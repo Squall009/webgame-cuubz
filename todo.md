@@ -310,14 +310,14 @@ webgame-cuubz/
   - [x] Player dimensions: ~0.8 wide × 1.8 tall (block units)
 
 ### Survival Systems
-- [ ] **Implement survival meters** — `js/systems/survival.js`
-  - [ ] Health meter (starts at 100, damaged by lava/poison/falls/bosses)
-  - [ ] Hunger meter (depletes over time, restored by food)
-  - [ ] Thirst meter (depletes over time, restored by drinking water)
-  - [ ] Sleep meter (depletes over time, restored by beds)
-  - [ ] Stamina meter (depletes on sprint/jump, regenerates at rest)
-  - [ ] HUD rendering: all 5 meters visible on screen
-  - [ ] Death handling: respawn at spawn point
+- [x] **Implement survival meters** — `js/systems/survival.js`
+  - [x] Health meter (starts at 100, damaged by lava/poison/falls/bosses)
+  - [x] Hunger meter (depletes over time, restored by food)
+  - [x] Thirst meter (depletes over time, restored by drinking water)
+  - [x] Sleep meter (depletes over time, restored by beds)
+  - [x] Stamina meter (depletes on sprint/jump, regenerates at rest)
+  - [x] HUD rendering: all 5 meters visible on screen
+  - [x] Death handling: respawn at spawn point
 - [ ] **Implement damage system** — `js/systems/damageSystem.js`
   - [ ] Lava contact damage (rapid per-tick)
   - [ ] Poison DoT from toxic slime pools (slower, lingering)
