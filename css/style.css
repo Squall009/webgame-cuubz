@@ -1,0 +1,615 @@
+/* ============================================================
+   Cuubz — Game UI Styles
+   Mobile-first, touch-friendly design
+   ============================================================ */
+
+/* --- Reset & Base --- */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none; /* Prevent browser gestures */
+}
+
+/* --- Game Canvas Container --- */
+#game-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+#game-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* --- Crosshair --- */
+#crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.7);
+  z-index: 100;
+  pointer-events: none;
+  text-shadow: 0 0 2px rgba(0,0,0,0.8);
+}
+
+/* --- Block Target Highlight --- */
+#target-highlight {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 50;
+  pointer-events: none;
+}
+
+/* --- Screens (Menu System) --- */
+.screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+}
+
+.screen.hidden {
+  display: none !important;
+}
+
+.game-title {
+  font-size: clamp(48px, 12vw, 96px);
+  font-weight: 900;
+  letter-spacing: 8px;
+  color: #4CAF50;
+  text-shadow: 0 0 30px rgba(76, 175, 80, 0.5), 0 4px 8px rgba(0,0,0,0.5);
+  margin-bottom: 8px;
+}
+
+.game-subtitle {
+  font-size: clamp(14px, 3vw, 24px);
+  color: #aaa;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  margin-bottom: 40px;
+}
+
+/* --- Menu Buttons --- */
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(320px, 80vw);
+}
+
+.menu-btn {
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 600;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: rgba(255,255,255,0.08);
+  color: #e0e0e0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.menu-btn:hover {
+  background: rgba(255,255,255,0.15);
+  border-color: rgba(255,255,255,0.3);
+  transform: translateY(-1px);
+}
+
+.menu-btn:active {
+  transform: translateY(1px);
+  background: rgba(255,255,255,0.2);
+}
+
+.menu-btn.primary {
+  background: rgba(76, 175, 80, 0.3);
+  border-color: #4CAF50;
+  color: #fff;
+}
+
+.menu-btn.primary:hover {
+  background: rgba(76, 175, 80, 0.5);
+}
+
+.menu-btn.secondary {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.1);
+  color: #888;
+}
+
+/* --- HUD --- */
+#hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 150;
+  pointer-events: none;
+}
+
+#hud.hidden {
+  display: none !important;
+}
+
+/* Survival Meters */
+#meters-container {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(200px, 35vw);
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meter-bar {
+  flex: 1;
+  height: 8px;
+  background: rgba(0,0,0,0.5);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+#health-meter .meter-fill { background: #e74c3c; }
+#hunger-meter .meter-fill { background: #e67e22; }
+#thirst-meter .meter-fill { background: #3498db; }
+#sleep-meter .meter-fill { background: #9b59b6; }
+#stamina-meter .meter-fill { background: #f1c40f; }
+
+.meter-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.8);
+  min-width: 60px;
+}
+
+/* Hotbar */
+#hotbar-container {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+#hotbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(0,0,0,0.5);
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.1);
+}
+
+.hotbar-slot {
+  width: 48px;
+  height: 48px;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.hotbar-slot.active {
+  border-color: #4CAF50;
+  background: rgba(76, 175, 80, 0.15);
+}
+
+/* --- Quest Tracker --- */
+#quest-tracker {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: min(240px, 35vw);
+  background: rgba(0,0,0,0.6);
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.quest-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f1c40f;
+  margin-bottom: 4px;
+}
+
+.quest-current {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.quest-objective {
+  font-size: 11px;
+  color: #aaa;
+}
+
+.quest-progress {
+  font-size: 10px;
+  color: #888;
+  margin-top: 4px;
+}
+
+/* --- Damage Flash --- */
+#damage-flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(255,0,0,0.4) 100%);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+}
+
+#damage-flash.active {
+  opacity: 1;
+}
+
+/* --- Character/World Slots --- */
+#character-slots, #world-slots {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.char-slot, .world-slot {
+  width: 120px;
+  height: 120px;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.char-slot:hover, .world-slot:hover {
+  border-color: #4CAF50;
+  background: rgba(76,175,80,0.1);
+}
+
+/* --- Modal --- */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+.modal.hidden {
+  display: none !important;
+}
+
+.modal-content {
+  background: #1e1e2e;
+  border-radius: 12px;
+  padding: 24px;
+  width: min(360px, 85vw);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.modal-content h3 {
+  margin-bottom: 16px;
+  color: #4CAF50;
+}
+
+.modal-content label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.modal-content input[type="text"],
+.modal-content input[type="color"] {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* --- Settings Screen --- */
+.settings-group {
+  margin-bottom: 16px;
+  width: min(320px, 80vw);
+}
+
+.settings-group label {
+  display: block;
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 4px;
+}
+
+.settings-group input[type="range"] {
+  width: 100%;
+  accent-color: #4CAF50;
+}
+
+.settings-group .controls-hint p {
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+
+/* --- Inventory Overlay --- */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.8);
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay.hidden {
+  display: none !important;
+}
+
+#inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 48px);
+  gap: 4px;
+  padding: 12px;
+  background: rgba(30,30,46,0.95);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.overlay-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+/* --- Mobile Touch Controls --- */
+#touch-controls {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 160;
+  pointer-events: none;
+}
+
+#touch-controls.hidden {
+  display: none !important;
+}
+
+/* Joystick Zone (left half) */
+#joystick-zone {
+  position: absolute;
+  bottom: 80px;
+  left: 40px;
+  width: 120px;
+  height: 120px;
+  pointer-events: auto;
+}
+
+#joystick-base {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  border: 2px solid rgba(255,255,255,0.2);
+}
+
+#joystick-thumb {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.4);
+  position: absolute;
+  top: 35px;
+  left: 35px;
+  transition: none;
+}
+
+/* Look Zone (right half) */
+#look-zone {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 50%;
+  height: calc(100% - 200px);
+  pointer-events: auto;
+}
+
+/* Mobile Action Buttons */
+#mobile-actions {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 140px;
+  justify-content: flex-end;
+  pointer-events: auto;
+}
+
+.action-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  border: 2px solid rgba(255,255,255,0.3);
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-btn:active {
+  background: rgba(255,255,255,0.3);
+}
+
+/* --- Loading Screen --- */
+.loading-content {
+  text-align: center;
+}
+
+.loading-bar {
+  width: min(300px, 70vw);
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+.loading-fill {
+  height: 100%;
+  width: 0%;
+  background: #4CAF50;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* --- Session List (Multiplayer Lobby) --- */
+#session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+  width: min(400px, 80vw);
+}
+
+.session-item {
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.session-item:hover {
+  border-color: #4CAF50;
+  background: rgba(76,175,80,0.1);
+}
+
+/* --- Responsive Adjustments --- */
+@media (max-width: 600px) {
+  .game-title {
+    letter-spacing: 4px;
+  }
+  
+  .menu-btn {
+    padding: 12px 20px;
+    font-size: 14px;
+  }
+  
+  #meters-container {
+    width: 35vw;
+  }
+  
+  .hotbar-slot {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+  }
+
+  #joystick-zone {
+    left: 20px;
+    bottom: 60px;
+  }
+
+  #mobile-actions {
+    right: 10px;
+    bottom: 60px;
+  }
+}
+
+/* --- Utility Classes --- */
+.hidden {
+  display: none !important;
+}
+
+.screen h2 {
+  font-size: clamp(24px, 5vw, 36px);
+  margin-bottom: 20px;
+  color: #e0e0e0;
+}

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Cuubz — Voxel Survival</title>
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Three.js r160 from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+</head>
+<body>
+  <!-- Game Canvas Container -->
+  <div id="game-container"></div>
+
+  <!-- Crosshair Overlay -->
+  <div id="crosshair">+</div>
+
+  <!-- Block Target Highlight (wireframe overlay) -->
+  <canvas id="target-highlight" width="1" height="1"></canvas>
+
+  <!-- HUD: Survival Meters -->
+  <div id="hud" class="hidden">
+    <div id="meters-container">
+      <div class="meter" id="health-meter" data-meter="health">
+        <div class="meter-bar"><div class="meter-fill" style="width:100%"></div></div>
+        <span class="meter-label">❤️ Health</span>
+      </div>
+      <div class="meter" id="hunger-meter" data-meter="hunger">
+        <div class="meter-bar"><div class="meter-fill" style="width:100%"></div></div>
+        <span class="meter-label">🍎 Hunger</span>
+      </div>
+      <div class="meter" id="thirst-meter" data-meter="thirst">
+        <div class="meter-bar"><div class="meter-fill" style="width:100%"></div></div>
+        <span class="meter-label">💧 Thirst</span>
+      </div>
+      <div class="meter" id="sleep-meter" data-meter="sleep">
+        <div class="meter-bar"><div class="meter-fill" style="width:100%"></div></div>
+        <span class="meter-label">😴 Sleep</span>
+      </div>
+      <div class="meter" id="stamina-meter" data-meter="stamina">
+        <div class="meter-bar"><div class="meter-fill" style="width:100%"></div></div>
+        <span class="meter-label">⚡ Stamina</span>
+      </div>
+    </div>
+
+    <!-- Hotbar -->
+    <div id="hotbar-container">
+      <div id="hotbar">
+        <!-- 9 hotbar slots, filled by inventory system -->
+        <div class="hotbar-slot" data-slot="0"></div>
+        <div class="hotbar-slot active" data-slot="1"></div>
+        <div class="hotbar-slot" data-slot="2"></div>
+        <div class="hotbar-slot" data-slot="3"></div>
+        <div class="hotbar-slot" data-slot="4"></div>
+        <div class="hotbar-slot" data-slot="5"></div>
+        <div class="hotbar-slot" data-slot="6"></div>
+        <div class="hotbar-slot" data-slot="7"></div>
+        <div class="hotbar-slot" data-slot="8"></div>
+      </div>
+    </div>
+
+    <!-- Quest Tracker -->
+    <div id="quest-tracker" class="hidden">
+      <div class="quest-header">📜 Quest</div>
+      <div class="quest-current" id="quest-name"></div>
+      <div class="quest-objective" id="quest-objective"></div>
+      <div class="quest-progress" id="quest-progress"></div>
+    </div>
+
+    <!-- Damage Flash -->
+    <div id="damage-flash"></div>
+  </div>
+
+  <!-- Main Menu Screen -->
+  <div id="main-menu" class="screen">
+    <h1 class="game-title">CUUBZ</h1>
+    <p class="game-subtitle">Voxel Survival</p>
+    <div class="menu-buttons">
+      <button id="btn-play-solo" class="menu-btn primary">Play Solo</button>
+      <button id="btn-host" class="menu-btn">Host Multiplayer</button>
+      <button id="btn-join" class="menu-btn">Join Multiplayer</button>
+      <button id="btn-settings" class="menu-btn secondary">Settings</button>
+    </div>
+  </div>
+
+  <!-- Character Selection Screen -->
+  <div id="character-screen" class="screen hidden">
+    <h2>Select Character</h2>
+    <div id="character-slots"></div>
+    <div class="menu-buttons">
+      <button id="btn-create-char" class="menu-btn primary">Create Character</button>
+      <button id="btn-back-char" class="menu-btn secondary">Back</button>
+    </div>
+  </div>
+
+  <!-- Character Create Modal -->
+  <div id="create-char-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Create New Character</h3>
+      <label for="char-name">Name:</label>
+      <input type="text" id="char-name" maxlength="16" placeholder="Enter name...">
+      <label for="char-color">Color:</label>
+      <input type="color" id="char-color" value="#4CAF50">
+      <div class="modal-buttons">
+        <button id="btn-save-char" class="menu-btn primary">Create</button>
+        <button id="btn-cancel-char" class="menu-btn secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- World Selection Screen -->
+  <div id="world-screen" class="screen hidden">
+    <h2>Select World</h2>
+    <div id="world-slots"></div>
+    <div class="menu-buttons">
+      <button id="btn-create-world" class="menu-btn primary">Create New World</button>
+      <button id="btn-back-world" class="menu-btn secondary">Back</button>
+    </div>
+  </div>
+
+  <!-- Mode Selection Screen -->
+  <div id="mode-screen" class="screen hidden">
+    <h2>Game Mode</h2>
+    <div class="menu-buttons">
+      <button id="btn-survival" class="menu-btn primary">Survival</button>
+      <button id="btn-creative" class="menu-btn">Creative</button>
+      <button id="btn-back-mode" class="menu-btn secondary">Back</button>
+    </div>
+  </div>
+
+  <!-- Settings Screen -->
+  <div id="settings-screen" class="screen hidden">
+    <h2>Settings</h2>
+    <div class="settings-group">
+      <label for="render-distance">Render Distance (chunks):</label>
+      <input type="range" id="render-distance" min="3" max="12" value="6">
+      <span id="render-distance-value">6</span>
+    </div>
+    <div class="settings-group">
+      <label for="volume-slider">Volume:</label>
+      <input type="range" id="volume-slider" min="0" max="100" value="50">
+      <span id="volume-value">50%</span>
+    </div>
+    <div class="settings-group">
+      <label for="music-volume">Music Volume:</label>
+      <input type="range" id="music-volume" min="0" max="100" value="30">
+      <span id="music-volume-value">30%</span>
+    </div>
+    <div class="settings-group controls-hint">
+      <h4>Controls</h4>
+      <p><strong>Desktop:</strong> WASD move, Space jump, Shift sprint, E interact, Mouse look/click</p>
+      <p><strong>Mobile:</strong> Left joystick move, Right swipe look, Tap break/place</p>
+    </div>
+    <div class="menu-buttons">
+      <button id="btn-back-settings" class="menu-btn secondary">Back</button>
+    </div>
+  </div>
+
+  <!-- Multiplayer Lobby Screen -->
+  <div id="lobby-screen" class="screen hidden">
+    <h2>Multiplayer Lobby</h2>
+    <div id="session-list"></div>
+    <div class="menu-buttons">
+      <button id="btn-create-session" class="menu-btn primary">Create Session</button>
+      <button id="btn-back-lobby" class="menu-btn secondary">Back</button>
+    </div>
+  </div>
+
+  <!-- Inventory Screen (toggleable in-game) -->
+  <div id="inventory-screen" class="overlay hidden">
+    <div id="inventory-grid"></div>
+    <button id="btn-close-inventory" class="overlay-close">✕</button>
+  </div>
+
+  <!-- Mobile Touch Controls -->
+  <div id="touch-controls" class="hidden">
+    <!-- Left Virtual Joystick -->
+    <div id="joystick-zone">
+      <div id="joystick-base"></div>
+      <div id="joystick-thumb"></div>
+    </div>
+    <!-- Right side: swipe-to-look zone (handled by touch.js) -->
+    <div id="look-zone"></div>
+    <!-- Action buttons for mobile -->
+    <div id="mobile-actions">
+      <button id="btn-jump-mobile" class="action-btn">⬆</button>
+      <button id="btn-break-mobile" class="action-btn action-break">⛏</button>
+      <button id="btn-place-mobile" class="action-btn action-place">🧱</button>
+      <button id="btn-inventory-mobile" class="action-btn action-inv">🎒</button>
+    </div>
+  </div>
+
+  <!-- Loading Screen -->
+  <div id="loading-screen" class="screen hidden">
+    <div class="loading-content">
+      <h2>Loading...</h2>
+      <p id="loading-status">Generating world...</p>
+      <div class="loading-bar"><div class="loading-fill" id="loading-progress"></div></div>
+    </div>
+  </div>
+
+  <!-- Game Script Entry -->
+  <script src="js/main.js"></script>
+</body>
+</html>

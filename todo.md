@@ -4,7 +4,7 @@
 
 > **Tech Stack:** Three.js (local CDN), Vanilla JS, Node.js + ws relay server (matchmaking + game sync), IndexedDB for persistence, Canvas API for texture generation, Web Audio API for procedural calm ambient soundscapes.
 
-> **Current State:** 🟡 Approved — Workspace created, autonomous builder scheduled. No code written yet.
+> **Current State:** 🟢 Building — Phase 1 World Generation complete. Rendering engine, input systems, player physics, persistence all implemented with tests.
 
 ---
 
@@ -176,51 +176,51 @@ webgame-cuubz/
 ## Phase 1: Foundation — Core Voxel Engine & Single Player Survival
 
 ### World Generation System
-- [ ] **Setup project structure** — Create all folders, index.html with Three.js CDN, basic HTML shell
-  - [ ] Link local Three.js build via `<script>` (CDN)
-  - [ ] Basic HTML/CSS skeleton: canvas container, UI overlay divs, menu screens
-- [ ] **Implement noise functions** — `js/world/noise.js`
-  - [ ] Perlin/Simplex noise with seed support
-  - [ ] Multi-octave noise for terrain detail
-  - [ ] Ridge noise for mountain ridges and cave systems
-  - [ ] 3D noise for cave tube generation
-- [ ] **Implement chunk data structures** — `js/world/chunkData.js`
-  - [ ] Chunk class: 16×16×96 block array (Z: -32 to +64, layer 0 = sea level)
-  - [ ] Block type lookup with properties (solid, transparent, hardness, damage, item drop)
-  - [ ] Serialization/deserialization to/from compressed JSON
-  - [ ] Edge boundary data for seamless neighbor chunk joining
-- [ ] **Implement chunk grid system** — `js/world/chunkGrid.js`
-  - [ ] Global coordinate → chunk coordinate conversion
-  - [ ] Chunk loading/unloading based on player distance thresholds
-  - [ ] Neighbor awareness: chunks know their neighbors for seamless rendering
-  - [ ] Dirty flag system: mark changed chunks for save
-- [ ] **Implement biome system** — `js/world/biomeSystem.js`
-  - [ ] Temperature/moisture noise maps for biome distribution
-  - [ ] All 8 biomes defined with height modifiers and block palettes
-  - [ ] Biome blending at borders (smooth transitions)
-- [ ] **Implement terrain generation** — `js/world/worldGenerator.js`
-  - [ ] Heightmap from noise: mountains, valleys, plains, ocean floors (Z: -32 to +64)
-  - [ ] Layer 0 = sea level. Below 0 = ground/caves, above 0 = surface/mountains
-  - [ ] Surface block placement based on biome + height
-  - [ ] Edge matching: shared boundary data between adjacent chunks
-  - [ ] Water level generation and filling at layer 0
-- [ ] **Implement cave generation** — `js/world/caveGenerator.js`
-  - [ ] 3D tube caves using marching cubes or noise thresholding
-  - [ ] Seamless across chunk boundaries (seed-based deterministic)
-  - [ ] Cave connectivity: no dead-end isolated pockets
-  - [ ] Varying cave sizes: small tunnels to large caverns
-- [ ] **Implement ore generation** — `js/world/oreGenerator.js`
-  - [ ] Ore veins in caves and mountain sides
-  - [ ] Depth-based rarity: coal (shallow) → iron → gold → diamond (deep)
-  - [ ] Clustered vein patterns (not single scattered blocks)
-- [ ] **Implement feature placement** — `js/world/featurePlacer.js`
-  - [ ] Tree generation in Plains/Forest biomes (wood trunk + leaves + apples)
-  - [ ] Cactus placement in Desert biome
-  - [ ] Snow layer on Tundra surface
-  - [ ] Coral structures in Ocean biome
-  - [ ] Lava pools in Lava biome (animated damage voxels)
-  - [ ] Toxic pools in Corrupt biome (DoT area markers)
-  - [ ] Corrupt crystals in Corrupt biome (quest items)
+- [x] **Setup project structure** — Create all folders, index.html with Three.js CDN, basic HTML shell
+  - [x] Link local Three.js build via `<script>` (CDN)
+  - [x] Basic HTML/CSS skeleton: canvas container, UI overlay divs, menu screens
+- [x] **Implement noise functions** — `js/world/noise.js`
+  - [x] Perlin/Simplex noise with seed support
+  - [x] Multi-octave noise for terrain detail
+  - [x] Ridge noise for mountain ridges and cave systems
+  - [x] 3D noise for cave tube generation
+- [x] **Implement chunk data structures** — `js/world/chunkData.js`
+  - [x] Chunk class: 16×16×96 block array (Z: -32 to +64, layer 0 = sea level)
+  - [x] Block type lookup with properties (solid, transparent, hardness, damage, item drop)
+  - [x] Serialization/deserialization to/from compressed JSON
+  - [x] Edge boundary data for seamless neighbor chunk joining
+- [x] **Implement chunk grid system** — `js/world/chunkGrid.js`
+  - [x] Global coordinate → chunk coordinate conversion
+  - [x] Chunk loading/unloading based on player distance thresholds
+  - [x] Neighbor awareness: chunks know their neighbors for seamless rendering
+  - [x] Dirty flag system: mark changed chunks for save
+- [x] **Implement biome system** — `js/world/biomeSystem.js`
+  - [x] Temperature/moisture noise maps for biome distribution
+  - [x] All 8 biomes defined with height modifiers and block palettes
+  - [x] Biome blending at borders (smooth transitions)
+- [x] **Implement terrain generation** — `js/world/worldGenerator.js`
+  - [x] Heightmap from noise: mountains, valleys, plains, ocean floors (Z: -32 to +64)
+  - [x] Layer 0 = sea level. Below 0 = ground/caves, above 0 = surface/mountains
+  - [x] Surface block placement based on biome + height
+  - [x] Edge matching: shared boundary data between adjacent chunks
+  - [x] Water level generation and filling at layer 0
+- [x] **Implement cave generation** — `js/world/caveGenerator.js`
+  - [x] 3D tube caves using marching cubes or noise thresholding
+  - [x] Seamless across chunk boundaries (seed-based deterministic)
+  - [x] Cave connectivity: no dead-end isolated pockets
+  - [x] Varying cave sizes: small tunnels to large caverns
+- [x] **Implement ore generation** — `js/world/oreGenerator.js`
+  - [x] Ore veins in caves and mountain sides
+  - [x] Depth-based rarity: coal (shallow) → iron → gold → diamond (deep)
+  - [x] Clustered vein patterns (not single scattered blocks)
+- [x] **Implement feature placement** — `js/world/featurePlacer.js`
+  - [x] Tree generation in Plains/Forest biomes (wood trunk + leaves + apples)
+  - [x] Cactus placement in Desert biome
+  - [x] Snow layer on Tundra surface
+  - [x] Coral structures in Ocean biome
+  - [x] Lava pools in Lava biome (animated damage voxels)
+  - [x] Toxic pools in Corrupt biome (DoT area markers)
+  - [x] Corrupt crystals in Corrupt biome (quest items)
 
 ### Rendering Engine
 - [ ] **Build voxel renderer** — `js/renderer/voxelRenderer.js`
