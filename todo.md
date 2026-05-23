@@ -223,29 +223,29 @@ webgame-cuubz/
   - [x] Corrupt crystals in Corrupt biome (quest items)
 
 ### Rendering Engine
-- [ ] **Build voxel renderer** — `js/renderer/voxelRenderer.js`
-  - [ ] Three.js scene, camera, WebGL renderer setup
-  - [ ] Texture atlas from all generated textures
-  - [ ] Basic lighting: ambient + directional sun
-  - [ ] Fog for distance rendering fade
-- [ ] **Build chunk mesh builder** — `js/renderer/chunkMeshBuilder.js`
-  - [ ] Face culling: only render exposed faces (not internal/hidden)
-  - [ ] Merged geometry per chunk (single draw call per chunk)
-  - [ ] Transparent face handling (water, leaves, lava)
-  - [ ] Animated texture offset for water/lava/toxic slime
-- [ ] **Implement chunk manager** — `js/renderer/chunkManager.js`
-  - [ ] Load/unload chunks based on player position radius
-  - [ ] Render distance: configurable (default 6 chunks radius)
-  - [ ] Async chunk building to avoid frame drops
-  - [ ] Chunk disposal for memory management
-- [ ] **Implement skybox** — `js/renderer/skybox.js`
-  - [ ] Gradient sky based on time of day
-  - [ ] Sun/moon directional light positioning
-  - [ ] Cloud layer (billboard approximation)
-- [ ] **Implement crosshair** — `js/renderer/crosshair.js`
-  - [ ] Center screen crosshair overlay
-  - [ ] Targeted block wireframe highlight
-  - [ ] Raycasting from camera center for block/face detection
+- [x] **Build voxel renderer** — `js/renderer/voxelRenderer.js`
+  - [x] Three.js scene, camera, WebGL renderer setup
+  - [x] Texture atlas from all generated textures
+  - [x] Basic lighting: ambient + directional sun
+  - [x] Fog for distance rendering fade
+- [x] **Build chunk mesh builder** — `js/renderer/chunkMeshBuilder.js`
+  - [x] Face culling: only render exposed faces (not internal/hidden)
+  - [x] Merged geometry per chunk (single draw call per chunk)
+  - [x] Transparent face handling (water, leaves, lava)
+  - [x] Animated texture offset for water/lava/toxic slime
+- [x] **Implement chunk manager** — `js/renderer/chunkManager.js`
+  - [x] Load/unload chunks based on player position radius
+  - [x] Render distance: configurable (default 6 chunks radius)
+  - [x] Async chunk building to avoid frame drops
+  - [x] Chunk disposal for memory management
+- [x] **Implement skybox** — `js/renderer/skybox.js`
+  - [x] Gradient sky based on time of day
+  - [x] Sun/moon directional light positioning
+  - [x] Cloud layer (billboard approximation)
+- [x] **Implement crosshair** — `js/renderer/crosshair.js`
+  - [x] Center screen crosshair overlay
+  - [x] Targeted block wireframe highlight
+  - [x] Raycasting from camera center for block/face detection
 
 ### Procedural Textures (ALL 32×32)
 - [ ] **Create texture generator script** — `scripts/generate_textures.py`
@@ -281,33 +281,33 @@ webgame-cuubz/
   - [ ] bed.png: colored bed block texture
 
 ### Player & Controls
-- [ ] **Implement first-person camera** — `js/renderer/voxelRenderer.js`
-  - [ ] Perspective camera with yaw/pitch rotation
-  - [ ] Pointer lock API for desktop mouse look
-  - [ ] Smooth camera interpolation
-- [ ] **Implement keyboard controls** — `js/input/keyboard.js`
-  - [ ] WASD movement relative to camera direction
-  - [ ] Space jump, Shift sprint, E interact
-  - [ ] Key state tracking with input queue
-- [ ] **Implement mouse interaction** — `js/input/mouse.js`
-  - [ ] Left click: break targeted block (with attack progress bar)
-  - [ ] Right click: place selected block at targeted face
-  - [ ] Scroll wheel: cycle hotbar slots
-- [ ] **Implement touch controls** — `js/input/touch.js`
-  - [ ] Virtual joystick on left side (movement)
-  - [ ] Swipe-to-look on right side (camera rotation)
-  - [ ] Tap to break/place blocks
-  - [ ] Touch-friendly UI scaling for mobile viewports
-- [ ] **Implement block interaction** — `js/input/interaction.js`
-  - [ ] Raycast from camera center through crosshair
-  - [ ] Detect target block position and face normal
-  - [ ] Break animation (particle effect or progress bar)
-  - [ ] Place block with collision check (don't place inside player)
-- [ ] **Implement player physics** — `js/entities/player.js`
-  - [ ] AABB collision detection against solid blocks
-  - [ ] Gravity, jump velocity, ground detection
-  - [ ] Horizontal movement with collision slide
-  - [ ] Player dimensions: ~0.8 wide × 1.8 tall (block units)
+- [x] **Implement first-person camera** — `js/renderer/voxelRenderer.js`
+  - [x] Perspective camera with yaw/pitch rotation
+  - [x] Pointer lock API for desktop mouse look
+  - [x] Smooth camera interpolation
+- [x] **Implement keyboard controls** — `js/input/keyboard.js`
+  - [x] WASD movement relative to camera direction
+  - [x] Space jump, Shift sprint, E interact
+  - [x] Key state tracking with input queue
+- [x] **Implement mouse interaction** — `js/input/mouse.js`
+  - [x] Left click: break targeted block (with attack progress bar)
+  - [x] Right click: place selected block at targeted face
+  - [x] Scroll wheel: cycle hotbar slots
+- [x] **Implement touch controls** — `js/input/touch.js`
+  - [x] Virtual joystick on left side (movement)
+  - [x] Swipe-to-look on right side (camera rotation)
+  - [x] Tap to break/place blocks
+  - [x] Touch-friendly UI scaling for mobile viewports
+- [x] **Implement block interaction** — `js/input/interaction.js`
+  - [x] Raycast from camera center through crosshair
+  - [x] Detect target block position and face normal
+  - [x] Break animation (particle effect or progress bar)
+  - [x] Place block with collision check (don't place inside player)
+- [x] **Implement player physics** — `js/entities/player.js`
+  - [x] AABB collision detection against solid blocks
+  - [x] Gravity, jump velocity, ground detection
+  - [x] Horizontal movement with collision slide
+  - [x] Player dimensions: ~0.8 wide × 1.8 tall (block units)
 
 ### Survival Systems
 - [ ] **Implement survival meters** — `js/systems/survival.js`
@@ -347,11 +347,11 @@ webgame-cuubz/
   - [ ] Mobile-friendly inventory UI
 
 ### Persistence System (Characters + Worlds Separated)
-- [ ] **Implement IndexedDB database** — `js/world/persistence.js`
-  - [ ] Database schema: characters store, worlds store, chunks store
-  - [ ] Character save structure: name, color, inventory, spawn points per world
-  - [ ] World save structure: seed, biome map, quest progress, chunk references
-  - [ ] Chunk save structure: compressed block data per chunk file
+- [x] **Implement IndexedDB database** — `js/world/persistence.js`
+  - [x] Database schema: characters store, worlds store, chunks store
+  - [x] Character save structure: name, color, inventory, spawn points per world
+  - [x] World save structure: seed, biome map, quest progress, chunk references
+  - [x] Chunk save structure: compressed block data per chunk file
 - [ ] **Implement character management** — `js/main.js`
   - [ ] Character screen: list up to 3 characters
   - [ ] Create character: name input + color picker
@@ -363,15 +363,15 @@ webgame-cuubz/
   - [ ] Create world: generate new random seed + place quest markers/dungeons
   - [ ] Delete world with confirmation
   - [ ] Save/load world metadata from IndexedDB
-- [ ] **Implement chunk persistence** — `js/world/persistence.js`
-  - [ ] Save dirty chunks to IndexedDB on interval (every 30s) and on exit
-  - [ ] Load existing chunks from disk before generating new ones
-  - [ ] Chunk compression for storage efficiency
-  - [ ] Partial world updates: only save changed chunks
-- [ ] **Implement spawn manager** — `js/world/spawnManager.js`
-  - [ ] Per-player spawn points stored per world
-  - [ ] Default spawn at world center if no bed set
-  - [ ] Load spawn on world entry, update on bed use
+- [x] **Implement chunk persistence** — `js/world/persistence.js`
+  - [x] Save dirty chunks to IndexedDB on interval (every 30s) and on exit
+  - [x] Load existing chunks from disk before generating new ones
+  - [x] Chunk compression for storage efficiency
+  - [x] Partial world updates: only save changed chunks
+- [x] **Implement spawn manager** — `js/world/spawnManager.js`
+  - [x] Per-player spawn points stored per world
+  - [x] Default spawn at world center if no bed set
+  - [x] Load spawn on world entry, update on bed use
 
 ### Quest System (World-State Based)
 - [ ] **Implement quest system** — `js/systems/questSystem.js`
@@ -469,25 +469,25 @@ webgame-cuubz/
 ## Phase 2: Multiplayer & Relay Server
 
 ### Node.js Relay Server
-- [ ] **Setup server project** — `server/package.json`, `server/index.js`
-  - [ ] ws dependency for WebSocket support
-  - [ ] Dual port setup: matchmaking port + game session ports
-  - [ ] Connection handling with player ID assignment
-  - [ ] Disconnect cleanup (remove from session, broadcast leave)
-- [ ] **Implement matchmaking relay** — `server/matchmaking.js`
-  - [ ] Session registration: host name, world seed, mode, max players (4)
-  - [ ] Session browsing: list available sessions with details
-  - [ ] Join request routing → connect client to game session
-  - [ ] Session cleanup on host disconnect
-- [ ] **Implement game session relay** — `server/session.js`
-  - [ ] Message types: JOIN, LEAVE, MOVE, BREAK_BLOCK, PLACE_BLOCK, CHUNK_DATA, INVENTORY_UPDATE, QUEST_UPDATE, HEARTBEAT
-  - [ ] Server-side validation: block break/place checks, inventory verification
-  - [ ] Player state broadcast: position, rotation, selected block, health meters
-  - [ ] Heartbeat keepalive (30s), disconnect on timeout
-- [ ] **Create systemd service file** — `cuubz-relay.service`
-  - [ ] Service unit file for Node.js relay server
-  - [ ] Configurable ports, working directory, restart policy
-  - [ ] User-level service (no sudo required)
+- [x] **Setup server project** — `server/package.json`, `server/index.js`
+  - [x] ws dependency for WebSocket support
+  - [x] Dual port setup: matchmaking port + game session ports
+  - [x] Connection handling with player ID assignment
+  - [x] Disconnect cleanup (remove from session, broadcast leave)
+- [x] **Implement matchmaking relay** — `server/matchmaking.js`
+  - [x] Session registration: host name, world seed, mode, max players (4)
+  - [x] Session browsing: list available sessions with details
+  - [x] Join request routing → connect client to game session
+  - [x] Session cleanup on host disconnect
+- [x] **Implement game session relay** — `server/session.js`
+  - [x] Message types: JOIN, LEAVE, MOVE, BREAK_BLOCK, PLACE_BLOCK, CHUNK_DATA, INVENTORY_UPDATE, QUEST_UPDATE, HEARTBEAT
+  - [x] Server-side validation: block break/place checks, inventory verification
+  - [x] Player state broadcast: position, rotation, selected block, health meters
+  - [x] Heartbeat keepalive (30s), disconnect on timeout
+- [x] **Create systemd service file** — `cuubz-relay.service`
+  - [x] Service unit file for Node.js relay server
+  - [x] Configurable ports, working directory, restart policy
+  - [x] User-level service (no sudo required)
 
 ### Client Multiplayer Integration
 - [ ] **Implement WebSocket client** — `js/multiplayer/client.js`
