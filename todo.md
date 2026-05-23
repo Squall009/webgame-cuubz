@@ -248,37 +248,37 @@ webgame-cuubz/
   - [x] Raycasting from camera center for block/face detection
 
 ### Procedural Textures (ALL 32×32)
-- [ ] **Create texture generator script** — `scripts/generate_textures.py`
-  - [ ] Python script using PIL/Pillow with Perlin noise functions
-  - [ ] Each texture function: name, base colors, pattern type → outputs 32×32 PNG
-  - [ ] Run once to generate all textures → committed to git as static assets
-- [ ] **Generate all textures** — Run `python scripts/generate_textures.py` → saves to `textures/`
-  - [ ] grass_top.png: green noise with lighter patches
-  - [ ] grass_side.png: dirt base with green top stripe
-  - [ ] dirt.png: brown noise with darker speckles
-  - [ ] stone.png: gray noise with crack patterns
-  - [ ] sand.png: yellow noise with grain variation
-  - [ ] gravel.png: mixed gray/brown small squares
-  - [ ] water.png: blue semi-transparent wave pattern
-  - [ ] wood_log.png: brown rings/circles (vertical grain)
-  - [ ] leaves.png: green noise with darker spots
-  - [ ] snow.png: white/light gray minimal noise
-  - [ ] ice.png: light blue translucent
-  - [ ] bedrock.png: dark gray/black heavy noise
-  - [ ] planks.png: wood grain horizontal lines
-  - [ ] obsidian.png: very dark purple-black glossy
-  - [ ] blackstone.png: dark gray with subtle texture
-  - [ ] lava.png: orange/red animated flow pattern
-  - [ ] corrupt_stone.png: dark purple crystalline
-  - [ ] toxic_slime.png: bright purple translucent pool
-  - [ ] coal_ore.png: stone base with black ore spots
-  - [ ] iron_ore.png: stone base with light gray ore spots
-  - [ ] gold_ore.png: stone base with yellow ore spots
-  - [ ] diamond_ore.png: stone base with cyan ore spots
-  - [ ] corrupt_cry.png: glowing purple crystal
-  - [ ] apple.png: red round fruit icon
-  - [ ] quest_key.png: golden key icon (color variants per dungeon)
-  - [ ] bed.png: colored bed block texture
+- [x] **Create texture generator script** — `scripts/generate_textures.py`
+  - [x] Python script using PIL/Pillow with Perlin noise functions
+  - [x] Each texture function: name, base colors, pattern type → outputs 32×32 PNG
+  - [x] Run once to generate all textures → committed to git as static assets
+- [x] **Generate all textures** — Run `python scripts/generate_textures.py` → saves to `textures/`
+  - [x] grass_top.png: green noise with lighter patches
+  - [x] grass_side.png: dirt base with green top stripe
+  - [x] dirt.png: brown noise with darker speckles
+  - [x] stone.png: gray noise with crack patterns
+  - [x] sand.png: yellow noise with grain variation
+  - [x] gravel.png: mixed gray/brown small squares
+  - [x] water.png: blue semi-transparent wave pattern
+  - [x] wood_log.png: brown rings/circles (vertical grain)
+  - [x] leaves.png: green noise with darker spots
+  - [x] snow.png: white/light gray minimal noise
+  - [x] ice.png: light blue translucent
+  - [x] bedrock.png: dark gray/black heavy noise
+  - [x] planks.png: wood grain horizontal lines
+  - [x] obsidian.png: very dark purple-black glossy
+  - [x] blackstone.png: dark gray with subtle texture
+  - [x] lava.png: orange/red animated flow pattern
+  - [x] corrupt_stone.png: dark purple crystalline
+  - [x] toxic_slime.png: bright purple translucent pool
+  - [x] coal_ore.png: stone base with black ore spots
+  - [x] iron_ore.png: stone base with light gray ore spots
+  - [x] gold_ore.png: stone base with yellow ore spots
+  - [x] diamond_ore.png: stone base with cyan ore spots
+  - [x] corrupt_cry.png: glowing purple crystal
+  - [x] apple.png: red round fruit icon
+  - [x] quest_key.png: golden key icon (color variants per dungeon)
+  - [x] bed.png: colored bed block texture
 
 ### Player & Controls
 - [x] **Implement first-person camera** — `js/renderer/voxelRenderer.js`

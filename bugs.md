@@ -45,7 +45,16 @@
 - **Reproduction Steps:** Call `noise.octaveNoise2(10, 20, 1)` and `noise.octaveNoise2(10, 20, 4)`. Both return 0.
 - **Root Cause:** Test used integer coordinates (10, 20). Perlin noise is exactly 0 at integer grid points. Octaves multiply frequency by 2^n, so 10*2=20, 10*4=40 — all integers → all zeros.
 - **Fix Applied:** Changed test to use non-integer coordinates (10.37, 20.53) where noise produces non-zero values and octave stacking shows variation.
-- **Verified:** 2026-05-23 — test_noise passes with corrected test coordinates.
+- **Verified:** May 23, 2026 — test_noise passes with corrected test coordinates.
+
+### Bug #5: Texture test reads wrong PNG byte offset for color type
+- **Found:** May 23, 2026 during task "Create texture generator script"
+- **Status:** 🟢 FIXED
+- **Description:** `test_textureGenerator.js` read PNG color type from byte 24 instead of byte 25. Byte 24 is bit depth; byte 25 is the actual color type in the IHDR chunk. This caused all RGBA/RGB checks to fail — RGB textures reported as type=8 (bit depth) and RGBA textures weren't detected.
+- **Reproduction Steps:** Run `node test/test_textureGenerator.js` — 28 failures on color type assertions, all showing `type=8`.
+- **Root Cause:** Off-by-one error in PNG IHDR parsing. The IHDR structure is: bytes 16-19 width, 20-23 height, 24 bit depth, 25 color type.
+- **Fix Applied:** Changed `buf[24]` to `buf[25]` in both `isRgbaPng()` and the RGB color type check. Also relaxed file size limit from 2048 to 2500 bytes for complex textures (gravel, leaves).
+- **Verified:** May 23, 2026 — test_textureGenerator.js passes 166/166 tests.
 
 ---
 
@@ -55,7 +64,7 @@
 |--------|-------|
 | 🔴 OPEN | 0 |
 | 🟡 FIXING | 0 |
-| 🟢 FIXED | 4 |
-| **Total** | **4** |
+| 🟢 FIXED | 5 |
+| **Total** | **5** |
 
 > ✅ No open bugs — safe to proceed with next task.
