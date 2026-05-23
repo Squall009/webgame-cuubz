@@ -1,0 +1,22 @@
+[Unit]
+Description=Cuubz Multiplayer Relay Server
+After=network.target
+
+[Service]
+Type=simple
+User=dadmin
+WorkingDirectory=/var/www/html/webgame-cuubz/server
+ExecStart=/usr/bin/node index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=MATCHMAKING_PORT=8765
+Environment=GAME_SESSION_PORT=8766
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cuubz-relay
+
+[Install]
+WantedBy=default.target

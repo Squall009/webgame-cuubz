@@ -1,23 +1,74 @@
 # Cuubz — Implementation TODO
 
-> **Vision:** A web-based Minecraft-style voxel game with full multiplayer support (up to 4 players), procedural texture generation, persistent worlds, and mobile-first touch controls. Host/Join session model with 3-slot world saves per device.
+> **Vision:** A web-based Minecraft-style voxel game with full multiplayer (up to 4 players), dynamic infinite chunked world, procedural texture/audio generation, persistent character & world saves, survival mechanics (health/hunger/thirst/sleep/stamina), and a story-driven quest system with 25 quests, dungeons, and 4 bosses.
 
-> **Tech Stack:** Three.js (local CDN), Vanilla JS, WebSockets (ws library) for multiplayer server, IndexedDB for persistence, Web Audio API for procedural sound, Canvas API for texture generation.
+> **Tech Stack:** Three.js (local CDN), Vanilla JS, Node.js + ws relay server (matchmaking + game sync), IndexedDB for persistence, Canvas API for texture generation, Web Audio API for procedural calm ambient soundscapes.
 
-> **Current State:** 🟡 Approved — Workspace created, plan pending review. No code written yet.
+> **Current State:** 🟡 Approved — Workspace created, plan pending final review. No code written yet.
 
 ---
 
 ## Design Decisions
 
-- **Mobile-first, touch-friendly** — Virtual joystick for movement, swipe-to-look on right side of screen, tap to interact with blocks. Desktop WASD + mouse as secondary fallback.
-- **Three.js for 3D voxel rendering** — Instanced meshes or merged geometry per chunk for performance. Local Three.js CDN build, no npm tooling.
-- **Procedural texture generation** — All textures generated via Canvas API (noise algorithms, color palettes) at 32×32 resolution, then saved as PNG assets. No external image files shipped.
-- **WebSocket multiplayer** — Node.js + ws server for real-time sync. Host runs local game loop and broadcasts state; clients receive updates and send actions. Server-authoritative for block changes.
-- **IndexedDB persistence** — 3 world slots per device, stored as compressed chunk data + metadata (seed, biome map, player position).
-- **Chunk-based world** — 16×16×64 chunks loaded/unloaded based on player position. Render distance configurable.
-- **Session discovery** — Host broadcasts session via WebSocket matchmaking room; clients browse available sessions by host name.
-- **First-person camera** — Pointer lock on desktop, free-look swipe on mobile. Center crosshair for block targeting.
+- **Mobile-first, touch-friendly** — Virtual joystick (left), swipe-to-look (right), tap to interact. Desktop WASD + mouse as secondary fallback.
+- **Three.js for 3D voxel rendering** — Face-culled merged geometry per chunk for performance. Local Three.js CDN build, no npm tooling on client side.
+- **Procedural texture generation** — All textures via Canvas API at 32×32 resolution, saved as PNG assets. No external image files shipped.
+- **Central relay server** — Node.js + ws running on dedicated LXC container. Handles matchmaking lobby AND game session relaying on different ports. systemd service file created in project (user sets up manually).
+- **Infinite chunked world** — Dynamic grid of 16×16×Y chunks loaded/unloaded based on ALL player positions. Chunks saved to disk individually. Seamless edge matching for caves/surface across chunk boundaries.
+- **Server-authoritative gameplay** — Host validates all block changes, inventory updates, and quest progress. Relay server streams validated state to all connected clients.
+- **IndexedDB persistence** — Characters and Worlds separated. 3 characters + 3 worlds per device. Chunk-level world saves for partial updates. Spawn points per player per world.
+- **Story system lives with the world** — Quest progress, boss states, and quest markers are part of world state (not character). All players contribute to shared story progression in multiplayer.
+
+---
+
+## Biome Definitions
+
+| Biome | Surface Blocks | Features | Hazards | Special Items |
+|-------|---------------|----------|---------|---------------|
+| **Plains** | Grass, dirt | Trees (oak), flowers | None | Apples on trees |
+| **Forest** | Grass, dirt | Dense oak trees, tall trunks | None | Apples on trees |
+| **Desert** | Sand, gravel | Cacti, dry terrain | Dehydration faster | Nothing special |
+| **Tundra** | Snow, ice | Sparse vegetation, snow layers | Slippery (reduced movement) | Nothing special |
+| **Mountains** | Stone, gravel | High elevation, ore veins exposed | Fall damage risk | Ores more common |
+| **Ocean** | Sand bottom, water column | Coral-like structures underwater | Drowning if no air | Water source for drinking |
+| **Lava** | Obsidian, blackstone | Lava pools (animated voxels) | ⚠️ Lava blocks deal damage on contact | Fire-resistant ores? |
+| **Corrupt** | Dark purple stone, slime | Purple toxic pools | ☠️ Poison pools: damage over time | Corrupt crystals (quest items) |
+
+---
+
+## Block Type Registry
+
+```
+ID  | Name           | Texture       | Properties
+----|----------------|---------------|---------------------------
+0   | Air            | (none)        | transparent, not solid
+1   | Grass          | grass_top/side| solid, drop: dirt
+2   | Dirt           | dirt          | solid, breakable
+3   | Stone          | stone         | solid, hard
+4   | Sand           | sand          | solid
+5   | Gravel         | gravel        | solid
+6   | Water          | water         | transparent, not solid, drinkable
+7   | Wood Log       | wood_log      | solid, craftable
+8   | Leaves         | leaves        | transparent, not solid
+9   | Snow           | snow          | solid
+10  | Ice            | ice           | solid, slippery
+11  | Bedrock        | bedrock       | solid, unbreakable
+12  | Planks         | planks        | solid, craftable
+13  | Obsidian       | obsidian      | solid, very hard
+14  | Blackstone     | blackstone    | solid, hard
+15  | Lava           | lava          | transparent, damaging (animated)
+16  | Corrupt Stone  | corrupt_stone | solid
+17  | Toxic Slime    | toxic_slime   | damaging pool (animated, DoT)
+18  | Coal Ore       | coal_ore      | solid, mineable item
+19  | Iron Ore       | iron_ore      | solid, mineable item
+20  | Gold Ore       | gold_ore      | solid, mineable item
+21  | Diamond Ore    | diamond_ore   | solid, rare mineable item
+22  | Corrupt Crystal| corrupt_cry   | quest item, rare
+23  | Bed            | bed           | placeable, sets spawn + restores sleep
+24  | Apple          | apple         | food item, restores hunger (on trees)
+25  | Quest Key      | quest_key     | quest item (various colors per dungeon)
+26  | Boss Spawn     | boss_spawn    | invisible trigger block for boss fights
+```
 
 ---
 
@@ -30,338 +81,510 @@ webgame-cuubz/
 │   └── style.css                 # Game UI, HUD, menus, mobile touch overlays
 ├── js/
 │   ├── main.js                   # App entry: menu system, play/host/join flow
-│   ├── game.js                   # Main game loop, state management, render pipeline
+│   ├── game.js                   # Main game loop, state management, mode (creative/survival)
 │   ├── renderer/
-│   │   ├── voxelRenderer.js      # Three.js scene setup, chunk mesh builder
-│   │   ├── chunkManager.js       # Chunk loading/unloading, visibility culling
-│   │   └── crosshair.js          # Center pointer/crosshair overlay
+│   │   ├── voxelRenderer.js      # Three.js scene, camera, WebGL renderer, lighting
+│   │   ├── chunkMeshBuilder.js   # Face-culled merged geometry per chunk
+│   │   ├── chunkManager.js       # Dynamic load/unload based on ALL player positions
+│   │   ├── crosshair.js          # Center pointer + target block wireframe highlight
+│   │   └── skybox.js             # Sky gradient, sun/moon, clouds, day/night cycle
 │   ├── world/
-│   │   ├── worldGenerator.js     # Procedural world generation (noise, biomes)
-│   │   ├── chunkData.js          # Chunk data structures, serialization
-│   │   ├── biomeSystem.js        # Biome definitions, height maps, block distribution
-│   │   └── persistence.js        # IndexedDB save/load, 3-slot management
+│   │   ├── noise.js              # Perlin/Simplex noise functions (heightmap, biome, cave)
+│   │   ├── chunkData.js          # Chunk class: 16×16×Y block array, serialization
+│   │   ├── chunkGrid.js          # Grid system tracking all loaded chunks globally
+│   │   ├── worldGenerator.js     # Terrain generation with edge-seamless matching
+│   │   ├── biomeSystem.js        # Biome definitions, distribution, features placement
+│   │   ├── caveGenerator.js      # Underground tube caves with seamless chunk edges
+│   │   ├── oreGenerator.js       # Ore vein placement in caves and mountains
+│   │   ├── featurePlacer.js      # Trees, cacti, flowers, quest markers, dungeons
+│   │   ├── persistence.js        # IndexedDB: character saves + world chunk saves
+│   │   └── spawnManager.js       # Per-player spawn points per world
 │   ├── multiplayer/
-│   │   ├── client.js             # WebSocket client: connect, join, send actions
-│   │   ├── host.js               # Host logic: broadcast state, sync players
-│   │   ├── sessionManager.js     # Session discovery, matchmaking room
-│   │   └── playerSync.js         # Player position/rotation/action sync
+│   │   ├── client.js             # WebSocket client: connect, send actions, receive state
+│   │   ├── host.js               # Host logic: validate actions, broadcast to relay
+│   │   ├── sessionManager.js     # Session discovery via relay matchmaking room
+│   │   ├── playerSync.js         # Remote player rendering + smooth interpolation
+│   │   ├── inventorySync.js      # Server-side inventory validation & sync
+│   │   └── chunkStreamer.js      # Stream chunks to players based on their positions
 │   ├── input/
 │   │   ├── keyboard.js           # WASD + key bindings (desktop)
 │   │   ├── mouse.js              # Pointer lock, click events (desktop)
-│   │   ├── touch.js              # Virtual joystick, swipe-to-look (mobile)
-│   │   └── interaction.js        # Block break/place targeting via crosshair
+│   │   ├── touch.js              # Virtual joystick, swipe-to-look, tap interact (mobile)
+│   │   └── interaction.js        # Block break/place targeting via crosshair raycast
 │   ├── textures/
 │   │   ├── textureGenerator.js   # Procedural 32x32 texture creation (Canvas API)
-│   │   └── biomeTextures.js      # Biome-specific texture palettes & patterns
+│   │   └── biomeTextures.js      # All biome-specific texture palettes & patterns
 │   ├── entities/
-│   │   ├── player.js             # Player character: movement, physics, collision
-│   │   └── blockTypes.js         # Block definitions: type, hardness, drop, texture
+│   │   ├── player.js             # Player: movement, physics, AABB collision
+│   │   ├── blockTypes.js         # Full block registry with properties
+│   │   ├── remotePlayer.js       # Remote player mesh rendering + name tags
+│   │   ├── boss.js               # Boss entities: AI, health, attack patterns
+│   │   └── questMarker.js        # Quest marker visual entity (glowing post in world)
+│   ├── systems/
+│   │   ├── survival.js           # Health, hunger, thirst, sleep, stamina meters
+│   │   ├── inventory.js          # Inventory grid, hotbar, item management per character
+│   │   ├── crafting.js           # Block crafting recipes (planks from wood, beds, etc.)
+│   │   ├── questSystem.js        # 25 quests, progress tracking, world-state storage
+│   │   └── damageSystem.js       # Damage sources: lava, poison, falls, bosses
 │   └── audio/
-│       ├── sfx.js                # Procedural sound effects (Web Audio API)
-│       └── music.js              # Ambient procedural music generation
-├── textures/                     # Generated texture assets (PNG files)
-│   ├── dirt.png                  # 32x32 dirt texture
-│   ├── grass_top.png             # 32x32 grass top
-│   ├── grass_side.png            # 32x32 grass side
-│   ├── stone.png                 # 32x32 stone
-│   ├── sand.png                  # 32x32 sand
-│   ├── gravel.png                # 32x32 gravel
-│   ├── water.png                 # 32x32 water (transparent)
-│   ├── wood_log.png              # 32x32 wood log
-│   ├── leaves.png                # 32x32 leaves
-│   ├── snow.png                  # 32x32 snow
-│   ├── ice.png                   # 32x32 ice
-│   ├── bedrock.png               # 32x32 bedrock
-│   └── planks.png                # 32x32 wood planks
-├── sounds/                       # (Future: pre-rendered audio if needed)
-├── server/                       # Node.js multiplayer server
+│       ├── sfx.js                # Procedural SFX: block break/place, footsteps, UI
+│       └── ambient.js            # Calm/chill procedural ambient soundscapes per biome
+├── textures/                     # Generated texture assets (PNG files, 32×32)
+│   ├── grass_top.png, grass_side.png, dirt.png, stone.png, sand.png
+│   ├── gravel.png, water.png, wood_log.png, leaves.png, snow.png, ice.png
+│   ├── bedrock.png, planks.png, obsidian.png, blackstone.png, lava.png
+│   ├── corrupt_stone.png, toxic_slime.png, coal_ore.png, iron_ore.png
+│   ├── gold_ore.png, diamond_ore.png, corrupt_cry.png, apple.png
+│   ├── quest_key.png, bed.png
+├── server/                       # Node.js relay server
 │   ├── package.json              # ws dependency
-│   ├── index.js                  # Server entry point, WebSocket setup
-│   └── matchmaking.js            # Session discovery room logic
+│   ├── index.js                  # Server entry: matchmaking + game session relaying
+│   ├── matchmaking.js            # Session discovery room logic (lobby)
+│   └── session.js                # Game session relay: validate, broadcast, stream chunks
+├── cuubz-relay.service           # systemd service file for relay server
 ├── todo.md                       # This file
 └── sync.sh                       # Deployment script (generated from template)
 ```
 
 ---
 
-## Phase 1: Foundation — Core Voxel Engine & Single Player
+## Phase 1: Foundation — Core Voxel Engine & Single Player Survival
 
-### World Generation & Rendering
+### World Generation System
 - [ ] **Setup project structure** — Create all folders, index.html with Three.js CDN, basic HTML shell
-  - [ ] Link local Three.js build via `<script src="...">` (CDN)
-  - [ ] Basic HTML/CSS skeleton with canvas container and UI overlay divs
-- [ ] **Implement noise-based terrain generation** — `js/world/worldGenerator.js`
-  - [ ] Perlin/Simplex noise function for heightmap generation
-  - [ ] Seed-based deterministic generation (same seed = same world)
-  - [ ] Height range: 0-64 blocks, surface variation with mountains/valleys
-- [ ] **Implement biome system** — `js/world/biomeSystem.js`
-  - [ ] Define biomes: Plains, Forest, Desert, Tundra, Mountains, Ocean
-  - [ ] Temperature/moisture noise maps for biome distribution
-  - [ ] Biome-specific height modifiers (mountains higher, oceans lower)
+  - [ ] Link local Three.js build via `<script>` (CDN)
+  - [ ] Basic HTML/CSS skeleton: canvas container, UI overlay divs, menu screens
+- [ ] **Implement noise functions** — `js/world/noise.js`
+  - [ ] Perlin/Simplex noise with seed support
+  - [ ] Multi-octave noise for terrain detail
+  - [ ] Ridge noise for mountain ridges and cave systems
+  - [ ] 3D noise for cave tube generation
 - [ ] **Implement chunk data structures** — `js/world/chunkData.js`
-  - [ ] Chunk class: 16×16×64 block array
-  - [ ] Block type enum/lookup with properties (solid, transparent, hardness)
-  - [ ] Serialization/deserialization to/from JSON for persistence
+  - [ ] Chunk class: 16×16×Y block array (configurable height)
+  - [ ] Block type lookup with properties (solid, transparent, hardness, damage, item drop)
+  - [ ] Serialization/deserialization to/from compressed JSON
+  - [ ] Edge boundary data for seamless neighbor chunk joining
+- [ ] **Implement chunk grid system** — `js/world/chunkGrid.js`
+  - [ ] Global coordinate → chunk coordinate conversion
+  - [ ] Chunk loading/unloading based on player distance thresholds
+  - [ ] Neighbor awareness: chunks know their neighbors for seamless rendering
+  - [ ] Dirty flag system: mark changed chunks for save
+- [ ] **Implement biome system** — `js/world/biomeSystem.js`
+  - [ ] Temperature/moisture noise maps for biome distribution
+  - [ ] All 8 biomes defined with height modifiers and block palettes
+  - [ ] Biome blending at borders (smooth transitions)
+- [ ] **Implement terrain generation** — `js/world/worldGenerator.js`
+  - [ ] Heightmap from noise: mountains, valleys, plains, ocean floors
+  - [ ] Surface block placement based on biome + height
+  - [ ] Edge matching: shared boundary data between adjacent chunks
+  - [ ] Water level generation and filling
+- [ ] **Implement cave generation** — `js/world/caveGenerator.js`
+  - [ ] 3D tube caves using marching cubes or noise thresholding
+  - [ ] Seamless across chunk boundaries (seed-based deterministic)
+  - [ ] Cave connectivity: no dead-end isolated pockets
+  - [ ] Varying cave sizes: small tunnels to large caverns
+- [ ] **Implement ore generation** — `js/world/oreGenerator.js`
+  - [ ] Ore veins in caves and mountain sides
+  - [ ] Depth-based rarity: coal (shallow) → iron → gold → diamond (deep)
+  - [ ] Clustered vein patterns (not single scattered blocks)
+- [ ] **Implement feature placement** — `js/world/featurePlacer.js`
+  - [ ] Tree generation in Plains/Forest biomes (wood trunk + leaves + apples)
+  - [ ] Cactus placement in Desert biome
+  - [ ] Snow layer on Tundra surface
+  - [ ] Coral structures in Ocean biome
+  - [ ] Lava pools in Lava biome (animated damage voxels)
+  - [ ] Toxic pools in Corrupt biome (DoT area markers)
+  - [ ] Corrupt crystals in Corrupt biome (quest items)
+
+### Rendering Engine
 - [ ] **Build voxel renderer** — `js/renderer/voxelRenderer.js`
   - [ ] Three.js scene, camera, WebGL renderer setup
-  - [ ] Chunk mesh builder: merge visible faces into single geometry (face culling)
-  - [ ] Texture atlas from generated textures
-  - [ ] Basic lighting (ambient + directional sun)
+  - [ ] Texture atlas from all generated textures
+  - [ ] Basic lighting: ambient + directional sun
+  - [ ] Fog for distance rendering fade
+- [ ] **Build chunk mesh builder** — `js/renderer/chunkMeshBuilder.js`
+  - [ ] Face culling: only render exposed faces (not internal/hidden)
+  - [ ] Merged geometry per chunk (single draw call per chunk)
+  - [ ] Transparent face handling (water, leaves, lava)
+  - [ ] Animated texture offset for water/lava/toxic slime
 - [ ] **Implement chunk manager** — `js/renderer/chunkManager.js`
-  - [ ] Load/unload chunks based on player position
-  - [ ] Render distance: configurable (default 4 chunks radius)
+  - [ ] Load/unload chunks based on player position radius
+  - [ ] Render distance: configurable (default 6 chunks radius)
   - [ ] Async chunk building to avoid frame drops
-- [ ] **Generate procedural textures** — `js/textures/textureGenerator.js`
-  - [ ] Dirt texture: brown noise with darker speckles
-  - [ ] Grass top: green noise with lighter patches
-  - [ ] Grass side: dirt base with green top stripe
-  - [ ] Stone: gray noise with crack patterns
-  - [ ] Sand: yellow noise with grain variation
-  - [ ] Gravel: mixed gray/brown small squares
-  - [ ] Water: blue semi-transparent with wave pattern
-  - [ ] Wood log: brown rings/circles
-  - [ ] Leaves: green noise with darker spots
-  - [ ] Snow: white/light gray minimal noise
-  - [ ] Ice: light blue translucent
-  - [ ] Bedrock: dark gray/black heavy noise
-  - [ ] Planks: wood grain horizontal lines
-  - [ ] Save all as 32×32 PNG files to `textures/` directory
-- [ ] **Implement block types** — `js/entities/blockTypes.js`
-  - [ ] Define all block types with properties: id, name, texture key, hardness, transparent, solid
-  - [ ] Block lookup registry for generation and interaction
+  - [ ] Chunk disposal for memory management
+- [ ] **Implement skybox** — `js/renderer/skybox.js`
+  - [ ] Gradient sky based on time of day
+  - [ ] Sun/moon directional light positioning
+  - [ ] Cloud layer (billboard approximation)
+- [ ] **Implement crosshair** — `js/renderer/crosshair.js`
+  - [ ] Center screen crosshair overlay
+  - [ ] Targeted block wireframe highlight
+  - [ ] Raycasting from camera center for block/face detection
 
-### Player & Controls (Mobile-First)
+### Procedural Textures (ALL 32×32)
+- [ ] **Generate all textures** — `js/textures/textureGenerator.js` + save to `textures/`
+  - [ ] grass_top.png: green noise with lighter patches
+  - [ ] grass_side.png: dirt base with green top stripe
+  - [ ] dirt.png: brown noise with darker speckles
+  - [ ] stone.png: gray noise with crack patterns
+  - [ ] sand.png: yellow noise with grain variation
+  - [ ] gravel.png: mixed gray/brown small squares
+  - [ ] water.png: blue semi-transparent wave pattern
+  - [ ] wood_log.png: brown rings/circles (vertical grain)
+  - [ ] leaves.png: green noise with darker spots
+  - [ ] snow.png: white/light gray minimal noise
+  - [ ] ice.png: light blue translucent
+  - [ ] bedrock.png: dark gray/black heavy noise
+  - [ ] planks.png: wood grain horizontal lines
+  - [ ] obsidian.png: very dark purple-black glossy
+  - [ ] blackstone.png: dark gray with subtle texture
+  - [ ] lava.png: orange/red animated flow pattern
+  - [ ] corrupt_stone.png: dark purple crystalline
+  - [ ] toxic_slime.png: bright purple translucent pool
+  - [ ] coal_ore.png: stone base with black ore spots
+  - [ ] iron_ore.png: stone base with light gray ore spots
+  - [ ] gold_ore.png: stone base with yellow ore spots
+  - [ ] diamond_ore.png: stone base with cyan ore spots
+  - [ ] corrupt_cry.png: glowing purple crystal
+  - [ ] apple.png: red round fruit icon
+  - [ ] quest_key.png: golden key icon (color variants per dungeon)
+  - [ ] bed.png: colored bed block texture
+
+### Player & Controls
 - [ ] **Implement first-person camera** — `js/renderer/voxelRenderer.js`
-  - [ ] Three.js perspective camera with yaw/pitch rotation
+  - [ ] Perspective camera with yaw/pitch rotation
   - [ ] Pointer lock API for desktop mouse look
   - [ ] Smooth camera interpolation
-- [ ] **Implement crosshair overlay** — `js/renderer/crosshair.js`
-  - [ ] Center screen crosshair (white lines or dot)
-  - [ ] Highlight targeted block with wireframe outline
-  - [ ] Raycasting from camera center to detect target block & face
 - [ ] **Implement keyboard controls** — `js/input/keyboard.js`
-  - [ ] WASD movement with relative direction (based on camera yaw)
-  - [ ] Space for jump, Shift for sprint
+  - [ ] WASD movement relative to camera direction
+  - [ ] Space jump, Shift sprint, E interact
   - [ ] Key state tracking with input queue
 - [ ] **Implement mouse interaction** — `js/input/mouse.js`
-  - [ ] Left click: break targeted block
-  - [ ] Right click: place selected block type at targeted face
-  - [ ] Scroll wheel: cycle through hotbar blocks
+  - [ ] Left click: break targeted block (with attack progress bar)
+  - [ ] Right click: place selected block at targeted face
+  - [ ] Scroll wheel: cycle hotbar slots
 - [ ] **Implement touch controls** — `js/input/touch.js`
-  - [ ] Virtual joystick on left side of screen (movement)
+  - [ ] Virtual joystick on left side (movement)
   - [ ] Swipe-to-look on right side (camera rotation)
   - [ ] Tap to break/place blocks
   - [ ] Touch-friendly UI scaling for mobile viewports
-  - [ ] Visual joystick indicator with drag zone
 - [ ] **Implement block interaction** — `js/input/interaction.js`
   - [ ] Raycast from camera center through crosshair
   - [ ] Detect target block position and face normal
-  - [ ] Break animation (particle effect or instant)
-  - [ ] Place block logic with collision check (don't place inside player)
+  - [ ] Break animation (particle effect or progress bar)
+  - [ ] Place block with collision check (don't place inside player)
 - [ ] **Implement player physics** — `js/entities/player.js`
   - [ ] AABB collision detection against solid blocks
   - [ ] Gravity, jump velocity, ground detection
   - [ ] Horizontal movement with collision slide
   - [ ] Player dimensions: ~0.8 wide × 1.8 tall (block units)
 
-### Persistence
-- [ ] **Implement IndexedDB persistence** — `js/world/persistence.js`
-  - [ ] Create database: worlds store, metadata store
-  - [ ] Save world structure: seed, chunk data (compressed), player position
-  - [ ] Load world structure: decompress chunks, restore player state
-  - [ ] 3-slot management: create new, overwrite existing, delete slot
-  - [ ] World metadata: name, creation date, play time, biome summary
-- [ ] **Implement main menu flow** — `js/main.js`
-  - [ ] Menu screen with options: Play, Host, Join
-  - [ ] Play: show 3 world slots (create new or load existing)
-  - [ ] Host: select world → start multiplayer session
-  - [ ] Join: browse available sessions → connect
-  - [ ] Settings panel: render distance, volume, controls hint
+### Survival Systems
+- [ ] **Implement survival meters** — `js/systems/survival.js`
+  - [ ] Health meter (starts at 100, damaged by lava/poison/falls/bosses)
+  - [ ] Hunger meter (depletes over time, restored by food)
+  - [ ] Thirst meter (depletes over time, restored by drinking water)
+  - [ ] Sleep meter (depletes over time, restored by beds)
+  - [ ] Stamina meter (depletes on sprint/jump, regenerates at rest)
+  - [ ] HUD rendering: all 5 meters visible on screen
+  - [ ] Death handling: respawn at spawn point
+- [ ] **Implement damage system** — `js/systems/damageSystem.js`
+  - [ ] Lava contact damage (rapid per-tick)
+  - [ ] Poison DoT from toxic slime pools (slower, lingering)
+  - [ ] Fall damage based on height
+  - [ ] Boss attack damage patterns
+  - [ ] Damage flash effect on screen edges
+- [ ] **Implement food system** — `js/systems/survival.js`
+  - [ ] Apple blocks on trees in healthy biomes
+  - [ ] Eating restores hunger meter
+  - [ ] Right-click with apple to consume
+- [ ] **Implement water drinking** — `js/systems/survival.js`
+  - [ ] Stand in/near water source (ponds, oceans, rivers)
+  - [ ] Press interact key to drink → restores thirst
+  - [ ] Drinking animation/delay (can't drink instantly)
+- [ ] **Implement bed system** — `js/systems/survival.js`
+  - [ ] Placeable bed blocks from inventory
+  - [ ] Right-click bed: restore sleep meter + set spawn point
+  - [ ] Spawn point saved per player per world
+
+### Inventory System
+- [ ] **Implement inventory** — `js/systems/inventory.js`
+  - [ ] Grid-based inventory (e.g., 9×4 grid)
+  - [ ] Hotbar: bottom 9 slots, scroll/tap to select
+  - [ ] Block item tracking with counts per type
+  - [ ] Break block → add to inventory
+  - [ ] Place block → decrement from inventory
+  - [ ] Mobile-friendly inventory UI
+
+### Persistence System (Characters + Worlds Separated)
+- [ ] **Implement IndexedDB database** — `js/world/persistence.js`
+  - [ ] Database schema: characters store, worlds store, chunks store
+  - [ ] Character save structure: name, color, inventory, spawn points per world
+  - [ ] World save structure: seed, biome map, quest progress, chunk references
+  - [ ] Chunk save structure: compressed block data per chunk file
+- [ ] **Implement character management** — `js/main.js`
+  - [ ] Character screen: list up to 3 characters
+  - [ ] Create character: name input + color picker
+  - [ ] Edit character: rename, change color
+  - [ ] Delete character with confirmation
+  - [ ] Save/load character data from IndexedDB
+- [ ] **Implement world management** — `js/main.js`
+  - [ ] World screen: list up to 3 worlds
+  - [ ] Create world: generate new random seed + place quest markers/dungeons
+  - [ ] Delete world with confirmation
+  - [ ] Save/load world metadata from IndexedDB
+- [ ] **Implement chunk persistence** — `js/world/persistence.js`
+  - [ ] Save dirty chunks to IndexedDB on interval (every 30s) and on exit
+  - [ ] Load existing chunks from disk before generating new ones
+  - [ ] Chunk compression for storage efficiency
+  - [ ] Partial world updates: only save changed chunks
+- [ ] **Implement spawn manager** — `js/world/spawnManager.js`
+  - [ ] Per-player spawn points stored per world
+  - [ ] Default spawn at world center if no bed set
+  - [ ] Load spawn on world entry, update on bed use
+
+### Quest System (World-State Based)
+- [ ] **Implement quest system** — `js/systems/questSystem.js`
+  - [ ] Quest data structure: id, name, description, type, requirements, reward
+  - [ ] World-state storage for quest progress (shared by all players)
+  - [ ] Quest tracker UI: current quest + next objective
+  - [ ] Quest completion logic and progression chain
+- [ ] **Implement quest markers** — `js/entities/questMarker.js`
+  - [ ] Glowing post/entity in world at quest target locations
+  - [ ] Visible from distance (particle effect or beacon)
+  - [ ] Interact to receive quest update/dialogue
+  - [ ] Marker placement during world generation for all 25 quests
+- [ ] **Design 25-quest storyline** — Document quest chain with requirements
+  - [ ] Quests 1–6: Introduction & gathering (collect basic materials)
+  - [ ] Quests 7–12: First dungeon exploration (Boss 1)
+  - [ ] Quests 13–17: Second dungeon (Boss 2) + world events
+  - [ ] Quests 18–21: Third dungeon (Boss 3) + preparation
+  - [ ] Quests 22–24: Fourth dungeon (Boss 4)
+  - [ ] Quest 25: Final boss — beat the game
+  - [ ] Each quest has specific item/kill/exploration requirements
+  - [ ] Quest items placed during world generation at deterministic locations
+- [ ] **Implement boss system** — `js/entities/boss.js`
+  - [ ] Boss entity class with health, AI state machine, attack patterns
+  - [ ] Boss spawn triggered by quest progression + key item
+  - [ ] 4 unique bosses: different attacks, sizes, behaviors
+  - [ ] Final boss: multi-phase fight
+  - [ ] Boss death triggers quest completion
 
 ### Audio Foundation
 - [ ] **Procedural sound effects** — `js/audio/sfx.js`
-  - [ ] Block break sound: short noise burst with decay
-  - [ ] Block place sound: thud/impact sound
-  - [ ] Footstep sounds: different for each biome surface type
-  - [ ] Jump/land sounds
-- [ ] **Ambient procedural music** — `js/audio/music.js`
-  - [ ] Procedural ambient drone/chord progression
-  - [ ] Biome-specific ambient tones (calm for plains, windy for mountains)
+  - [ ] Block break/place sounds (different per material type)
+  - [ ] Footstep sounds per biome surface type
+  - [ ] Jump/land sounds, damage flash sounds
+  - [ ] UI click/hover sounds for menus
+  - [ ] Eating/drinking sounds
+- [ ] **Calm ambient soundscapes** — `js/audio/ambient.js`
+  - [ ] Procedural calm drone/chord progression
+  - [ ] Biome-specific ambient tones (plains=peaceful, lava=tense, corrupt=eerie)
+  - [ ] Day/night volume variation
+
+### Main Menu Flow
+- [ ] **Implement menu system** — `js/main.js`
+  - [ ] Main screen: Play Solo, Host Multiplayer, Join Multiplayer, Settings
+  - [ ] Character selection screen (3 slots, create/edit/delete)
+  - [ ] World selection screen (3 slots, create/delete)
+  - [ ] Mode selection: Creative or Survival
+  - [ ] Settings panel: render distance, volume, controls hint
 
 ### Phase 1 Testing (Browser Automation)
-- [ ] **Test: Page loads without errors** — Navigate to game URL, check console
-  - [ ] No JavaScript errors in console
-  - [ ] Canvas element renders
-  - [ ] Three.js scene initializes
-- [ ] **Test: World generation** — Create new world with known seed
-  - [ ] Terrain generates with variation (not flat)
-  - [ ] Multiple biomes visible across terrain
-  - [ ] Water level present at expected height
-- [ ] **Test: Chunk rendering** — Move player to chunk boundary
-  - [ ] Adjacent chunks load seamlessly
-  - [ ] No texture gaps between chunks
+- [ ] **Test: Page loads** — Navigate to game URL, check console
+  - [ ] No JS errors, canvas renders, Three.js initializes
+- [ ] **Test: World generation** — Create world with known seed
+  - [ ] Terrain varies across biomes, water level correct
+  - [ ] Caves generate underground with connectivity
+  - [ ] Trees/cacti/features placed in correct biomes
+  - [ ] Ore veins present at appropriate depths
+- [ ] **Test: Chunk loading** — Move player across boundaries
+  - [ ] Seamless transitions between chunks (no gaps/tears)
+  - [ ] Caves continue seamlessly across chunk edges
   - [ ] Distant chunks unload properly
 - [ ] **Test: Player movement** — WASD + jump on desktop
-  - [ ] Player moves in camera direction
-  - [ ] Jump works with gravity
+  - [ ] Movement in camera direction, gravity works
   - [ ] Collision prevents walking through blocks
+  - [ ] Sprint consumes stamina
 - [ ] **Test: Block interaction** — Crosshair targeting + break/place
-  - [ ] Crosshair highlights target block
-  - [ ] Left click removes block
-  - [ ] Right click places block on correct face
+  - [ ] Target block highlighted, breaks on click
+  - [ ] Place block on correct face
+  - [ ] Broken blocks added to inventory
+- [ ] **Test: Survival meters** — Play for several minutes
+  - [ ] All 5 meters deplete over time
+  - [ ] Hunger restored by eating apples
+  - [ ] Thirst restored by drinking water
+  - [ ] Sleep restored by beds, spawn point set
+  - [ ] Death and respawn at spawn point works
 - [ ] **Test: Touch controls** — Mobile viewport simulation
-  - [ ] Virtual joystick responds to touch drag
-  - [ ] Swipe rotates camera view
-  - [ ] Tap triggers block interaction
-- [ ] **Test: World save/load** — Create world, reload page
-  - [ ] World persists across page reloads
-  - [ ] Player position restored correctly
-  - [ ] All 3 slots available for separate worlds
+  - [ ] Virtual joystick moves player
+  - [ ] Swipe rotates camera
+  - [ ] Tap breaks/places blocks
+- [ ] **Test: Character management** — Create/edit/delete characters
+  - [ ] 3 character slots available
+  - [ ] Name + color saved and restored
+  - [ ] Inventory persists per character
+- [ ] **Test: World persistence** — Create world, reload page
+  - [ ] Chunk data loaded from disk
+  - [ ] Quest progress preserved
+  - [ ] Spawn points restored per player
+- [ ] **Test: Quest system** — Progress through first quest
+  - [ ] Quest marker visible in world
+  - [ ] Quest tracker shows current objective
+  - [ ] Quest completes on requirement fulfillment
 - [ ] Record all test results, note bugs, update checkboxes
 
 ---
 
-## Phase 2: Multiplayer & Session System
+## Phase 2: Multiplayer & Relay Server
 
-### Multiplayer Server
-- [ ] **Setup Node.js multiplayer server** — `server/package.json`, `server/index.js`
-  - [ ] Install ws dependency for WebSocket support
-  - [ ] WebSocket server setup with connection handling
-  - [ ] Player ID assignment on connect
-  - [ ] Disconnect cleanup (remove player from session)
-- [ ] **Implement session management** — `server/matchmaking.js`
-  - [ ] Matchmaking room: list of active sessions
-  - [ ] Host registers session: name, world seed, max players (4)
-  - [ ] Client browses sessions: host name, player count, world info
-  - [ ] Session join request → accept → connect to host's game server
-- [ ] **Implement multiplayer protocol** — `server/index.js`
-  - [ ] Message types: JOIN, LEAVE, MOVE, BREAK_BLOCK, PLACE_BLOCK, CHUNK_DATA, HEARTBEAT
-  - [ ] JSON message format with type + payload
-  - [ ] Player state broadcast: position, rotation, selected block
-  - [ ] Block change broadcast: position, old type, new type
+### Node.js Relay Server
+- [ ] **Setup server project** — `server/package.json`, `server/index.js`
+  - [ ] ws dependency for WebSocket support
+  - [ ] Dual port setup: matchmaking port + game session ports
+  - [ ] Connection handling with player ID assignment
+  - [ ] Disconnect cleanup (remove from session, broadcast leave)
+- [ ] **Implement matchmaking relay** — `server/matchmaking.js`
+  - [ ] Session registration: host name, world seed, mode, max players (4)
+  - [ ] Session browsing: list available sessions with details
+  - [ ] Join request routing → connect client to game session
+  - [ ] Session cleanup on host disconnect
+- [ ] **Implement game session relay** — `server/session.js`
+  - [ ] Message types: JOIN, LEAVE, MOVE, BREAK_BLOCK, PLACE_BLOCK, CHUNK_DATA, INVENTORY_UPDATE, QUEST_UPDATE, HEARTBEAT
+  - [ ] Server-side validation: block break/place checks, inventory verification
+  - [ ] Player state broadcast: position, rotation, selected block, health meters
+  - [ ] Heartbeat keepalive (30s), disconnect on timeout
+- [ ] **Create systemd service file** — `cuubz-relay.service`
+  - [ ] Service unit file for Node.js relay server
+  - [ ] Configurable ports, working directory, restart policy
+  - [ ] User-level service (no sudo required)
 
 ### Client Multiplayer Integration
 - [ ] **Implement WebSocket client** — `js/multiplayer/client.js`
-  - [ ] Connect/disconnect to server
+  - [ ] Connect/disconnect to relay server
   - [ ] Send/receive messages with retry logic
-  - [ ] Heartbeat keepalive (30s interval)
-  - [ ] Reconnection handler with session restore attempt
+  - [ ] Heartbeat keepalive, reconnection handler
+  - [ ] Message queue for reliable delivery ordering
 - [ ] **Implement host logic** — `js/multiplayer/host.js`
-  - [ ] Register session with matchmaking server
-  - [ ] Broadcast world chunks to joining clients
-  - [ ] Authoritative block changes (validate before broadcast)
-  - [ ] Player position/rotation sync broadcast
-  - [ ] Kick/disconnect player handling
+  - [ ] Register session with matchmaking relay
+  - [ ] Authoritative block change validation before broadcast
+  - [ ] Inventory update validation (server-side)
+  - [ ] Quest progress validation and broadcast
+  - [ ] Player disconnect/reconnect handling
+- [ ] **Implement chunk streaming** — `js/multiplayer/chunkStreamer.js`
+  - [ ] Track ALL player positions in session
+  - [ ] Load chunks around ALL players (not just host)
+  - [ ] Stream chunk data to clients who need it
+  - [ ] Compress chunk data for transmission
+  - [ ] Unload distant chunks when no players nearby
 - [ ] **Implement player synchronization** — `js/multiplayer/playerSync.js`
-  - [ ] Render remote players as voxel characters in world
-  - [ ] Smooth interpolation of remote player positions
-  - [ ] Remote player name tags above heads
-  - [ ] Sync block changes from host to client view
+  - [ ] Render remote players as colored voxel characters
+  - [ ] Smooth interpolation of remote player positions/rotations
+  - [ ] Name tags above heads with color matching
+  - [ ] Health bar display above remote players (survival mode)
+- [ ] **Implement inventory sync** — `js/multiplayer/inventorySync.js`
+  - [ ] Send inventory to host on join
+  - [ ] Host validates block breaks/places against inventory
+  - [ ] Inventory updates broadcast to all players
+  - [ ] Save character inventory on disconnect/exit
 - [ ] **Implement session UI** — `js/main.js`
   - [ ] Session browser: list available sessions with details
-  - [ ] Host screen: set session name, select world, start hosting
+  - [ ] Host screen: set name, select world/mode, start hosting
   - [ ] Connection status indicator (connected/disconnected/reconnecting)
-  - [ ] Player list overlay showing connected players
-
-### Mobile-First Multiplayer Controls
-- [ ] **Touch-friendly multiplayer UI** — `css/style.css`
-  - [ ] Session browser touch targets ≥ 48px
-  - [ ] Host/Join buttons sized for thumb reach
-  - [ ] Connection status visible on mobile HUD
-  - [ ] Remote player indicators in mobile viewport
+  - [ ] Player list overlay: names + health of all players (top-left HUD)
 
 ### Phase 2 Testing (Browser Automation)
-- [ ] **Test: Server starts and accepts connections** — Launch server, connect client
-  - [ ] WebSocket connection established
-  - [ ] Player ID assigned
-  - [ ] Heartbeat messages flowing
-- [ ] **Test: Session discovery** — Create session, browse from second client
+- [ ] **Test: Server starts** — Launch relay server, check ports
+  - [ ] Matchmaking port accepting connections
+  - [ ] Game session ready for hosting
+- [ ] **Test: Session discovery** — Create session, browse from client
   - [ ] Host session appears in browser list
-  - [ ] Session details correct (name, player count)
-  - [ ] Join request accepted, connection established
+  - [ ] Join connects to game session successfully
 - [ ] **Test: Multiplayer sync** — Two players in same world
-  - [ ] Player A sees Player B's character model
+  - [ ] Remote player visible with correct color + name tag
   - [ ] Movement synchronized between clients
-  - [ ] Block changes visible to all players
+  - [ ] Block changes validated by host, broadcast to all
+  - [ ] Inventory updates synced correctly
+- [ ] **Test: Chunk streaming** — Players at different locations
+  - [ ] Each player's surrounding chunks loaded
+  - [ ] World doesn't disappear when players spread out
+  - [ ] New chunks streamed seamlessly to remote clients
+- [ ] **Test: Server validation** — Client sends invalid block change
+  - [ ] Host rejects invalid break/place
+  - [ ] Inventory properly validated before changes
 - [ ] **Test: Max player enforcement** — 4+ join attempts
-  - [ ] 4th player joins successfully
-  - [ ] 5th player rejected with "full" message
+  - [ ] 4th player joins, 5th rejected with "full" message
+- [ ] **Test: Character save on disconnect** — Player leaves session
+  - [ ] Character inventory saved to IndexedDB
+  - [ ] Inventory restored on rejoin
 - [ ] Record all test results, note bugs, update checkboxes
 
 ---
 
 ## Phase 3: Polish & Content Expansion
 
-### World & Biome Polish
-- [ ] **Tree generation** — `js/world/worldGenerator.js`
-  - [ ] Random tree placement in Forest biome (oak: wood trunk + leaves)
-  - [ ] Cactus placement in Desert biome
-  - [ ] Snow layer on Tundra biome surface blocks
-- [ ] **Cave generation** — `js/world/worldGenerator.js`
-  - [ ] 3D noise for underground cave systems
-  - [ ] Cave connectivity (not isolated pockets)
-  - [ ] Ore veins in caves (coal, iron visual variants)
-- [ ] **Water & rivers** — `js/world/biomeSystem.js`
-  - [ ] River generation using ridge noise
-  - [ ] Water flow simulation (static: fill low areas)
-  - [ ] Ocean biome with gradual depth increase
-- [ ] **Skybox & atmosphere** — `js/renderer/voxelRenderer.js`
-  - [ ] Gradient sky based on time of day
-  - [ ] Sun/moon directional light positioning
-  - [ ] Cloud layer (simple billboard or volumetric approximation)
-
-### Gameplay Features
-- [ ] **Inventory & hotbar system** — `js/game.js`
-  - [ ] Hotbar with 9 slots, scroll/tap to select
-  - [ ] Inventory screen: grid of collected blocks
-  - [ ] Block count tracking per type
-  - [ ] Mobile-friendly inventory UI with drag/slide
-- [ ] **Day/night cycle** — `js/game.js`
-  - [ ] Configurable cycle length (e.g., 5 minutes full cycle)
-  - [ ] Sun/moon movement across sky
-  - [ ] Ambient light changes (bright day → dark night)
+### World Polish
+- [ ] **Day/night cycle** — `js/renderer/skybox.js`
+  - [ ] Configurable cycle length (e.g., 5 min full cycle)
+  - [ ] Sun/moon movement, sky color transitions
+  - [ ] Ambient light changes affecting visibility
   - [ ] Night indicator on HUD
-- [ ] **Creative mode** — `js/game.js`
-  - [ ] Unlimited blocks, no gravity, can fly
-  - [ ] Toggle between Creative and Survival modes
-  - [ ] Block palette selector for creative building
+- [ ] **Biome visual polish** — `js/world/featurePlacer.js`
+  - [ ] Flower variety in Plains biomes
+  - [ ] Tree density variation in Forest
+  - [ ] Lava flow animation with particle effects
+  - [ ] Toxic slime pool bubbling animation
+  - [ ] Corrupt biome ambient purple fog effect
+- [ ] **Cave polish** — `js/world/caveGenerator.js`
+  - [ ] Torches/light sources in caves (player placeable)
+  - [ ] Cave stalactite/stalagmite features
+  - [ ] Glowstone-like ore blocks for cave lighting
+
+### Gameplay Polish
+- [ ] **Creative mode full implementation** — `js/game.js`
+  - [ ] Unlimited blocks, no gravity, fly mode (double-tap space)
+  - [ ] Block palette selector for all block types
+  - [ ] Toggle between Creative and Survival
+- [ ] **Crafting system** — `js/systems/crafting.js`
+  - [ ] Basic recipes: planks from wood, beds from wool+planks
+  - [ ] Crafting UI with recipe grid
+  - [ ] Recipe discovery (learn as you progress)
+- [ ] **Player list HUD** — `css/style.css` + `js/multiplayer/playerSync.js`
+  - [ ] Top-left overlay showing all other players
+  - [ ] Name + color dot + health bar for each player
+  - [ ] Collapsible panel on mobile
 
 ### Audio Polish
-- [ ] **Biome-specific ambient sounds** — `js/audio/music.js`
-  - [ ] Ocean waves for ocean biome
-  - [ ] Wind for mountains/tundra
-  - [ ] Birds chirping for forest/plains (procedural)
-- [ ] **Interaction sound feedback** — `js/audio/sfx.js`
-  - [ ] Different break sounds per block material type
-  - [ ] UI click/hover sounds for menus
+- [ ] **Biome ambient sound transitions** — `js/audio/ambient.js`
+  - [ ] Smooth crossfade between biome sounds
+  - [ ] Lava crackle/bubble sounds in lava biome
+  - [ ] Eerie whispers/drone in corrupt biome
+  - [ ] Birds/wind for healthy biomes
 
 ### Mobile Polish
 - [ ] **Responsive HUD** — `css/style.css`
-  - [ ] Crosshair adapts to mobile viewport
-  - [ ] Hotbar positioned below joystick on mobile
+  - [ ] Survival meters visible on mobile viewport
+  - [ ] Hotbar positioned below joystick
   - [ ] Inventory overlay full-screen on mobile
-- [ ] **Performance optimization for mobile** — `js/renderer/chunkManager.js`
+  - [ ] Quest tracker compact on mobile
+- [ ] **Performance optimization** — `js/renderer/chunkManager.js`
   - [ ] Reduced render distance on mobile detection
-  - [ ] Lower chunk geometry detail option
-  - [ ] Frame rate target: 30fps minimum on mobile
+  - [ ] Lower geometry detail option for weak devices
+  - [ ] Frame rate target: 30fps minimum
 
 ### Phase 3 Testing (Browser Automation)
-- [ ] **Test: Biome features** — Explore generated world
-  - [ ] Trees appear in Forest biome
-  - [ ] Cacti appear in Desert biome
-  - [ ] Snow visible on Tundra surface
-- [ ] **Test: Inventory system** — Break blocks, check inventory
-  - [ ] Broken blocks added to inventory
-  - [ ] Hotbar selection works (scroll + tap)
-  - [ ] Placed blocks decrement from inventory
-- [ ] **Test: Day/night cycle** — Wait for cycle or accelerate time
-  - [ ] Sky color changes smoothly
-  - [ ] Lighting transitions with sun position
-  - [ ] Night darkness appropriate
-- [ ] **Test: Mobile performance** — Simulate mobile device
-  - [ ] Frame rate ≥ 30fps on reduced render distance
-  - [ ] Touch controls responsive (< 100ms input lag)
-  - [ ] UI elements touch-friendly (≥ 48px targets)
+- [ ] **Test: Day/night cycle** — Accelerate time, observe transitions
+  - [ ] Smooth sky color changes, lighting follows sun
+- [ ] **Test: Crafting** — Craft planks from wood
+  - [ ] Recipe available in crafting UI
+  - [ ] Output items added to inventory correctly
+- [ ] **Test: Creative mode** — Toggle creative, fly around
+  - [ ] Unlimited blocks available, no gravity
+  - [ ] All block types accessible in palette
+- [ ] **Test: Mobile HUD** — Simulate mobile viewport
+  - [ ] All survival meters visible and readable
+  - [ ] Player list overlay functional
+  - [ ] Touch targets ≥ 48px
 - [ ] Record all test results, note bugs, update checkboxes
 
 ---
@@ -375,21 +598,21 @@ webgame-cuubz/
   - [ ] Memory leak check (chunk disposal, event listener cleanup)
   - [ ] Mobile viewport testing across device sizes
 - [ ] **Texture asset verification** — `textures/` directory
-  - [ ] All 13 texture PNGs present and 32×32 resolution
+  - [ ] All texture PNGs present and 32×32 resolution
   - [ ] Visual quality check on each texture
-  - [ ] Texture atlas generation working correctly
 - [ ] **Multiplayer stress test** — 4 concurrent players
   - [ ] Server handles 4 connections without lag
   - [ ] Block changes sync within 500ms
   - [ ] Player disconnect/reconnect handled gracefully
+  - [ ] Inventory sync correct across all clients
 
 ### Deployment
 - [ ] **Generate sync.sh from template** — `sed` from skill template with remote IP
 - [ ] **Deploy game files to server** — `./sync.sh` via rsync
   - [ ] All HTML/CSS/JS files synced
   - [ ] Texture PNGs synced
-  - [ ] Server directory deployed for Node.js backend
-- [ ] **Setup NPM proxy** — Reverse proxy for game on designated server IP
+  - [ ] Server directory deployed (Node.js relay)
+- [ ] **Setup NPM proxy** — Reverse proxy for game on dedicated LXC container
 - [ ] **Test deployed game** — Access via browser from remote device
   - [ ] Game loads and renders correctly
   - [ ] Multiplayer connects through proxy
@@ -400,18 +623,12 @@ webgame-cuubz/
   - [ ] Master branch with README
   - [ ] .gitignore for node_modules, .env, generated temp files
 - [ ] **Push all code to repository** — git add/commit/push
-  - [ ] Full workspace committed (excluding .git)
-  - [ ] Verify repo contents match local
 
 ### Phase 4 Testing (Browser Automation)
 - [ ] **Test: Deployed game loads** — Navigate to deployed URL
-  - [ ] Page loads without errors
-  - [ ] All assets served correctly
-  - [ ] Three.js renderer initializes
+  - [ ] Page loads without errors, all assets serve correctly
 - [ ] **Test: Multiplayer through proxy** — Connect from remote device
-  - [ ] Session discovery works over internet
-  - [ ] WebSocket connection stable
-  - [ ] Block sync functional through proxy
+  - [ ] Session discovery works, WebSocket stable through proxy
 - [ ] Record all test results, note bugs, update checkboxes
 
 ---
@@ -422,21 +639,27 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 
 | Test Category | Method | Expected Result |
 |---|---|---|
-| Page load | Navigate to game URL, check console | No JS errors, canvas renders, Three.js initializes |
-| World generation | Create world with fixed seed, inspect chunks | Terrain varies, biomes distribute, water level correct |
-| Chunk rendering | Move player across chunk boundaries | Seamless transitions, no gaps, proper unload distance |
-| Player movement | WASD + jump simulation | Movement in camera direction, gravity works, collision blocks |
-| Block interaction | Simulate click on targeted block | Block breaks/places correctly, visual update instant |
-| Touch controls | Mobile viewport simulation with touch events | Joystick moves player, swipe rotates camera, tap interacts |
-| Persistence | Create world, reload page, compare state | World data restored, player position correct, 3 slots available |
-| Multiplayer connect | Start server, connect 2+ clients | WebSocket established, session joined, players visible |
-| Block sync | Break/place block as host, check client view | All clients see change within 500ms |
-| Max players | Attempt 5th join on full session | Rejected with error, existing 4 unaffected |
-| Biome features | Generate and explore world | Trees in forest, cacti in desert, snow in tundra |
-| Inventory | Break blocks, check counts | Blocks tracked correctly, hotbar selection works |
-| Day/night cycle | Accelerate time, observe sky | Smooth color transition, sun/moon movement correct |
-| Mobile performance | Throttle CPU, measure FPS | ≥ 30fps with reduced render distance |
-| Deployed access | Navigate to remote URL | Game loads, assets serve, multiplayer connects |
+| Page load | Navigate to URL, check console | No JS errors, canvas renders, Three.js initializes |
+| World generation | Create world with fixed seed | Terrain varies, 8 biomes present, caves connected, ores at depth |
+| Chunk loading/unloading | Move across boundaries | Seamless transitions, no gaps, caves match edges, chunks unload |
+| Player movement | WASD + jump simulation | Camera-relative movement, gravity, collision blocks player |
+| Block interaction | Simulate click on target | Highlight correct block, break/place works, inventory updates |
+| Survival meters | Play for several minutes | All 5 meters deplete, food/water/bed restore correctly |
+| Damage system | Enter lava/poison pools | Health decreases, death respawns at spawn point |
+| Touch controls | Mobile viewport + touch events | Joystick moves, swipe rotates camera, tap interacts |
+| Character management | Create/edit/delete 3 characters | Name+color saved, inventory persists per character |
+| World persistence | Create world, reload page | Chunks loaded from disk, quest progress preserved |
+| Quest system | Progress through first quest chain | Markers visible, tracker updates, completion triggers next quest |
+| Boss fights | Reach boss trigger with key item | Boss spawns, fight mechanics work, death completes quest |
+| Server matchmaking | Start server, connect clients | Sessions listed, join accepted, player IDs assigned |
+| Multiplayer sync | 2+ players in world | Remote players visible, movement synced, blocks validated by host |
+| Chunk streaming | Players spread across world | All player areas loaded, chunks streamed to remote clients |
+| Inventory sync | Break/mine as non-host | Host validates, inventory updated for all, saved on disconnect |
+| Max players | 5th join attempt | Rejected with "full", existing 4 unaffected |
+| Day/night cycle | Accelerate time | Smooth transitions, lighting follows sun position |
+| Crafting | Craft items from recipes | Output correct, ingredients consumed, inventory updated |
+| Mobile performance | Throttle CPU + mobile viewport | ≥ 30fps, touch targets functional, HUD readable |
+| Deployed access | Navigate to remote URL | Game loads, multiplayer connects through proxy |
 
 **Bug tracking:** Each test records pass/fail. Failed tests create specific bug items in the relevant phase. Fixes verified by re-running the specific test.
 
@@ -446,37 +669,68 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 
 | Phase | Status |
 |-------|--------|
-| Phase 1: Foundation — Core Voxel Engine & Single Player | ⬜ Not Started |
-| Phase 2: Multiplayer & Session System | ⬜ Not Started |
+| Phase 1: Foundation — Core Voxel Engine & Single Player Survival | ⬜ Not Started |
+| Phase 2: Multiplayer & Relay Server | ⬜ Not Started |
 | Phase 3: Polish & Content Expansion | ⬜ Not Started |
 | Phase 4: Deployment & Final Polish | ⬜ Not Started |
 
 ---
 
-## Questions for Clarification ✨
+## Quest Chain Design (25 Quests) 🗺️
 
-Before implementation begins, I'd love your input on these~ (◕‿▽‿◕) ★
+### Act I: Awakening (Quests 1–6)
+| # | Quest Name | Objective | Requirement |
+|---|-----------|-----------|-------------|
+| 1 | First Steps | Explore your surroundings | Walk 100 blocks from spawn |
+| 2 | Gather Wood | Collect wood for building | Mine 10 wood logs |
+| 3 | Stone Age | Mine stone for tools | Mine 20 stone blocks |
+| 4 | A Safe Place | Build and place a bed | Craft and place 1 bed |
+| 5 | The Forest Path | Find the forest biome | Reach any forest biome |
+| 6 | Apple Harvest | Gather food supplies | Collect 5 apples from trees |
 
-### Multiplayer Architecture
-1. **Session discovery** — Do you want the matchmaking to work through a central relay server (like a lobby), or should it be peer-to-peer with host broadcasting? The plan assumes a relay server for session listing, but P2P is also possible with WebRTC.
+### Act II: The First Dungeon — Ember Depths (Quests 7–12)
+| # | Quest Name | Objective | Requirement |
+|---|-----------|-----------|-------------|
+| 7 | Into the Lava Wastes | Explore the lava biome | Enter lava biome without dying |
+| 8 | Obsidian Shield | Gather lava materials | Mine 15 obsidian blocks |
+| 9 | The Ember Key | Find the dungeon key | Locate and collect Ember Key (quest item in cave) |
+| 10 | Descend | Enter the first dungeon | Reach the dungeon entrance with key |
+| 11 | Lava Lurker | Defeat Boss 1 | Kill the Lava Lurker boss |
+| 12 | Ashes and Embers | Collect boss loot | Take Ember Core from boss (quest item) |
 
-2. **Server hosting** — Since the multiplayer server is Node.js-based, should the host player run the server locally (their browser can't directly host WebSocket servers), or should we deploy a persistent matchmaking server? I recommend deploying a small relay server on one of your LXC containers for session discovery, while the game world itself runs authoritative on the host's connection.
+### Act III: The Second Dungeon — Corrupt Hollows (Quests 13–17)
+| # | Quest Name | Objective | Requirement |
+|---|-----------|-----------|-------------|
+| 13 | Purple Fog | Explore the corrupt biome | Enter corrupt biome, survive poison |
+| 14 | Crystal Hunter | Gather corrupt crystals | Collect 10 corrupt crystals |
+| 15 | The Void Key | Find the second key | Locate and collect Void Key (in deep cave) |
+| 16 | The Hollow Descent | Enter the corrupt dungeon | Reach dungeon entrance with key |
+| 17 | Poison Maw | Defeat Boss 2 | Kill the Poison Maw boss, take Void Shard |
 
-### World Generation
-3. **Biome list** — The plan includes: Plains, Forest, Desert, Tundra, Mountains, Ocean. Do you want more or fewer biomes? Any specific ones you're dreaming of~? ♪
+### Act IV: The Third Dungeon — Frozen Peak (Quests 18–21)
+| # | Quest Name | Objective | Requirement |
+|---|-----------|-----------|-------------|
+| 18 | Mountain Climb | Reach the mountain biome peaks | Reach highest point in mountains |
+| 19 | Ice Walker | Traverse the tundra safely | Cross tundra biome without falling |
+| 20 | The Frost Key | Find the third key | Locate and collect Frost Key (mountain cave) |
+| 21 | Blizzard King | Defeat Boss 3 | Kill Blizzard King, take Frost Heart |
 
-4. **World size** — Should worlds be bounded (e.g., 256×256) or infinite? The plan uses chunk-based loading which supports both, but infinite is more complex.
+### Act V: Final Dungeon — The Core (Quests 22–25)
+| # | Quest Name | Objective | Requirement |
+|---|-----------|-----------|-------------|
+| 22 | Gathering Storm | Collect all boss items | Have Ember Core + Void Shard + Frost Heart |
+| 23 | The Final Key | Craft the Core Key | Combine 3 boss items at quest marker |
+| 24 | Into the Core | Enter the final dungeon | Reach core entrance with Core Key |
+| 25 | The World Eater | Defeat the Final Boss | Kill The World Eater — **GAME COMPLETE** 🎉 |
 
-5. **Caves & ores** — Should underground caves and ore veins be part of the initial build? Currently in Phase 3 as stretch goals.
+**Boss Summary:**
+1. **Lava Lurker** (Act II) — Fire attacks, lava pool AOE, drops Ember Core
+2. **Poison Maw** (Act III) — Poison DoT area, tentacle attacks, drops Void Shard
+3. **Blizzard King** (Act IV) — Ice projectiles, freeze stun, drops Frost Heart
+4. **The World Eater** (Act V) — Multi-phase: fire → poison → ice → all elements
 
-### Gameplay
-6. **Creative vs Survival mode** — Should both be available from day one, or start with Creative only (unlimited blocks, flying)?
-
-7. **Block types** — The plan includes ~13 block textures. Do you want more variety? Things like glass, wool colors, redstone-style logic blocks?
-
-8. **Character customization** — Should players have customizable skins/names when joining sessions? Or just default voxel characters with name tags?
-
-### Mobile Controls
-9. **Touch control layout** — Virtual joystick (left) + swipe-to-look (right) is the plan. Any preferences for the hotbar placement or inventory access method on mobile~?
-
-10. **Sound preference** — Procedural Web Audio API sounds are planned. Do you have a preference for ambient music style? (calm/chill, adventurous, minimal/no music?)
+**Quest item placement during world generation:**
+- Ember Key: placed in lava biome cave system at deterministic noise-derived position
+- Void Key: placed deep in corrupt biome underground
+- Frost Key: placed in high mountain cave
+- Boss spawn points: fixed relative to quest markers, generated during world creation
