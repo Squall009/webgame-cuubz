@@ -39,11 +39,71 @@ const STAMINA_REGEN = {
   delay: 0.5,             // Seconds after last action before regen starts
 };
 
-// Restoration amounts
+// Restoration amounts (legacy — kept for backward compat)
 const RESTORATION = {
   apple:   { hunger: 25 },
   water:   { thirst: 30 },
   bed_use: { sleep: 60, health: 20 },  // Bed restores sleep + some health
+};
+
+// ─── Food Item Registry ──────────────────────────────────────────────────────
+// Each food item defines what it restores when consumed.
+// hunger   — restores hunger meter (0-100)
+// thirst   — restores thirst meter (0-100)  (optional)
+// health   — restores health meter (0-100)  (optional, for premium foods)
+// saturation — how "filling" the food is; affects how fast hunger depletes after eating
+//             higher saturation = slower depletion. Applied as a temporary multiplier
+//             on the hunger depletion rate (lower = better). Range: 0.1 (very filling) to 2.0 (barely filling).
+// eatTime  — seconds required to finish eating (animation delay, prevents instant spam)
+// blockDrop — the BLOCK_TYPES enum value this food comes from when mined/broken
+
+const FOOD_ITEMS = {
+  apple: {
+    hunger: 25,
+    thirst: 0,
+    health: 0,
+    saturation: 0.8,   // Moderately filling
+    eatTime: 0.5,       // Fast to eat — it's a small fruit
+    blockDrop: 24,      // BLOCK_TYPES.APPLE
+  },
+  cooked_meat: {
+    hunger: 40,
+    thirst: -5,         // Meat doesn't quench thirst (slightly dehydrating)
+    health: 5,
+    saturation: 0.5,    // Very filling
+    eatTime: 1.0,
+    blockDrop: null,    // Crafted item, not a world block drop
+  },
+  berry: {
+    hunger: 10,
+    thirst: 5,
+    health: 0,
+    saturation: 1.2,    // Light snack — barely filling
+    eatTime: 0.3,       // Very fast to eat
+    blockDrop: null,    // Would be a separate item ID in full implementation
+  },
+  bread: {
+    hunger: 30,
+    thirst: 0,
+    health: 0,
+    saturation: 0.7,    // Fairly filling
+    eatTime: 0.8,
+    blockDrop: null,    // Crafted item
+  },
+  golden_apple: {
+    hunger: 35,
+    thirst: 10,
+    health: 20,         // Premium food restores health too
+    saturation: 0.4,    // Extremely filling
+    eatTime: 1.0,
+    blockDrop: null,    // Rare crafted item
+  },
+};
+
+// Eating cooldown constants
+const EATING = {
+  defaultCooldown: 0.5,   // Seconds between bites (minimum)
+  saturationDuration: 30, // How long saturation bonus lasts after eating (seconds)
 };
 
 class SurvivalSystem {
@@ -84,6 +144,14 @@ class SurvivalSystem {
 
     // Tundra biome modifier (slower stamina regen on slippery ground)
     this.staminaRegenMultiplier = 1.0;
+
+    // ─── Food System State ──────────────────────────────────────────────────
+    this.isEating = false;           // Currently in the middle of eating animation
+    this.eatingProgress = 0;         // Progress through current eatTime (0 to food.eatTime)
+    this.currentFoodItem = null;     // Which food is being eaten right now
+    this.lastEatTime = 0;            // Timestamp when last eating action finished (cooldown)
+    this.saturationTimer = 0;        // Remaining time with active saturation bonus
+    this.activeSaturation = 1.0;     // Current hunger depletion multiplier from saturation (1.0 = no bonus)
   }
 
   /**
@@ -93,14 +161,38 @@ class SurvivalSystem {
   update(deltaTime, context = {}) {
     if (this.isDead) return;
 
-    const { isSprinting, isJumping, isMoving, biome } = context;
+    const { isSprinting, isJumping, isMoving, biome, currentTime } = context;
+    const now = currentTime || Date.now() / 1000;
 
-    // --- Deplete meters over time ---
+    // ─── Food System: Update eating progress ──────────────────────────────
+    if (this.isEating && this.currentFoodItem) {
+      this.eatingProgress += deltaTime;
+
+      if (this.eatingProgress >= this.currentFoodItem.eatTime) {
+        // Eating complete — apply restoration
+        this._finishEating(this.currentFoodItem);
+        this.isEating = false;
+        this.eatingProgress = 0;
+        this.lastEatTime = now;
+        this.currentFoodItem = null;
+      }
+    }
+
+    // ─── Food System: Update saturation timer ─────────────────────────────
+    if (this.saturationTimer > 0) {
+      this.saturationTimer -= deltaTime;
+      if (this.saturationTimer <= 0) {
+        this.saturationTimer = 0;
+        this.activeSaturation = 1.0; // Reset to normal depletion rate
+      }
+    }
+
+    // ─── Deplete meters over time ─────────────────────────────────────────
     this._depleteMeter('hunger', deltaTime);
     this._depleteMeter('thirst', deltaTime);
     this._depleteMeter('sleep', deltaTime);
 
-    // --- Stamina: consume on actions ---
+    // ─── Stamina: consume on actions ──────────────────────────────────────
     if (isSprinting && isMoving) {
       this._consumeStamina(STAMINA_COSTS.SPRINT * deltaTime);
       this._markStaminaAction();
@@ -109,14 +201,14 @@ class SurvivalSystem {
       this._markStaminaAction();
     }
 
-    // --- Stamina: regenerate when resting ---
-    const timeSinceAction = context.currentTime ? (context.currentTime - this.lastStaminaActionTime) : Infinity;
+    // ─── Stamina: regenerate when resting ─────────────────────────────────
+    const timeSinceAction = currentTime ? (currentTime - this.lastStaminaActionTime) : Infinity;
     if (!isSprinting && !isJumping && timeSinceAction > STAMINA_REGEN.delay) {
       const regenRate = STAMINA_REGEN.rate * this.staminaRegenMultiplier;
       this.meters.stamina = Math.min(this.config.stamina.max, this.meters.stamina + regenRate * deltaTime);
     }
 
-    // --- Starvation/Dehydration damage ---
+    // ─── Starvation/Dehydration damage ────────────────────────────────────
     if (this.meters.hunger <= 0) {
       this.meters.hunger = 0;
       this.takeDamage(2.0 * deltaTime, DAMAGE_SOURCES.HUNGER);
@@ -126,14 +218,14 @@ class SurvivalSystem {
       this.takeDamage(3.0 * deltaTime, DAMAGE_SOURCES.THIRST);
     }
 
-    // --- Low sleep penalty: slower stamina regen ---
+    // ─── Low sleep penalty: slower stamina regen ──────────────────────────
     if (this.meters.sleep < 20) {
       this.staminaRegenMultiplier = Math.max(0.2, this.meters.sleep / 100);
     } else {
       this.staminaRegenMultiplier = 1.0;
     }
 
-    // --- Low hunger penalty: slower health regen (if any) ---
+    // ─── Low hunger penalty: slower health regen (if any) ─────────────────
     if (this.meters.hunger < 30) {
       // At very low hunger, health doesn't regenerate naturally
     }
@@ -149,6 +241,10 @@ class SurvivalSystem {
     let effectiveRate = rate;
     if (meterName === 'thirst') {
       effectiveRate *= this.thirstMultiplier;
+    }
+    if (meterName === 'hunger' && this.saturationTimer > 0) {
+      // Saturation bonus: multiply depletion rate by activeSaturation (lower = slower depletion)
+      effectiveRate *= this.activeSaturation;
     }
 
     this.meters[meterName] -= effectiveRate * deltaTime;
@@ -240,17 +336,201 @@ class SurvivalSystem {
 
   /**
    * Eat an apple — restores hunger.
-   * Returns true if food was consumed (not dead).
+   * @deprecated Use startEating('apple') or eatFood('apple') instead.
+   * Kept for backward compatibility.
    */
   eatApple() {
+    return this.eatFood('apple');
+  }
+
+  /**
+   * Start eating a food item (animated — takes eatTime seconds).
+   * Returns true if eating started successfully.
+   * Returns false if: player is dead, already eating, on cooldown, or invalid food type.
+   *
+   * @param {string} foodType — Key from FOOD_ITEMS registry (e.g., 'apple', 'bread')
+   * @returns {boolean} Whether eating was initiated
+   */
+  startEating(foodType) {
     if (this.isDead) return false;
-    this.meters.hunger = Math.min(this.config.hunger.max, this.meters.hunger + RESTORATION.apple.hunger);
+    if (this.isEating) return false; // Already in the middle of eating
+
+    const food = FOOD_ITEMS[foodType];
+    if (!food) return false; // Unknown food type
+
+    // Check cooldown
+    const now = Date.now() / 1000;
+    if (now - this.lastEatTime < EATING.defaultCooldown) {
+      return false; // Still on cooldown
+    }
+
+    this.isEating = true;
+    this.eatingProgress = 0;
+    this.currentFoodItem = food;
     return true;
   }
 
   /**
+   * Cancel the current eating action (e.g., player moved away, interrupted).
+   * No restoration is applied.
+   */
+  cancelEating() {
+    if (!this.isEating) return;
+    this.isEating = false;
+    this.eatingProgress = 0;
+    this.currentFoodItem = null;
+  }
+
+  /**
+   * Eat a food item instantly (no animation delay).
+   * Used for testing or non-animated contexts.
+   * Returns true if food was consumed successfully.
+   *
+   * @param {string} foodType — Key from FOOD_ITEMS registry
+   * @returns {boolean} Whether food was consumed
+   */
+  eatFood(foodType) {
+    if (this.isDead) return false;
+
+    const food = FOOD_ITEMS[foodType];
+    if (!food) return false; // Unknown food type
+
+    this._applyFoodRestoration(food);
+    return true;
+  }
+
+  /**
+   * Apply the restoration effects of a completed eat action.
+   * Called internally when eating animation finishes.
+   *
+   * @private
+   * @param {object} food — Food item definition from FOOD_ITEMS
+   */
+  _finishEating(food) {
+    this._applyFoodRestoration(food);
+
+    // Start saturation bonus timer
+    this.saturationTimer = EATING.saturationDuration;
+    this.activeSaturation = food.saturation;
+  }
+
+  /**
+   * Apply the raw restoration values from a food item to meters.
+   * Clamps all values to their max. Negative values are applied (e.g., meat dehydrates).
+   *
+   * @private
+   * @param {object} food — Food item definition from FOOD_ITEMS
+   */
+  _applyFoodRestoration(food) {
+    if (food.hunger !== undefined && food.hunger !== 0) {
+      this.meters.hunger = Math.min(this.config.hunger.max,
+        Math.max(0, this.meters.hunger + food.hunger));
+    }
+    if (food.thirst !== undefined && food.thirst !== 0) {
+      this.meters.thirst = Math.min(this.config.thirst.max,
+        Math.max(0, this.meters.thirst + food.thirst));
+    }
+    if (food.health !== undefined && food.health !== 0) {
+      this.meters.health = Math.min(this.config.health.max,
+        Math.max(0, this.meters.health + food.health));
+    }
+
+    // Notify callbacks about food consumption
+    if (this.onFoodEaten) {
+      this.onFoodEaten({ foodType: this._findFoodKeyName(food), food });
+    }
+  }
+
+  /**
+   * Find the key name for a food item in FOOD_ITEMS registry.
+   * Used for callbacks to report which food was eaten.
+   *
+   * @private
+   * @param {object} food — Food item definition
+   * @returns {string} Key name or 'unknown'
+   */
+  _findFoodKeyName(food) {
+    for (const [key, item] of Object.entries(FOOD_ITEMS)) {
+      if (item === food) return key;
+    }
+    return 'unknown';
+  }
+
+  /**
+   * Check if a food type is valid (exists in FOOD_ITEMS registry).
+   *
+   * @param {string} foodType — Key to check
+   * @returns {boolean}
+   */
+  isValidFood(foodType) {
+    return !!FOOD_ITEMS[foodType];
+  }
+
+  /**
+   * Get the food item definition by type.
+   *
+   * @param {string} foodType — Key from FOOD_ITEMS
+   * @returns {object|null} Food definition or null if not found
+   */
+  getFoodItem(foodType) {
+    return FOOD_ITEMS[foodType] || null;
+  }
+
+  /**
+   * Get all registered food item keys.
+   *
+   * @returns {string[]} Array of food type names
+   */
+  getAvailableFoods() {
+    return Object.keys(FOOD_ITEMS);
+  }
+
+  /**
+   * Check if player can eat (not dead, not already eating, off cooldown).
+   *
+   * @returns {boolean}
+   */
+  canEat() {
+    if (this.isDead) return false;
+    if (this.isEating) return false;
+    const now = Date.now() / 1000;
+    return (now - this.lastEatTime) >= EATING.defaultCooldown;
+  }
+
+  /**
+   * Get eating state for HUD/animation systems.
+   *
+   * @returns {object} Eating state: isEating, progress (0-1), foodType
+   */
+  getEatingState() {
+    if (!this.isEating || !this.currentFoodItem) {
+      return { isEating: false, progress: 0, foodType: null };
+    }
+    const progress = this.eatingProgress / this.currentFoodItem.eatTime;
+    return {
+      isEating: true,
+      progress: Math.min(1, progress),
+      foodType: this._findFoodKeyName(this.currentFoodItem),
+    };
+  }
+
+  /**
+   * Get saturation state for HUD display.
+   *
+   * @returns {object} Saturation state: active, timeRemaining, multiplier
+   */
+  getSaturationState() {
+    return {
+      active: this.saturationTimer > 0,
+      timeRemaining: Math.max(0, this.saturationTimer),
+      multiplier: this.activeSaturation,
+    };
+  }
+
+  /**
    * Drink water — restores thirst.
-   * Returns true if water was consumed (not dead).
+   * @deprecated Use a dedicated drink/drinkWater method with cooldown if needed.
+   * Kept for backward compatibility.
    */
   drinkWater() {
     if (this.isDead) return false;
@@ -372,6 +652,13 @@ class SurvivalSystem {
       isDead: this.isDead,
       spawnPoint: { ...this.spawnPoint },
       lastDamageSource: this.lastDamageSource,
+      // Food system state
+      isEating: this.isEating,
+      eatingProgress: this.eatingProgress,
+      currentFoodItemKey: this.currentFoodItem ? this._findFoodKeyName(this.currentFoodItem) : null,
+      lastEatTime: this.lastEatTime,
+      saturationTimer: this.saturationTimer,
+      activeSaturation: this.activeSaturation,
     };
   }
 
@@ -390,6 +677,18 @@ class SurvivalSystem {
     if (data.isDead !== undefined) this.isDead = data.isDead;
     if (data.spawnPoint) this.spawnPoint = { ...data.spawnPoint };
     if (data.lastDamageSource) this.lastDamageSource = data.lastDamageSource;
+
+    // Food system state
+    if (data.isEating !== undefined) this.isEating = data.isEating;
+    if (data.eatingProgress !== undefined) this.eatingProgress = data.eatingProgress;
+    if (data.currentFoodItemKey) {
+      this.currentFoodItem = FOOD_ITEMS[data.currentFoodItemKey] || null;
+    } else {
+      this.currentFoodItem = null;
+    }
+    if (data.lastEatTime !== undefined) this.lastEatTime = data.lastEatTime;
+    if (data.saturationTimer !== undefined) this.saturationTimer = data.saturationTimer;
+    if (data.activeSaturation !== undefined) this.activeSaturation = data.activeSaturation;
   }
 
   /**
@@ -429,4 +728,4 @@ class SurvivalSystem {
   }
 }
 
-module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION };
+module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING };

@@ -324,10 +324,20 @@ webgame-cuubz/
   - [x] Fall damage based on height
   - [x] Boss attack damage patterns
   - [x] Damage flash effect on screen edges
-- [ ] **Implement food system** — `js/systems/survival.js`
-  - [ ] Apple blocks on trees in healthy biomes
-  - [ ] Eating restores hunger meter
-  - [ ] Right-click with apple to consume
+- [x] **Implement food system** — `js/systems/survival.js`
+  - [x] Apple blocks on trees in healthy biomes (already placed via featurePlacer)
+  - [x] Eating restores hunger meter
+  - [x] Right-click with apple to consume (eatFood/startEating API ready for interaction integration)
+  - [x] FOOD_ITEMS registry: apple, cooked_meat, berry, bread, golden_apple
+  - [x] Each food type has: hunger/thirst/health restoration, saturation, eatTime, blockDrop
+  - [x] Animated eating via startEating() + update loop (eatTime-based progress)
+  - [x] Instant eating via eatFood() for testing/non-animated contexts
+  - [x] Eating cooldown prevents spam (0.5s defaultCooldown)
+  - [x] Saturation system: food fillingness reduces hunger depletion rate for 30s after eating
+  - [x] Negative restoration clamped to 0 (e.g., cooked_meat dehydrates by -5 thirst)
+  - [x] onFoodEaten callback for HUD/game integration
+  - [x] Eating state tracking: isEating, eatingProgress, currentFoodItem, getEatingState()
+  - [x] Food state serialization/deserialization in survival save system
 - [ ] **Implement water drinking** — `js/systems/survival.js`
   - [ ] Stand in/near water source (ponds, oceans, rivers)
   - [ ] Press interact key to drink → restores thirst
