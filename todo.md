@@ -14,7 +14,7 @@
 - **Three.js for 3D voxel rendering** — Face-culled merged geometry per chunk for performance. Local Three.js CDN build, no npm tooling on client side.
 - **Procedural texture generation** — All textures via Canvas API at 32×32 resolution, saved as PNG assets. No external image files shipped.
 - **Central relay server** — Node.js + ws running on dedicated LXC container. Handles matchmaking lobby AND game session relaying on different ports. systemd service file created in project (user sets up manually).
-- **Infinite chunked world** — Dynamic grid of 16×16×Y chunks loaded/unloaded based on ALL player positions. Chunks saved to disk individually. Seamless edge matching for caves/surface across chunk boundaries.
+- **Infinite chunked world** — Dynamic grid of 16×16×96 chunks (Z: -32 to +64, layer 0 = sea level). Below 0 = ground/caves, above 0 = surface/mountains. Chunks saved to disk individually. Seamless edge matching for caves/surface across chunk boundaries.
 - **Server-authoritative gameplay** — Host validates all block changes, inventory updates, and quest progress. Relay server streams validated state to all connected clients.
 - **IndexedDB persistence** — Characters and Worlds separated. 3 characters + 3 worlds per device. Chunk-level world saves for partial updates. Spawn points per player per world.
 - **Story system lives with the world** — Quest progress, boss states, and quest markers are part of world state (not character). All players contribute to shared story progression in multiplayer.
@@ -136,6 +136,8 @@ webgame-cuubz/
 │   ├── corrupt_stone.png, toxic_slime.png, coal_ore.png, iron_ore.png
 │   ├── gold_ore.png, diamond_ore.png, corrupt_cry.png, apple.png
 │   ├── quest_key.png, bed.png
+├── scripts/
+│   └── generate_textures.py    # Python build script → generates all 32x32 PNG textures
 ├── server/                       # Node.js relay server
 │   ├── package.json              # ws dependency
 │   ├── index.js                  # Server entry: matchmaking + game session relaying
@@ -160,7 +162,7 @@ webgame-cuubz/
   - [ ] Ridge noise for mountain ridges and cave systems
   - [ ] 3D noise for cave tube generation
 - [ ] **Implement chunk data structures** — `js/world/chunkData.js`
-  - [ ] Chunk class: 16×16×Y block array (configurable height)
+  - [ ] Chunk class: 16×16×96 block array (Z: -32 to +64, layer 0 = sea level)
   - [ ] Block type lookup with properties (solid, transparent, hardness, damage, item drop)
   - [ ] Serialization/deserialization to/from compressed JSON
   - [ ] Edge boundary data for seamless neighbor chunk joining
@@ -174,10 +176,11 @@ webgame-cuubz/
   - [ ] All 8 biomes defined with height modifiers and block palettes
   - [ ] Biome blending at borders (smooth transitions)
 - [ ] **Implement terrain generation** — `js/world/worldGenerator.js`
-  - [ ] Heightmap from noise: mountains, valleys, plains, ocean floors
+  - [ ] Heightmap from noise: mountains, valleys, plains, ocean floors (Z: -32 to +64)
+  - [ ] Layer 0 = sea level. Below 0 = ground/caves, above 0 = surface/mountains
   - [ ] Surface block placement based on biome + height
   - [ ] Edge matching: shared boundary data between adjacent chunks
-  - [ ] Water level generation and filling
+  - [ ] Water level generation and filling at layer 0
 - [ ] **Implement cave generation** — `js/world/caveGenerator.js`
   - [ ] 3D tube caves using marching cubes or noise thresholding
   - [ ] Seamless across chunk boundaries (seed-based deterministic)
@@ -222,7 +225,11 @@ webgame-cuubz/
   - [ ] Raycasting from camera center for block/face detection
 
 ### Procedural Textures (ALL 32×32)
-- [ ] **Generate all textures** — `js/textures/textureGenerator.js` + save to `textures/`
+- [ ] **Create texture generator script** — `scripts/generate_textures.py`
+  - [ ] Python script using PIL/Pillow with Perlin noise functions
+  - [ ] Each texture function: name, base colors, pattern type → outputs 32×32 PNG
+  - [ ] Run once to generate all textures → committed to git as static assets
+- [ ] **Generate all textures** — Run `python scripts/generate_textures.py` → saves to `textures/`
   - [ ] grass_top.png: green noise with lighter patches
   - [ ] grass_side.png: dirt base with green top stripe
   - [ ] dirt.png: brown noise with darker speckles
