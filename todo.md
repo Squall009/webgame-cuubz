@@ -4,7 +4,30 @@
 
 > **Tech Stack:** Three.js (local CDN), Vanilla JS, Node.js + ws relay server (matchmaking + game sync), IndexedDB for persistence, Canvas API for texture generation, Web Audio API for procedural calm ambient soundscapes.
 
-> **Current State:** 🟡 Approved — Workspace created, plan pending final review. No code written yet.
+> **Current State:** 🟡 Approved — Workspace created, autonomous builder scheduled. No code written yet.
+
+---
+
+## Autonomous Builder Workflow ⚙️
+
+This project is built by an **autonomous AI cron job** running every 30 minutes. The builder follows these rules:
+
+1. **todo.md is the source of truth** — Tasks are worked in order, top to bottom within each phase
+2. **Testing mandatory** — Every task must include tests before being marked complete (`- [x]`)
+3. **Bug tracking** — All bugs logged in `bugs.md`. Must be FIXED + VERIFIED before continuing
+4. **Phase boundaries** — Cannot start Phase N+1 until ALL Phase N tasks are `- [x]` with zero open bugs
+5. **Clean handoffs** — Each 30-minute cycle completes tasks, runs tests, fixes bugs, commits code
+
+### Test Suite
+- All tests live in `test/` directory
+- Run via: `bash test/run_tests.sh`
+- Each test file exits 0 (pass) or 1 (fail) with descriptive output
+- Master runner reports pass/fail count for all tests
+
+### Bug Tracker
+- Live at `bugs.md` — updated every cycle
+- Format: Bug #N with status, description, reproduction steps, fix, verification
+- Zero open bugs required before phase advancement
 
 ---
 
