@@ -318,12 +318,12 @@ webgame-cuubz/
   - [x] Stamina meter (depletes on sprint/jump, regenerates at rest)
   - [x] HUD rendering: all 5 meters visible on screen
   - [x] Death handling: respawn at spawn point
-- [ ] **Implement damage system** — `js/systems/damageSystem.js`
-  - [ ] Lava contact damage (rapid per-tick)
-  - [ ] Poison DoT from toxic slime pools (slower, lingering)
-  - [ ] Fall damage based on height
-  - [ ] Boss attack damage patterns
-  - [ ] Damage flash effect on screen edges
+- [x] **Implement damage system** — `js/systems/damageSystem.js`
+  - [x] Lava contact damage (rapid per-tick)
+  - [x] Poison DoT from toxic slime pools (slower, lingering)
+  - [x] Fall damage based on height
+  - [x] Boss attack damage patterns
+  - [x] Damage flash effect on screen edges
 - [ ] **Implement food system** — `js/systems/survival.js`
   - [ ] Apple blocks on trees in healthy biomes
   - [ ] Eating restores hunger meter

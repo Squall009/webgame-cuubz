@@ -64,7 +64,34 @@
 |--------|-------|
 | 🔴 OPEN | 0 |
 | 🟡 FIXING | 0 |
-| 🟢 FIXED | 5 |
-| **Total** | **5** |
+| 🟢 FIXED | 8 |
+| **Total** | **8** |
 
 > ✅ No open bugs — safe to proceed with next task.
+
+### Bug #6: ENVIRONMENTAL_DAMAGE_RATES keys mismatched DAMAGE_SOURCES values
+- **Found:** May 23, 2026 during task "Implement damage system"
+- **Status:** 🟢 FIXED
+- **Description:** `ENVIRONMENTAL_DAMAGE_RATES` used uppercase string keys (`'LAVA'`, `'POISON'`) but `DAMAGE_SOURCES.LAVA` resolves to lowercase `'lava'`. This caused `getEnvironmentalDamageRate(DAMAGE_SOURCES.LAVA)` to return `undefined` instead of `20.0`, breaking all environmental damage calculations.
+- **Reproduction Steps:** Call `getEnvironmentalDamageRate(DAMAGE_SOURCES.LAVA)` — returns 0 (falsy) instead of 20.0.
+- **Root Cause:** Object literal used bare word keys (`LAVA: 20.0`) which become string `'LAVA'`, not referencing the constant value `'lava'`.
+- **Fix Applied:** Changed to computed property keys: `{ [DAMAGE_SOURCES.LAVA]: 20.0, [DAMAGE_SOURCES.POISON]: 5.0 }`.
+- **Verified:** May 23, 2026 — test_damageSystem.js passes (185/185 tests).
+
+### Bug #7: Boss attack definitions missing `range` property
+- **Found:** May 23, 2026 during task "Implement damage system"
+- **Status:** 🟢 FIXED
+- **Description:** Crystal Shield (CORRUPT_GUARDIAN) and Summon Minions (CORRUPTION_OVERLORD) attack definitions were missing the required `range` property. The test suite validates all attacks have a `range` field, causing 2 assertion failures.
+- **Reproduction Steps:** Run boss definition validation — `attack.range` is `undefined` for shield/summon attacks.
+- **Root Cause:** These non-offensive attack types were defined with different properties (`duration`, `count`) but omitted `range`. Boss AI uses range to check if player is in range before attacking.
+- **Fix Applied:** Added `range: 0` to Crystal Shield and Summon Minions (0-range means they trigger regardless of distance).
+- **Verified:** May 23, 2026 — test_damageSystem.js passes with boss definition validation.
+
+### Bug #8: DamageSystem._updateBosses called non-existent class method
+- **Found:** May 23, 2026 during task "Implement damage system"
+- **Status:** 🟢 FIXED
+- **Description:** `_updateBosses()` method called `this.calculateBossAttackDamage(attack.def, boss.phase)` but `calculateBossAttackDamage` was only defined as a module-level function, not a class method. This threw `TypeError: this.calculateBossAttackDamage is not a function`.
+- **Reproduction Steps:** Call `ds.update(deltaTime, context)` with active bosses — throws TypeError on first boss attack evaluation.
+- **Root Cause:** Module-level `calculateBossAttackDamage()` function exists but was never exposed as an instance method on the `DamageSystem` class. The `_updateBosses` private method assumed it was available via `this`.
+- **Fix Applied:** Added `calculateBossAttackDamage(attack, phase)` instance method that delegates to the module-level function.
+- **Verified:** May 23, 2026 — test_damageSystem.js boss integration tests pass without TypeError.
