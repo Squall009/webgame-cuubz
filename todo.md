@@ -368,12 +368,19 @@ webgame-cuubz/
   - [x] Character save structure: name, color, inventory, spawn points per world
   - [x] World save structure: seed, biome map, quest progress, chunk references
   - [x] Chunk save structure: compressed block data per chunk file
-- [ ] **Implement character management** — `js/main.js`
-  - [ ] Character screen: list up to 3 characters
-  - [ ] Create character: name input + color picker
-  - [ ] Edit character: rename, change color
-  - [ ] Delete character with confirmation
-  - [ ] Save/load character data from IndexedDB
+- [x] **Implement character management** — `js/main.js` + `js/entities/characterManager.js`
+  - [x] Character screen: list up to 3 characters with avatar, name, slot count
+  - [x] Create character: name input (1-16 chars) + color picker (#RRGGBB hex)
+  - [x] Edit character: rename, change color via modal
+  - [x] Delete character with confirmation modal
+  - [x] Save/load character data from IndexedDB (via PersistenceManager)
+  - [x] Character selection system with lastPlayed tracking
+  - [x] Inventory/spawn point helpers per character
+  - [x] Duplicate name prevention (case-insensitive)
+  - [x] Name validation: alphanumeric, spaces, hyphens, underscores only
+  - [x] Color normalization to uppercase hex
+  - [x] Serialization/deserialization for persistence round-trips
+  - [x] 112 tests passing — constants, validation, CRUD, selection, inventory, spawn, serialization, edge cases
 - [ ] **Implement world management** — `js/main.js`
   - [ ] World screen: list up to 3 worlds
   - [ ] Create world: generate new random seed + place quest markers/dungeons
@@ -715,7 +722,7 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 
 | Phase | Status |
 |-------|--------|
-| Phase 1: Foundation — Core Voxel Engine & Single Player Survival | ⬜ Not Started |
+| Phase 1: Foundation — Core Voxel Engine & Single Player Survival | 🟡 In Progress (character management done, world management next) |
 | Phase 2: Multiplayer & Relay Server | ⬜ Not Started |
 | Phase 3: Polish & Content Expansion | ⬜ Not Started |
 | Phase 4: Deployment & Final Polish | ⬜ Not Started |

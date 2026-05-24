@@ -86,6 +86,7 @@
   <!-- Character Selection Screen -->
   <div id="character-screen" class="screen hidden">
     <h2>Select Character</h2>
+    <p id="char-slot-info" class="slot-info"></p>
     <div id="character-slots"></div>
     <div class="menu-buttons">
       <button id="btn-create-char" class="menu-btn primary">Create Character</button>
@@ -93,17 +94,31 @@
     </div>
   </div>
 
-  <!-- Character Create Modal -->
+  <!-- Character Create/Edit Modal -->
   <div id="create-char-modal" class="modal hidden">
     <div class="modal-content">
-      <h3>Create New Character</h3>
+      <h3 id="char-modal-title">Create New Character</h3>
       <label for="char-name">Name:</label>
       <input type="text" id="char-name" maxlength="16" placeholder="Enter name...">
       <label for="char-color">Color:</label>
       <input type="color" id="char-color" value="#4CAF50">
+      <div id="char-error" class="modal-error hidden"></div>
       <div class="modal-buttons">
         <button id="btn-save-char" class="menu-btn primary">Create</button>
         <button id="btn-cancel-char" class="menu-btn secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Character Delete Confirmation Modal -->
+  <div id="delete-char-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Delete Character?</h3>
+      <p id="delete-char-name" style="margin-bottom:12px;color:#e74c3c;font-weight:bold;"></p>
+      <p style="font-size:13px;color:#aaa;margin-bottom:16px;">This action cannot be undone. All progress for this character will be lost.</p>
+      <div class="modal-buttons">
+        <button id="btn-confirm-delete-char" class="menu-btn" style="background:rgba(231,76,60,0.3);border-color:#e74c3c;">Delete</button>
+        <button id="btn-cancel-delete-char" class="menu-btn secondary">Cancel</button>
       </div>
     </div>
   </div>

@@ -613,3 +613,106 @@ html, body {
   margin-bottom: 20px;
   color: #e0e0e0;
 }
+
+/* --- Slot Info Text --- */
+.slot-info {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 16px;
+}
+
+/* --- Modal Error Message --- */
+.modal-error {
+  font-size: 12px;
+  color: #e74c3c;
+  background: rgba(231, 76, 60, 0.1);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.modal-error.hidden {
+  display: none !important;
+}
+
+/* --- Character Slot Actions (edit/delete buttons) --- */
+.char-slot-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.char-slot:hover .char-slot-actions {
+  opacity: 1;
+}
+
+.char-slot-action-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s ease;
+}
+
+.char-slot-action-btn.edit {
+  background: rgba(33, 150, 243, 0.6);
+  color: #fff;
+}
+
+.char-slot-action-btn.edit:hover {
+  background: rgba(33, 150, 243, 0.9);
+}
+
+.char-slot-action-btn.delete {
+  background: rgba(231, 76, 60, 0.6);
+  color: #fff;
+}
+
+.char-slot-action-btn.delete:hover {
+  background: rgba(231, 76, 60, 0.9);
+}
+
+/* --- Character Slot Avatar --- */
+.char-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  margin-bottom: 8px;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+
+.char-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e0e0e0;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.char-slot.empty {
+  border-style: dashed;
+  cursor: default;
+}
+
+.char-slot.empty:hover {
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.03);
+}
+
+.char-slot.selected {
+  border-color: #4CAF50;
+  box-shadow: 0 0 12px rgba(76, 175, 80, 0.3);
+}
