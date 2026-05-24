@@ -432,15 +432,15 @@ webgame-cuubz/
   - [x] Color-coded markers by quest type (green=collect, red=kill, blue=explore, orange=craft, purple=deliver, gold=boss)
   - [x] Serialization/deserialization for persistence
   - [x] 231 tests passing — constants, constructor, colors, distance calc, interaction range, visibility, update loop, glow pulse, interaction, reset, setActive, serialization round-trip, manager CRUD, stage/biome filtering, deactivation, determinism
-- [ ] **Design 25-quest storyline** — Document quest chain with requirements
-  - [ ] Quests 1–6: Introduction & gathering (collect basic materials)
-  - [ ] Quests 7–12: First dungeon exploration (Boss 1)
-  - [ ] Quests 13–17: Second dungeon (Boss 2) + world events
-  - [ ] Quests 18–21: Third dungeon (Boss 3) + preparation
-  - [ ] Quests 22–24: Fourth dungeon (Boss 4)
-  - [ ] Quest 25: Final boss — beat the game
-  - [ ] Each quest has specific item/kill/exploration requirements
-  - [ ] Quest items placed during world generation at deterministic locations
+- [x] **Design 25-quest storyline** — Document quest chain with requirements
+  - [x] Quests 1–6: Introduction & gathering (collect basic materials)
+  - [x] Quests 7–12: First dungeon exploration (Boss 1)
+  - [x] Quests 13–17: Second dungeon (Boss 2) + world events
+  - [x] Quests 18–21: Third dungeon (Boss 3) + preparation
+  - [x] Quests 22–24: Fourth dungeon (Boss 4)
+  - [x] Quest 25: Final boss — beat the game
+  - [x] Each quest has specific item/kill/exploration requirements
+  - [x] Quest items placed during world generation at deterministic locations
 - [ ] **Implement boss system** — `js/entities/boss.js`
   - [ ] Boss entity class with health, AI state machine, attack patterns
   - [ ] Boss spawn triggered by quest progression + key item
