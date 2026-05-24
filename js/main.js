@@ -180,6 +180,7 @@
 
   // Global reference for game engine access
   let characterManager = null;
+  let worldManager = null;
 
   // ============================================================
   // Character UI Rendering
@@ -244,12 +245,15 @@
       </div>
     `;
 
-    // Click to select character
+    // Click to select character → navigate to world screen
     slot.addEventListener('click', (e) => {
       if (e.target.closest('.char-slot-action-btn')) return; // Don't trigger on action buttons
       if (characterManager) {
         characterManager.selectCharacter(char.id);
         renderCharacterSlots();
+        // Navigate to world selection after picking character
+        showScreen('worldScreen');
+        renderWorldSlots();
       }
     });
 
@@ -311,6 +315,9 @@
   function closeCharModal() {
     screens.createCharModal.classList.add('hidden');
     editingCharId = null;
+    // Restore color picker visibility
+    const colorLabel = document.getElementById('char-color').parentElement;
+    if (colorLabel) colorLabel.style.display = '';
   }
 
   function openDeleteModal(char) {
@@ -324,6 +331,21 @@
     delete screens.deleteCharModal.dataset.charId;
   }
 
+  // ============================================================
+  // World Delete Modal Handlers
+  // ============================================================
+
+  function openDeleteWorldModal(world) {
+    document.getElementById('delete-char-name').textContent = `"${world.name}"`;
+    screens.deleteCharModal.dataset.worldId = world.id;
+    screens.deleteCharModal.classList.remove('hidden');
+  }
+
+  function closeDeleteWorldModal() {
+    screens.deleteCharModal.classList.add('hidden');
+    delete screens.deleteCharModal.dataset.worldId;
+  }
+
   function showCharError(message) {
     const errorEl = document.getElementById('char-error');
     errorEl.textContent = message;
@@ -332,6 +354,264 @@
 
   function hideCharError() {
     document.getElementById('char-error').classList.add('hidden');
+  }
+
+  // ============================================================
+  // World Manager (inline — runs in browser context)
+  // ============================================================
+
+  const MAX_WORLDS = 3;
+  const DEFAULT_WORLD_SEED = 42;
+
+  /**
+   * BrowserWorldManager — Wraps PersistenceManager for browser UI.
+   * Handles world CRUD with IndexedDB storage.
+   */
+  class BrowserWorldManager {
+    constructor(persistence) {
+      this.persistence = persistence;
+      this.worlds = [];
+      this.selectedId = null;
+    }
+
+    async init() {
+      this.worlds = await this.persistence.loadWorlds();
+      return this.worlds;
+    }
+
+    static validateName(name) {
+      if (typeof name !== 'string') return { valid: false, error: 'Name must be a string' };
+      const trimmed = name.trim();
+      if (trimmed.length < 1) return { valid: false, error: 'Name must be at least 1 character' };
+      if (trimmed.length > 32) return { valid: false, error: 'Name must be at most 32 characters' };
+      if (!/^[a-zA-Z0-9 _\-]+$/.test(trimmed)) return { valid: false, error: 'Name can only contain letters, numbers, spaces, hyphens, and underscores' };
+      return { valid: true };
+    }
+
+    static generateId() {
+      const ts = Date.now().toString(36);
+      const rnd = Math.random().toString(36).substring(2, 8);
+      return `world_${ts}_${rnd}`;
+    }
+
+    static generateSeed() {
+      return Math.floor(Math.random() * 0xFFFFFFFF);
+    }
+
+    static formatSeed(seed) {
+      return String(seed).padStart(8, '0');
+    }
+
+    canCreateMore() {
+      return this.worlds.length < MAX_WORLDS;
+    }
+
+    getRemainingSlots() {
+      return MAX_WORLDS - this.worlds.length;
+    }
+
+    async createWorld(name, seed) {
+      const nameResult = BrowserWorldManager.validateName(name);
+      if (!nameResult.valid) return { success: false, error: nameResult.error };
+
+      if (!this.canCreateMore()) return { success: false, error: `Maximum ${MAX_WORLDS} worlds reached` };
+
+      const trimmedName = name.trim();
+      const duplicate = this.worlds.find(w => w.name.toLowerCase() === trimmedName.toLowerCase());
+      if (duplicate) return { success: false, error: `World "${duplicate.name}" already exists` };
+
+      const worldSeed = seed !== undefined ? seed : BrowserWorldManager.generateSeed();
+      
+      // Generate biome map metadata
+      const lcg = (s) => (s * 16807 + 12345) % 2147483647;
+      let s = worldSeed;
+      const biomeNames = ['Plains', 'Forest', 'Desert', 'Tundra', 'Mountains', 'Ocean', 'Lava', 'Corrupt'];
+      const count = 2 + (lcg(s) % 3);
+      const biomes = [];
+      const used = new Set();
+      for (let i = 0; i < count; i++) {
+        s = lcg(s);
+        let idx = s % biomeNames.length;
+        while (used.has(idx)) idx = (idx + 1) % biomeNames.length;
+        used.add(idx);
+        biomes.push(biomeNames[idx]);
+      }
+
+      const id = BrowserWorldManager.generateId();
+      const world = {
+        id,
+        name: trimmedName,
+        seed: worldSeed,
+        biomeMap: { dominantBiomes: biomes, seed: worldSeed },
+        questProgress: {},
+        chunkReferences: [],
+        createdAt: Date.now(),
+        lastPlayed: null,
+      };
+
+      await this.persistence.saveWorld(world);
+      this.worlds.push(world);
+      return { success: true, world };
+    }
+
+    async updateWorld(id, updates) {
+      const index = this.worlds.findIndex(w => w.id === id);
+      if (index === -1) return { success: false, error: 'World not found' };
+
+      const world = this.worlds[index];
+
+      if (updates.name !== undefined) {
+        const nameResult = BrowserWorldManager.validateName(updates.name);
+        if (!nameResult.valid) return { success: false, error: nameResult.error };
+        const trimmedName = updates.name.trim();
+        const duplicate = this.worlds.find(w => w.id !== id && w.name.toLowerCase() === trimmedName.toLowerCase());
+        if (duplicate) return { success: false, error: `World "${duplicate.name}" already exists` };
+        world.name = trimmedName;
+      }
+
+      await this.persistence.saveWorld(world);
+      this.worlds[index] = world;
+      return { success: true, world };
+    }
+
+    async deleteWorld(id) {
+      const index = this.worlds.findIndex(w => w.id === id);
+      if (index === -1) return { success: false, error: 'World not found' };
+
+      await this.persistence.deleteWorld(id);
+      this.worlds.splice(index, 1);
+      if (this.selectedId === id) this.selectedId = null;
+      return { success: true };
+    }
+
+    getWorld(id) {
+      return this.worlds.find(w => w.id === id) || null;
+    }
+
+    getAllWorlds() {
+      return [...this.worlds];
+    }
+
+    selectWorld(id) {
+      const world = this.getWorld(id);
+      if (!world) return { success: false, error: 'World not found' };
+      this.selectedId = id;
+      world.lastPlayed = Date.now();
+      return { success: true, world };
+    }
+
+    getSelectedWorld() {
+      if (!this.selectedId) return null;
+      return this.getWorld(this.selectedId);
+    }
+
+    clearSelection() {
+      this.selectedId = null;
+    }
+
+    static getBiomePreview(world) {
+      const biomes = world.biomeMap && world.biomeMap.dominantBiomes
+        ? world.biomeMap.dominantBiomes.join(', ')
+        : 'Unknown';
+      const seed = BrowserWorldManager.formatSeed(world.seed);
+      return { biomes, seed };
+    }
+  }
+
+  // ============================================================
+  // World UI Rendering
+  // ============================================================
+
+  function renderWorldSlots() {
+    const container = document.getElementById('world-slots');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    const worlds = worldManager ? worldManager.getAllWorlds() : [];
+    
+    // Render existing worlds
+    worlds.forEach(world => {
+      const slot = createWorldSlotElement(world);
+      container.appendChild(slot);
+    });
+
+    // Render empty slots
+    for (let i = worlds.length; i < MAX_WORLDS; i++) {
+      const emptySlot = document.createElement('div');
+      emptySlot.className = 'world-slot empty';
+      emptySlot.innerHTML = '<span style="font-size:28px;color:#555;">+</span><span class="world-name">Empty</span>';
+      container.appendChild(emptySlot);
+    }
+
+    // Update slot info text
+    const worldSlotInfo = document.getElementById('world-slot-info');
+    if (worldSlotInfo) {
+      const remaining = MAX_WORLDS - worlds.length;
+      worldSlotInfo.textContent = `${worlds.length}/${MAX_WORLDS} worlds (${remaining} slots available)`;
+    }
+
+    // Update create button visibility
+    const createBtn = document.getElementById('btn-create-world');
+    if (createBtn) {
+      if (worldManager && !worldManager.canCreateMore()) {
+        createBtn.disabled = true;
+        createBtn.textContent = 'Slots Full';
+        createBtn.style.opacity = '0.5';
+      } else {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create New World';
+        createBtn.style.opacity = '1';
+      }
+    }
+  }
+
+  function createWorldSlotElement(world) {
+    const slot = document.createElement('div');
+    slot.className = 'world-slot' + (worldManager && worldManager.selectedId === world.id ? ' selected' : '');
+    slot.style.position = 'relative';
+    slot.dataset.worldId = world.id;
+
+    const preview = BrowserWorldManager.getBiomePreview(world);
+
+    // Biome color indicator based on dominant biome
+    const biomeColors = {
+      'Plains': '#4CAF50', 'Forest': '#2E7D32', 'Desert': '#FFB300', 'Tundra': '#90CAF9',
+      'Mountains': '#78909C', 'Ocean': '#1E88E5', 'Lava': '#E64A19', 'Corrupt': '#AB47BC'
+    };
+    const primaryBiome = preview.biomes.split(',')[0] || 'Plains';
+    const biomeColor = biomeColors[primaryBiome] || '#4CAF50';
+
+    slot.innerHTML = `
+      <div class="world-icon" style="background:${biomeColor};" title="${preview.biomes}">🌍</div>
+      <div class="world-info">
+        <span class="world-name">${escapeHtml(world.name)}</span>
+        <span class="world-seed">Seed: ${preview.seed}</span>
+        <span class="world-biomes" title="${preview.biomes}">${preview.biomes}</span>
+      </div>
+      <div class="world-slot-actions">
+        <button class="world-slot-action-btn delete" title="Delete world" data-action="delete">✕</button>
+      </div>
+    `;
+
+    // Click to select world → go to mode screen
+    slot.addEventListener('click', (e) => {
+      if (e.target.closest('.world-slot-action-btn')) return;
+      if (worldManager) {
+        worldManager.selectWorld(world.id);
+        renderWorldSlots();
+        showScreen('modeScreen');
+      }
+    });
+
+    // Delete button
+    const deleteBtn = slot.querySelector('[data-action="delete"]');
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDeleteWorldModal(world);
+    });
+
+    return slot;
   }
 
   // ============================================================
@@ -357,7 +637,7 @@
       showScreen('settingsScreen');
     });
 
-    // Character screen
+    // Character screen — navigate to world screen after selecting character
     document.getElementById('btn-back-char').addEventListener('click', () => {
       showScreen('mainMenu');
     });
@@ -367,31 +647,49 @@
       openCreateModal();
     });
 
-    // Character modal — save
+    // Character modal — save (unified: handles both characters and worlds)
     document.getElementById('btn-save-char').addEventListener('click', async () => {
-      const name = document.getElementById('char-name').value.trim();
-      const color = document.getElementById('char-color').value;
+      const title = document.getElementById('char-modal-title').textContent;
 
-      if (!name) {
-        showCharError('Please enter a character name.');
-        return;
-      }
-
-      let result;
-      if (editingCharId) {
-        // Update existing character
-        result = await characterManager.updateCharacter(editingCharId, { name, color });
+      if (title === 'Create New World') {
+        // Creating a world
+        const name = document.getElementById('char-name').value.trim();
+        if (!name) {
+          showCharError('Please enter a world name.');
+          return;
+        }
+        const result = await worldManager.createWorld(name);
+        if (result.success) {
+          closeCharModal();
+          renderWorldSlots();
+          console.log(`[Cuubz] World created: ${result.world.name} (seed: ${BrowserWorldManager.formatSeed(result.world.seed)})`);
+        } else {
+          showCharError(result.error);
+        }
       } else {
-        // Create new character
-        result = await characterManager.createCharacter(name, color);
-      }
+        // Creating/editing a character
+        const name = document.getElementById('char-name').value.trim();
+        const color = document.getElementById('char-color').value;
 
-      if (result.success) {
-        closeCharModal();
-        renderCharacterSlots();
-        console.log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name} (${result.character.color})`);
-      } else {
-        showCharError(result.error);
+        if (!name) {
+          showCharError('Please enter a character name.');
+          return;
+        }
+
+        let result;
+        if (editingCharId) {
+          result = await characterManager.updateCharacter(editingCharId, { name, color });
+        } else {
+          result = await characterManager.createCharacter(name, color);
+        }
+
+        if (result.success) {
+          closeCharModal();
+          renderCharacterSlots();
+          console.log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name} (${result.character.color})`);
+        } else {
+          showCharError(result.error);
+        }
       }
     });
 
@@ -409,32 +707,59 @@
       }
     });
 
-    // Delete modal
+    // Delete modal — handles both character and world deletion
     document.getElementById('btn-confirm-delete-char').addEventListener('click', async () => {
-      const id = screens.deleteCharModal.dataset.charId;
-      if (!id) return;
+      const charId = screens.deleteCharModal.dataset.charId;
+      const worldId = screens.deleteCharModal.dataset.worldId;
 
-      const result = await characterManager.deleteCharacter(id);
-      if (result.success) {
-        closeDeleteModal();
-        renderCharacterSlots();
-        console.log(`[Cuubz] Character deleted: ${id}`);
-      } else {
-        alert(result.error);
+      if (worldId) {
+        // Deleting a world
+        const result = await worldManager.deleteWorld(worldId);
+        if (result.success) {
+          closeDeleteWorldModal();
+          renderWorldSlots();
+          console.log(`[Cuubz] World deleted: ${worldId}`);
+        } else {
+          alert(result.error);
+        }
+      } else if (charId) {
+        // Deleting a character
+        const result = await characterManager.deleteCharacter(charId);
+        if (result.success) {
+          closeDeleteModal();
+          renderCharacterSlots();
+          console.log(`[Cuubz] Character deleted: ${charId}`);
+        } else {
+          alert(result.error);
+        }
       }
     });
 
-    document.getElementById('btn-cancel-delete-char').addEventListener('click', closeDeleteModal);
+    document.getElementById('btn-cancel-delete-char').addEventListener('click', () => {
+      if (screens.deleteCharModal.dataset.worldId) {
+        closeDeleteWorldModal();
+      } else {
+        closeDeleteModal();
+      }
+    });
 
     // World screen
     document.getElementById('btn-back-world').addEventListener('click', () => {
       showScreen('characterScreen');
     });
 
+    // Create world button → open create modal (reuse char modal)
     document.getElementById('btn-create-world').addEventListener('click', () => {
-      console.log('[Cuubz] Creating new world...');
-      // TODO: Generate world via worldGenerator.js
-      showScreen('modeScreen');
+      if (worldManager && !worldManager.canCreateMore()) return;
+      editingCharId = null;
+      document.getElementById('char-modal-title').textContent = 'Create New World';
+      document.getElementById('btn-save-char').textContent = 'Create World';
+      document.getElementById('char-name').value = '';
+      const colorLabel = document.getElementById('char-color').parentElement;
+      if (colorLabel) colorLabel.style.display = 'none'; // Hide color picker for worlds
+      hideCharError();
+      screens.createCharModal.classList.remove('hidden');
+      setTimeout(() => document.getElementById('char-name').focus(), 100);
     });
 
     // Mode screen
@@ -574,6 +899,15 @@
       console.log(`[Cuubz] Loaded ${characterManager.getAllCharacters().length} characters`);
     } catch (err) {
       console.error('[Cuubz] Failed to load characters:', err.message);
+    }
+
+    // Initialize WorldManager
+    worldManager = new BrowserWorldManager(persistence);
+    try {
+      await worldManager.init();
+      console.log(`[Cuubz] Loaded ${worldManager.getAllWorlds().length} worlds`);
+    } catch (err) {
+      console.error('[Cuubz] Failed to load worlds:', err.message);
     }
 
     initMenuNavigation();

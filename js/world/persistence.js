@@ -121,6 +121,43 @@ class PersistenceManager {
   }
 
   /**
+   * Delete world and all its associated chunks
+   */
+  async deleteWorld(id) {
+    // Delete the world metadata
+    const tx1 = this.db.transaction('worlds', 'readwrite');
+    const worldStore = tx1.objectStore('worlds');
+    worldStore.delete(id);
+
+    // Delete all chunks associated with this world
+    const tx2 = this.db.transaction('chunks', 'readwrite');
+    const chunkStore = tx2.objectStore('chunks');
+    const index = chunkStore.index('worldId');
+    
+    // Get all chunk keys for this world
+    const chunkKeys = await new Promise((resolve, reject) => {
+      const request = index.getAll(id);
+      request.onsuccess = () => {
+        resolve(request.result.map(c => c.key));
+      };
+      request.onerror = () => reject(request.error);
+    });
+
+    // Delete each chunk
+    for (const key of chunkKeys) {
+      chunkStore.delete(key);
+    }
+
+    return new Promise((resolve, reject) => {
+      tx1.oncomplete = () => {
+        tx2.oncomplete = () => resolve();
+        tx2.onerror = () => reject(tx2.error);
+      };
+      tx1.onerror = () => reject(tx1.error);
+    });
+  }
+
+  /**
    * Queue a dirty chunk for saving
    */
   queueChunk(worldId, cx, cz, chunkData) {

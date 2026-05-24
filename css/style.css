@@ -320,6 +320,101 @@ html, body {
   background: rgba(76,175,80,0.1);
 }
 
+/* --- World Slot Specific Styles --- */
+.world-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.world-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.world-name {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-seed {
+  color: #888;
+  font-size: 10px;
+  font-family: monospace;
+}
+
+.world-biomes {
+  color: #aaa;
+  font-size: 10px;
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-slot-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.world-slot:hover .world-slot-actions {
+  opacity: 1;
+}
+
+.world-slot-action-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.world-slot-action-btn.delete {
+  background: rgba(231,76,60,0.2);
+  color: #e74c3c;
+}
+
+.world-slot-action-btn.delete:hover {
+  background: rgba(231,76,60,0.5);
+}
+
+.world-slot.empty {
+  border-style: dashed;
+  opacity: 0.5;
+}
+
+.world-slot.empty:hover {
+  opacity: 0.8;
+}
+
+.world-slot.selected {
+  border-color: #2196F3;
+  background: rgba(33,150,243,0.1);
+}
+
 /* --- Modal --- */
 .modal {
   position: fixed;

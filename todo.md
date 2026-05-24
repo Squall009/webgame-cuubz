@@ -381,11 +381,19 @@ webgame-cuubz/
   - [x] Color normalization to uppercase hex
   - [x] Serialization/deserialization for persistence round-trips
   - [x] 112 tests passing — constants, validation, CRUD, selection, inventory, spawn, serialization, edge cases
-- [ ] **Implement world management** — `js/main.js`
-  - [ ] World screen: list up to 3 worlds
-  - [ ] Create world: generate new random seed + place quest markers/dungeons
-  - [ ] Delete world with confirmation
-  - [ ] Save/load world metadata from IndexedDB
+- [x] **Implement world management** — `js/main.js` + `js/entities/worldManager.js`
+  - [x] World screen: list up to 3 worlds with biome preview, seed display, slot info
+  - [x] Create world: generate new random seed + deterministic biome distribution (LCG-based)
+  - [x] Delete world with confirmation modal (shared with character delete)
+  - [x] Save/load world metadata from IndexedDB (via PersistenceManager.deleteWorld)
+  - [x] World selection → mode screen flow
+  - [x] World CRUD: create, read, update name, delete with cascade chunk cleanup
+  - [x] Quest progress helpers: get/set/advance quest state per world
+  - [x] Chunk reference tracking per world
+  - [x] Serialization/deserialization for persistence round-trips
+  - [x] BrowserWorldManager class in main.js (browser UI wrapper)
+  - [x] WorldManager core class in js/entities/worldManager.js (Node.js testable)
+  - [x] 234 tests passing — constants, validation, CRUD, selection, quest progress, chunk refs, serialization, preview, edge cases
 - [x] **Implement chunk persistence** — `js/world/persistence.js`
   - [x] Save dirty chunks to IndexedDB on interval (every 30s) and on exit
   - [x] Load existing chunks from disk before generating new ones
