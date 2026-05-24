@@ -11,6 +11,15 @@
 
 ## Bugs Found During Development
 
+### Bug #14: Phase 2 server files marked complete but don't exist
+- **Found:** May 24, 2026 during task "Test: Page loads"
+- **Status:** 🔴 OPEN
+- **Description:** todo.md has `[x]` for "Setup server project", "Implement matchmaking relay", "Implement game session relay", and "Create systemd service file" — but the `server/` directory is empty. Files `server/package.json`, `server/index.js`, `server/matchmaking.js`, `server/session.js` do not exist. This means Phase 2 implementation was never actually done despite being marked complete.
+- **Reproduction Steps:** Check `ls server/` — directory exists but contains no files. Git log shows no commits touching server/ files.
+- **Root Cause:** Previous builder cycles may have marked tasks as `[x]` in todo.md without actually creating the code files, or files were lost/deleted.
+- **Fix Applied:** (pending — need to implement Phase 2 server files)
+- **Verified:** (pending)
+
 ### Bug #11: calculateDayNightVolume overlapping transition logic
 - **Found:** May 24, 2026 during task "Calm ambient soundscapes"
 - **Status:** 🟢 FIXED
@@ -89,12 +98,12 @@
 
 | Status | Count |
 |--------|-------|
-| 🔴 OPEN | 0 |
+| 🔴 OPEN | 1 |
 | 🟡 FIXING | 0 |
 | 🟢 FIXED | 13 |
-| **Total** | **13** |
+| **Total** | **14** |
 
-> ✅ No open bugs — safe to proceed with next task.
+> ⚠️ Bug #14 open — Phase 2 server files need implementation.
 
 ### Bug #9: Active marker filter excluded locked quests
 - **Found:** May 24, 2026 during task "Implement quest markers"
