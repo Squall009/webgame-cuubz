@@ -608,7 +608,7 @@ webgame-cuubz/
   - [x] Bounded message queue (500 max, FIFO ordering, oldest dropped on overflow)
   - [x] Protocol consistency verified against server/session.js and matchmaking.js
   - [x] Browser-safe: works in Node.js test mode with null WebSocket factory
-- [x] **Implement host logic** — `js/multiplayer/host.js` (181 tests via test_hostLogic.js)
+- [x] **Implement host logic** — `js/multiplayer/host.js` (182 tests via test_hostLogic.js)
   - [x] Register session with matchmaking relay
   - [x] Authoritative block change validation before broadcast
   - [x] Inventory update validation (server-side)

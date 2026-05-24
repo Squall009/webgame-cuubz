@@ -11,6 +11,7 @@
 | 5 | MouseInput exitPointerLock crashes in Node.js | FIXED | Touch controls unit tests | Phase 1 |
 | 6 | MultiplayerClient connected status check incorrect | FIXED | WebSocket client implementation | Phase 2 |
 | 7 | joinSession only sets sessionId when connected | FIXED | WebSocket client implementation | Phase 2 |
+| 8 | HostManager playerCount includes disconnected players | FIXED | Host logic tests | Phase 2 |
 
 ---
 
@@ -91,3 +92,12 @@
 - **Root Cause:** The session ID assignment was nested inside the connection guard, making it conditional on having an active matchmaking connection.
 - **Fix Applied:** Moved `this._currentSessionId = sessionId` outside the `if (this._matchmakingConn)` block so it always updates regardless of connection state.
 - **Verified:** 2026-05-24 — test_multiplayerClient.js passes (156 assertions)
+
+## Bug #8: HostManager playerCount includes disconnected players
+- **Found:** 2026-05-25 during task "Host logic tests"
+- **Status:** FIXED
+- **Description:** `playerCount` getter used `this._players.size` which counts ALL entries in the Map, including players who disconnected (`connected = false`). This caused stale player counts after `_handlePlayerLeft()` was called. Expected: only connected players counted. Actual: disconnected players still counted.
+- **Reproduction Steps:** Create HostManager, start session, add remote player, call `_handlePlayerLeft(playerId)`, check `playerCount` — returns 2 instead of expected 1 (just host).
+- **Root Cause:** `_handlePlayerLeft` sets `connected = false` but doesn't remove the player from the Map (by design, for reconnect tracking). The `playerCount` getter didn't filter by connection status.
+- **Fix Applied:** Changed `playerCount` getter to iterate `_players` and only count entries where `player.connected === true`. Also fixed test ordering in test_hostLogic.js — edge case assertions expected post-endSession state but `endSession()` was called too late.
+- **Verified:** 2026-05-25 — test_hostLogic.js passes (182 assertions), full suite 35/35 passing
