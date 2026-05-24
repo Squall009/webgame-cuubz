@@ -11,6 +11,33 @@
 
 ## Bugs Found During Development
 
+### Bug #11: calculateDayNightVolume overlapping transition logic
+- **Found:** May 24, 2026 during task "Calm ambient soundscapes"
+- **Status:** 🟢 FIXED
+- **Description:** The original implementation computed day/night multiplier first (isDay check at 0.25 boundary), then applied dawn/dusk transitions separately. This caused conflicts: timeOfDay=0.25 was marked as "day" by the isDay check but fell within the dawn transition zone (0.20-0.30), resulting in incorrect volume interpolation. Night times outside transitions returned night volume correctly, but boundary cases at 0.25, 0.749, 0.75 were wrong.
+- **Reproduction Steps:** Call `calculateDayNightVolume(0.15, 0.25, 1.0)` — expected day volume (0.15), got night-transition volume (~0.12).
+- **Root Cause:** Two separate logic paths (isDay boolean + transition zones) that overlapped without clear priority. The isDay check used different boundaries (0.25/0.75) than the transition zones (0.20-0.30 / 0.70-0.80).
+- **Fix Applied:** Replaced with single cascading if/else chain: check dawn transition → dusk transition → full day range [0.30, 0.70) → night range [0, 0.20) ∪ [0.80, 1.0]. Added input clamping for baseVolume and masterVolume.
+- **Verified:** May 24, 2026 — test_ambient.js passes all day/night volume assertions (Groups 10, 17).
+
+### Bug #12: Test expected values incorrect for chord frequency calculations
+- **Found:** May 24, 2026 during task "Calm ambient soundscapes" test writing
+- **Status:** 🟢 FIXED
+- **Description:** Tests assumed majorPentatonic degrees [0,2,4] produced a traditional major triad (A-C#-E), but the pentatonic scale indices map to semitones [0,4,9], producing A-C#-F# (a sixth, not a fifth). Also, cents formula expected values were miscalculated (e.g., 440Hz+100cents expected 468.75Hz instead of correct 466.16Hz).
+- **Reproduction Steps:** Run test_calculateChordFrequencies — A major fifth assertion failed (expected ~330Hz, got ~370Hz). Cents tests failed with wrong expected values.
+- **Root Cause:** Confusion between chord degree indices (into the scale array) and semitone offsets. The scale array IS the semitone offset list, so `scale[4]` = 9 for majorPentatonic, not 7 (the perfect fifth). Cents formula: f2 = f1 * 2^(cents/1200), not linear interpolation.
+- **Fix Applied:** Updated test to use correct expected values. Added separate test for traditional major triad using SCALES.majorTriad. Fixed all cents calculation expected values to match the exponential formula.
+- **Verified:** May 24, 2026 — All chord and detune tests pass (Groups 7, 12).
+
+### Bug #13: Test captured wrong timeOfDay state for noon volume comparison
+- **Found:** May 24, 2026 during task "Calm ambient soundscapes" test writing
+- **Status:** 🟢 FIXED
+- **Description:** In AmbientManager time of day tests, `noonVol` was captured immediately after `setTimeOfDay(1.5)` which clamps to 1.0 (night). The test then compared this night volume against midnight volume and expected noon > midnight, which failed since both were night volumes.
+- **Reproduction Steps:** Run test_AmbientManager_timeOfDay — "Noon louder than midnight" assertion failed because timeOfDay was still 1.0 when noonVol was measured.
+- **Root Cause:** Missing `setTimeOfDay(0.5)` call before capturing noon volume. Test assumed default timeOfDay (0.5) but previous test steps had changed it.
+- **Fix Applied:** Added explicit `manager.setTimeOfDay(0.5)` before measuring noon volume.
+- **Verified:** May 24, 2026 — Group 17 passes with correct time state management.
+
 ### Bug #1: Noise LCG produces 0 for seed 0
 - **Found:** May 23, 2026 during task "test noise functions"
 - **Status:** 🟢 FIXED
@@ -64,8 +91,8 @@
 |--------|-------|
 | 🔴 OPEN | 0 |
 | 🟡 FIXING | 0 |
-| 🟢 FIXED | 10 |
-| **Total** | **10** |
+| 🟢 FIXED | 13 |
+| **Total** | **13** |
 
 > ✅ No open bugs — safe to proceed with next task.
 

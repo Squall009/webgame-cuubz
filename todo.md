@@ -468,10 +468,23 @@ webgame-cuubz/
   - [x] Pure utility functions: getMaterialParams, getFootstepParams, calculateVolume, blockIdToMaterial, biomeToFootstepSurface
   - [x] Noise buffer generation with deterministic seeding (LCG PRNG)
   - [x] All params testable without Web Audio API — 357 tests passing
-- [ ] **Calm ambient soundscapes** — `js/audio/ambient.js`
-  - [ ] Procedural calm drone/chord progression
-  - [ ] Biome-specific ambient tones (plains=peaceful, lava=tense, corrupt=eerie)
-  - [ ] Day/night volume variation
+- [x] **Calm ambient soundscapes** — `js/audio/ambient.js`
+  - [x] Procedural calm drone/chord progression
+  - [x] Biome-specific ambient tones (plains=peaceful, lava=tense, corrupt=eerie)
+  - [x] Day/night volume variation
+  - [x] Musical note frequency table (C2-Bb4 across octaves)
+  - [x] Scale system: majorPentatonic, minorPentatonic, majorTriad, minorTriad, diminished, wholeTone
+  - [x] 8 biome configs with unique root notes, scales, chord degrees, drone types, swell speeds, moods
+  - [x] Ocean biome has filtered noise layer for wave wash effect
+  - [x] Corrupt biome has microtone detuning (±7 cents) for eerie effect
+  - [x] Lava uses sawtooth oscillator + fast swell (4s) for tense atmosphere
+  - [x] Day/night volume with dawn/dusk smoothstep transitions (0.20-0.30 dawn, 0.70-0.80 dusk)
+  - [x] Swell effect: sine wave breathing between 0.5-1.0 volume per biome cycle speed
+  - [x] AmbientManager class: init/setBiome/setTimeOfDay/update/dispose lifecycle
+  - [x] Crossfade between biomes (2-second fade out + fade in)
+  - [x] getStateSummary() for debugging/HUD integration
+  - [x] Config validation system with field checking, note validation, scale reference verification
+  - [x] 465 tests passing across 23 test groups — constants, chord math, day/night volume, swell, detuning, manager lifecycle, integration, edge cases, musical theory
 
 ### Main Menu Flow
 - [ ] **Implement menu system** — `js/main.js`
