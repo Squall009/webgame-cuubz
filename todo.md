@@ -534,12 +534,19 @@ webgame-cuubz/
   - [x] Target block highlighted, breaks on click
   - [x] Place block on correct face (all 6 face normals tested)
   - [x] Broken blocks added to inventory
-- [ ] **Test: Survival meters** — Play for several minutes
-  - [ ] All 5 meters deplete over time
-  - [ ] Hunger restored by eating apples
-  - [ ] Thirst restored by drinking water
-  - [ ] Sleep restored by beds, spawn point set
-  - [ ] Death and respawn at spawn point works
+- [x] **Test: Survival meters** — Play for several minutes (103 assertions via test_survivalMetersIntegration.js)
+  - [x] All 5 meters deplete over time (hunger/thirst/sleep natural depletion, stamina via actions)
+  - [x] Hunger restored by eating apples (instant + animated flow)
+  - [x] Thirst restored by drinking water (instant + animated flow)
+  - [x] Sleep restored by beds, spawn point set above bed position
+  - [x] Death and respawn at spawn point works (starvation death tested)
+  - [x] Stamina cycle: sprint depletes → rest regenerates
+  - [x] Full 2-minute gameplay simulation with periodic maintenance
+  - [x] Survival state serialization/deserialization round-trip
+  - [x] Desert biome faster thirst depletion
+  - [x] Low sleep penalizes stamina regeneration
+  - [x] Environmental damage: lava contact, poison DoT, fall damage
+  - [x] Normalized meters for HUD rendering
 - [ ] **Test: Touch controls** — Mobile viewport simulation
   - [ ] Virtual joystick moves player
   - [ ] Swipe rotates camera
