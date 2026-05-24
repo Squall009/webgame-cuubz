@@ -7,6 +7,8 @@
 | 1 | Collision slide direction error | FIXED | Player movement integration tests | Phase 1 |
 | 2 | FeaturePlacer placement outside chunk bounds | FIXED | Chunk loading tests | Phase 1 |
 | 3 | Cave generator seam mismatch at chunk edges | FIXED | World generation integration | Phase 1 |
+| 4 | TouchInput DOM access without browser guard | FIXED | Touch controls unit tests | Phase 1 |
+| 5 | MouseInput exitPointerLock crashes in Node.js | FIXED | Touch controls unit tests | Phase 1 |
 
 ---
 
@@ -51,3 +53,21 @@
 - **Fix Applied:** (when fixed)
 - **Verified:** [date] — test passes
 ```
+
+## Bug #4: TouchInput DOM access without browser guard
+- **Found:** 2026-05-24 during task "Touch controls unit tests"
+- **Status:** FIXED
+- **Description:** `_onJoystickMove` and `_onJoystickEnd` methods in `js/input/touch.js` directly call `document.getElementById()` without checking if running in a browser context. This causes `ReferenceError: document is not defined` when the module is loaded or tested in Node.js (e.g., unit tests, SSR).
+- **Reproduction Steps:** Run `node test/test_touchControls.js` — test crashes on `_onJoystickMove` call with `document is not defined`.
+- **Root Cause:** Constructor checks `typeof window !== 'undefined'` before binding events, but the internal event handler methods (`_onJoystickMove`, `_onJoystickEnd`) directly access `document.getElementById` without guards. These methods are callable in Node.js tests via direct invocation.
+- **Fix Applied:** Wrapped all `document.getElementById()` calls in `_onJoystickMove` and `_onJoystickEnd` with `if (typeof document !== 'undefined')` guards. Visual thumb updates are now browser-only.
+- **Verified:** 2026-05-24 — test_touchControls.js passes (116 assertions)
+
+## Bug #5: MouseInput exitPointerLock crashes in Node.js
+- **Found:** 2026-05-24 during task "Touch controls unit tests"
+- **Status:** FIXED
+- **Description:** `exitPointerLock()` method in `js/input/mouse.js` checks `typeof document.exitPointerLock === 'function'` but does not first check if `document` itself exists. In Node.js context, accessing `document` throws `ReferenceError: document is not defined`.
+- **Reproduction Steps:** Create MouseInput instance in Node.js and call `mouse.exitPointerLock()` — crashes with `document is not defined`.
+- **Root Cause:** Missing outer guard for `typeof document !== 'undefined'` before accessing `document.exitPointerLock`. The `requestPointerLock` method already has this pattern (checks canvas method existence), but `exitPointerLock` was inconsistent.
+- **Fix Applied:** Changed condition from `typeof document.exitPointerLock === 'function'` to `typeof document !== 'undefined' && typeof document.exitPointerLock === 'function'`.
+- **Verified:** 2026-05-24 — test_touchControls.js passes (116 assertions)

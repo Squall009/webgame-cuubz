@@ -65,7 +65,7 @@ class MouseInput {
    * Exit pointer lock
    */
   exitPointerLock() {
-    if (typeof document.exitPointerLock === 'function') {
+    if (typeof document !== 'undefined' && typeof document.exitPointerLock === 'function') {
       document.exitPointerLock();
     }
   }

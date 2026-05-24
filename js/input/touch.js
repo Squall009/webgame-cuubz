@@ -79,13 +79,15 @@ class TouchInput {
       this.joystickY = dy / maxDist;
     }
     
-    // Update visual thumb position
-    const thumb = document.getElementById('joystick-thumb');
-    if (thumb) {
-      const clampedDx = Math.sign(dx) * Math.min(dist, maxDist);
-      const clampedDy = Math.sign(dy) * Math.min(dist, maxDist);
-      thumb.style.left = (35 + clampedDx) + 'px';
-      thumb.style.top = (35 + clampedDy) + 'px';
+    // Update visual thumb position (browser only)
+    if (typeof document !== 'undefined') {
+      const thumb = document.getElementById('joystick-thumb');
+      if (thumb) {
+        const clampedDx = Math.sign(dx) * Math.min(dist, maxDist);
+        const clampedDy = Math.sign(dy) * Math.min(dist, maxDist);
+        thumb.style.left = (35 + clampedDx) + 'px';
+        thumb.style.top = (35 + clampedDy) + 'px';
+      }
     }
   }
 
@@ -95,11 +97,13 @@ class TouchInput {
     this.joystickX = 0;
     this.joystickY = 0;
     
-    // Reset thumb position
-    const thumb = document.getElementById('joystick-thumb');
-    if (thumb) {
-      thumb.style.left = '35px';
-      thumb.style.top = '35px';
+    // Reset thumb position (browser only)
+    if (typeof document !== 'undefined') {
+      const thumb = document.getElementById('joystick-thumb');
+      if (thumb) {
+        thumb.style.left = '35px';
+        thumb.style.top = '35px';
+      }
     }
   }
 

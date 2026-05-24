@@ -547,10 +547,15 @@ webgame-cuubz/
   - [x] Low sleep penalizes stamina regeneration
   - [x] Environmental damage: lava contact, poison DoT, fall damage
   - [x] Normalized meters for HUD rendering
-- [ ] **Test: Touch controls** — Mobile viewport simulation
-  - [ ] Virtual joystick moves player
-  - [ ] Swipe rotates camera
-  - [ ] Tap breaks/places blocks
+- [x] **Test: Touch controls** — Mobile viewport simulation (116 assertions via test_touchControls.js)
+  - [x] Virtual joystick moves player (joystick start/move/end, radius clamping, diagonal normalization)
+  - [x] Swipe rotates camera (look start/move/end, delta accumulation, consumeLookDeltas)
+  - [x] Tap breaks/places blocks (tap detection, checkTap consumption, long press behavior)
+  - [x] KeyboardInput: WASD + Space/Shift/E key mapping, just-pressed flags, update cycle
+  - [x] MouseInput: left/right click, scroll wheel, pointer lock safety guards
+  - [x] Integration: Touch <-> Keyboard movement equivalence, Touch tap <-> Mouse click equivalence
+  - [x] Bug #4 fixed: TouchInput DOM access guarded for Node.js testing (js/input/touch.js)
+  - [x] Bug #5 fixed: MouseInput exitPointerLock document guard added (js/input/mouse.js)
 - [ ] **Test: Character management** — Create/edit/delete characters
   - [ ] 3 character slots available
   - [ ] Name + color saved and restored
