@@ -1,521 +1,250 @@
 /**
- * Cuubz - Quest System (NEW)
- * World-state quest tracking with 25 quests, progression chains, requirements, and rewards.
+ * Cuubz — Quest System (World-State Based)
+ * 25 quests across 4 dungeons + final boss. Progress lives with the world,
+ * shared by all players in multiplayer sessions.
  */
 
-'use strict';
-
 const QUEST_TYPES = {
-  COLLECT: 'collect',
-  EXPLORE: 'explore',
-  KILL: 'kill',
-  CRAFT: 'craft',
-  PLACE: 'place',
-  DIALOGUE: 'dialogue',
-  BOSS: 'boss',
-};
-
-const QUEST_DIFFICULTY = {
-  TRIVIAL: 1,
-  EASY: 2,
-  MEDIUM: 3,
-  HARD: 4,
-  LEGENDARY: 5,
+  COLLECT:   'collect',
+  KILL:      'kill',
+  EXPLORE:   'explore',
+  CRAFT:     'craft',
+  DELIVER:   'deliver',
+  BOSS:      'boss',
 };
 
 const REWARD_TYPES = {
-  ITEM: 'item',
-  UNLOCK: 'unlock',
-  XP: 'xp',
-  ACHIEVEMENT: 'achievement',
+  ITEM:        'item',
+  UNLOCK_QUEST:'unlock_quest',
+  UNLOCK_AREA: 'unlock_area',
+  XP:          'xp',
+  TITLE:       'title',
 };
 
-const QUEST_CATALOG = Object.freeze({
-  Q01: Object.freeze({
-    id: 'Q01', name: 'A New Beginning',
-    description: 'Welcome to Cuubz! Take your first steps into the world.',
-    type: QUEST_TYPES.EXPLORE, difficulty: QUEST_DIFFICULTY.TRIVIAL,
-    requirements: { exploreBiomes: ['Plains'] },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'apple', count: 3 },
-    nextQuest: 'Q02', markerBiome: 'Plains',
-  }),
-  Q02: Object.freeze({
-    id: 'Q02', name: 'Gather Wood',
-    description: 'Chop down trees and collect wood logs.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.TRIVIAL,
-    requirements: { collectItem: 'wood_log', count: 10 },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'planks', count: 8 },
-    nextQuest: 'Q03', markerBiome: 'Forest',
-  }),
-  Q03: Object.freeze({
-    id: 'Q03', name: 'Stone Age',
-    description: 'Mine stone blocks to upgrade your tools.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.EASY,
-    requirements: { collectItem: 'stone', count: 20 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'stone_tools' },
-    nextQuest: 'Q04', markerBiome: 'Mountains',
-  }),
-  Q04: Object.freeze({
-    id: 'Q04', name: 'A Safe Place to Sleep',
-    description: 'Craft and place a bed so you have somewhere safe to rest.',
-    type: QUEST_TYPES.CRAFT, difficulty: QUEST_DIFFICULTY.EASY,
-    requirements: { craftItem: 'bed', count: 1 },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'apple', count: 5 },
-    nextQuest: 'Q05', markerBiome: 'Plains',
-  }),
-  Q05: Object.freeze({
-    id: 'Q05', name: 'Diggers Delight',
-    description: 'Dig down and find coal ore.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.EASY,
-    requirements: { collectItem: 'coal_ore', count: 10 },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'cooked_meat', count: 3 },
-    nextQuest: 'Q06', markerBiome: 'Mountains',
-  }),
-  Q06: Object.freeze({
-    id: 'Q06', name: 'Into the Depths',
-    description: 'Find iron ore hidden beneath the surface.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.MEDIUM,
-    requirements: { collectItem: 'iron_ore', count: 15 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'iron_tools' },
-    nextQuest: 'Q07', markerBiome: 'Mountains',
-  }),
-  Q07: Object.freeze({
-    id: 'Q07', name: 'Whispers in the Dark',
-    description: 'Investigate strange sounds and find the first dungeon.',
-    type: QUEST_TYPES.EXPLORE, difficulty: QUEST_DIFFICULTY.MEDIUM,
-    requirements: { exploreBiomes: ['Corrupt'] },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'quest_key', count: 1 },
-    nextQuest: 'Q08', markerBiome: 'Corrupt',
-  }),
-  Q08: Object.freeze({
-    id: 'Q08', name: 'Prepare for Battle',
-    description: 'Gather supplies before entering the dungeon.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.MEDIUM,
-    requirements: { collectItem: 'apple', count: 10 },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'golden_apple', count: 1 },
-    nextQuest: 'Q09', markerBiome: 'Forest',
-  }),
-  Q09: Object.freeze({
-    id: 'Q09', name: 'The Corrupted Roots',
-    description: 'Clear toxic pools and find the dungeon heart.',
-    type: QUEST_TYPES.EXPLORE, difficulty: QUEST_DIFFICULTY.MEDIUM,
-    requirements: { exploreBiomes: ['Corrupt'], collectItem: 'corrupt_crystal', count: 3 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'dungeon_1_access' },
-    nextQuest: 'Q10', markerBiome: 'Corrupt',
-  }),
-  Q10: Object.freeze({
-    id: 'Q10', name: 'Keys to the Gate',
-    description: 'Find three dungeon keys hidden in the corruption.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { collectItem: 'quest_key', count: 3 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'dungeon_1_inner' },
-    nextQuest: 'Q11', markerBiome: 'Corrupt',
-  }),
-  Q11: Object.freeze({
-    id: 'Q11', name: 'The Forest Guardian Awakens',
-    description: 'Face the first boss - the Forest Guardian.',
-    type: QUEST_TYPES.BOSS, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { killBoss: 'forest_guardian' },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'gold_ore', count: 10 },
-    nextQuest: 'Q12', markerBiome: 'Corrupt',
-  }),
-  Q12: Object.freeze({
-    id: 'Q12', name: 'Purified Lands',
-    description: 'Collect purified crystals left by the defeated guardian.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.MEDIUM,
-    requirements: { collectItem: 'corrupt_crystal', count: 5 },
-    reward: { type: REWARD_TYPES.ACHIEVEMENT, achievementId: 'first_boss_slayer' },
-    nextQuest: 'Q13', markerBiome: 'Plains',
-  }),
-  Q13: Object.freeze({
-    id: 'Q13', name: 'Desert Horizons',
-    description: 'Travel to the scorching desert.',
-    type: QUEST_TYPES.EXPLORE, difficulty: QUEST_DIFFICULTY.MEDIUM,
-    requirements: { exploreBiomes: ['Desert'] },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'cooked_meat', count: 5 },
-    nextQuest: 'Q14', markerBiome: 'Desert',
-  }),
-  Q14: Object.freeze({
-    id: 'Q14', name: 'Gold Rush',
-    description: 'Mine enough gold to forge a powerful weapon.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { collectItem: 'gold_ore', count: 25 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'gold_weapons' },
-    nextQuest: 'Q15', markerBiome: 'Desert',
-  }),
-  Q15: Object.freeze({
-    id: 'Q15', name: 'The Sunken Temple',
-    description: 'Navigate the ancient temple beneath the desert.',
-    type: QUEST_TYPES.EXPLORE, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { exploreBiomes: ['Desert'], collectItem: 'quest_key', count: 3 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'dungeon_2_access' },
-    nextQuest: 'Q16', markerBiome: 'Desert',
-  }),
-  Q16: Object.freeze({
-    id: 'Q16', name: 'Sand Wraith Rising',
-    description: 'Defeat the Sand Wraith to claim its treasures.',
-    type: QUEST_TYPES.BOSS, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { killBoss: 'sand_wraith' },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'diamond', count: 5 },
-    nextQuest: 'Q17', markerBiome: 'Desert',
-  }),
-  Q17: Object.freeze({
-    id: 'Q17', name: 'Temple Treasures',
-    description: 'Claim the temples ancient artifacts.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.MEDIUM,
-    requirements: { collectItem: 'diamond', count: 3 },
-    reward: { type: REWARD_TYPES.ACHIEVEMENT, achievementId: 'temple_explorer' },
-    nextQuest: 'Q18', markerBiome: 'Plains',
-  }),
-  Q18: Object.freeze({
-    id: 'Q18', name: 'Frozen Wastes',
-    description: 'Something ancient stirs beneath the ice.',
-    type: QUEST_TYPES.EXPLORE, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { exploreBiomes: ['Tundra'] },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'golden_apple', count: 2 },
-    nextQuest: 'Q19', markerBiome: 'Tundra',
-  }),
-  Q19: Object.freeze({
-    id: 'Q19', name: 'Ice Mining',
-    description: 'Mine diamond veins in frozen caves.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { collectItem: 'diamond', count: 10 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'diamond_armor' },
-    nextQuest: 'Q20', markerBiome: 'Tundra',
-  }),
-  Q20: Object.freeze({
-    id: 'Q20', name: 'The Ice Fortress',
-    description: 'Find keys to breach the ice fortress walls.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { collectItem: 'quest_key', count: 4 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'dungeon_3_access' },
-    nextQuest: 'Q21', markerBiome: 'Tundra',
-  }),
-  Q21: Object.freeze({
-    id: 'Q21', name: 'Frost Titans Wrath',
-    description: 'Defeat the Frost Titan to thaw the frozen world.',
-    type: QUEST_TYPES.BOSS, difficulty: QUEST_DIFFICULTY.HARD,
-    requirements: { killBoss: 'frost_titan' },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'diamond', count: 10 },
-    nextQuest: 'Q22', markerBiome: 'Tundra',
-  }),
-  Q22: Object.freeze({
-    id: 'Q22', name: 'The Corrupt Heart Returns',
-    description: 'A deeper corruption spreads in the most dangerous biome.',
-    type: QUEST_TYPES.EXPLORE, difficulty: QUEST_DIFFICULTY.LEGENDARY,
-    requirements: { exploreBiomes: ['Lava', 'Corrupt'] },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'golden_apple', count: 5 },
-    nextQuest: 'Q23', markerBiome: 'Lava',
-  }),
-  Q23: Object.freeze({
-    id: 'Q23', name: 'Gathering the Final Keys',
-    description: 'Assemble all keys for the final dungeon.',
-    type: QUEST_TYPES.COLLECT, difficulty: QUEST_DIFFICULTY.LEGENDARY,
-    requirements: { collectItem: 'quest_key', count: 5 },
-    reward: { type: REWARD_TYPES.UNLOCK, unlockId: 'dungeon_4_access' },
-    nextQuest: 'Q24', markerBiome: 'Corrupt',
-  }),
-  Q24: Object.freeze({
-    id: 'Q24', name: 'The Corruption Overlord',
-    description: 'Face the ultimate evil - the Corruption Overlord.',
-    type: QUEST_TYPES.BOSS, difficulty: QUEST_DIFFICULTY.LEGENDARY,
-    requirements: { killBoss: 'corruption_overlord' },
-    reward: { type: REWARD_TYPES.ITEM, itemId: 'diamond', count: 20 },
-    nextQuest: 'Q25', markerBiome: 'Corrupt',
-  }),
-  Q25: Object.freeze({
-    id: 'Q25', name: 'The World Reborn',
-    description: 'Face the World Ender to restore Cuubz forever.',
-    type: QUEST_TYPES.BOSS, difficulty: QUEST_DIFFICULTY.LEGENDARY,
-    requirements: { killBoss: 'world_ender' },
-    reward: { type: REWARD_TYPES.ACHIEVEMENT, achievementId: 'game_complete' },
-    nextQuest: null, markerBiome: 'Plains',
-  }),
-});
+const QUEST_STATES = {
+  LOCKED:     'locked',
+  AVAILABLE:  'available',
+  IN_PROGRESS:'in_progress',
+  COMPLETE:   'complete',
+};
 
-const BOSS_DEFINITIONS = Object.freeze({
-  forest_guardian: { name: 'Forest Guardian', health: 500, attackDamage: 15, phases: 2, attacks: [
-    { name: 'Root Slam', damage: 15, cooldown: 3000, range: 5 },
-    { name: 'Vine Whip', damage: 10, cooldown: 2000, range: 8 },
-    { name: 'Spore Cloud', damage: 5, cooldown: 5000, range: 6, type: 'aoe' },
-  ]},
-  sand_wraith: { name: 'Sand Wraith', health: 750, attackDamage: 20, phases: 3, attacks: [
-    { name: 'Sand Blast', damage: 20, cooldown: 2500, range: 10 },
-    { name: 'Burrow Strike', damage: 25, cooldown: 4000, range: 3 },
-    { name: 'Sandstorm', damage: 8, cooldown: 6000, range: 12, type: 'aoe' },
-  ]},
-  frost_titan: { name: 'Frost Titan', health: 1000, attackDamage: 25, phases: 3, attacks: [
-    { name: 'Ice Slam', damage: 25, cooldown: 3000, range: 6 },
-    { name: 'Frost Nova', damage: 15, cooldown: 5000, range: 8, type: 'aoe' },
-    { name: 'Blizzard', damage: 10, cooldown: 8000, range: 15, type: 'aoe' },
-  ]},
-  corruption_overlord: { name: 'Corruption Overlord', health: 1500, attackDamage: 30, phases: 4, attacks: [
-    { name: 'Dark Bolt', damage: 30, cooldown: 2000, range: 12 },
-    { name: 'Corrupt Wave', damage: 20, cooldown: 4000, range: 10, type: 'aoe' },
-    { name: 'Crystal Shield', damage: 0, cooldown: 8000, range: 0, type: 'buff' },
-    { name: 'Summon Minions', damage: 5, cooldown: 10000, range: 0, type: 'summon', count: 3 },
-  ]},
-  world_ender: { name: 'World Ender', health: 2500, attackDamage: 40, phases: 5, attacks: [
-    { name: 'Void Slash', damage: 40, cooldown: 2000, range: 8 },
-    { name: 'Gravity Crush', damage: 30, cooldown: 3000, range: 6 },
-    { name: 'Dimensional Rift', damage: 25, cooldown: 5000, range: 15, type: 'aoe' },
-    { name: 'Reality Warp', damage: 20, cooldown: 7000, range: 10, type: 'aoe' },
-    { name: 'Final Despair', damage: 50, cooldown: 12000, range: 20, type: 'ultimate' },
-  ]},
-});
+const QUEST_REGISTRY = [
+  { id: 'quest_01', name: 'First Steps', description: 'Welcome to Cuubz! Break some wood and gather dirt.', type: QUEST_TYPES.COLLECT, stage: 1, requirements: [{ item: 'wood_log', count: 5 }, { item: 'dirt', count: 10 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_02' }, markerBiome: 'plains', markerOffset: { x: 3, z: 5 } },
+  { id: 'quest_02', name: 'Crafting Basics', description: 'Turn wood logs into planks.', type: QUEST_TYPES.CRAFT, stage: 2, requirements: [{ item: 'planks', count: 10 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_03' }, markerBiome: 'plains', markerOffset: { x: -4, z: 8 } },
+  { id: 'quest_03', name: 'A Warm Meal', description: 'Find apples on trees and eat them.', type: QUEST_TYPES.COLLECT, stage: 3, requirements: [{ item: 'apple', count: 3 }], reward: { type: REWARD_TYPES.ITEM, items: [{ item: 'berry', count: 5 }] }, markerBiome: 'forest', markerOffset: { x: 10, z: -6 } },
+  { id: 'quest_04', name: 'Mining the Depths', description: 'Mine coal underground.', type: QUEST_TYPES.COLLECT, stage: 4, requirements: [{ item: 'coal', count: 10 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_05' }, markerBiome: 'mountains', markerOffset: { x: -8, z: 12 } },
+  { id: 'quest_05', name: 'Iron Will', description: 'Find iron ore deep underground.', type: QUEST_TYPES.COLLECT, stage: 5, requirements: [{ item: 'iron_ore', count: 8 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_06' }, markerBiome: 'mountains', markerOffset: { x: 15, z: -10 } },
+  { id: 'quest_06', name: 'A Safe Place to Rest', description: 'Craft and place a bed.', type: QUEST_TYPES.CRAFT, stage: 6, requirements: [{ item: 'bed', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_07' }, markerBiome: 'plains', markerOffset: { x: 0, z: -12 } },
+  { id: 'quest_07', name: 'Whispers in the Dark', description: 'Investigate the corruption.', type: QUEST_TYPES.EXPLORE, stage: 7, requirements: [{ item: 'corrupt_crystal', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_08' }, markerBiome: 'corrupt', markerOffset: { x: -20, z: 15 } },
+  { id: 'quest_08', name: 'Gathering Defenses', description: 'Collect gold ore and diamonds.', type: QUEST_TYPES.COLLECT, stage: 8, requirements: [{ item: 'gold_ore', count: 5 }, { item: 'diamond', count: 3 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_09' }, markerBiome: 'mountains', markerOffset: { x: 22, z: -18 } },
+  { id: 'quest_09', name: 'The First Key', description: 'Find the dungeon key.', type: QUEST_TYPES.COLLECT, stage: 9, requirements: [{ item: 'quest_key', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_10' }, markerBiome: 'corrupt', markerOffset: { x: -25, z: 20 } },
+  { id: 'quest_10', name: 'Into the Dungeon', description: 'Collect corrupt crystals.', type: QUEST_TYPES.COLLECT, stage: 10, requirements: [{ item: 'corrupt_crystal', count: 5 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_11' }, markerBiome: 'corrupt', markerOffset: { x: -30, z: 25 } },
+  { id: 'quest_11', name: 'Offering of Light', description: 'Deliver key and crystals to summon boss.', type: QUEST_TYPES.DELIVER, stage: 11, requirements: [{ item: 'quest_key', count: 1 }, { item: 'corrupt_crystal', count: 5 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_12' }, markerBiome: 'corrupt', markerOffset: { x: -30, z: 25 } },
+  { id: 'quest_12', name: 'The Forest Warden', description: 'Defeat the Forest Warden.', type: QUEST_TYPES.BOSS, stage: 12, bossId: 'forest_warden', requirements: [{ item: 'boss_kill', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_13' }, markerBiome: 'corrupt', markerOffset: { x: -35, z: 30 } },
+  { id: 'quest_13', name: 'Ashes of the Past', description: 'Explore the volcanic wasteland.', type: QUEST_TYPES.EXPLORE, stage: 13, requirements: [{ item: 'obsidian', count: 5 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_14' }, markerBiome: 'lava', markerOffset: { x: 30, z: 30 } },
+  { id: 'quest_14', name: 'Fireproof Preparation', description: 'Gather obsidian and blackstone.', type: QUEST_TYPES.COLLECT, stage: 14, requirements: [{ item: 'obsidian', count: 15 }, { item: 'blackstone', count: 20 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_15' }, markerBiome: 'lava', markerOffset: { x: 35, z: 35 } },
+  { id: 'quest_15', name: 'The Second Key', description: 'Find the second dungeon key.', type: QUEST_TYPES.COLLECT, stage: 15, requirements: [{ item: 'quest_key', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_16' }, markerBiome: 'lava', markerOffset: { x: 40, z: 40 } },
+  { id: 'quest_16', name: 'Heart of Fire', description: 'Deliver key and materials to awaken the Lava Titan.', type: QUEST_TYPES.DELIVER, stage: 16, requirements: [{ item: 'quest_key', count: 1 }, { item: 'obsidian', count: 10 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_17' }, markerBiome: 'lava', markerOffset: { x: 45, z: 45 } },
+  { id: 'quest_17', name: 'The Lava Titan', description: 'Defeat the Lava Titan.', type: QUEST_TYPES.BOSS, stage: 17, bossId: 'lava_titan', requirements: [{ item: 'boss_kill', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_18' }, markerBiome: 'lava', markerOffset: { x: 50, z: 50 } },
+  { id: 'quest_18', name: 'Frozen Wastes', description: 'Explore the frozen dungeon.', type: QUEST_TYPES.EXPLORE, stage: 18, requirements: [{ item: 'ice', count: 10 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_19' }, markerBiome: 'tundra', markerOffset: { x: -40, z: -35 } },
+  { id: 'quest_19', name: 'Winter Supplies', description: 'Gather food and resources.', type: QUEST_TYPES.COLLECT, stage: 19, requirements: [{ item: 'cooked_meat', count: 5 }, { item: 'bread', count: 3 }, { item: 'ice', count: 15 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_20' }, markerBiome: 'tundra', markerOffset: { x: -45, z: -40 } },
+  { id: 'quest_20', name: 'The Third Key', description: 'Find the third dungeon key.', type: QUEST_TYPES.COLLECT, stage: 20, requirements: [{ item: 'quest_key', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_21' }, markerBiome: 'tundra', markerOffset: { x: -50, z: -45 } },
+  { id: 'quest_21', name: 'The Frost Serpent', description: 'Defeat the Frost Serpent.', type: QUEST_TYPES.BOSS, stage: 21, bossId: 'frost_serpent', requirements: [{ item: 'boss_kill', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_22' }, markerBiome: 'tundra', markerOffset: { x: -55, z: -50 } },
+  { id: 'quest_22', name: 'The Final Corruption', description: 'Find the Corruption Overlord.', type: QUEST_TYPES.EXPLORE, stage: 22, requirements: [{ item: 'corrupt_crystal', count: 10 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_23' }, markerBiome: 'corrupt', markerOffset: { x: -60, z: 55 } },
+  { id: 'quest_23', name: 'Keys of Power', description: 'Collect quest keys for the final confrontation.', type: QUEST_TYPES.COLLECT, stage: 23, requirements: [{ item: 'quest_key', count: 1 }, { item: 'diamond', count: 10 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_24' }, markerBiome: 'corrupt', markerOffset: { x: -65, z: 60 } },
+  { id: 'quest_24', name: 'The Corruption Overlord', description: 'Face the source of all corruption.', type: QUEST_TYPES.BOSS, stage: 24, bossId: 'corruption_overlord', requirements: [{ item: 'boss_kill', count: 1 }], reward: { type: REWARD_TYPES.UNLOCK_QUEST, target: 'quest_25' }, markerBiome: 'corrupt', markerOffset: { x: -70, z: 65 } },
+  { id: 'quest_25', name: 'The World Remade', description: 'Seal the corruption forever. Final multi-phase battle.', type: QUEST_TYPES.BOSS, stage: 25, bossId: 'final_seal', requirements: [{ item: 'boss_kill', count: 1 }], reward: { type: REWARD_TYPES.TITLE, value: 'World Saver' }, markerBiome: 'corrupt', markerOffset: { x: -75, z: 70 } },
+];
 
-class QuestTracker {
-  constructor(worldId, callbacks = {}) {
-    this.worldId = worldId;
-    this.callbacks = callbacks;
-    this.progress = {};
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      this.progress[qid] = {
-        stage: 0, completed: false, completedAt: null,
-        collectedItems: {}, exploredBiomes: new Set(), bossesKilled: new Set(), craftedItems: {},
-      };
-    }
-    this.unlocks = new Set();
-    this.achievements = new Set();
-    this.totalXP = 0;
+class QuestSystem {
+  constructor(worldState, options = {}) {
+    this.worldState = worldState || {};
+    this.onQuestComplete = options.onQuestComplete || null;
+    this.onQuestStart = options.onQuestStart || null;
+    this.onProgressUpdate = options.onProgressUpdate || null;
+    this.onTrackerUpdate = options.onTrackerUpdate || null;
+    this._registryMap = new Map();
+    QUEST_REGISTRY.forEach(q => this._registryMap.set(q.id, q));
+    this._initQuestStates();
   }
 
-  static getQuestDefinition(questId) { return QUEST_CATALOG[questId] || null; }
-  static getAllQuests() { return Object.values(QUEST_CATALOG); }
-  static getQuestCount() { return Object.keys(QUEST_CATALOG).length; }
-
-  recordItemCollected(itemId, count = 1) {
-    if (count <= 0) return;
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      const prog = this.progress[qid];
-      if (prog.completed) continue;
-      const def = QUEST_CATALOG[qid];
-      if (def.requirements.collectItem === itemId) {
-        prog.collectedItems[itemId] = (prog.collectedItems[itemId] || 0) + count;
-        this._notifyProgress(qid);
-        this._checkCompletion(qid);
+  _initQuestStates() {
+    QUEST_REGISTRY.forEach((quest, idx) => {
+      if (!this.worldState[quest.id]) {
+        const prevCompleted = idx === 0 || (this.worldState[QUEST_REGISTRY[idx - 1]?.id]?.completed === true);
+        this.worldState[quest.id] = {
+          state: prevCompleted ? QUEST_STATES.AVAILABLE : QUEST_STATES.LOCKED,
+          progress: {}, completed: false, completedAt: null,
+        };
       }
-    }
+    });
+    this._rebuildChain();
   }
 
-  recordBiomeExplored(biomeName) {
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      const prog = this.progress[qid];
-      if (prog.completed) continue;
-      const def = QUEST_CATALOG[qid];
-      if (def.requirements.exploreBiomes && def.requirements.exploreBiomes.includes(biomeName)) {
-        prog.exploredBiomes.add(biomeName);
-        this._notifyProgress(qid);
-        this._checkCompletion(qid);
+  _rebuildChain() {
+    QUEST_REGISTRY.forEach((quest, idx) => {
+      const qs = this.worldState[quest.id];
+      if (!qs || qs.completed) return;
+      if (idx === 0) {
+        qs.state = QUEST_STATES.AVAILABLE;
+      } else {
+        const prevQuestId = QUEST_REGISTRY[idx - 1].id;
+        const prevState = this.worldState[prevQuestId];
+        qs.state = (prevState && prevState.completed) ? QUEST_STATES.AVAILABLE : QUEST_STATES.LOCKED;
       }
-    }
+    });
   }
 
-  recordBossKilled(bossId) {
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      const prog = this.progress[qid];
-      if (prog.completed) continue;
-      const def = QUEST_CATALOG[qid];
-      if (def.requirements.killBoss === bossId) {
-        prog.bossesKilled.add(bossId);
-        this._notifyProgress(qid);
-        this._checkCompletion(qid);
-      }
-    }
-  }
+  getQuest(questId) { return this._registryMap.get(questId) || null; }
 
-  recordItemCrafted(itemId, count = 1) {
-    if (count <= 0) return;
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      const prog = this.progress[qid];
-      if (prog.completed) continue;
-      const def = QUEST_CATALOG[qid];
-      if (def.requirements.craftItem === itemId) {
-        prog.craftedItems[itemId] = (prog.craftedItems[itemId] || 0) + count;
-        this._notifyProgress(qid);
-        this._checkCompletion(qid);
-      }
-    }
-  }
-
-  _checkCompletion(questId) {
-    const prog = this.progress[questId];
-    if (prog.completed) return;
-    const def = QUEST_CATALOG[questId];
-    const reqs = def.requirements;
-    let allMet = true;
-    if (reqs.collectItem !== undefined) {
-      if ((prog.collectedItems[reqs.collectItem] || 0) < reqs.count) allMet = false;
-    }
-    if (reqs.exploreBiomes !== undefined) {
-      for (const biome of reqs.exploreBiomes) {
-        if (!prog.exploredBiomes.has(biome)) { allMet = false; break; }
-      }
-    }
-    if (reqs.killBoss !== undefined && !prog.bossesKilled.has(reqs.killBoss)) allMet = false;
-    if (reqs.craftItem !== undefined) {
-      if ((prog.craftedItems[reqs.craftItem] || 0) < reqs.count) allMet = false;
-    }
-    if (allMet) this._completeQuest(questId);
-  }
-
-  _completeQuest(questId) {
-    const prog = this.progress[questId];
-    const def = QUEST_CATALOG[questId];
-    prog.completed = true;
-    prog.stage = 1;
-    prog.completedAt = Date.now();
-    this._applyReward(questId, def.reward);
-    this.totalXP += def.difficulty * 100;
-    if (this.callbacks.onQuestComplete) this.callbacks.onQuestComplete(questId);
-  }
-
-  _applyReward(questId, reward) {
-    if (!reward) return;
-    switch (reward.type) {
-      case REWARD_TYPES.ITEM:
-        this.pendingItemRewards = this.pendingItemRewards || [];
-        this.pendingItemRewards.push({ questId, itemId: reward.itemId, count: reward.count });
-        break;
-      case REWARD_TYPES.UNLOCK:
-        this.unlocks.add(reward.unlockId);
-        if (this.callbacks.onUnlock) this.callbacks.onUnlock(questId, reward.unlockId);
-        break;
-      case REWARD_TYPES.XP:
-        this.totalXP += reward.amount || 0;
-        break;
-      case REWARD_TYPES.ACHIEVEMENT:
-        this.achievements.add(reward.achievementId);
-        if (this.callbacks.onAchievement) this.callbacks.onAchievement(questId, reward.achievementId);
-        break;
-    }
-  }
-
-  getProgress(questId) {
-    const prog = this.progress[questId];
-    if (!prog) return null;
-    return {
-      stage: prog.stage, completed: prog.completed, completedAt: prog.completedAt,
-      collectedItems: { ...prog.collectedItems },
-      exploredBiomes: Array.from(prog.exploredBiomes),
-      bossesKilled: Array.from(prog.bossesKilled),
-      craftedItems: { ...prog.craftedItems },
-    };
+  getAllQuests() {
+    return QUEST_REGISTRY.map(q => ({
+      ...q, state: this.worldState[q.id]?.state || QUEST_STATES.LOCKED,
+      progress: this.worldState[q.id]?.progress || {},
+      completed: this.worldState[q.id]?.completed || false,
+      completedAt: this.worldState[q.id]?.completedAt || null,
+    }));
   }
 
   getCurrentQuest() {
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      if (!this.progress[qid].completed) {
-        return { definition: QUEST_CATALOG[qid], progress: this.getProgress(qid) };
+    for (const q of QUEST_REGISTRY) {
+      const qs = this.worldState[q.id];
+      if (qs && (qs.state === QUEST_STATES.AVAILABLE || qs.state === QUEST_STATES.IN_PROGRESS)) {
+        return { ...q, state: qs.state, progress: qs.progress };
       }
     }
     return null;
   }
 
-  getNextQuest(questId) {
-    const def = QUEST_CATALOG[questId];
-    if (!def || !def.nextQuest) return null;
-    return { definition: QUEST_CATALOG[def.nextQuest], progress: this.getProgress(def.nextQuest) };
-  }
-
-  getCompletedQuests() {
-    const completed = [];
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      if (this.progress[qid].completed) {
-        completed.push({ id: qid, name: QUEST_CATALOG[qid].name, completedAt: this.progress[qid].completedAt });
+  getNextObjective(questId) {
+    const quest = this.getQuest(questId);
+    if (!quest) return null;
+    const qs = this.worldState[questId];
+    if (!qs || qs.completed) return null;
+    for (const req of quest.requirements) {
+      const collected = qs.progress[req.item] || 0;
+      if (collected < req.count) {
+        return { item: req.item, needed: req.count, collected, remaining: req.count - collected, description: `${req.item} (${collected}/${req.count})` };
       }
     }
-    return completed;
+    return null;
   }
 
-  getCompletionPercentage() {
-    const total = Object.keys(QUEST_CATALOG).length;
-    const completed = this.getCompletedQuests().length;
-    return Math.round((completed / total) * 100);
+  getProgress(questId) {
+    const qs = this.worldState[questId];
+    if (!qs) return null;
+    const quest = this.getQuest(questId);
+    if (!quest) return null;
+    const objectives = quest.requirements.map(req => ({
+      item: req.item, needed: req.count,
+      collected: qs.progress[req.item] || 0,
+      remaining: Math.max(0, req.count - (qs.progress[req.item] || 0)),
+      met: (qs.progress[req.item] || 0) >= req.count,
+    }));
+    const totalNeeded = objectives.reduce((s, o) => s + o.needed, 0);
+    const totalCollected = objectives.reduce((s, o) => s + o.collected, 0);
+    return { questId, state: qs.state, completed: qs.completed, objectives, totalNeeded, totalCollected, percentage: Math.min(100, totalNeeded > 0 ? (totalCollected / totalNeeded) * 100 : 0) };
   }
 
-  getRequirementProgress(questId) {
-    const prog = this.progress[questId];
-    if (!prog || prog.completed) return { current: 100, required: 100, percentage: 100 };
-    const def = QUEST_CATALOG[questId];
-    const reqs = def.requirements;
-    if (reqs.collectItem !== undefined) {
-      const collected = prog.collectedItems[reqs.collectItem] || 0;
-      return { current: collected, required: reqs.count, percentage: Math.min(100, Math.round((collected / reqs.count) * 100)) };
-    }
-    if (reqs.exploreBiomes !== undefined) {
-      const explored = reqs.exploreBiomes.filter(b => prog.exploredBiomes.has(b)).length;
-      return { current: explored, required: reqs.exploreBiomes.length, percentage: Math.min(100, Math.round((explored / reqs.exploreBiomes.length) * 100)) };
-    }
-    if (reqs.killBoss !== undefined) {
-      const killed = prog.bossesKilled.has(reqs.killBoss) ? 1 : 0;
-      return { current: killed, required: 1, percentage: killed * 100 };
-    }
-    if (reqs.craftItem !== undefined) {
-      const crafted = prog.craftedItems[reqs.craftItem] || 0;
-      return { current: crafted, required: reqs.count, percentage: Math.min(100, Math.round((crafted / reqs.count) * 100)) };
-    }
-    return { current: 0, required: 1, percentage: 0 };
+  startQuest(questId) {
+    const qs = this.worldState[questId];
+    if (!qs || qs.state !== QUEST_STATES.AVAILABLE) return false;
+    qs.state = QUEST_STATES.IN_PROGRESS;
+    if (this.onQuestStart) this.onQuestStart(questId);
+    return true;
   }
 
-  isQuestAvailable(questId) {
-    if (questId === 'Q01') return true;
-    for (const qid of Object.keys(QUEST_CATALOG)) {
-      if (QUEST_CATALOG[qid].nextQuest === questId) return this.progress[qid].completed;
+  addProgress(item, count = 1) {
+    /* Three-pass: identify → apply → check completion */
+    const affectedQuests = [];
+    for (const quest of QUEST_REGISTRY) {
+      const qs = this.worldState[quest.id];
+      if (!qs || qs.completed || qs.state === QUEST_STATES.LOCKED) continue;
+      const req = quest.requirements.find(r => r.item === item);
+      if (!req) continue;
+      if (qs.state === QUEST_STATES.AVAILABLE) {
+        qs.state = QUEST_STATES.IN_PROGRESS;
+        if (this.onQuestStart) this.onQuestStart(quest.id);
+      }
+      const current = qs.progress[item] || 0;
+      const newProgress = Math.min(current + count, req.count);
+      if (newProgress > current) affectedQuests.push({ questId: quest.id, item, newProgress });
     }
-    return false;
+    if (affectedQuests.length === 0) return null;
+    for (const entry of affectedQuests) {
+      this.worldState[entry.questId].progress[entry.item] = entry.newProgress;
+      if (this.onProgressUpdate) this.onProgressUpdate(entry.questId, entry.item, entry.newProgress);
+    }
+    let completedQuests = [];
+    for (const entry of affectedQuests) {
+      if (!completedQuests.some(c => c.questId === entry.questId)) {
+        if (this._checkCompletion(entry.questId)) completedQuests.push(this._completeQuest(entry.questId));
+      }
+    }
+    if (completedQuests.length > 0) this._rebuildChain();
+    return completedQuests.length > 0 ? completedQuests[0] : null;
   }
 
-  hasUnlock(unlockId) { return this.unlocks.has(unlockId); }
-  hasAchievement(achievementId) { return this.achievements.has(achievementId); }
-
-  serialize() {
-    const serialized = {};
-    for (const qid of Object.keys(this.progress)) {
-      const prog = this.progress[qid];
-      serialized[qid] = {
-        stage: prog.stage, completed: prog.completed, completedAt: prog.completedAt,
-        collectedItems: { ...prog.collectedItems },
-        exploredBiomes: Array.from(prog.exploredBiomes),
-        bossesKilled: Array.from(prog.bossesKilled),
-        craftedItems: { ...prog.craftedItems },
-      };
+  _checkCompletion(questId) {
+    const quest = this.getQuest(questId);
+    if (!quest) return false;
+    const qs = this.worldState[questId];
+    if (!qs || qs.completed) return false;
+    for (const req of quest.requirements) {
+      if ((qs.progress[req.item] || 0) < req.count) return false;
     }
+    return true;
+  }
+
+  _completeQuest(questId) {
+    const quest = this.getQuest(questId);
+    if (!quest) return null;
+    const qs = this.worldState[questId];
+    qs.state = QUEST_STATES.COMPLETE;
+    qs.completed = true;
+    qs.completedAt = Date.now();
+    if (this.onTrackerUpdate) this.onTrackerUpdate(questId, QUEST_STATES.COMPLETE);
+    if (this.onQuestComplete) this.onQuestComplete(questId, quest.reward);
+    return { questId, name: quest.name, reward: quest.reward, completedAt: qs.completedAt };
+  }
+
+  isGameComplete() { return this.worldState['quest_25']?.completed === true; }
+  getCompletedCount() { return QUEST_REGISTRY.filter(q => this.worldState[q.id]?.completed).length; }
+  getCompletionPercentage() { return (this.getCompletedCount() / QUEST_REGISTRY.length) * 100; }
+  serialize() { return JSON.parse(JSON.stringify(this.worldState)); }
+  deserialize(data) { if (!data || typeof data !== 'object') return; this.worldState = JSON.parse(JSON.stringify(data)); this._initQuestStates(); this._rebuildChain(); }
+  reset() { this.worldState = {}; this._initQuestStates(); }
+
+  getMarkerPosition(questId, seed) {
+    const quest = this.getQuest(questId);
+    if (!quest || !quest.markerOffset) return null;
+    const hash = this._hashString(seed + questId);
+    return { x: quest.markerOffset.x + ((hash % 10) - 5), y: 64, z: quest.markerOffset.z + (((hash >> 4) % 10) - 5), biome: quest.markerBiome };
+  }
+
+  _hashString(str) { let h = 0; for (let i = 0; i < str.length; i++) { h = ((h << 5) - h) + str.charCodeAt(i); h |= 0; } return Math.abs(h); }
+
+  getQuestsByDungeon() {
     return {
-      worldId: this.worldId, progress: serialized,
-      unlocks: Array.from(this.unlocks), achievements: Array.from(this.achievements),
-      totalXP: this.totalXP, pendingItemRewards: this.pendingItemRewards || [],
+      introduction: QUEST_REGISTRY.filter(q => q.stage >= 1 && q.stage <= 6),
+      dungeon1_forest_warden: QUEST_REGISTRY.filter(q => q.stage >= 7 && q.stage <= 12),
+      dungeon2_lava_titan: QUEST_REGISTRY.filter(q => q.stage >= 13 && q.stage <= 17),
+      dungeon3_frost_serpent: QUEST_REGISTRY.filter(q => q.stage >= 18 && q.stage <= 21),
+      dungeon4_corruption_overlord: QUEST_REGISTRY.filter(q => q.stage >= 22 && q.stage <= 25),
     };
   }
 
-  static deserialize(worldId, data, callbacks = {}) {
-    const tracker = new QuestTracker(worldId, callbacks);
-    if (data.progress) {
-      for (const qid of Object.keys(data.progress)) {
-        const saved = data.progress[qid];
-        if (tracker.progress[qid]) {
-          tracker.progress[qid].stage = saved.stage || 0;
-          tracker.progress[qid].completed = saved.completed || false;
-          tracker.progress[qid].completedAt = saved.completedAt || null;
-          tracker.progress[qid].collectedItems = saved.collectedItems || {};
-          tracker.progress[qid].exploredBiomes = new Set(saved.exploredBiomes || []);
-          tracker.progress[qid].bossesKilled = new Set(saved.bossesKilled || []);
-          tracker.progress[qid].craftedItems = saved.craftedItems || {};
-        }
-      }
-    }
-    if (data.unlocks) tracker.unlocks = new Set(data.unlocks);
-    if (data.achievements) tracker.achievements = new Set(data.achievements);
-    if (data.totalXP !== undefined) tracker.totalXP = data.totalXP;
-    if (data.pendingItemRewards) tracker.pendingItemRewards = data.pendingItemRewards;
-    return tracker;
-  }
-
-  _notifyProgress(questId) {
-    if (this.callbacks.onProgressUpdate) this.callbacks.onProgressUpdate(questId, this.getProgress(questId));
+  getCurrentDungeon() {
+    const c = this.getCompletedCount();
+    if (c < 6) return 'introduction';
+    if (c < 12) return 'dungeon1_forest_warden';
+    if (c < 17) return 'dungeon2_lava_titan';
+    if (c < 21) return 'dungeon3_frost_serpent';
+    if (c < 24) return 'dungeon4_corruption_overlord';
+    return 'final_boss';
   }
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { QUEST_TYPES, QUEST_DIFFICULTY, REWARD_TYPES, QUEST_CATALOG, BOSS_DEFINITIONS, QuestTracker };
+  module.exports = { QUEST_TYPES, REWARD_TYPES, QUEST_STATES, QUEST_REGISTRY, QuestSystem };
 }

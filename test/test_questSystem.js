@@ -1,290 +1,221 @@
 #!/usr/bin/env node
-/**
- * Cuubz - Quest System Tests (NEW)
- * Tests quest data structures, progression chain, completion logic, serialization, and edge cases.
- */
-
 'use strict';
 
-const { QUEST_TYPES, QUEST_DIFFICULTY, REWARD_TYPES, QUEST_CATALOG, BOSS_DEFINITIONS, QuestTracker } = require('../js/systems/questSystem');
+let passCount = 0, failCount = 0;
+const failures = [];
 
-let passed = 0, failed = 0;
-function assert(cond, msg) { if (cond) passed++; else { failed++; console.error('  FAIL: ' + msg); } }
+function assert(c, m) { if (c) { passCount++; console.log(`  ✅ ${m}`); } else { failCount++; failures.push(m); console.log(`  ❌ ${m}`); } }
+function assertEquals(a, e, m) { assert(a === e, `${m}: expected ${e}, got ${a}`); }
+function assertTrue(c, m) { assert(c === true, m); }
+function assertFalse(c, m) { assert(c === false, m); }
+function assertNotNull(v, m) { assert(v !== null && v !== undefined, m); }
+function assertGreaterThan(a, t, m) { assert(a > t, `${m}: expected > ${t}, got ${a}`); }
 
-console.log('Quest System Tests\n==================\n');
+const { QUEST_TYPES, REWARD_TYPES, QUEST_STATES, QUEST_REGISTRY, QuestSystem } = require('../js/systems/questSystem.js');
 
-// Constants & Enums
+console.log('Quest System Tests');
+console.log('==================\n');
+
+// Test 1: Constants & Enums
 console.log('--- Constants & Enums ---');
-assert(Object.keys(QUEST_TYPES).length === 7, 'QUEST_TYPES has 7 types');
-assert(QUEST_TYPES.COLLECT === 'collect', 'COLLECT type value');
-assert(QUEST_TYPES.EXPLORE === 'explore', 'EXPLORE type value');
-assert(QUEST_TYPES.KILL === 'kill', 'KILL type value');
-assert(QUEST_TYPES.CRAFT === 'craft', 'CRAFT type value');
-assert(QUEST_TYPES.PLACE === 'place', 'PLACE type value');
-assert(QUEST_TYPES.DIALOGUE === 'dialogue', 'DIALOGUE type value');
-assert(QUEST_TYPES.BOSS === 'boss', 'BOSS type value');
+assertEquals(6, Object.keys(QUEST_TYPES).length, 'QUEST_TYPES has 6 types');
+assertEquals('collect', QUEST_TYPES.COLLECT, 'COLLECT type');
+assertEquals('kill', QUEST_TYPES.KILL, 'KILL type');
+assertEquals('explore', QUEST_TYPES.EXPLORE, 'EXPLORE type');
+assertEquals('craft', QUEST_TYPES.CRAFT, 'CRAFT type');
+assertEquals('deliver', QUEST_TYPES.DELIVER, 'DELIVER type');
+assertEquals('boss', QUEST_TYPES.BOSS, 'BOSS type');
+assertEquals(5, Object.keys(REWARD_TYPES).length, 'REWARD_TYPES has 5 types');
+assertEquals(4, Object.keys(QUEST_STATES).length, 'QUEST_STATES has 4 states');
+assertEquals('locked', QUEST_STATES.LOCKED, 'LOCKED state');
+assertEquals('available', QUEST_STATES.AVAILABLE, 'AVAILABLE state');
+assertEquals('in_progress', QUEST_STATES.IN_PROGRESS, 'IN_PROGRESS state');
+assertEquals('complete', QUEST_STATES.COMPLETE, 'COMPLETE state');
 
-assert(Object.keys(QUEST_DIFFICULTY).length === 5, 'QUEST_DIFFICULTY has 5 levels');
-assert(QUEST_DIFFICULTY.TRIVIAL === 1, 'TRIVIAL = 1');
-assert(QUEST_DIFFICULTY.EASY === 2, 'EASY = 2');
-assert(QUEST_DIFFICULTY.MEDIUM === 3, 'MEDIUM = 3');
-assert(QUEST_DIFFICULTY.HARD === 4, 'HARD = 4');
-assert(QUEST_DIFFICULTY.LEGENDARY === 5, 'LEGENDARY = 5');
+// Test 2: Quest Registry
+console.log('\n--- Quest Registry ---');
+assertEquals(25, QUEST_REGISTRY.length, 'Registry has 25 quests');
+let allHaveFields = true;
+for (const q of QUEST_REGISTRY) { if (!q.id || !q.name || !q.description || !q.type || !q.requirements || !q.reward || !Array.isArray(q.requirements) || q.requirements.length === 0) allHaveFields = false; }
+assertTrue(allHaveFields, 'All quests have required fields');
+assertEquals(25, new Set(QUEST_REGISTRY.map(q => q.id)).size, 'All quest IDs unique');
+const stages = QUEST_REGISTRY.map(q => q.stage).sort((a,b) => a-b);
+assertEquals([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25].join(','), stages.join(','), 'Stages sequential 1-25');
+const tc = {}; QUEST_REGISTRY.forEach(q => { tc[q.type] = (tc[q.type]||0)+1; });
+assertGreaterThan(tc['collect']||0, 3, 'Multiple COLLECT quests');
+assertGreaterThan(tc['boss']||0, 2, 'Multiple BOSS quests');
+assertTrue(QUEST_REGISTRY.filter(q=>q.type===QUEST_TYPES.BOSS).every(q=>q.bossId), 'All BOSS quests have bossId');
+for (let i=0; i<QUEST_REGISTRY.length-1; i++) { const q=QUEST_REGISTRY[i]; if(q.reward.type===REWARD_TYPES.UNLOCK_QUEST) assertEquals(QUEST_REGISTRY[i+1].id, q.reward.target, `Quest ${q.id} unlocks next`); }
 
-assert(Object.keys(REWARD_TYPES).length === 4, 'REWARD_TYPES has 4 types');
-assert(REWARD_TYPES.ITEM === 'item', 'ITEM reward type');
-assert(REWARD_TYPES.UNLOCK === 'unlock', 'UNLOCK reward type');
-assert(REWARD_TYPES.XP === 'xp', 'XP reward type');
-assert(REWARD_TYPES.ACHIEVEMENT === 'achievement', 'ACHIEVEMENT reward type');
+// Test 3: Constructor & Init
+console.log('\n--- Constructor & Initialization ---');
+const qs1 = new QuestSystem({});
+assertNotNull(qs1, 'Creates instance');
+assertEquals(0, qs1.getCompletedCount(), '0 completed at start');
+assertFalse(qs1.isGameComplete(), 'Not complete at start');
+assertEquals('quest_01', qs1.getCurrentQuest().id, 'First quest is current');
+assertEquals(QUEST_STATES.AVAILABLE, qs1.worldState['quest_01'].state, 'Quest 1 AVAILABLE');
+for (let i=1; i<qs1.getAllQuests().length; i++) assertEquals(QUEST_STATES.LOCKED, qs1.getAllQuests()[i].state, `Quest ${i+1} LOCKED`);
 
-// Quest Catalog Structure
-console.log('\n--- Quest Catalog Structure ---');
-assert(Object.keys(QUEST_CATALOG).length === 25, 'Exactly 25 quests defined');
-for (let i = 1; i <= 25; i++) {
-  const qid = 'Q' + String(i).padStart(2, '0');
-  assert(QUEST_CATALOG[qid] !== undefined, 'Quest ' + qid + ' exists');
-}
-for (const qid of Object.keys(QUEST_CATALOG)) {
-  const q = QUEST_CATALOG[qid];
-  assert(typeof q.id === 'string', qid + ' has id');
-  assert(typeof q.name === 'string' && q.name.length > 0, qid + ' has name');
-  assert(typeof q.description === 'string' && q.description.length > 0, qid + ' has description');
-  assert(typeof q.type === 'string', qid + ' has type');
-  assert(typeof q.difficulty === 'number' && q.difficulty >= 1 && q.difficulty <= 5, qid + ' difficulty valid');
-  assert(typeof q.requirements === 'object', qid + ' has requirements');
-  assert(typeof q.reward === 'object', qid + ' has reward');
-  assert(typeof q.nextQuest === 'string' || q.nextQuest === null, qid + ' nextQuest valid');
-  assert(typeof q.markerBiome === 'string', qid + ' has markerBiome');
-}
-assert(QUEST_CATALOG.Q25.nextQuest === null, 'Q25 is final quest');
-for (let i = 1; i <= 24; i++) {
-  const cur = 'Q' + String(i).padStart(2, '0');
-  const nxt = 'Q' + String(i + 1).padStart(2, '0');
-  assert(QUEST_CATALOG[cur].nextQuest === nxt, cur + ' chains to ' + nxt);
-}
+// Test 4: Progression Chain
+console.log('\n--- Progression Chain ---');
+const qs2 = new QuestSystem({});
+assertTrue(qs2.startQuest('quest_01'), 'Can start quest_01');
+assertEquals(QUEST_STATES.IN_PROGRESS, qs2.worldState['quest_01'].state, 'IN_PROGRESS after start');
+qs2.addProgress('wood_log', 5);
+qs2.addProgress('dirt', 10);
+assertEquals(QUEST_STATES.COMPLETE, qs2.worldState['quest_01'].state, 'Auto-completes');
+assertTrue(qs2.worldState['quest_01'].completed, 'completed flag set');
+assertNotNull(qs2.worldState['quest_01'].completedAt, 'Has completedAt');
+assertEquals(QUEST_STATES.AVAILABLE, qs2.worldState['quest_02'].state, 'Quest 2 unlocked');
+assertEquals(1, qs2.getCompletedCount(), 'Exactly 1 completed');
 
-// Boss Definitions
-console.log('\n--- Boss Definitions ---');
-assert(Object.keys(BOSS_DEFINITIONS).length === 5, '5 bosses defined');
-const bossIds = ['forest_guardian', 'sand_wraith', 'frost_titan', 'corruption_overlord', 'world_ender'];
-for (const bid of bossIds) {
-  assert(BOSS_DEFINITIONS[bid] !== undefined, 'Boss ' + bid + ' defined');
-  const b = BOSS_DEFINITIONS[bid];
-  assert(typeof b.name === 'string' && b.name.length > 0, bid + ' has name');
-  assert(typeof b.health === 'number' && b.health > 0, bid + ' health > 0');
-  assert(typeof b.attackDamage === 'number' && b.attackDamage > 0, bid + ' attackDamage > 0');
-  assert(typeof b.phases === 'number' && b.phases >= 2, bid + ' phases >= 2');
-  assert(Array.isArray(b.attacks) && b.attacks.length > 0, bid + ' has attacks');
-  for (const atk of b.attacks) {
-    assert(typeof atk.name === 'string', bid + ' attack has name');
-    assert(typeof atk.damage === 'number', bid + ' attack has damage');
-    assert(typeof atk.cooldown === 'number' && atk.cooldown > 0, bid + ' attack cooldown > 0');
-    assert(typeof atk.range === 'number' && atk.range >= 0, bid + ' attack range >= 0');
-  }
-}
-const bossOrder = ['forest_guardian', 'sand_wraith', 'frost_titan', 'corruption_overlord', 'world_ender'];
-for (let i = 1; i < bossOrder.length; i++) {
-  assert(BOSS_DEFINITIONS[bossOrder[i]].health > BOSS_DEFINITIONS[bossOrder[i-1]].health, 'Boss health scales');
-}
+// Test 5: addProgress partial
+console.log('\n--- Partial Progress ---');
+const qs3 = new QuestSystem({});
+qs3.startQuest('quest_01');
+assertFalse(qs3.addProgress('wood_log', 3) !== null, 'Partial progress returns null');
+assertEquals(3, qs3.getProgress('quest_01').objectives.find(o=>o.item==='wood_log').collected, 'Collected 3 wood_logs');
+qs3.addProgress('wood_log', 2); // Now 5/5
+assertTrue(qs3.getProgress('quest_01').objectives.find(o=>o.item==='wood_log').met, 'Wood log requirement met');
+assertFalse(qs3.worldState['quest_01'].completed, 'Still needs dirt');
+assertTrue(qs3.addProgress('dirt', 10) !== null, 'Final items complete quest');
+assertEquals(QUEST_STATES.COMPLETE, qs3.worldState['quest_01'].state, 'Complete after all requirements met');
 
-// QuestTracker Construction
-console.log('\n--- QuestTracker Construction ---');
-const tr = new QuestTracker('test-world');
-assert(tr.worldId === 'test-world', 'World ID set');
-assert(Object.keys(tr.progress).length === 25, 'All 25 quests initialized');
-assert(tr.totalXP === 0, 'Starting XP is 0');
-assert(tr.unlocks.size === 0, 'No initial unlocks');
-assert(tr.achievements.size === 0, 'No initial achievements');
-for (const qid of Object.keys(QUEST_CATALOG)) {
-  const p = tr.progress[qid];
-  assert(p.stage === 0 && !p.completed && p.completedAt === null, qid + ' starts incomplete');
-}
+// Test 6: Progress Capping
+console.log('\n--- Progress Capping ---');
+const qs4 = new QuestSystem({});
+qs4.startQuest('quest_01');
+qs4.addProgress('wood_log', 100);
+assertEquals(5, qs4.getProgress('quest_01').objectives.find(o=>o.item==='wood_log').collected, 'Capped at 5');
 
-// Static Methods
-console.log('\n--- Static Methods ---');
-assert(QuestTracker.getQuestDefinition('Q01') !== null, 'getQuestDefinition Q01');
-assert(QuestTracker.getQuestDefinition('Q99') === null, 'getQuestDefinition invalid returns null');
-assert(QuestTracker.getAllQuests().length === 25, 'getAllQuests returns 25');
-assert(QuestTracker.getQuestCount() === 25, 'getQuestCount returns 25');
+// Test 7: Auto-Start
+console.log('\n--- Auto-Start ---');
+const qs5 = new QuestSystem({});
+qs5.startQuest('quest_01'); qs5.addProgress('wood_log', 5); qs5.addProgress('dirt', 10);
+assertEquals(QUEST_STATES.AVAILABLE, qs5.worldState['quest_02'].state, 'Quest 2 unlocked');
+qs5.addProgress('planks', 5);
+assertEquals(QUEST_STATES.IN_PROGRESS, qs5.worldState['quest_02'].state, 'Auto-started on relevant item');
 
-// Q01: Explore Plains
-console.log('\n--- Q01: Explore Plains ---');
-const t1 = new QuestTracker('q01');
-assert(!t1.progress.Q01.completed, 'Q01 not complete initially');
-t1.recordBiomeExplored('Plains');
-assert(t1.progress.Q01.completed, 'Q01 completes after exploring Plains');
-assert(t1.progress.Q01.stage === 1, 'Q01 stage advances');
-assert(t1.progress.Q01.completedAt !== null, 'Q01 has timestamp');
-const r1 = t1.pendingItemRewards.find(r => r.questId === 'Q01');
-assert(r1 && r1.itemId === 'apple' && r1.count === 3, 'Q01 reward: 3 apples');
+// Test 8: getCurrentQuest & getNextObjective
+console.log('\n--- getCurrentQuest & getNextObjective ---');
+const qs6 = new QuestSystem({});
+qs6.startQuest('quest_01');
+assertEquals('quest_01', qs6.getCurrentQuest().id, 'Current quest correct');
+const obj = qs6.getNextObjective('quest_01');
+assertNotNull(obj, 'Has objective');
+assertEquals('wood_log', obj.item, 'Next item wood_log');
+assertEquals(5, obj.needed, 'Need 5');
+assertEquals(0, obj.collected, 'Collected 0');
+qs6.addProgress('wood_log', 3);
+assertEquals(3, qs6.getNextObjective('quest_01').collected, 'Shows 3 collected');
 
-// Q02: Collect Wood Logs
-console.log('\n--- Q02: Collect Items ---');
-const t2 = new QuestTracker('q02');
-t2.recordBiomeExplored('Plains'); // Complete Q01
-assert(!t2.progress.Q02.completed, 'Q02 not complete initially');
-t2.recordItemCollected('wood_log', 5);
-assert(!t2.progress.Q02.completed, 'Q02 needs 10, only 5 collected');
-const rp = t2.getRequirementProgress('Q02');
-assert(rp.current === 5 && rp.required === 10 && rp.percentage === 50, 'Q02 progress 50%');
-t2.recordItemCollected('wood_log', 5);
-assert(t2.progress.Q02.completed, 'Q02 completes with 10/10');
+// Test 9: getProgress Report
+console.log('\n--- getProgress Report ---');
+const qs7 = new QuestSystem({});
+qs7.startQuest('quest_01'); qs7.addProgress('wood_log', 3); qs7.addProgress('dirt', 5);
+const report = qs7.getProgress('quest_01');
+assertEquals(15, report.totalNeeded, 'Total needed = 15');
+assertEquals(8, report.totalCollected, 'Total collected = 8');
+assertGreaterThan(report.percentage, 50, 'Percentage ~53%');
 
-// Q03: Collect Stone
-console.log('\n--- Q03: Collect Stone ---');
-const t3 = new QuestTracker('q03');
-t3.recordBiomeExplored('Plains'); t3.recordItemCollected('wood_log', 10);
-assert(!t3.progress.Q03.completed, 'Q03 not complete initially');
-t3.recordItemCollected('stone', 7);
-assert(!t3.progress.Q03.completed, 'Q03 needs 20, only 7');
-t3.recordItemCollected('stone', 13);
-assert(t3.progress.Q03.completed, 'Q03 completes with 20/20');
-assert(t3.hasUnlock('stone_tools'), 'Q03 grants stone_tools unlock');
-
-// Q04: Craft Bed
-console.log('\n--- Q04: Craft Item ---');
-const t4 = new QuestTracker('q04');
-t4.recordBiomeExplored('Plains'); t4.recordItemCollected('wood_log', 10); t4.recordItemCollected('stone', 20);
-assert(!t4.progress.Q04.completed, 'Q04 not complete initially');
-t4.recordItemCrafted('bed', 1);
-assert(t4.progress.Q04.completed, 'Q04 completes after crafting bed');
-
-// Q07: Explore Corrupt
-console.log('\n--- Q07: Explore Corrupt ---');
-const t7 = new QuestTracker('q07');
-t7.recordBiomeExplored('Plains'); t7.recordItemCollected('wood_log', 10);
-t7.recordItemCollected('stone', 20); t7.recordItemCrafted('bed', 1);
-t7.recordItemCollected('coal_ore', 10); t7.recordItemCollected('iron_ore', 15);
-assert(!t7.progress.Q07.completed, 'Q07 not complete initially');
-t7.recordBiomeExplored('Corrupt');
-assert(t7.progress.Q07.completed, 'Q07 completes after exploring Corrupt');
-
-// Q09: Multi-requirement
-console.log('\n--- Q09: Multi-requirement ---');
-const t9 = new QuestTracker('q09');
-t9.recordBiomeExplored('Plains'); t9.recordItemCollected('wood_log', 10);
-t9.recordItemCollected('stone', 20); t9.recordItemCrafted('bed', 1);
-t9.recordItemCollected('coal_ore', 10); t9.recordItemCollected('iron_ore', 15);
-t9.recordBiomeExplored('Corrupt'); t9.recordItemCollected('apple', 10);
-assert(!t9.progress.Q09.completed, 'Q09 not complete initially');
-t9.recordBiomeExplored('Corrupt'); // Already explored but record again
-t9.recordItemCollected('corrupt_crystal', 1);
-assert(!t9.progress.Q09.completed, 'Q09 needs 3 crystals, only 1');
-t9.recordItemCollected('corrupt_crystal', 2);
-assert(t9.progress.Q09.completed, 'Q09 completes with 3/3 + Corrupt explored');
-
-// Q11: Boss Kill
-console.log('\n--- Q11: Boss Kill ---');
-const t11 = new QuestTracker('q11');
-t11.recordBiomeExplored('Plains'); t11.recordItemCollected('wood_log', 10);
-t11.recordItemCollected('stone', 20); t11.recordItemCrafted('bed', 1);
-t11.recordItemCollected('coal_ore', 10); t11.recordItemCollected('iron_ore', 15);
-t11.recordBiomeExplored('Corrupt'); t11.recordItemCollected('apple', 10);
-t11.recordItemCollected('corrupt_crystal', 5); t11.recordItemCollected('quest_key', 3);
-assert(!t11.progress.Q11.completed, 'Q11 not complete initially');
-t11.recordBossKilled('forest_guardian');
-assert(t11.progress.Q11.completed, 'Q11 completes after boss kill');
-assert(t11.progress.Q11.bossesKilled.has('forest_guardian'), 'Boss recorded');
-
-// Quest Availability
-console.log('\n--- Quest Availability ---');
-const ta = new QuestTracker('avail');
-assert(ta.isQuestAvailable('Q01'), 'Q01 always available');
-assert(!ta.isQuestAvailable('Q02'), 'Q02 not available yet');
-ta.recordBiomeExplored('Plains');
-assert(ta.isQuestAvailable('Q02'), 'Q02 available after Q01');
-
-// getCurrentQuest
-console.log('\n--- getCurrentQuest ---');
-const tc = new QuestTracker('curr');
-let cq = tc.getCurrentQuest();
-assert(cq && cq.definition.id === 'Q01', 'First quest is Q01');
-tc.recordBiomeExplored('Plains');
-cq = tc.getCurrentQuest();
-assert(cq && cq.definition.id === 'Q02', 'Advances to Q02');
-
-// getCompletionPercentage
-console.log('\n--- getCompletionPercentage ---');
-const tp = new QuestTracker('pct');
-assert(tp.getCompletionPercentage() === 0, 'Starts at 0%');
-tp.recordBiomeExplored('Plains');
-assert(tp.getCompletionPercentage() > 0, '>0% after Q01 complete');
-
-// getCompletedQuests
-console.log('\n--- getCompletedQuests ---');
-const td = new QuestTracker('done');
-td.recordBiomeExplored('Plains');
-const done = td.getCompletedQuests();
-assert(Array.isArray(done) && done.length >= 1, 'Returns array with completed quests');
-assert(done.some(q => q.id === 'Q01'), 'Q01 in list');
-
-// Callbacks
-console.log('\n--- Callbacks ---');
-let cbFired = false, cbData = null;
-const tcb = new QuestTracker('cb', {
-  onQuestComplete(id) { cbFired = true; },
-  onProgressUpdate(id, data) { cbData = id; },
-});
-tcb.recordBiomeExplored('Plains');
-assert(cbFired, 'onQuestComplete fired');
-assert(cbData === 'Q01', 'onProgressUpdate fired for Q01');
-
-// Serialization
+// Test 10: Serialization
 console.log('\n--- Serialization ---');
-const ts = new QuestTracker('ser');
-ts.recordBiomeExplored('Plains'); ts.recordItemCollected('wood_log', 7);
-const sd = ts.serialize();
-assert(sd.worldId === 'ser', 'worldId serialized');
-assert(sd.progress.Q01.completed, 'Q01 completed serialized');
-assert(sd.progress.Q02.collectedItems.wood_log === 7, 'Partial progress serialized');
+const qs8 = new QuestSystem({});
+qs8.startQuest('quest_01'); qs8.addProgress('wood_log', 5); qs8.addProgress('dirt', 10);
+assertEquals(1, qs8.getCompletedCount(), '1 completed before serialize');
+const serialized = qs8.serialize();
+assertTrue(serialized['quest_01'].completed, 'Serialized quest complete');
+const qs9 = new QuestSystem({}, {});
+qs9.deserialize(serialized);
+assertEquals(1, qs9.getCompletedCount(), 'Deserialized: 1 completed');
+assertEquals(QUEST_STATES.COMPLETE, qs9.worldState['quest_01'].state, 'State preserved');
+assertEquals(QUEST_STATES.AVAILABLE, qs9.worldState['quest_02'].state, 'Chain rebuilt');
 
-const tds = QuestTracker.deserialize('ser', sd);
-assert(tds.progress.Q01.completed, 'Q01 restored');
-assert(tds.progress.Q02.collectedItems.wood_log === 7, 'Progress restored');
-assert(!tds.progress.Q02.completed, 'Incomplete quest stays incomplete');
+// Test 11: Callbacks
+console.log('\n--- Callbacks ---');
+let cb = { s: 0, c: 0, p: 0 };
+const qs10 = new QuestSystem({}, { onQuestStart: ()=>cb.s++, onQuestComplete: ()=>cb.c++, onProgressUpdate: ()=>cb.p++ });
+qs10.startQuest('quest_01'); assertEquals(1, cb.s, 'onQuestStart fired');
+cb.p = 0; qs10.addProgress('wood_log', 5); assertGreaterThan(cb.p, 0, 'onProgressUpdate fired');
+const beforeC = cb.c; qs10.addProgress('dirt', 10); assertEquals(beforeC+1, cb.c, 'onQuestComplete fired');
 
-let cbRestored = false;
-const tds2 = QuestTracker.deserialize('ser', sd, { onQuestComplete() { cbRestored = true; } });
-tds2.recordItemCollected('wood_log', 3);
-assert(cbRestored, 'Callbacks work on deserialized tracker');
+// Test 12: Game Completion
+console.log('\n--- Game Completion ---');
+const qs11 = new QuestSystem({});
+assertFalse(qs11.isGameComplete(), 'Not complete at start');
+assertEquals(0, qs11.getCompletionPercentage(), '0% at start');
+QUEST_REGISTRY.forEach(q => { qs11.worldState[q.id] = { state: QUEST_STATES.COMPLETE, completed: true, completedAt: Date.now(), progress: {} }; });
+assertTrue(qs11.isGameComplete(), 'All complete = game complete');
+assertEquals(100, qs11.getCompletionPercentage(), '100% completion');
 
-// Edge Cases
+// Test 13: Reset
+console.log('\n--- Reset ---');
+const qs12 = new QuestSystem({});
+qs12.startQuest('quest_01'); qs12.addProgress('wood_log', 5); qs12.addProgress('dirt', 10);
+assertEquals(1, qs12.getCompletedCount(), '1 before reset');
+qs12.reset();
+assertEquals(0, qs12.getCompletedCount(), 'Reset clears progress');
+assertEquals(QUEST_STATES.AVAILABLE, qs12.worldState['quest_01'].state, 'Quest 1 available after reset');
+
+// Test 14: Marker Positions
+console.log('\n--- Marker Positions ---');
+const qs13 = new QuestSystem({});
+const m1 = qs13.getMarkerPosition('quest_01', 'seed123');
+assertNotNull(m1, 'Has marker position');
+assertEquals('plains', m1.biome, 'Correct biome');
+const m2 = qs13.getMarkerPosition('quest_01', 'seed123');
+assertEquals(m1.x, m2.x, 'Deterministic x');
+assertEquals(m1.z, m2.z, 'Deterministic z');
+assertEquals(null, qs13.getMarkerPosition('nonexistent', 'seed'), 'Null for nonexistent');
+
+// Test 15: Dungeon Grouping
+console.log('\n--- Dungeon Grouping ---');
+const qs14 = new QuestSystem({});
+const dungeons = qs14.getQuestsByDungeon();
+assertEquals(6, dungeons.introduction.length, 'Intro: 6 quests');
+assertEquals(6, dungeons.dungeon1_forest_warden.length, 'D1: 6 quests');
+assertEquals(5, dungeons.dungeon2_lava_titan.length, 'D2: 5 quests');
+assertEquals(4, dungeons.dungeon3_frost_serpent.length, 'D3: 4 quests');
+assertEquals(4, dungeons.dungeon4_corruption_overlord.length, 'D4: 4 quests');
+assertEquals('introduction', qs14.getCurrentDungeon(), 'Start in intro');
+
+// Test 16: Edge Cases
 console.log('\n--- Edge Cases ---');
-const te = new QuestTracker('edge');
-te.recordItemCollected('wood_log', 0);
-assert(te.progress.Q02.collectedItems.wood_log === undefined, 'Zero count ignored');
-te.recordItemCollected('wood_log', -5);
-assert(te.progress.Q02.collectedItems.wood_log === undefined, 'Negative count ignored');
-te.recordItemCrafted('bed', 0);
-assert(te.progress.Q04.craftedItems.bed === undefined, 'Zero craft ignored');
-assert(te.getProgress('Q99') === null, 'Invalid questId returns null');
+const qs15 = new QuestSystem({});
+assertFalse(qs15.startQuest('quest_02'), 'Cannot start locked quest');
+qs15.startQuest('quest_01'); assertFalse(qs15.startQuest('quest_01'), 'Cannot restart in_progress');
 
-// Immutability
-console.log('\n--- Immutability ---');
-const ti = new QuestTracker('imm');
-ti.recordBiomeExplored('Plains');
-const p1 = ti.getProgress('Q01');
-p1.completed = false;
-assert(ti.getProgress('Q01').completed, 'getProgress returns copy');
+const qs16 = new QuestSystem({});
+qs16.startQuest('quest_01');
+assertFalse(qs16.addProgress('nonexistent_item', 99) !== null, 'Non-existent item returns null');
+assertEquals(null, qs16.getProgress('nonexistent'), 'Null progress for nonexistent quest');
+assertEquals(null, qs16.getQuest('nonexistent'), 'Null quest for nonexistent id');
 
-// getNextQuest
-console.log('\n--- getNextQuest ---');
-const tn = new QuestTracker('next');
-tn.recordBiomeExplored('Plains');
-const nq = tn.getNextQuest('Q01');
-assert(nq && nq.definition.id === 'Q02', 'Next after Q01 is Q02');
-assert(tn.getNextQuest('Q25') === null, 'Q25 has no next');
+qs16.addProgress('wood_log', 5); qs16.addProgress('dirt', 10);
+assertEquals(null, qs16.getNextObjective('quest_01'), 'Null objective for completed quest');
 
-// World Ender Boss
-console.log('\n--- World Ender ---');
-const we = BOSS_DEFINITIONS.world_ender;
-assert(we.health === 2500 && we.phases === 5, 'World Ender stats correct');
-assert(we.attacks.find(a => a.type === 'ultimate'), 'Has ultimate attack');
+const qs17 = new QuestSystem({});
+qs17.deserialize(null); assertEquals(QUEST_STATES.AVAILABLE, qs17.worldState['quest_01'].state, 'Deserialize null OK');
 
-// Summary
-console.log('\n--- Results ---');
-console.log('  Passed: ' + passed);
-console.log('  Failed: ' + failed);
-console.log('  Total: ' + (passed + failed));
-if (failed > 0) { console.error('\nSome tests FAILED'); process.exit(1); }
-else { console.log('\nAll quest system tests passed!'); process.exit(0); }
+// Test 17: Multi-Quest Progression
+console.log('\n--- Multi-Quest Progression ---');
+const qs18 = new QuestSystem({});
+function completeQ(qs, id) { const q=qs.getQuest(id); if(!q)return; if(qs.worldState[id].state===QUEST_STATES.AVAILABLE) qs.startQuest(id); for(const r of q.requirements) qs.addProgress(r.item, r.count); }
+completeQ(qs18, 'quest_01'); assertEquals(QUEST_STATES.COMPLETE, qs18.worldState['quest_01'].state, 'Q1 complete');
+completeQ(qs18, 'quest_02'); assertEquals(QUEST_STATES.COMPLETE, qs18.worldState['quest_02'].state, 'Q2 complete');
+assertEquals(2, qs18.getCompletedCount(), '2 completed');
+assertEquals('quest_03', qs18.getCurrentQuest().id, 'Current is quest_03');
+
+// Test 18: Three-Pass Prevents Cascading
+console.log('\n--- Three-Pass addProgress ---');
+const qs19 = new QuestSystem({});
+qs19.startQuest('quest_01');
+assertFalse(qs19.addProgress('wood_log', 5) !== null, 'Partial does not complete');
+assertFalse(qs19.worldState['quest_01'].completed, 'Still in progress');
+assertTrue(qs19.addProgress('dirt', 10) !== null, 'Final requirement completes quest');
+
+console.log('\n========================');
+console.log(`Results: ${passCount} passed, ${failCount} failed`);
+if (failCount > 0) { console.log('\nFailures:'); failures.forEach(f => console.log(`  - ${f}`)); process.exit(1); }
+else { console.log('🎉 All quest system tests passing!'); process.exit(0); }

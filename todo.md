@@ -411,13 +411,16 @@ webgame-cuubz/
   - [x] Quest tracker UI hooks: getCurrentQuest, getNextQuest, getProgress
   - [x] Quest completion logic and progression chain (Q01→Q25)
   - [x] 25 quests defined across 4 dungeons + final boss
-  - [x] Boss definitions: forest_guardian, sand_wraith, frost_titan, corruption_overlord, world_ender
-  - [x] Requirement types: COLLECT, EXPLORE, KILL, CRAFT, PLACE, DIALOGUE, BOSS
-  - [x] Reward types: ITEM, UNLOCK, XP, ACHIEVEMENT
+  - [x] Boss definitions: forest_warden, lava_titan, frost_serpent, corruption_overlord, final_seal
+  - [x] Requirement types: COLLECT, KILL, EXPLORE, CRAFT, DELIVER, BOSS
+  - [x] Reward types: ITEM, UNLOCK_QUEST, UNLOCK_AREA, XP, TITLE
   - [x] Serialization/deserialization for persistence round-trips
-  - [x] Callback system: onQuestComplete, onProgressUpdate, onUnlock, onAchievement
-  - [x] Quest availability checking (previous quest must complete first)
-  - [x] 486 tests passing — constants, catalog structure, boss definitions, tracker construction, static methods, Q01-Q11 progression, callbacks, serialization round-trip, edge cases
+  - [x] Callback system: onQuestComplete, onQuestStart, onProgressUpdate, onTrackerUpdate
+  - [x] Quest availability chain (previous quest must complete first)
+  - [x] Marker position calculation with seed-based deterministic placement
+  - [x] Dungeon grouping + getCurrentDungeon progress tracking
+  - [x] Three-pass addProgress prevents cascading completions
+  - [x] 137 tests passing — constants, registry structure, boss definitions, constructor/init, progression chain, partial progress, capping, auto-start, objectives, progress reports, serialization round-trip, callbacks, game completion, reset, markers, dungeon grouping, edge cases, multi-quest progression
 - [ ] **Implement quest markers** — `js/entities/questMarker.js`
   - [ ] Glowing post/entity in world at quest target locations
   - [ ] Visible from distance (particle effect or beacon)
