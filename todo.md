@@ -684,9 +684,23 @@ webgame-cuubz/
   - [x] 155 tests passing across 12 test groups — constructor, status logic, session rendering, player rendering, form validation, tab switching, HTML escape, state machine, health bar edge cases, display formatting, error handling, multiplayer constraints
 
 ### Phase 2 Testing (Browser Automation)
-- [ ] **Test: Server starts** — Launch relay server, check ports
-  - [ ] Matchmaking port accepting connections
-  - [ ] Game session ready for hosting
+- [x] **Test: Server starts** — Launch relay server, check ports (48 assertions via test_serverIntegration.js)
+  - [x] Matchmaking port accepting connections
+  - [x] Game session ready for hosting
+  - [x] Health endpoint returns ok with session count
+  - [x] WELCOME message on connect with valid playerId
+  - [x] HOST creates session with sessionId + sessionPort
+  - [x] BROWSE lists active sessions correctly
+  - [x] JOIN routes to correct session port via matchmaking
+  - [x] Game session WELCOME includes players list
+  - [x] Movement relayed between players (PLAYER_MOVE broadcast)
+  - [x] Valid block break/place relayed, invalid rejected with ERROR
+  - [x] Heartbeat keepalive tracked server-side
+  - [x] Max player enforcement (5th player rejected: "Session is full")
+  - [x] PLAYER_LEFT broadcast on disconnect
+  - [x] Inventory sync relayed to all players (INVENTORY_SYNC)
+  - [x] HTTP /health and /sessions endpoints functional
+  - [x] Edge cases: invalid JSON, unknown message type, missing fields, nonexistent session, LEAVE
 - [ ] **Test: Session discovery** — Create session, browse from client
   - [ ] Host session appears in browser list
   - [ ] Join connects to game session successfully
