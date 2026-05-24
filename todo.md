@@ -530,10 +530,10 @@ webgame-cuubz/
   - [x] Full integration: KeyboardInput → Player update → World collision pipeline
   - [x] Sprint multiplier increases speed, stamina depletion via SurvivalSystem
   - [x] Edge cases: world bounds clamp, respawn reset, meter clamping during update
-- [ ] **Test: Block interaction** — Crosshair targeting + break/place
-  - [ ] Target block highlighted, breaks on click
-  - [ ] Place block on correct face
-  - [ ] Broken blocks added to inventory
+- [x] **Test: Block interaction** — Crosshair targeting + break/place (85 assertions via test_blockInteraction.js)
+  - [x] Target block highlighted, breaks on click
+  - [x] Place block on correct face (all 6 face normals tested)
+  - [x] Broken blocks added to inventory
 - [ ] **Test: Survival meters** — Play for several minutes
   - [ ] All 5 meters deplete over time
   - [ ] Hunger restored by eating apples
