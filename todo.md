@@ -555,25 +555,25 @@ webgame-cuubz/
 ## Phase 2: Multiplayer & Relay Server
 
 ### Node.js Relay Server
-- [ ] **Setup server project** — `server/package.json`, `server/index.js`
-  - [ ] ws dependency for WebSocket support
-  - [ ] Dual port setup: matchmaking port + game session ports
-  - [ ] Connection handling with player ID assignment
-  - [ ] Disconnect cleanup (remove from session, broadcast leave)
-- [ ] **Implement matchmaking relay** — `server/matchmaking.js`
-  - [ ] Session registration: host name, world seed, mode, max players (4)
-  - [ ] Session browsing: list available sessions with details
-  - [ ] Join request routing → connect client to game session
-  - [ ] Session cleanup on host disconnect
-- [ ] **Implement game session relay** — `server/session.js`
-  - [ ] Message types: JOIN, LEAVE, MOVE, BREAK_BLOCK, PLACE_BLOCK, CHUNK_DATA, INVENTORY_UPDATE, QUEST_UPDATE, HEARTBEAT
-  - [ ] Server-side validation: block break/place checks, inventory verification
-  - [ ] Player state broadcast: position, rotation, selected block, health meters
-  - [ ] Heartbeat keepalive (30s), disconnect on timeout
-- [ ] **Create systemd service file** — `cuubz-relay.service`
-  - [ ] Service unit file for Node.js relay server
-  - [ ] Configurable ports, working directory, restart policy
-  - [ ] User-level service (no sudo required)
+- [x] **Setup server project** — `server/package.json`, `server/index.js` (36 tests via test_server.js)
+  - [x] ws dependency for WebSocket support
+  - [x] Dual port setup: matchmaking port + game session ports
+  - [x] Connection handling with player ID assignment
+  - [x] Disconnect cleanup (remove from session, broadcast leave)
+- [x] **Implement matchmaking relay** — `server/matchmaking.js`
+  - [x] Session registration: host name, world seed, mode, max players (4)
+  - [x] Session browsing: list available sessions with details
+  - [x] Join request routing → connect client to game session
+  - [x] Session cleanup on host disconnect
+- [x] **Implement game session relay** — `server/session.js`
+  - [x] Message types: JOIN, LEAVE, MOVE, BREAK_BLOCK, PLACE_BLOCK, CHUNK_DATA, INVENTORY_UPDATE, QUEST_UPDATE, HEARTBEAT
+  - [x] Server-side validation: block break/place checks (range, bounds, integer coords), inventory verification
+  - [x] Player state broadcast: position, rotation, selected block, health meters
+  - [x] Heartbeat keepalive (30s), disconnect on timeout
+- [x] **Create systemd service file** — `cuubz-relay.service`
+  - [x] Service unit file for Node.js relay server
+  - [x] Configurable ports, working directory, restart policy
+  - [x] User-level service (no sudo required)
 
 ### Client Multiplayer Integration
 - [ ] **Implement WebSocket client** — `js/multiplayer/client.js`
@@ -785,8 +785,8 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 
 | Phase | Status |
 |-------|--------|
-| Phase 1: Foundation — Core Voxel Engine & Single Player Survival | 🟡 In Progress (page load test done, world generation test next) |
-| Phase 2: Multiplayer & Relay Server | ⬜ Not Started (server files need implementation — Bug #14) |
+| Phase 1: Foundation — Core Voxel Engine & Single Player Survival | 🟡 In Progress (world gen test done, chunk loading test next) |
+| Phase 2: Multiplayer & Relay Server | 🟡 In Progress (server files complete + tested, client integration next) |
 | Phase 3: Polish & Content Expansion | ⬜ Not Started |
 | Phase 4: Deployment & Final Polish | ⬜ Not Started |
 

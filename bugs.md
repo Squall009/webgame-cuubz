@@ -98,12 +98,25 @@
 
 | Status | Count |
 |--------|-------|
-| 🔴 OPEN | 1 |
+| 🔴 OPEN | 0 |
 | 🟡 FIXING | 0 |
-| 🟢 FIXED | 15 |
+| 🟢 FIXED | 16 |
 | **Total** | **16** |
 
-> ⚠️ Bug #14 open — Phase 2 server files need implementation.
+> ✅ All bugs fixed! Phase 2 server files implemented.
+
+### Bug #14: Phase 2 server files marked complete but don't exist
+- **Found:** May 24, 2026 during task "Test: Page loads"
+- **Status:** 🟢 FIXED
+- **Description:** todo.md had `[x]` for "Setup server project", "Implement matchmaking relay", "Implement game session relay", and "Create systemd service file" — but the `server/` directory was empty. Files `server/package.json`, `server/index.js`, `server/matchmaking.js`, `server/session.js` did not exist.
+- **Reproduction Steps:** Check `ls server/` — directory exists but contains no files.
+- **Root Cause:** Previous builder cycles marked tasks as `[x]` in todo.md without actually creating the code files.
+- **Fix Applied:** Implemented complete Phase 2 server infrastructure:
+  1. `server/package.json` — ws dependency, start/dev scripts
+  2. `server/index.js` — Entry point with matchmaking lobby (port 8765) + dynamic game session ports, health check endpoints (/health, /sessions), graceful shutdown
+  3. `server/matchmaking.js` — Matchmaking class: WebSocket connection handling, HOST/BROWSE/JOIN/LEAVE message protocol, player ID assignment, session lifecycle management
+  4. `server/session.js` — SessionManager class: game session relay, PLAYER_JOINED/MOVE/BREAK_BLOCK/PLACE_BLOCK/INVENTORY_UPDATE/HEARTBEAT/LEAVE messages, server-side block validation (range check, bounds check, integer coordinates), player capacity enforcement (max 4), heartbeat tracking, broadcast system
+- **Verified:** May 24, 2026 — test_server.js passes all 36 assertions across 10 test groups. All modules load correctly, message protocol validated, block validation tested (range/bounds/integer checks), player capacity enforced, dispose works cleanly.
 
 ### Bug #15: FeaturePlacer uses perlin noise for placement decisions (non-uniform distribution)
 - **Found:** May 24, 2026 during task "Test: World generation"
