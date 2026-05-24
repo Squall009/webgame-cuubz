@@ -342,10 +342,10 @@ webgame-cuubz/
   - [x] Stand in/near water source (ponds, oceans, rivers)
   - [x] Press interact key to drink → restores thirst
   - [x] Drinking animation/delay (can't drink instantly)
-- [ ] **Implement bed system** — `js/systems/survival.js`
-  - [ ] Placeable bed blocks from inventory
-  - [ ] Right-click bed: restore sleep meter + set spawn point
-  - [ ] Spawn point saved per player per world
+- [x] **Implement bed system** — `js/systems/survival.js`
+  - [x] Placeable bed blocks from inventory (BED block type ID=23, placeable property)
+  - [x] Right-click bed: restore sleep meter + set spawn point
+  - [x] Spawn point saved per player per world (SpawnManager integration)
 
 ### Inventory System
 - [ ] **Implement inventory** — `js/systems/inventory.js`

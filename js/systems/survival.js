@@ -113,6 +113,26 @@ const DRINKING = {
   thirstRestoration: 35,   // Thirst restored per drink from natural water source
 };
 
+// ─── Bed System Constants ────────────────────────────────────────────────────
+const BED = {
+  useTime: 3.0,            // Seconds to complete sleep animation (lie down → rest → wake up)
+  cooldown: 5.0,           // Seconds between bed uses (minimum — prevents spam sleeping)
+  sleepRestoration: 70,    // Sleep restored per bed use (most of the 100 max)
+  healthRestoration: 25,   // Health restored per bed use
+  hungerRestoration: 10,   // Small hunger restoration from resting
+  thirstRestoration: 10,   // Small thirst restoration from resting
+};
+
+// Bed colors for visual variety (used by renderer)
+const BED_COLORS = {
+  red:    '#c0392b',
+  blue:   '#2980b9',
+  green:  '#27ae60',
+  yellow: '#f1c40f',
+  purple: '#8e44ad',
+  white:  '#ecf0f1',
+};
+
 class SurvivalSystem {
   constructor(options = {}) {
     // Meter configurations (override defaults)
@@ -165,6 +185,16 @@ class SurvivalSystem {
     this.drinkingProgress = 0;       // Progress through DRINKING.drinkTime (0 to drinkTime)
     this.lastDrinkTime = 0;          // Timestamp when last drinking action finished (cooldown)
     this.isNearWaterSource = false;  // Whether player is standing in/near a water block
+
+    // ─── Bed System State ──────────────────────────────────────────────────
+    this.isSleeping = false;         // Currently in the middle of sleeping animation
+    this.sleepingProgress = 0;       // Progress through BED.useTime (0 to useTime)
+    this.lastBedUseTime = 0;         // Timestamp when last bed use finished (cooldown)
+    this.isNearBed = false;          // Whether player is adjacent to a placed bed block
+    this.bedPosition = null;         // { x, y, z } of the bed being used
+
+    // ─── Spawn Manager Integration ────────────────────────────────────────
+    this._spawnManager = null;       // Reference to SpawnManager instance (set via setSpawnManager)
   }
 
   /**
@@ -201,6 +231,19 @@ class SurvivalSystem {
         this.isDrinking = false;
         this.drinkingProgress = 0;
         this.lastDrinkTime = now;
+      }
+    }
+
+    // ─── Bed System: Update sleeping progress ─────────────────────────────
+    if (this.isSleeping) {
+      this.sleepingProgress += deltaTime;
+
+      if (this.sleepingProgress >= BED.useTime) {
+        // Sleeping complete — apply restoration and set spawn point
+        this._finishSleeping();
+        this.isSleeping = false;
+        this.sleepingProgress = 0;
+        this.lastBedUseTime = now;
       }
     }
 
@@ -678,16 +721,188 @@ class SurvivalSystem {
   }
 
   /**
+   * Set whether player is adjacent to a placed bed block.
+   * Called by the game loop based on chunk data around player position.
+   *
+   * @param {boolean|object} nearBed - true if adjacent, or { x, y, z } of bed position
+   */
+  setNearBed(nearBed) {
+    if (typeof nearBed === 'object' && nearBed !== null) {
+      this.isNearBed = true;
+      this.bedPosition = { ...nearBed };
+    } else {
+      this.isNearBed = !!nearBed;
+      if (!nearBed) {
+        this.bedPosition = null;
+      }
+    }
+  }
+
+  /**
+   * Check if player can use a bed (not dead, not already sleeping, off cooldown, near bed).
+   *
+   * @returns {boolean}
+   */
+  canUseBed() {
+    if (this.isDead) return false;
+    if (this.isSleeping) return false;
+    if (!this.isNearBed || !this.bedPosition) return false;
+    const now = Date.now() / 1000;
+    return (now - this.lastBedUseTime) >= BED.cooldown;
+  }
+
+  /**
+   * Start using a bed — animated sleep sequence that takes BED.useTime seconds.
+   * On completion: restores sleep/health/hunger/thirst + sets spawn point at bed position.
+   * Returns true if sleeping started successfully.
+   * Returns false if: player is dead, already sleeping, on cooldown, not near bed, or bed invalid.
+   *
+   * @param {number} [x] - Optional override for bed X (uses bedPosition.x if omitted)
+   * @param {number} [y] - Optional override for bed Y (uses bedPosition.y if omitted)
+   * @param {number} [z] - Optional override for bed Z (uses bedPosition.z if omitted)
+   * @returns {boolean} Whether sleeping was initiated
+   */
+  startUsingBed(x, y, z) {
+    if (this.isDead) return false;
+    if (this.isSleeping) return false;
+
+    // Check proximity
+    if (!this.isNearBed || !this.bedPosition) return false;
+
+    // Use provided position or fall back to detected bed position
+    const bedX = x !== undefined ? x : this.bedPosition.x;
+    const bedY = y !== undefined ? y : this.bedPosition.y;
+    const bedZ = z !== undefined ? z : this.bedPosition.z;
+
+    // Validate bed position
+    if (bedX === null || bedY === null || bedZ === null) return false;
+
+    // Check cooldown
+    const now = Date.now() / 1000;
+    if (now - this.lastBedUseTime < BED.cooldown) {
+      return false; // Still on cooldown
+    }
+
+    this.isSleeping = true;
+    this.sleepingProgress = 0;
+    this.bedPosition = { x: bedX, y: bedY, z: bedZ };
+    return true;
+  }
+
+  /**
+   * Cancel the current sleeping action (e.g., player interrupted by damage).
+   * No restoration is applied, spawn point is NOT set.
+   */
+  cancelSleeping() {
+    if (!this.isSleeping) return;
+    this.isSleeping = false;
+    this.sleepingProgress = 0;
+
+    // Notify callbacks that sleep was interrupted
+    if (this.onSleepCancelled) {
+      this.onSleepCancelled({ reason: 'interrupted' });
+    }
+  }
+
+  /**
+   * Finish sleeping — apply restoration and set spawn point.
+   * Called internally when sleeping animation completes.
+   *
+   * @private
+   */
+  _finishSleeping() {
+    const bedX = this.bedPosition ? this.bedPosition.x : 0;
+    const bedY = this.bedPosition ? this.bedPosition.y : 20;
+    const bedZ = this.bedPosition ? this.bedPosition.z : 0;
+
+    // Apply restoration — clamped to max
+    this.meters.sleep   = Math.min(this.config.sleep.max,
+      this.meters.sleep + BED.sleepRestoration);
+    this.meters.health  = Math.min(this.config.health.max,
+      this.meters.health + BED.healthRestoration);
+    this.meters.hunger  = Math.min(this.config.hunger.max,
+      this.meters.hunger + BED.hungerRestoration);
+    this.meters.thirst  = Math.min(this.config.thirst.max,
+      this.meters.thirst + BED.thirstRestoration);
+
+    // Set spawn point at bed position (spawn player above bed — y+1)
+    this.setSpawnPoint(bedX, bedY + 1, bedZ);
+
+    // Also update SpawnManager if available (per-player per-world persistence)
+    if (this._spawnManager && this.currentWorldId && this.currentPlayerId) {
+      this._spawnManager.setSpawn(this.currentWorldId, this.currentPlayerId,
+        { x: bedX, y: bedY + 1, z: bedZ });
+    }
+
+    // Notify callbacks
+    if (this.onBedUsed) {
+      this.onBedUsed({
+        sleepRestored: BED.sleepRestoration,
+        healthRestored: BED.healthRestoration,
+        hungerRestored: BED.hungerRestoration,
+        thirstRestored: BED.thirstRestoration,
+        spawnPoint: { x: bedX, y: bedY + 1, z: bedZ },
+      });
+    }
+  }
+
+  /**
+   * Get sleeping state for HUD/animation systems.
+   *
+   * @returns {object} Sleeping state: isSleeping, progress (0-1), bedPosition
+   */
+  getSleepingState() {
+    return {
+      isSleeping: this.isSleeping,
+      progress: this.isSleeping ? Math.min(1, this.sleepingProgress / BED.useTime) : 0,
+      nearBed: this.isNearBed,
+      bedPosition: this.bedPosition ? { ...this.bedPosition } : null,
+    };
+  }
+
+  /**
+   * Set the current world ID and player ID for SpawnManager integration.
+   * Call this when entering a world so spawn points are tracked per-player per-world.
+   *
+   * @param {string} worldId - World identifier
+   * @param {string} playerId - Player identifier
+   */
+  setCurrentContext(worldId, playerId) {
+    this.currentWorldId = worldId;
+    this.currentPlayerId = playerId;
+  }
+
+  /**
+   * Set the SpawnManager instance for per-player per-world spawn tracking.
+   *
+   * @param {SpawnManager} manager - SpawnManager instance
+   */
+  setSpawnManager(manager) {
+    this._spawnManager = manager;
+  }
+
+  /**
    * Use a bed — restores sleep and some health, sets spawn point.
+   * @deprecated Use startUsingBed() for animated bed use. Kept for backward compatibility.
    * @param {number} x - Bed position X
    * @param {number} y - Bed position Y
    * @param {number} z - Bed position Z
    */
   useBed(x, y, z) {
     if (this.isDead) return false;
-    this.meters.sleep  = Math.min(this.config.sleep.max, this.meters.sleep + RESTORATION.bed_use.sleep);
-    this.meters.health = Math.min(this.config.health.max, this.meters.health + RESTORATION.bed_use.health);
-    this.setSpawnPoint(x, y, z);
+
+    // Apply restoration — clamped to max
+    this.meters.sleep   = Math.min(this.config.sleep.max,
+      this.meters.sleep + BED.sleepRestoration);
+    this.meters.health  = Math.min(this.config.health.max,
+      this.meters.health + BED.healthRestoration);
+    this.meters.hunger  = Math.min(this.config.hunger.max,
+      this.meters.hunger + BED.hungerRestoration);
+    this.meters.thirst  = Math.min(this.config.thirst.max,
+      this.meters.thirst + BED.thirstRestoration);
+
+    // Set spawn point above bed
+    this.setSpawnPoint(x, y + 1, z);
     return true;
   }
 
@@ -802,6 +1017,11 @@ class SurvivalSystem {
       isDrinking: this.isDrinking,
       drinkingProgress: this.drinkingProgress,
       lastDrinkTime: this.lastDrinkTime,
+      // Bed system state
+      isSleeping: this.isSleeping,
+      sleepingProgress: this.sleepingProgress,
+      lastBedUseTime: this.lastBedUseTime,
+      bedPosition: this.bedPosition ? { ...this.bedPosition } : null,
     };
   }
 
@@ -837,6 +1057,12 @@ class SurvivalSystem {
     if (data.isDrinking !== undefined) this.isDrinking = data.isDrinking;
     if (data.drinkingProgress !== undefined) this.drinkingProgress = data.drinkingProgress;
     if (data.lastDrinkTime !== undefined) this.lastDrinkTime = data.lastDrinkTime;
+
+    // Bed system state
+    if (data.isSleeping !== undefined) this.isSleeping = data.isSleeping;
+    if (data.sleepingProgress !== undefined) this.sleepingProgress = data.sleepingProgress;
+    if (data.lastBedUseTime !== undefined) this.lastBedUseTime = data.lastBedUseTime;
+    if (data.bedPosition) this.bedPosition = { ...data.bedPosition };
   }
 
   /**
@@ -876,4 +1102,4 @@ class SurvivalSystem {
   }
 }
 
-module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING };
+module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS };

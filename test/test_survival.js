@@ -5,7 +5,8 @@
  * Includes comprehensive food system tests (FOOD_ITEMS registry, eating mechanics, saturation).
  */
 
-const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING } = require('../js/systems/survival');
+const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS } = require('../js/systems/survival');
+const SpawnManager = require('../js/world/spawnManager');
 
 let passed = 0;
 let failed = 0;
@@ -512,10 +513,10 @@ const ssD4 = new SurvivalSystem();
 ssD4.meters.sleep = 30;
 ssD4.meters.health = 60;
 ssD4.useBed(5, 15, -3);
-assert(ssD4.meters.sleep === 90, `Bed should restore sleep to 90, got ${ssD4.meters.sleep}`);
-assert(ssD4.meters.health === 80, `Bed should restore health to 80, got ${ssD4.meters.health}`);
+assert(ssD4.meters.sleep === 100, `Bed should cap sleep at max (30+70=100), got ${ssD4.meters.sleep}`);
+assert(ssD4.meters.health === 85, `Bed should restore health to 85 (60+25), got ${ssD4.meters.health}`);
 assert(ssD4.spawnPoint.x === 5, 'Bed should set spawn X');
-assert(ssD4.spawnPoint.y === 15, 'Bed should set spawn Y');
+assert(ssD4.spawnPoint.y === 16, `Bed should set spawn Y as bed Y + 1 (got ${ssD4.spawnPoint.y})`);
 assert(ssD4.spawnPoint.z === -3, 'Bed should set spawn Z');
 
 // --- Test 27: useBed caps at max ---
@@ -941,6 +942,306 @@ assert(ssW28.meters.thirst === 80, `Legacy drinkWater should restore by RESTORAT
 const ssW29 = new SurvivalSystem();
 ssW29.takeDamage(100, DAMAGE_SOURCES.LAVA);
 assert(ssW29.drinkWater() === false, 'Legacy drinkWater should return false when dead');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BED SYSTEM TESTS — Animated bed use with cooldown, proximity, spawn points
+// ═══════════════════════════════════════════════════════════════════════════
+
+// --- Test B1: BED constants are correct ---
+assert(BED.useTime === 3.0, `BED.useTime should be 3.0, got ${BED.useTime}`);
+assert(BED.cooldown === 5.0, `BED.cooldown should be 5.0, got ${BED.cooldown}`);
+assert(BED.sleepRestoration === 70, `BED.sleepRestoration should be 70, got ${BED.sleepRestoration}`);
+assert(BED.healthRestoration === 25, `BED.healthRestoration should be 25, got ${BED.healthRestoration}`);
+assert(BED.hungerRestoration === 10, `BED.hungerRestoration should be 10, got ${BED.hungerRestoration}`);
+assert(BED.thirstRestoration === 10, `BED.thirstRestoration should be 10, got ${BED.thirstRestoration}`);
+
+// --- Test B2: BED_COLORS has expected entries ---
+assert(typeof BED_COLORS === 'object', 'BED_COLORS should be an object');
+assert(BED_COLORS.red !== undefined, 'BED_COLORS should have red');
+assert(BED_COLORS.blue !== undefined, 'BED_COLORS should have blue');
+assert(BED_COLORS.green !== undefined, 'BED_COLORS should have green');
+assert(Object.keys(BED_COLORS).length >= 5, `BED_COLORS should have at least 5 colors, got ${Object.keys(BED_COLORS).length}`);
+
+// --- Test B3: Constructor initializes bed state ---
+const ssB1 = new SurvivalSystem();
+assert(ssB1.isSleeping === false, 'Should not be sleeping by default');
+assert(ssB1.sleepingProgress === 0, 'Sleeping progress should start at 0');
+assert(ssB1.lastBedUseTime === 0, 'Last bed use time should start at 0');
+assert(ssB1.isNearBed === false, 'Should not be near bed by default');
+assert(ssB1.bedPosition === null, 'Bed position should be null by default');
+
+// --- Test B4: setNearBed with boolean ---
+const ssB2 = new SurvivalSystem();
+ssB2.setNearBed(true);
+assert(ssB2.isNearBed === true, 'setNearBed(true) should set flag');
+ssB2.setNearBed(false);
+assert(ssB2.isNearBed === false, 'setNearBed(false) should clear flag');
+assert(ssB2.bedPosition === null, 'setNearBed(false) should clear bedPosition');
+
+// --- Test B5: setNearBed with position object ---
+const ssB3 = new SurvivalSystem();
+ssB3.setNearBed({ x: 10, y: 15, z: -7 });
+assert(ssB3.isNearBed === true, 'setNearBed(object) should set flag');
+assert(ssB3.bedPosition.x === 10, 'Bed position X should be 10');
+assert(ssB3.bedPosition.y === 15, 'Bed position Y should be 15');
+assert(ssB3.bedPosition.z === -7, 'Bed position Z should be -7');
+
+// --- Test B6: canUseBed returns false when not near bed ---
+const ssB4 = new SurvivalSystem();
+ssB4.lastBedUseTime = 0;
+assert(ssB4.canUseBed() === false, 'Cannot use bed without being near one');
+
+// --- Test B7: canUseBed returns true when near bed and off cooldown ---
+const ssB5 = new SurvivalSystem();
+ssB5.setNearBed({ x: 5, y: 12, z: 3 });
+ssB5.lastBedUseTime = 0;
+assert(ssB5.canUseBed() === true, 'Can use bed when near and off cooldown');
+
+// --- Test B8: canUseBed returns false when dead ---
+const ssB6 = new SurvivalSystem();
+ssB6.setNearBed({ x: 0, y: 10, z: 0 });
+ssB6.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssB6.canUseBed() === false, 'Dead player cannot use bed');
+
+// --- Test B9: canUseBed returns false while sleeping ---
+const ssB7 = new SurvivalSystem();
+ssB7.setNearBed({ x: 0, y: 10, z: 0 });
+ssB7.isSleeping = true;
+assert(ssB7.canUseBed() === false, 'Cannot use bed while already sleeping');
+
+// --- Test B10: canUseBed returns false on cooldown ---
+const ssB8 = new SurvivalSystem();
+ssB8.setNearBed({ x: 0, y: 10, z: 0 });
+ssB8.lastBedUseTime = (Date.now() / 1000) - 2; // Used bed 2 seconds ago — still on cooldown (5s)
+assert(ssB8.canUseBed() === false, 'Should fail on cooldown');
+
+// --- Test B11: startUsingBed returns true when near bed ---
+const ssB9 = new SurvivalSystem();
+ssB9.setNearBed({ x: 7, y: 14, z: -2 });
+ssB9.lastBedUseTime = 0;
+assert(ssB9.startUsingBed() === true, 'startUsingBed should succeed near bed');
+assert(ssB9.isSleeping === true, 'Should be marked as sleeping');
+assert(ssB9.sleepingProgress === 0, 'Sleeping progress should start at 0');
+
+// --- Test B12: startUsingBed returns false when not near bed ---
+const ssB10 = new SurvivalSystem();
+ssB10.lastBedUseTime = 0;
+assert(ssB10.startUsingBed() === false, 'startUsingBed should fail without bed nearby');
+
+// --- Test B13: startUsingBed returns false when dead ---
+const ssB11 = new SurvivalSystem();
+ssB11.setNearBed({ x: 0, y: 10, z: 0 });
+ssB11.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssB11.startUsingBed() === false, 'Dead player cannot start using bed');
+
+// --- Test B14: startUsingBed returns false when already sleeping ---
+const ssB12 = new SurvivalSystem();
+ssB12.setNearBed({ x: 0, y: 10, z: 0 });
+ssB12.lastBedUseTime = 0;
+ssB12.startUsingBed();
+assert(ssB12.startUsingBed() === false, 'Cannot start sleeping while already sleeping');
+
+// --- Test B15: startUsingBed with explicit position override ---
+const ssB13 = new SurvivalSystem();
+ssB13.setNearBed({ x: 0, y: 10, z: 0 });
+ssB13.lastBedUseTime = 0;
+ssB13.startUsingBed(20, 25, -10);
+assert(ssB13.bedPosition.x === 20, 'Explicit X should override bedPosition');
+assert(ssB13.bedPosition.y === 25, 'Explicit Y should override bedPosition');
+assert(ssB13.bedPosition.z === -10, 'Explicit Z should override bedPosition');
+
+// --- Test B16: startUsingBed returns false on cooldown ---
+const ssB14 = new SurvivalSystem();
+ssB14.setNearBed({ x: 0, y: 10, z: 0 });
+ssB14.lastBedUseTime = (Date.now() / 1000) - 3; // 3s ago — still on cooldown
+assert(ssB14.startUsingBed() === false, 'Should fail on cooldown');
+
+// --- Test B17: Sleeping progress completes in update loop ---
+const ssB15 = new SurvivalSystem();
+ssB15.meters.sleep = 20;
+ssB15.meters.health = 50;
+ssB15.setNearBed({ x: 8, y: 16, z: -4 });
+ssB15.lastBedUseTime = 0;
+let bedUsedData = null;
+ssB15.onBedUsed = (data) => { bedUsedData = data; };
+ssB15.startUsingBed();
+assert(ssB15.isSleeping === true, 'Should be sleeping');
+
+// Advance time past useTime (3.0s)
+ssB15.update(3.5, { currentTime: 100 });
+assert(ssB15.isSleeping === false, 'Sleeping should complete after useTime');
+assert(bedUsedData !== null, 'onBedUsed callback should fire');
+
+// --- Test B18: Sleeping completion restores all meters ---
+assert(ssB15.meters.sleep > 80, `Sleep should be restored significantly (got ${ssB15.meters.sleep.toFixed(1)})`);
+assert(ssB15.meters.health > 70, `Health should be restored (got ${ssB15.meters.health.toFixed(1)})`);
+
+// --- Test B19: Sleeping completion sets spawn point above bed ---
+assert(ssB15.spawnPoint.x === 8, 'Spawn X should match bed X');
+assert(ssB15.spawnPoint.y === 17, `Spawn Y should be bed Y + 1 (got ${ssB15.spawnPoint.y})`);
+assert(ssB15.spawnPoint.z === -4, 'Spawn Z should match bed Z');
+
+// --- Test B20: onBedUsed callback receives correct data ---
+assert(bedUsedData.sleepRestored === 70, `onBedUsed should report sleepRestored=70, got ${bedUsedData.sleepRestored}`);
+assert(bedUsedData.healthRestored === 25, `onBedUsed should report healthRestored=25`);
+assert(bedUsedData.hungerRestored === 10, `onBedUsed should report hungerRestored=10`);
+assert(bedUsedData.thirstRestored === 10, `onBedUsed should report thirstRestored=10`);
+assert(bedUsedData.spawnPoint.x === 8, 'Callback spawnPoint X should be correct');
+
+// --- Test B21: Sleeping caps meters at max ---
+const ssB16 = new SurvivalSystem();
+ssB16.meters.sleep = 95;
+ssB16.meters.health = 95;
+ssB16.meters.hunger = 95;
+ssB16.meters.thirst = 95;
+ssB16.setNearBed({ x: 0, y: 10, z: 0 });
+ssB16.lastBedUseTime = 0;
+ssB16.startUsingBed();
+// Sleeping completes at ~3s. Restoration sets sleep to min(100, 95+70)=100,
+// then depletion runs for 3.01s at rate 0.8/s → -2.4 → final ~97.6
+// This is correct: in real gameplay with small dt frames, depletion would be negligible per-frame.
+ssB16.update(3.01, { currentTime: 200 });
+assert(ssB16.meters.sleep > 95, `Sleep should be restored significantly (got ${ssB16.meters.sleep.toFixed(1)}, started at 95)`);
+assert(ssB16.meters.sleep < 101, 'Sleep should not exceed max');
+assert(ssB16.meters.health === 100, 'Health should cap at max (no natural depletion)');
+
+// --- Test B22: cancelSleeping stops sleeping without restoration ---
+const ssB17 = new SurvivalSystem();
+ssB17.meters.sleep = 30;
+ssB17.setNearBed({ x: 5, y: 12, z: 2 });
+ssB17.lastBedUseTime = 0;
+ssB17.startUsingBed();
+assert(ssB17.isSleeping === true, 'Should be sleeping before cancel');
+ssB17.cancelSleeping();
+assert(ssB17.isSleeping === false, 'cancelSleeping should set isSleeping to false');
+assert(ssB17.sleepingProgress === 0, 'Sleeping progress should reset to 0');
+assert(ssB17.meters.sleep === 30, 'Sleep should not change when sleeping is cancelled');
+
+// --- Test B23: cancelSleeping fires onSleepCancelled callback ---
+let sleepCancelled = null;
+const ssB18 = new SurvivalSystem();
+ssB18.setNearBed({ x: 0, y: 10, z: 0 });
+ssB18.lastBedUseTime = 0;
+ssB18.onSleepCancelled = (data) => { sleepCancelled = data; };
+ssB18.startUsingBed();
+ssB18.cancelSleeping();
+assert(sleepCancelled !== null, 'onSleepCancelled callback should fire');
+assert(sleepCancelled.reason === 'interrupted', 'Cancel reason should be interrupted');
+
+// --- Test B24: getSleepingState returns correct data (not sleeping) ---
+const ssB19 = new SurvivalSystem();
+let sstate = ssB19.getSleepingState();
+assert(sstate.isSleeping === false, 'Not sleeping should return isSleeping=false');
+assert(sstate.progress === 0, 'Not sleeping should have progress=0');
+assert(sstate.nearBed === false, 'Should report not near bed');
+assert(sstate.bedPosition === null, 'Should have null bedPosition');
+
+// --- Test B25: getSleepingState shows progress during sleeping ---
+const ssB20 = new SurvivalSystem();
+ssB20.setNearBed({ x: 3, y: 11, z: -1 });
+ssB20.lastBedUseTime = 0;
+ssB20.startUsingBed();
+sstate = ssB20.getSleepingState();
+assert(sstate.isSleeping === true, 'Should be sleeping');
+assert(sstate.nearBed === true, 'Should report near bed');
+assert(sstate.bedPosition.x === 3, 'Bed position should be reported');
+
+// Halfway through sleeping (useTime=3.0, advance 1.5s)
+ssB20.update(1.5, { currentTime: 100 });
+sstate = ssB20.getSleepingState();
+assert(sstate.isSleeping === true, 'Should still be sleeping at halfway');
+assert(Math.abs(sstate.progress - 0.5) < 0.1, `Progress should be ~0.5, got ${sstate.progress.toFixed(2)}`);
+
+// --- Test B26: SpawnManager integration ---
+const ssB21 = new SurvivalSystem();
+const spawnMgr = new SpawnManager();
+ssB21.setSpawnManager(spawnMgr);
+ssB21.setCurrentContext('world-abc', 'player-1');
+ssB21.setNearBed({ x: 42, y: 18, z: -9 });
+ssB21.lastBedUseTime = 0;
+ssB21.startUsingBed();
+ssB21.update(3.5, { currentTime: 300 });
+
+// Check SpawnManager has the spawn point set
+const savedSpawn = spawnMgr.getSpawn('world-abc', 'player-1');
+assert(savedSpawn.x === 42, `SpawnManager should have X=42, got ${savedSpawn.x}`);
+assert(savedSpawn.y === 19, `SpawnManager should have Y=19 (bed Y+1), got ${savedSpawn.y}`);
+assert(savedSpawn.z === -9, `SpawnManager should have Z=-9, got ${savedSpawn.z}`);
+
+// --- Test B27: SpawnManager fallback to default when no bed set ---
+const spawnMgr2 = new SpawnManager();
+const defaultSpawn = spawnMgr2.getSpawn('nonexistent-world', 'player-2');
+assert(defaultSpawn.x === 0, 'Default spawn X should be 0');
+assert(defaultSpawn.y === 20, 'Default spawn Y should be 20');
+
+// --- Test B28: Legacy useBed still works with new restoration values ---
+const ssB22 = new SurvivalSystem();
+ssB22.meters.sleep = 30;
+ssB22.meters.health = 60;
+ssB22.useBed(10, 20, -5);
+assert(ssB22.meters.sleep === 100, `Legacy useBed should cap sleep at max (was 30+70=100), got ${ssB22.meters.sleep}`);
+assert(ssB22.meters.health === 85, `Legacy useBed health: 60+25=85, got ${ssB22.meters.health}`);
+assert(ssB22.spawnPoint.y === 21, `Spawn Y should be bed Y + 1 (got ${ssB22.spawnPoint.y})`);
+
+// --- Test B29: Legacy useBed returns false when dead ---
+const ssB23 = new SurvivalSystem();
+ssB23.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssB23.useBed(0, 0, 0) === false, 'Legacy useBed should return false when dead');
+
+// --- Test B30: Bed serialization includes bed state ---
+const ssB24 = new SurvivalSystem();
+ssB24.setNearBed({ x: 7, y: 15, z: -3 });
+ssB24.lastBedUseTime = 0;
+ssB24.startUsingBed();
+ssB24.sleepingProgress = 1.5; // Halfway through sleep
+const savedB = ssB24.serialize();
+assert(savedB.isSleeping === true, 'Serialized state should include isSleeping');
+assert(savedB.sleepingProgress === 1.5, 'Serialized sleeping progress should be preserved');
+assert(savedB.bedPosition !== null, 'Serialized bedPosition should not be null');
+assert(savedB.bedPosition.x === 7, 'Serialized bed position X should match');
+
+// --- Test B31: Bed deserialization restores state ---
+const ssB25 = new SurvivalSystem();
+ssB25.deserialize({
+  isSleeping: true,
+  sleepingProgress: 2.0,
+  lastBedUseTime: 75,
+  bedPosition: { x: 13, y: 22, z: -6 },
+});
+assert(ssB25.isSleeping === true, 'Deserialized isSleeping should be true');
+assert(ssB25.sleepingProgress === 2.0, 'Deserialized sleeping progress should be restored');
+assert(ssB25.lastBedUseTime === 75, 'Deserialized lastBedUseTime should be restored');
+assert(ssB25.bedPosition.x === 13, 'Deserialized bed position X should match');
+
+// --- Test B32: Full serialization round-trip with bed state ---
+const ssB26 = new SurvivalSystem();
+ssB26.meters.sleep = 40;
+ssB26.setNearBed({ x: 9, y: 17, z: -1 });
+ssB26.lastBedUseTime = 33;
+const savedRoundB = ssB26.serialize();
+const ssB27 = new SurvivalSystem();
+ssB27.deserialize(savedRoundB);
+assert(ssB27.meters.sleep === 40, 'Sleep should survive round-trip');
+assert(ssB27.lastBedUseTime === 33, 'lastBedUseTime should survive round-trip');
+assert(ssB27.bedPosition.x === 9, 'bedPosition should survive round-trip');
+
+// --- Test B33: setCurrentContext sets world/player IDs ---
+const ssB28 = new SurvivalSystem();
+ssB28.setCurrentContext('test-world', 'test-player');
+assert(ssB28.currentWorldId === 'test-world', 'currentWorldId should be set');
+assert(ssB28.currentPlayerId === 'test-player', 'currentPlayerId should be set');
+
+// --- Test B34: Bed use does NOT update SpawnManager without context ---
+const ssB29 = new SurvivalSystem();
+const spawnMgr3 = new SpawnManager();
+ssB29.setSpawnManager(spawnMgr3);
+// No setCurrentContext call — SpawnManager should not be updated
+ssB29.setNearBed({ x: 1, y: 10, z: 1 });
+ssB29.lastBedUseTime = 0;
+ssB29.startUsingBed();
+ssB29.update(3.5, { currentTime: 400 });
+const noContextSpawn = spawnMgr3.getSpawn('any-world', 'any-player');
+assert(noContextSpawn.x === 0, 'Without context, SpawnManager should use default (0, 20, 0)');
 
 // --- Summary ---
 console.log(`\nSurvival System Tests: ${passed} passed, ${failed} failed`);
