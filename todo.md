@@ -608,12 +608,20 @@ webgame-cuubz/
   - [x] Bounded message queue (500 max, FIFO ordering, oldest dropped on overflow)
   - [x] Protocol consistency verified against server/session.js and matchmaking.js
   - [x] Browser-safe: works in Node.js test mode with null WebSocket factory
-- [ ] **Implement host logic** — `js/multiplayer/host.js`
-  - [ ] Register session with matchmaking relay
-  - [ ] Authoritative block change validation before broadcast
-  - [ ] Inventory update validation (server-side)
-  - [ ] Quest progress validation and broadcast
-  - [ ] Player disconnect/reconnect handling
+- [x] **Implement host logic** — `js/multiplayer/host.js` (181 tests via test_hostLogic.js)
+  - [x] Register session with matchmaking relay
+  - [x] Authoritative block change validation before broadcast
+  - [x] Inventory update validation (server-side)
+  - [x] Quest progress validation and broadcast
+  - [x] Player disconnect/reconnect handling
+  - [x] HostManager class: state machine (IDLE→CONNECTING→HOSTING→ACTIVE→ENDING)
+  - [x] RemotePlayerState tracking per connected player
+  - [x] RateLimiter for move updates and block changes
+  - [x] Validation functions: validateBlockBreak, validateBlockPlace, validateMove, validateInventory, validateQuestUpdate
+  - [x] Server-authoritative actions: hostBreakBlock, hostPlaceBlock, kickPlayer
+  - [x] Event callbacks: onPlayerJoined, onPlayerLeft, onBlockBreakValidated, onBlockPlaceValidated, onInventorySynced, onQuestUpdated, onError
+  - [x] getStateSummary() for debugging/HUD integration
+  - [x] Serialization/deserialization for RemotePlayerState persistence
 - [ ] **Implement chunk streaming** — `js/multiplayer/chunkStreamer.js`
   - [ ] Track ALL player positions in session
   - [ ] Load chunks around ALL players (not just host)
