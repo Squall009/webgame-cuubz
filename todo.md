@@ -421,11 +421,17 @@ webgame-cuubz/
   - [x] Dungeon grouping + getCurrentDungeon progress tracking
   - [x] Three-pass addProgress prevents cascading completions
   - [x] 137 tests passing — constants, registry structure, boss definitions, constructor/init, progression chain, partial progress, capping, auto-start, objectives, progress reports, serialization round-trip, callbacks, game completion, reset, markers, dungeon grouping, edge cases, multi-quest progression
-- [ ] **Implement quest markers** — `js/entities/questMarker.js`
-  - [ ] Glowing post/entity in world at quest target locations
-  - [ ] Visible from distance (particle effect or beacon)
-  - [ ] Interact to receive quest update/dialogue
-  - [ ] Marker placement during world generation for all 25 quests
+- [x] **Implement quest markers** — `js/entities/questMarker.js`
+  - [x] Glowing post/entity in world at quest target locations
+  - [x] Visible from distance (particle effect or beacon)
+  - [x] Interact to receive quest update/dialogue
+  - [x] Marker placement during world generation for all 25 quests
+  - [x] QuestMarker class: position, glow pulse animation, interaction range, visibility radius
+  - [x] QuestMarkerManager: createAllMarkers from QuestSystem, active marker tracking, stage/biome filtering
+  - [x] Three.js mesh creation (post + glow sphere + point light + orbiting particles)
+  - [x] Color-coded markers by quest type (green=collect, red=kill, blue=explore, orange=craft, purple=deliver, gold=boss)
+  - [x] Serialization/deserialization for persistence
+  - [x] 231 tests passing — constants, constructor, colors, distance calc, interaction range, visibility, update loop, glow pulse, interaction, reset, setActive, serialization round-trip, manager CRUD, stage/biome filtering, deactivation, determinism
 - [ ] **Design 25-quest storyline** — Document quest chain with requirements
   - [ ] Quests 1–6: Introduction & gathering (collect basic materials)
   - [ ] Quests 7–12: First dungeon exploration (Boss 1)

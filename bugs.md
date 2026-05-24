@@ -64,10 +64,28 @@
 |--------|-------|
 | 🔴 OPEN | 0 |
 | 🟡 FIXING | 0 |
-| 🟢 FIXED | 8 |
-| **Total** | **8** |
+| 🟢 FIXED | 10 |
+| **Total** | **10** |
 
 > ✅ No open bugs — safe to proceed with next task.
+
+### Bug #9: Active marker filter excluded locked quests
+- **Found:** May 24, 2026 during task "Implement quest markers"
+- **Status:** 🟢 FIXED
+- **Description:** `_updateActiveMarkers()` filtered out locked quests (returned `false` when `getProgress()` returned `null` for locked quests). This meant only available/in-progress quest markers were considered active, but locked quest markers should still be visible in the world — only completed quest markers should be hidden.
+- **Reproduction Steps:** Create QuestMarkerManager with fresh QuestSystem. Only 1 marker (quest_01) was active instead of all 25.
+- **Root Cause:** Filter returned `false` for null progress data, which is what locked quests return. The intent was to hide completed markers only.
+- **Fix Applied:** Changed filter logic: `if (!progress) return true` (unknown/locked → active), then `return progress.state !== 'complete'` (hide only completed).
+- **Verified:** May 24, 2026 — test_questMarker.js passes 231/231 tests including active marker count assertions.
+
+### Bug #10: Test expectation mismatch for interaction range boundary
+- **Found:** May 24, 2026 during task "Implement quest markers" test writing
+- **Status:** 🟢 FIXED
+- **Description:** Test asserted `assertFalse` for position (2,10,2) claiming distance ~2.83 was outside interaction range of 3.0. However sqrt(8)=2.83 IS within range since 2.83 < 3.0. The squared distance check correctly returns true (8 <= 9).
+- **Reproduction Steps:** Run test_interaction_range with position at distance sqrt(8) from marker.
+- **Root Cause:** Test author miscalculated — the position WAS in range, but the test expected it out of range.
+- **Fix Applied:** Changed assertion to `assertTrue` with corrected description "distance sqrt(8)=~2.83 < range 3".
+- **Verified:** May 24, 2026 — test passes correctly.
 
 ### Bug #6: ENVIRONMENTAL_DAMAGE_RATES keys mismatched DAMAGE_SOURCES values
 - **Found:** May 23, 2026 during task "Implement damage system"
