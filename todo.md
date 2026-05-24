@@ -727,10 +727,20 @@ webgame-cuubz/
   - [x] INVENTORY_SYNC relayed with full inventory array (typeId, count, null slots)
   - [x] Heartbeat keepalive tracking — no errors after heartbeat
   - [x] PLAYER_LEFT broadcast on disconnect, session state consistent
-- [ ] **Test: Chunk streaming** — Players at different locations
-  - [ ] Each player's surrounding chunks loaded
-  - [ ] World doesn't disappear when players spread out
-  - [ ] New chunks streamed seamlessly to remote clients
+- [x] **Test: Chunk streaming** — Players at different locations (59 assertions via test_chunkStreamingIntegration.js)
+  - [x] Each player's surrounding chunks loaded
+  - [x] World doesn't disappear when players spread out
+  - [x] New chunks streamed seamlessly to remote clients
+  - [x] Single player chunk loading around position (69 chunks for radius 4)
+  - [x] Two players at same location — no duplicate loading
+  - [x] Two players far apart — chunks load around BOTH positions
+  - [x] Unloading when all players leave an area
+  - [x] Dirty chunk priority streaming
+  - [x] Player disconnect removes from tracking, allows unloading
+  - [x] RLE compression: 24576→194 bytes for typical chunk
+  - [x] Stats tracking accurate (playersTracked, chunksLoaded, chunksDirty, totalStreamed)
+  - [x] Edge cases: no players, invalid coords, null position
+  - [x] Full tick cycle simulation with maxChunksPerTick limit
 - [ ] **Test: Server validation** — Client sends invalid block change
   - [ ] Host rejects invalid break/place
   - [ ] Inventory properly validated before changes
