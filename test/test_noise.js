@@ -150,6 +150,74 @@ const variance = samples.reduce((sum, v) => sum + (v - mean) ** 2, 0) / samples.
 const stdDev = Math.sqrt(variance);
 assert(stdDev > 0.1 && stdDev < 1, `Std dev in reasonable range: ${stdDev.toFixed(4)}`);
 
+// --- Test: Hash Function (uniform distribution for placement decisions) ---
+console.log('\n[Hash Function]');
+
+// hash() returns value in [0, 1)
+const h1 = noise1.hash(0, 0);
+assertInRange(h1, 0, 1, `hash(0,0) in [0, 1): ${h1.toFixed(6)}`);
+
+// Deterministic: same input → same output
+assert(noise1.hash(42, 99) === noise1.hash(42, 99), 'Deterministic hash for same input');
+
+// Different seeds → different hash
+const noise3 = new NoiseGenerator(999);
+assert(noise1.hash(42, 99) !== noise3.hash(42, 99), 'Different seeds produce different hash');
+
+// Uniform distribution test: sample 6400 positions (25 chunks × 256 blocks)
+let below002 = 0, below01 = 0, below05 = 0;
+for (let i = 0; i < 80; i++) {
+  for (let j = 0; j < 80; j++) {
+    const v = noise1.hash(i, j);
+    if (v < 0.02) below002++;
+    if (v < 0.1) below01++;
+    if (v < 0.5) below05++;
+  }
+}
+// Expected: ~128 at 0.02, ~640 at 0.1, ~3200 at 0.5 for 6400 samples
+assert(below002 > 80 && below002 < 180, `Hash uniformity at 0.02: ${below002}/6400 (expected ~128)`);
+assert(below01 > 450 && below01 < 830, `Hash uniformity at 0.1: ${below01}/6400 (expected ~640)`);
+assert(below05 > 2700 && below05 < 3700, `Hash uniformity at 0.5: ${below05}/6400 (expected ~3200)`);
+
+// No clustering: nearby positions should have different hashes
+const h_nearby = [noise1.hash(10, 10), noise1.hash(10, 11), noise1.hash(11, 10), noise1.hash(11, 11)];
+const allDifferent = new Set(h_nearby).size === 4;
+assert(allDifferent, 'Nearby positions produce different hashes (no spatial clustering)');
+
+// --- Test: createPRNG (seeded pseudo-random generator) ---
+console.log('\n[createPRNG]');
+
+const rng1 = noise1.createPRNG(42);
+const rng2 = noise1.createPRNG(42); // Same sub-seed → same sequence
+
+// First call should be identical
+assert(rng1() === rng2(), 'Same sub-seed produces identical first value');
+assert(rng1() === rng2(), 'Same sub-seed produces identical second value');
+assert(rng1() === rng2(), 'Same sub-seed produces identical third value');
+
+// Different sub-seeds → different sequences
+const rng3 = noise1.createPRNG(99);
+const first1 = noise1.createPRNG(42)();
+const first2 = noise1.createPRNG(99)();
+assert(first1 !== first2, 'Different sub-seeds produce different values');
+
+// PRNG values in [0, 1)
+let prngInRange = true;
+const rng4 = noise1.createPRNG(123);
+for (let i = 0; i < 100; i++) {
+  const v = rng4();
+  if (v < 0 || v >= 1) prngInRange = false;
+}
+assert(prngInRange, 'All PRNG values in [0, 1)');
+
+// PRNG produces different values on each call (not stuck)
+const rng5 = noise1.createPRNG(42);
+const prngValues = new Set();
+for (let i = 0; i < 50; i++) {
+  prngValues.add(rng5());
+}
+assert(prngValues.size > 40, `PRNG produces varied output: ${prngValues.size}/50 unique values`);
+
 // ============================================================
 // Report
 // ============================================================

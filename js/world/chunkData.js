@@ -106,7 +106,7 @@ class Chunk {
    * Get block at local coordinates
    */
   getBlock(x, y, z) {
-    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < MIN_Y || y > MAX_Y) {
+    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < MIN_Y || y >= MAX_Y) {
       return BLOCK_TYPES.AIR; // Out of bounds = air
     }
     const index = this._localIndex(x, y, z);
@@ -117,7 +117,7 @@ class Chunk {
    * Set block at local coordinates
    */
   setBlock(x, y, z, type) {
-    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < MIN_Y || y > MAX_Y) {
+    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < MIN_Y || y >= MAX_Y) {
       return; // Out of bounds
     }
     const index = this._localIndex(x, y, z);
@@ -153,7 +153,7 @@ class Chunk {
   getEdgeData(edge) {
     const data = new Uint8Array(CHUNK_HEIGHT * CHUNK_WIDTH);
     
-    for (let y = MIN_Y; y <= MAX_Y; y++) {
+    for (let y = MIN_Y; y < MAX_Y; y++) {
       for (let x = 0; x < CHUNK_WIDTH; x++) {
         let z;
         switch (edge) {

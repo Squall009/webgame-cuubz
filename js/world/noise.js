@@ -177,6 +177,43 @@ class NoiseGenerator {
   normalized(x, y, z) {
     return (this.perlin3(x, y, z) + 1) / 2;
   }
+
+  /**
+   * Deterministic hash function — produces uniformly distributed value in [0, 1]
+   * from integer coordinates. Unlike perlin2 (which is spatially smooth), this
+   * gives uncorrelated values for nearby positions — suitable for random placement
+   * decisions (trees, ores, features).
+   *
+   * Uses a multiplicative hash combined with the instance seed for determinism.
+   * @param {number} x - Integer coordinate
+   * @param {number} y - Integer coordinate
+   * @returns {number} Value in [0, 1) uniformly distributed
+   */
+  hash(x, y) {
+    // MurmurHash3-style finalizer for integer pair + seed
+    let h = ((x | 0) * 374761393 + (y | 0) * 668265263 + (this.seed | 0)) | 0;
+    // Finalizer mix
+    h = ((h ^ (h >>> 13)) * 1274126177) | 0;
+    h = ((h ^ (h >>> 16)) >>> 0); // Unsigned 32-bit
+    return h / 4294967296; // Normalize to [0, 1)
+  }
+
+  /**
+   * Seeded pseudo-random number generator instance.
+   * Returns a PRNG function that produces deterministic values in [0, 1)
+   * for a given sub-seed. Use this instead of Math.random() for reproducible
+   * procedural content (tree heights, apple placement, etc.).
+   * @param {number} subSeed - Integer to derive PRNG state from
+   * @returns {function} Function that returns next value in [0, 1)
+   */
+  createPRNG(subSeed) {
+    let s = ((subSeed || 0) * 16807 + this.seed + 12345) % 2147483647;
+    if (s <= 0) s += 2147483646;
+    return () => {
+      s = (s * 16807) % 2147483647;
+      return s / 2147483647;
+    };
+  }
 }
 
 module.exports = NoiseGenerator;

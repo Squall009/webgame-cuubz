@@ -50,7 +50,8 @@ class OreGenerator {
         if (clusterValue < (1 - config.rarity * 3)) continue; // Not a vein center
         
         // Place a vein around this point
-        const veinRadius = config.veinSize + Math.floor(Math.random() * 2);
+        const rng = this.noise.createPRNG(wx * 1000 + wz);
+        const veinRadius = config.veinSize + Math.floor(rng() * 2);
         
         for (let dx = -veinRadius; dx <= veinRadius; dx++) {
           for (let dy = -veinRadius; dy <= veinRadius; dy++) {

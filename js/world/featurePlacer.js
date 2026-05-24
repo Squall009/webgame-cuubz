@@ -1,13 +1,15 @@
 /**
  * Cuubz — Feature Placer
  * Trees, cacti, flowers, quest markers, dungeons in appropriate biomes.
+ * Uses deterministic hash-based placement (NOT perlin noise) for uniform distribution.
  */
 
-const { BLOCK_TYPES } = require('./chunkData');
+const { BLOCK_TYPES, MIN_Y, MAX_Y } = require('./chunkData');
 const NoiseGenerator = require('./noise');
 
 class FeaturePlacer {
   constructor(seed) {
+    this.seed = seed;
     this.noise = new NoiseGenerator(seed);
     
     // Feature density per biome (chance per block column)
@@ -41,23 +43,22 @@ class FeaturePlacer {
         const density = this.featureDensity[biome.id];
         if (!density) continue;
         
-        // Use noise to determine feature placement (deterministic per position)
-        const featureRoll = this.noise.perlin2(wx * 0.1, wz * 0.1);
-        const normalized = (featureRoll + 1) / 2; // 0-1
+        // Use hash for uniform random placement (NOT perlin — perlin is spatially smooth)
+        const featureRoll = this.noise.hash(wx, wz); // Uniform [0, 1)
         
-        if (normalized < density.trees && biome.id !== 'ocean' && biome.id !== 'lava' && biome.id !== 'corrupt') {
+        if (featureRoll < density.trees && biome.id !== 'ocean' && biome.id !== 'lava' && biome.id !== 'corrupt') {
           this._placeTree(chunk, lx, surfaceY, lz);
-        } else if (normalized < density.trees + density.flowers) {
+        } else if (featureRoll < density.trees + density.flowers) {
           this._placeFlower(chunk, lx, surfaceY, lz);
-        } else if (density.cacti && normalized < density.trees + density.flowers + density.cacti) {
+        } else if (density.cacti && featureRoll < density.trees + density.flowers + density.cacti) {
           this._placeCactus(chunk, lx, surfaceY, lz);
-        } else if (density.coral && normalized < density.coral) {
+        } else if (density.coral && featureRoll < density.coral) {
           this._placeCoral(chunk, lx, surfaceY, lz);
-        } else if (density.lavaPool && normalized < density.lavaPool) {
+        } else if (density.lavaPool && featureRoll < density.lavaPool) {
           this._placeLavaPool(chunk, lx, surfaceY, lz);
-        } else if (density.toxicPool && normalized < density.toxicPool) {
+        } else if (density.toxicPool && featureRoll < density.toxicPool) {
           this._placeToxicPool(chunk, lx, surfaceY, lz);
-        } else if (density.crystals && normalized < density.crystals) {
+        } else if (density.crystals && featureRoll < density.crystals) {
           this._placeCorruptCrystal(chunk, lx, surfaceY, lz);
         }
       }
@@ -68,8 +69,8 @@ class FeaturePlacer {
    * Find the surface Y at a position in the chunk
    */
   _findSurface(chunk, lx, lz) {
-    // Search from top down
-    for (let y = 64; y >= -32; y--) {
+    // Search from top down (MAX_Y - 1 is the highest valid Y)
+    for (let y = MAX_Y - 1; y >= MIN_Y; y--) {
       const block = chunk.getBlock(lx, y, lz);
       if (block !== BLOCK_TYPES.AIR && block !== BLOCK_TYPES.WATER && block !== BLOCK_TYPES.LEAVES) {
         return y + 1; // Return the air block above surface
@@ -82,7 +83,9 @@ class FeaturePlacer {
    * Place a tree at the given position
    */
   _placeTree(chunk, lx, surfaceY, lz) {
-    const trunkHeight = 4 + Math.floor(Math.random() * 2); // 4-5 blocks tall
+    // Use seeded PRNG for deterministic trunk height and apple placement
+    const rng = this.noise.createPRNG(lx * 1000 + lz);
+    const trunkHeight = 4 + Math.floor(rng() * 2); // 4-5 blocks tall
     
     // Trunk
     for (let y = 0; y < trunkHeight; y++) {
@@ -113,10 +116,10 @@ class FeaturePlacer {
       }
     }
     
-    // Place apples on some trees
-    if (Math.random() < 0.3) {
+    // Place apples on some trees (30% chance, deterministic)
+    if (rng() < 0.3) {
       const appleY = leafStart + 1;
-      const appleX = lx + (Math.random() > 0.5 ? 1 : -1);
+      const appleX = lx + (rng() > 0.5 ? 1 : -1);
       const appleZ = lz;
       if (appleX >= 0 && appleX < 16) {
         chunk.setBlock(appleX, appleY, appleZ, BLOCK_TYPES.APPLE);
@@ -136,7 +139,8 @@ class FeaturePlacer {
    * Place a cactus in desert biome
    */
   _placeCactus(chunk, lx, surfaceY, lz) {
-    const height = 2 + Math.floor(Math.random() * 3); // 2-4 blocks tall
+    const rng = this.noise.createPRNG(lx * 1000 + lz + 777);
+    const height = 2 + Math.floor(rng() * 3); // 2-4 blocks tall
     
     for (let y = 0; y < height; y++) {
       chunk.setBlock(lx, surfaceY + y, lz, BLOCK_TYPES.WOOD_LOG); // Using wood_log as cactus placeholder
@@ -147,7 +151,8 @@ class FeaturePlacer {
    * Place coral structures in ocean biome
    */
   _placeCoral(chunk, lx, surfaceY, lz) {
-    const height = 2 + Math.floor(Math.random() * 2);
+    const rng = this.noise.createPRNG(lx * 1000 + lz + 888);
+    const height = 2 + Math.floor(rng() * 2);
     
     for (let y = 0; y < height; y++) {
       chunk.setBlock(lx, surfaceY - y, lz, BLOCK_TYPES.LEAVES); // Coral placeholder

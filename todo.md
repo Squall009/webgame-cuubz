@@ -509,11 +509,11 @@ webgame-cuubz/
 ### Phase 1 Testing (Browser Automation)
 - [x] **Test: Page loads** — Navigate to game URL, check console
   - [x] No JS errors, canvas renders, Three.js initializes (validated via jsdom — 182 tests passing in test_pageLoad.js)
-- [ ] **Test: World generation** — Create world with known seed
-  - [ ] Terrain varies across biomes, water level correct
-  - [ ] Caves generate underground with connectivity
-  - [ ] Trees/cacti/features placed in correct biomes
-  - [ ] Ore veins present at appropriate depths
+- [x] **Test: World generation** — Create world with known seed (36 assertions via test_worldGenerationIntegration.js)
+  - [x] Terrain varies across biomes, water level correct
+  - [x] Caves generate underground with connectivity
+  - [x] Trees/cacti/features placed in correct biomes
+  - [x] Ore veins present at appropriate depths
 - [ ] **Test: Chunk loading** — Move player across boundaries
   - [ ] Seamless transitions between chunks (no gaps/tears)
   - [ ] Caves continue seamlessly across chunk edges

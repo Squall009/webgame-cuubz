@@ -100,10 +100,29 @@
 |--------|-------|
 | 🔴 OPEN | 1 |
 | 🟡 FIXING | 0 |
-| 🟢 FIXED | 13 |
-| **Total** | **14** |
+| 🟢 FIXED | 15 |
+| **Total** | **16** |
 
 > ⚠️ Bug #14 open — Phase 2 server files need implementation.
+
+### Bug #15: FeaturePlacer uses perlin noise for placement decisions (non-uniform distribution)
+- **Found:** May 24, 2026 during task "Test: World generation"
+- **Status:** 🟢 FIXED
+- **Description:** `FeaturePlacer.placeFeatures()` used `this.noise.perlin2(wx * 0.1, wz * 0.1)` to determine whether to place trees/features at each position. Perlin noise is spatially smooth (designed for gradients), not uniformly distributed — meaning for some seeds the entire noise field falls above/below all density thresholds, resulting in zero feature placement. For seed 42, ALL normalized values were in range [0.33, 0.77], so nothing ever triggered tree placement (thresholds: 0.02 for plains, 0.08 for forest). Additionally, `_placeTree()` used `Math.random()` for trunk height and apple placement — non-deterministic and breaking reproducibility.
+- **Reproduction Steps:** Run world generation integration test with seed 42 — Group 7 "Feature placement" fails: "Trees found across 18 tree biome chunks: 0 wood, 0 leaves".
+- **Root Cause:** Three separate issues:
+  1. `FeaturePlacer` used perlin2 (smooth spatial noise) instead of uniform random for binary placement decisions
+  2. `_placeTree()`, `_placeCactus()`, `_placeCoral()` used `Math.random()` — non-deterministic
+  3. `Chunk.getBlock()` bounds check used `y > MAX_Y` instead of `y >= MAX_Y`, causing y=64 to return `undefined` instead of AIR (0), which made `_findSurface` incorrectly return surfaceY=65 for all positions
+- **Fix Applied:** 
+  1. Added `hash(x, y)` method to NoiseGenerator — MurmurHash3-style deterministic uniform [0,1) distribution from integer coordinates
+  2. Added `createPRNG(subSeed)` method — returns a seeded PRNG function for reproducible random values
+  3. Replaced all perlin2-based placement decisions in FeaturePlacer with hash-based uniform random
+  4. Replaced all `Math.random()` calls in FeaturePlacer with `this.noise.createPRNG()` 
+  5. Fixed Chunk.getBlock/setBlock bounds: `y > MAX_Y` → `y >= MAX_Y`
+  6. Fixed `_findSurface` loop start: `y = 64` → `y = MAX_Y - 1`
+  7. Fixed OreGenerator vein radius: replaced Math.random() with createPRNG
+- **Verified:** May 24, 2026 — All 24 test suites pass (24/24). World generation integration test Group 7 now shows "830 wood, 3219 leaves" across 18 tree biome chunks. Hash distribution verified uniform: 120/6400 positions below 0.02 threshold (expected ~128), matching statistical expectations.
 
 ### Bug #9: Active marker filter excluded locked quests
 - **Found:** May 24, 2026 during task "Implement quest markers"
