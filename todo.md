@@ -458,12 +458,16 @@ webgame-cuubz/
   - [x] 369 tests passing across 23 test groups — constants, definitions structure, attack validation, helpers, constructor, health/damage, shields, phase transitions, multi-phase final boss, attack system, cooldowns, AI state machine, death callback, minion spawning, reset, serialization, BossManager CRUD, manager update, summaries, edge cases
 
 ### Audio Foundation
-- [ ] **Procedural sound effects** — `js/audio/sfx.js`
-  - [ ] Block break/place sounds (different per material type)
-  - [ ] Footstep sounds per biome surface type
-  - [ ] Jump/land sounds, damage flash sounds
-  - [ ] UI click/hover sounds for menus
-  - [ ] Eating/drinking sounds
+- [x] **Procedural sound effects** — `js/audio/sfx.js`
+  - [x] Block break/place sounds (different per material type) — 17 materials with freq/noiseRatio/duration/volume params
+  - [x] Footstep sounds per biome surface type — 9 surfaces mapped from 8 biomes
+  - [x] Jump/land sounds, damage flash sounds — frequency sweep synthesis
+  - [x] UI click/hover sounds for menus — short sine tones with fast envelopes
+  - [x] Eating/drinking sounds — noise-tone mix synthesis
+  - [x] SoundManager class: init/play/dispose lifecycle, master+SFX volume control
+  - [x] Pure utility functions: getMaterialParams, getFootstepParams, calculateVolume, blockIdToMaterial, biomeToFootstepSurface
+  - [x] Noise buffer generation with deterministic seeding (LCG PRNG)
+  - [x] All params testable without Web Audio API — 357 tests passing
 - [ ] **Calm ambient soundscapes** — `js/audio/ambient.js`
   - [ ] Procedural calm drone/chord progression
   - [ ] Biome-specific ambient tones (plains=peaceful, lava=tense, corrupt=eerie)
