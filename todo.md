@@ -568,7 +568,7 @@ webgame-cuubz/
   - [x] Quest marker visible in world
   - [x] Quest tracker shows current objective
   - [x] Quest completes on requirement fulfillment
-- [ ] Record all test results, note bugs, update checkboxes
+- [x] Record all test results, note bugs, update checkboxes (all Phase 1 integration tests complete: character mgmt 106 assertions, world persistence 99 assertions, quest system 91 assertions — 33/33 test files passing)
 
 ---
 
@@ -805,7 +805,7 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 
 | Phase | Status |
 |-------|--------|
-| Phase 1: Foundation — Core Voxel Engine & Single Player Survival | 🟡 In Progress (world gen test done, chunk loading test next) |
+| Phase 1: Foundation — Core Voxel Engine & Single Player Survival | ✅ Complete (all tasks + integration tests done) |
 | Phase 2: Multiplayer & Relay Server | 🟡 In Progress (server files complete + tested, client integration next) |
 | Phase 3: Polish & Content Expansion | ⬜ Not Started |
 | Phase 4: Deployment & Final Polish | ⬜ Not Started |
