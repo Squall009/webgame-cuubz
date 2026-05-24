@@ -564,10 +564,10 @@ webgame-cuubz/
   - [x] Chunk data loaded from disk
   - [x] Quest progress preserved
   - [x] Spawn points restored per player
-- [ ] **Test: Quest system** — Progress through first quest
-  - [ ] Quest marker visible in world
-  - [ ] Quest tracker shows current objective
-  - [ ] Quest completes on requirement fulfillment
+- [x] **Test: Quest system** — Progress through first quest (91 assertions via test_questIntegration.js)
+  - [x] Quest marker visible in world
+  - [x] Quest tracker shows current objective
+  - [x] Quest completes on requirement fulfillment
 - [ ] Record all test results, note bugs, update checkboxes
 
 ---
