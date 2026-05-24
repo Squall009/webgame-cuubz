@@ -701,9 +701,17 @@ webgame-cuubz/
   - [x] Inventory sync relayed to all players (INVENTORY_SYNC)
   - [x] HTTP /health and /sessions endpoints functional
   - [x] Edge cases: invalid JSON, unknown message type, missing fields, nonexistent session, LEAVE
-- [ ] **Test: Session discovery** — Create session, browse from client
-  - [ ] Host session appears in browser list
-  - [ ] Join connects to game session successfully
+- [x] **Test: Session discovery** — Create session, browse from client (62 assertions via test_sessionDiscovery.js)
+  - [x] Host session appears in browser list with correct name, player count, mode
+  - [x] Join connects to game session successfully
+  - [x] Multiple sessions visible in browse list simultaneously
+  - [x] Full E2E flow: Browse → Find Session → Join → Connect to Game Session
+  - [x] Non-existent session join returns JOIN_REJECTED error
+  - [x] HTTP /sessions endpoint mirrors WebSocket browse data
+  - [x] Session player count updates in browse list after players join
+  - [x] Max player enforcement: 4th accepted, 5th rejected with "Session is full"
+  - [x] PLAYER_JOINED broadcast sent to existing players when new player joins
+  - [x] Host playerId consistency: same ID used across matchmaking and game session (server fix in session.js)
 - [ ] **Test: Multiplayer sync** — Two players in same world
   - [ ] Remote player visible with correct color + name tag
   - [ ] Movement synchronized between clients

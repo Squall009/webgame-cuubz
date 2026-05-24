@@ -107,7 +107,10 @@ class SessionManager {
 
     switch (msg.type) {
       case MESSAGE_TYPES.JOIN:
-        this._handleJoin(ws, playerId || this._generatePlayerId(), msg);
+        // Use playerId from message if provided (e.g., host reconnecting),
+        // otherwise use lookup or generate new one
+        const joinPlayerId = msg.playerId || playerId || this._generatePlayerId();
+        this._handleJoin(ws, joinPlayerId, msg);
         break;
 
       case MESSAGE_TYPES.MOVE:
