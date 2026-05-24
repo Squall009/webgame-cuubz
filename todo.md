@@ -348,13 +348,19 @@ webgame-cuubz/
   - [x] Spawn point saved per player per world (SpawnManager integration)
 
 ### Inventory System
-- [ ] **Implement inventory** — `js/systems/inventory.js`
-  - [ ] Grid-based inventory (e.g., 9×4 grid)
-  - [ ] Hotbar: bottom 9 slots, scroll/tap to select
-  - [ ] Block item tracking with counts per type
-  - [ ] Break block → add to inventory
-  - [ ] Place block → decrement from inventory
-  - [ ] Mobile-friendly inventory UI
+- [x] **Implement inventory** — `js/systems/inventory.js`
+  - [x] Grid-based inventory (9×4 grid = 36 slots)
+  - [x] Hotbar: bottom 9 slots, scroll/tap to select
+  - [x] Block item tracking with counts per type
+  - [x] Break block → add to inventory (addBlockDrop with BLOCK_PROPERTIES integration)
+  - [x] Place block → decrement from inventory (consumeSelectedBlock)
+  - [x] Mobile-friendly inventory UI (slot indexing, drag-drop swap/split support)
+  - [x] Stacking: auto-stack same types, respect max stack per category (64 blocks, 16 food, 1 quest items)
+  - [x] Named items: coal, iron_ore, gold_ore, diamond, corrupt_crystal, apple, cooked_meat, berry, bread, golden_apple
+  - [x] Serialization/deserialization for IndexedDB persistence
+  - [x] Query helpers: countItem, hasItem, findSlot, getItems, isFull
+  - [x] Callback system: onSlotChange, onSelectionChange for UI integration
+  - [x] 191 tests passing — construction, indexing, selection, add/remove, stacking, break/place, serialization, drag-drop, edge cases
 
 ### Persistence System (Characters + Worlds Separated)
 - [x] **Implement IndexedDB database** — `js/world/persistence.js`
