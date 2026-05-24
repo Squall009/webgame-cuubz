@@ -5,7 +5,7 @@
  * Includes comprehensive food system tests (FOOD_ITEMS registry, eating mechanics, saturation).
  */
 
-const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING } = require('../js/systems/survival');
+const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING } = require('../js/systems/survival');
 
 let passed = 0;
 let failed = 0;
@@ -695,6 +695,252 @@ const ssD31 = new SurvivalSystem({
 });
 assert(ssD31.config.health.max === 200, 'Custom health max should be 200');
 assert(ssD31.meters.health === 200, 'Health should start at custom max');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DRINKING SYSTEM TESTS — Water drinking with animation, cooldown, proximity
+// ═══════════════════════════════════════════════════════════════════════════
+
+// --- Test W1: DRINKING constants are correct ---
+assert(DRINKING.drinkTime === 0.8, `DRINKING.drinkTime should be 0.8, got ${DRINKING.drinkTime}`);
+assert(DRINKING.cooldown === 1.0, `DRINKING.cooldown should be 1.0, got ${DRINKING.cooldown}`);
+assert(DRINKING.thirstRestoration === 35, `DRINKING.thirstRestoration should be 35, got ${DRINKING.thirstRestoration}`);
+
+// --- Test W2: Constructor initializes drinking state ---
+const ssW1 = new SurvivalSystem();
+assert(ssW1.isDrinking === false, 'Should not be drinking by default');
+assert(ssW1.drinkingProgress === 0, 'Drinking progress should start at 0');
+assert(ssW1.lastDrinkTime === 0, 'Last drink time should start at 0');
+assert(ssW1.isNearWaterSource === false, 'Should not be near water by default');
+
+// --- Test W3: setNearWaterSource sets the flag ---
+const ssW2 = new SurvivalSystem();
+ssW2.setNearWaterSource(true);
+assert(ssW2.isNearWaterSource === true, 'setNearWaterSource(true) should set flag');
+ssW2.setNearWaterSource(false);
+assert(ssW2.isNearWaterSource === false, 'setNearWaterSource(false) should clear flag');
+
+// --- Test W4: canDrink returns false when not near water ---
+const ssW3 = new SurvivalSystem();
+ssW3.lastDrinkTime = 0;
+assert(ssW3.canDrink() === false, 'Cannot drink without being near water');
+ssW3.setNearWaterSource(true);
+assert(ssW3.canDrink() === true, 'Can drink when near water and off cooldown');
+
+// --- Test W5: canDrink returns false when dead ---
+const ssW4 = new SurvivalSystem();
+ssW4.setNearWaterSource(true);
+ssW4.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssW4.canDrink() === false, 'Dead player cannot drink');
+
+// --- Test W6: canDrink returns false while drinking ---
+const ssW5 = new SurvivalSystem();
+ssW5.setNearWaterSource(true);
+ssW5.lastDrinkTime = 0;
+ssW5.isDrinking = true;
+assert(ssW5.canDrink() === false, 'Cannot drink while already drinking');
+
+// --- Test W7: startDrinking returns true when near water ---
+const ssW6 = new SurvivalSystem();
+ssW6.setNearWaterSource(true);
+ssW6.lastDrinkTime = 0;
+assert(ssW6.startDrinking() === true, 'startDrinking should succeed near water');
+assert(ssW6.isDrinking === true, 'Should be marked as drinking');
+assert(ssW6.drinkingProgress === 0, 'Drinking progress should start at 0');
+
+// --- Test W8: startDrinking returns false when not near water ---
+const ssW7 = new SurvivalSystem();
+ssW7.lastDrinkTime = 0;
+assert(ssW7.startDrinking() === false, 'startDrinking should fail without water nearby');
+assert(ssW7.isDrinking === false, 'Should not be drinking after failed attempt');
+
+// --- Test W9: startDrinking returns false when dead ---
+const ssW8 = new SurvivalSystem();
+ssW8.setNearWaterSource(true);
+ssW8.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssW8.startDrinking() === false, 'Dead player cannot start drinking');
+
+// --- Test W10: startDrinking returns false when already drinking ---
+const ssW9 = new SurvivalSystem();
+ssW9.setNearWaterSource(true);
+ssW9.lastDrinkTime = 0;
+ssW9.startDrinking();
+assert(ssW9.startDrinking() === false, 'Cannot start drinking while already drinking');
+
+// --- Test W11: Drinking progress completes in update loop ---
+const ssW10 = new SurvivalSystem();
+ssW10.meters.thirst = 30;
+ssW10.setNearWaterSource(true);
+ssW10.lastDrinkTime = 0;
+let waterDrunk = null;
+ssW10.onWaterDrunk = (data) => { waterDrunk = data; };
+ssW10.startDrinking();
+assert(ssW10.isDrinking === true, 'Should be drinking');
+
+// Advance time past drinkTime (0.8s)
+ssW10.update(1.0, { currentTime: 100 });
+assert(ssW10.isDrinking === false, 'Drinking should complete after drinkTime');
+assert(waterDrunk !== null, 'onWaterDrunk callback should fire');
+assert(waterDrunk.thirstRestored === 35, `Should restore 35 thirst, got ${waterDrunk.thirstRestored}`);
+// Thirst: 30 + 35 - depletion (2.0 * 1.0) = 63
+assert(ssW10.meters.thirst > 58, `Thirst should be restored significantly, got ${ssW10.meters.thirst.toFixed(2)}`);
+assert(ssW10.meters.thirst < 70, `Thirst should not exceed expected max, got ${ssW10.meters.thirst.toFixed(2)}`);
+
+// --- Test W12: Drinking caps thirst at max ---
+const ssW11 = new SurvivalSystem();
+ssW11.meters.thirst = 80; // Would go to 80+35=115, should cap at 100
+ssW11.setNearWaterSource(true);
+ssW11.lastDrinkTime = 0;
+ssW11.startDrinking();
+// Use very small deltaTime so depletion is negligible — drinking completes and thirst caps
+ssW11.update(0.85, { currentTime: 200 }); // Just past drinkTime (0.8), minimal depletion (~1.7)
+assert(ssW11.meters.thirst >= 98, `Thirst should be near max after drinking (got ${ssW11.meters.thirst.toFixed(1)})`);
+
+// --- Test W13: cancelDrinking stops drinking without restoration ---
+const ssW12 = new SurvivalSystem();
+ssW12.meters.thirst = 30;
+ssW12.setNearWaterSource(true);
+ssW12.lastDrinkTime = 0;
+ssW12.startDrinking();
+assert(ssW12.isDrinking === true, 'Should be drinking before cancel');
+ssW12.cancelDrinking();
+assert(ssW12.isDrinking === false, 'cancelDrinking should set isDrinking to false');
+assert(ssW12.meters.thirst === 30, 'Thirst should not change when drinking is cancelled');
+
+// --- Test W14: Drinking cooldown prevents rapid drinking ---
+const ssW13 = new SurvivalSystem();
+ssW13.setNearWaterSource(true);
+ssW13.lastDrinkTime = (Date.now() / 1000) - 0.5; // Drank half a second ago — still on cooldown
+assert(ssW13.startDrinking() === false, 'Should fail on cooldown');
+
+// --- Test W14b: Cooldown expires and allows drinking again ---
+const ssW14 = new SurvivalSystem();
+ssW14.setNearWaterSource(true);
+ssW14.lastDrinkTime = 0; // Far in the past
+assert(ssW14.canDrink() === true, 'Should be able to drink after cooldown expires');
+
+// --- Test W15: getDrinkingState returns correct data ---
+const ssW15 = new SurvivalSystem();
+let dstate = ssW15.getDrinkingState();
+assert(dstate.isDrinking === false, 'Not drinking should return isDrinking=false');
+assert(dstate.progress === 0, 'Not drinking should have progress=0');
+assert(dstate.nearWaterSource === false, 'Should report not near water');
+
+ssW15.setNearWaterSource(true);
+dstate = ssW15.getDrinkingState();
+assert(dstate.nearWaterSource === true, 'Should report near water after setNearWaterSource');
+
+// --- Test W16: getDrinkingState shows progress during drinking ---
+const ssW16 = new SurvivalSystem();
+ssW16.setNearWaterSource(true);
+ssW16.lastDrinkTime = 0;
+ssW16.startDrinking();
+dstate = ssW16.getDrinkingState();
+assert(dstate.isDrinking === true, 'Should be drinking');
+assert(dstate.progress >= 0 && dstate.progress <= 1, `Progress should be between 0 and 1, got ${dstate.progress}`);
+
+// Halfway through drinking (drinkTime=0.8, advance 0.4s)
+ssW16.update(0.4, { currentTime: 100 });
+dstate = ssW16.getDrinkingState();
+assert(dstate.isDrinking === true, 'Should still be drinking at halfway');
+assert(Math.abs(dstate.progress - 0.5) < 0.1, `Progress should be ~0.5, got ${dstate.progress.toFixed(2)}`);
+
+// --- Test W17: drinkWaterInstant — instant thirst restoration ---
+const ssW17 = new SurvivalSystem();
+ssW17.meters.thirst = 40;
+ssW17.setNearWaterSource(true);
+ssW17.lastDrinkTime = 0;
+assert(ssW17.drinkWaterInstant() === true, 'drinkWaterInstant should succeed');
+assert(ssW17.meters.thirst === 75, `Thirst should be 40+35=75, got ${ssW17.meters.thirst}`);
+
+// --- Test W18: drinkWaterInstant — caps at max ---
+const ssW18 = new SurvivalSystem();
+ssW18.meters.thirst = 80;
+ssW18.setNearWaterSource(true);
+ssW18.lastDrinkTime = 0;
+ssW18.drinkWaterInstant();
+assert(ssW18.meters.thirst === 100, 'Thirst should cap at max with instant drink');
+
+// --- Test W19: drinkWaterInstant — returns false when dead ---
+const ssW19 = new SurvivalSystem();
+ssW19.setNearWaterSource(true);
+ssW19.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssW19.drinkWaterInstant() === false, 'Dead player cannot drink instantly');
+
+// --- Test W20: drinkWaterInstant — returns false when not near water ---
+const ssW20 = new SurvivalSystem();
+ssW20.lastDrinkTime = 0;
+assert(ssW20.drinkWaterInstant() === false, 'Cannot drink without being near water');
+
+// --- Test W21: drinkWaterInstant — respects cooldown ---
+const ssW21 = new SurvivalSystem();
+ssW21.setNearWaterSource(true);
+ssW21.lastDrinkTime = (Date.now() / 1000) - 0.5; // Drank half a second ago — still on cooldown
+assert(ssW21.drinkWaterInstant() === false, 'Should fail on cooldown');
+
+// --- Test W22: Drinking while dead does nothing in update loop ---
+const ssW22 = new SurvivalSystem();
+ssW22.setNearWaterSource(true);
+ssW22.isDrinking = true;
+ssW22.drinkingProgress = 0.5;
+ssW22.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssW22.isDead === true, 'Player should be dead');
+ssW22.update(10, { currentTime: 100 });
+assert(ssW22.isDrinking === true, 'Dead player drinking state should not change (update bails early)');
+
+// --- Test W23: onWaterDrunk callback receives correct data ---
+const ssW23 = new SurvivalSystem();
+let drinkCallbackData = null;
+ssW23.onWaterDrunk = (data) => { drinkCallbackData = data; };
+ssW23.setNearWaterSource(true);
+ssW23.lastDrinkTime = 0;
+ssW23.startDrinking();
+ssW23.update(1.0, { currentTime: 100 });
+assert(drinkCallbackData !== null, 'onWaterDrunk callback should fire');
+assert(drinkCallbackData.thirstRestored === 35, `Should report 35 thirst restored, got ${drinkCallbackData.thirstRestored}`);
+
+// --- Test W24: Drinking serialization includes state ---
+const ssW24 = new SurvivalSystem();
+ssW24.setNearWaterSource(true);
+ssW24.lastDrinkTime = 0;
+ssW24.startDrinking();
+ssW24.drinkingProgress = 0.4; // Midway through drinking
+const savedW = ssW24.serialize();
+assert(savedW.isDrinking === true, 'Serialized state should include isDrinking');
+assert(savedW.drinkingProgress === 0.4, 'Serialized drinking progress should be preserved');
+assert(savedW.lastDrinkTime !== undefined, 'Serialized state should include lastDrinkTime');
+
+// --- Test W25: Drinking deserialization restores state ---
+const ssW25 = new SurvivalSystem();
+ssW25.deserialize({
+  isDrinking: true,
+  drinkingProgress: 0.6,
+  lastDrinkTime: 50,
+});
+assert(ssW25.isDrinking === true, 'Deserialized isDrinking should be true');
+assert(ssW25.drinkingProgress === 0.6, 'Deserialized drinking progress should be restored');
+assert(ssW25.lastDrinkTime === 50, 'Deserialized lastDrinkTime should be restored');
+
+// --- Test W26: Full serialization round-trip with drinking state ---
+const ssW26 = new SurvivalSystem();
+ssW26.meters.thirst = 60;
+ssW26.setNearWaterSource(true);
+ssW26.lastDrinkTime = 42;
+const savedRound = ssW26.serialize();
+const ssW27 = new SurvivalSystem();
+ssW27.deserialize(savedRound);
+assert(ssW27.meters.thirst === 60, 'Thirst should survive round-trip');
+assert(ssW27.lastDrinkTime === 42, 'lastDrinkTime should survive round-trip');
+
+// --- Test W27: Backward compat drinkWater still works ---
+const ssW28 = new SurvivalSystem();
+ssW28.meters.thirst = 50;
+assert(ssW28.drinkWater() === true, 'Legacy drinkWater should return true');
+assert(ssW28.meters.thirst === 80, `Legacy drinkWater should restore by RESTORATION.water.thirst (30), got ${ssW28.meters.thirst}`);
+
+// --- Test W28: Legacy drinkWater returns false when dead ---
+const ssW29 = new SurvivalSystem();
+ssW29.takeDamage(100, DAMAGE_SOURCES.LAVA);
+assert(ssW29.drinkWater() === false, 'Legacy drinkWater should return false when dead');
 
 // --- Summary ---
 console.log(`\nSurvival System Tests: ${passed} passed, ${failed} failed`);

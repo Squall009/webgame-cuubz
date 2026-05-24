@@ -338,10 +338,10 @@ webgame-cuubz/
   - [x] onFoodEaten callback for HUD/game integration
   - [x] Eating state tracking: isEating, eatingProgress, currentFoodItem, getEatingState()
   - [x] Food state serialization/deserialization in survival save system
-- [ ] **Implement water drinking** — `js/systems/survival.js`
-  - [ ] Stand in/near water source (ponds, oceans, rivers)
-  - [ ] Press interact key to drink → restores thirst
-  - [ ] Drinking animation/delay (can't drink instantly)
+- [x] **Implement water drinking** — `js/systems/survival.js`
+  - [x] Stand in/near water source (ponds, oceans, rivers)
+  - [x] Press interact key to drink → restores thirst
+  - [x] Drinking animation/delay (can't drink instantly)
 - [ ] **Implement bed system** — `js/systems/survival.js`
   - [ ] Placeable bed blocks from inventory
   - [ ] Right-click bed: restore sleep meter + set spawn point

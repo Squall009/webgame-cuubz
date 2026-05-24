@@ -106,6 +106,13 @@ const EATING = {
   saturationDuration: 30, // How long saturation bonus lasts after eating (seconds)
 };
 
+// Drinking constants
+const DRINKING = {
+  drinkTime: 0.8,          // Seconds to complete drinking animation
+  cooldown: 1.0,           // Seconds between drinks (minimum)
+  thirstRestoration: 35,   // Thirst restored per drink from natural water source
+};
+
 class SurvivalSystem {
   constructor(options = {}) {
     // Meter configurations (override defaults)
@@ -152,6 +159,12 @@ class SurvivalSystem {
     this.lastEatTime = 0;            // Timestamp when last eating action finished (cooldown)
     this.saturationTimer = 0;        // Remaining time with active saturation bonus
     this.activeSaturation = 1.0;     // Current hunger depletion multiplier from saturation (1.0 = no bonus)
+
+    // ─── Drinking System State ──────────────────────────────────────────────
+    this.isDrinking = false;         // Currently in the middle of drinking animation
+    this.drinkingProgress = 0;       // Progress through DRINKING.drinkTime (0 to drinkTime)
+    this.lastDrinkTime = 0;          // Timestamp when last drinking action finished (cooldown)
+    this.isNearWaterSource = false;  // Whether player is standing in/near a water block
   }
 
   /**
@@ -175,6 +188,19 @@ class SurvivalSystem {
         this.eatingProgress = 0;
         this.lastEatTime = now;
         this.currentFoodItem = null;
+      }
+    }
+
+    // ─── Drinking System: Update drinking progress ────────────────────────
+    if (this.isDrinking) {
+      this.drinkingProgress += deltaTime;
+
+      if (this.drinkingProgress >= DRINKING.drinkTime) {
+        // Drinking complete — apply thirst restoration
+        this._finishDrinking();
+        this.isDrinking = false;
+        this.drinkingProgress = 0;
+        this.lastDrinkTime = now;
       }
     }
 
@@ -528,13 +554,126 @@ class SurvivalSystem {
   }
 
   /**
+   * Set whether player is near a water source (pond, ocean, river).
+   * Called by the game loop based on chunk data around player position.
+   *
+   * @param {boolean} nearWater — true if player is standing in or adjacent to a water block
+   */
+  setNearWaterSource(nearWater) {
+    this.isNearWaterSource = !!nearWater;
+  }
+
+  /**
+   * Check if player can drink (not dead, not already drinking, off cooldown, near water).
+   *
+   * @returns {boolean}
+   */
+  canDrink() {
+    if (this.isDead) return false;
+    if (this.isDrinking) return false;
+    if (!this.isNearWaterSource) return false;
+    const now = Date.now() / 1000;
+    return (now - this.lastDrinkTime) >= DRINKING.cooldown;
+  }
+
+  /**
+   * Start drinking water from a nearby source (animated — takes drinkTime seconds).
+   * Returns true if drinking started successfully.
+   * Returns false if: player is dead, already drinking, on cooldown, or not near water.
+   *
+   * @returns {boolean} Whether drinking was initiated
+   */
+  startDrinking() {
+    if (this.isDead) return false;
+    if (this.isDrinking) return false; // Already in the middle of drinking
+    if (!this.isNearWaterSource) return false; // No water nearby
+
+    // Check cooldown
+    const now = Date.now() / 1000;
+    if (now - this.lastDrinkTime < DRINKING.cooldown) {
+      return false; // Still on cooldown
+    }
+
+    this.isDrinking = true;
+    this.drinkingProgress = 0;
+    return true;
+  }
+
+  /**
+   * Cancel the current drinking action (e.g., player moved away from water).
+   * No restoration is applied.
+   */
+  cancelDrinking() {
+    if (!this.isDrinking) return;
+    this.isDrinking = false;
+    this.drinkingProgress = 0;
+  }
+
+  /**
+   * Finish drinking — apply thirst restoration.
+   * Called internally when drinking animation completes.
+   *
+   * @private
+   */
+  _finishDrinking() {
+    this.meters.thirst = Math.min(this.config.thirst.max,
+      this.meters.thirst + DRINKING.thirstRestoration);
+
+    // Notify callbacks about drinking
+    if (this.onWaterDrunk) {
+      this.onWaterDrunk({ thirstRestored: DRINKING.thirstRestoration });
+    }
+  }
+
+  /**
+   * Get drinking state for HUD/animation systems.
+   *
+   * @returns {object} Drinking state: isDrinking, progress (0-1), nearWaterSource
+   */
+  getDrinkingState() {
+    return {
+      isDrinking: this.isDrinking,
+      progress: this.isDrinking ? Math.min(1, this.drinkingProgress / DRINKING.drinkTime) : 0,
+      nearWaterSource: this.isNearWaterSource,
+    };
+  }
+
+  /**
    * Drink water — restores thirst.
-   * @deprecated Use a dedicated drink/drinkWater method with cooldown if needed.
+   * @deprecated Use startDrinking() for animated drinking or drinkWaterInstant() for testing.
    * Kept for backward compatibility.
    */
   drinkWater() {
     if (this.isDead) return false;
     this.meters.thirst = Math.min(this.config.thirst.max, this.meters.thirst + RESTORATION.water.thirst);
+    return true;
+  }
+
+  /**
+   * Instantly drink water (no animation delay).
+   * Used for testing or non-animated contexts.
+   * Requires player to be near a water source.
+   * Returns true if water was consumed successfully.
+   *
+   * @returns {boolean} Whether water was consumed
+   */
+  drinkWaterInstant() {
+    if (this.isDead) return false;
+    if (!this.isNearWaterSource) return false;
+
+    // Check cooldown even for instant drinking
+    const now = Date.now() / 1000;
+    if (now - this.lastDrinkTime < DRINKING.cooldown) {
+      return false;
+    }
+
+    this.meters.thirst = Math.min(this.config.thirst.max,
+      this.meters.thirst + DRINKING.thirstRestoration);
+    this.lastDrinkTime = now;
+
+    if (this.onWaterDrunk) {
+      this.onWaterDrunk({ thirstRestored: DRINKING.thirstRestoration });
+    }
     return true;
   }
 
@@ -659,6 +798,10 @@ class SurvivalSystem {
       lastEatTime: this.lastEatTime,
       saturationTimer: this.saturationTimer,
       activeSaturation: this.activeSaturation,
+      // Drinking system state
+      isDrinking: this.isDrinking,
+      drinkingProgress: this.drinkingProgress,
+      lastDrinkTime: this.lastDrinkTime,
     };
   }
 
@@ -689,6 +832,11 @@ class SurvivalSystem {
     if (data.lastEatTime !== undefined) this.lastEatTime = data.lastEatTime;
     if (data.saturationTimer !== undefined) this.saturationTimer = data.saturationTimer;
     if (data.activeSaturation !== undefined) this.activeSaturation = data.activeSaturation;
+
+    // Drinking system state
+    if (data.isDrinking !== undefined) this.isDrinking = data.isDrinking;
+    if (data.drinkingProgress !== undefined) this.drinkingProgress = data.drinkingProgress;
+    if (data.lastDrinkTime !== undefined) this.lastDrinkTime = data.lastDrinkTime;
   }
 
   /**
@@ -728,4 +876,4 @@ class SurvivalSystem {
   }
 }
 
-module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING };
+module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING };
