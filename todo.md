@@ -560,10 +560,10 @@ webgame-cuubz/
   - [x] 3 character slots available
   - [x] Name + color saved and restored
   - [x] Inventory persists per character
-- [ ] **Test: World persistence** — Create world, reload page
-  - [ ] Chunk data loaded from disk
-  - [ ] Quest progress preserved
-  - [ ] Spawn points restored per player
+- [x] **Test: World persistence** — Create world, reload page (99 assertions via test_worldPersistenceIntegration.js)
+  - [x] Chunk data loaded from disk
+  - [x] Quest progress preserved
+  - [x] Spawn points restored per player
 - [ ] **Test: Quest system** — Progress through first quest
   - [ ] Quest marker visible in world
   - [ ] Quest tracker shows current objective
