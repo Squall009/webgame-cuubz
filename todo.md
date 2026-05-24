@@ -556,10 +556,10 @@ webgame-cuubz/
   - [x] Integration: Touch <-> Keyboard movement equivalence, Touch tap <-> Mouse click equivalence
   - [x] Bug #4 fixed: TouchInput DOM access guarded for Node.js testing (js/input/touch.js)
   - [x] Bug #5 fixed: MouseInput exitPointerLock document guard added (js/input/mouse.js)
-- [ ] **Test: Character management** — Create/edit/delete characters
-  - [ ] 3 character slots available
-  - [ ] Name + color saved and restored
-  - [ ] Inventory persists per character
+- [x] **Test: Character management** — Create/edit/delete characters (106 assertions via test_characterManagementIntegration.js)
+  - [x] 3 character slots available
+  - [x] Name + color saved and restored
+  - [x] Inventory persists per character
 - [ ] **Test: World persistence** — Create world, reload page
   - [ ] Chunk data loaded from disk
   - [ ] Quest progress preserved
