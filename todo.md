@@ -622,12 +622,24 @@ webgame-cuubz/
   - [x] Event callbacks: onPlayerJoined, onPlayerLeft, onBlockBreakValidated, onBlockPlaceValidated, onInventorySynced, onQuestUpdated, onError
   - [x] getStateSummary() for debugging/HUD integration
   - [x] Serialization/deserialization for RemotePlayerState persistence
-- [ ] **Implement chunk streaming** — `js/multiplayer/chunkStreamer.js`
-  - [ ] Track ALL player positions in session
-  - [ ] Load chunks around ALL players (not just host)
-  - [ ] Stream chunk data to clients who need it
-  - [ ] Compress chunk data for transmission
-  - [ ] Unload distant chunks when no players nearby
+- [x] **Implement chunk streaming** — `js/multiplayer/chunkStreamer.js`
+  - [x] Track ALL player positions in session
+  - [x] Load chunks around ALL players (not just host)
+  - [x] Stream chunk data to clients who need it
+  - [x] Compress chunk data for transmission
+  - [x] Unload distant chunks when no players nearby
+  - [x] ChunkStreamer class: player position tracking, load/unload radius management
+  - [x] ChunkCompressor: RLE compression for efficient transmission (24576→194 bytes for all-air)
+  - [x] ChunkStreamEntry: per-chunk state (UNLOADED/LOADING/LOADED/STREAMING/DIRTY)
+  - [x] calculateChunkNeeds(): Manhattan-distance load radius, Euclidean unload radius
+  - [x] updatePlayerChunkNeeds(): assigns playerRefs to chunks within each player's load radius
+  - [x] tick(): full cycle — calculate needs → unload distant → load needed → build stream queue → stream (maxChunksPerTick limit)
+  - [x] Priority streaming: dirty chunks first, then never-streamed chunks
+  - [x] Lifecycle: start/stop/dispose with setInterval auto-tick loop
+  - [x] Error handling: generator failures revert to UNLOADED, callback errors caught silently
+  - [x] Callback system: onChunkLoaded, onChunkUnloaded, onChunkStreamed, onError
+  - [x] getStats(): playersTracked, chunksLoaded, chunksDirty, totalStreamed, totalLoaded
+  - [x] 150 tests passing across 16 test groups — constants, compressor, entry, constructor, player tracking, loading, unloading, dirty marking, chunk needs calculation, full tick cycle, multiplayer tracking, lifecycle, error handling, compression integration, edge cases
 - [ ] **Implement player synchronization** — `js/multiplayer/playerSync.js`
   - [ ] Render remote players as colored voxel characters
   - [ ] Smooth interpolation of remote player positions/rotations
