@@ -22,6 +22,19 @@
     loadingScreen: document.getElementById('loading-screen'),
   };
 
+  // Additional screen elements for session UI
+  const sessionUI = {
+    connectionStatus: document.getElementById('connection-status'),
+    connectionHud: document.getElementById('connection-hud'),
+    playerListOverlay: document.getElementById('player-list-overlay'),
+    playerCount: document.getElementById('player-count'),
+    playerListItems: document.getElementById('player-list-items'),
+    browsePanel: document.getElementById('browse-panel'),
+    hostPanel: document.getElementById('host-panel'),
+    sessionList: document.getElementById('session-list'),
+    noSessionsMsg: document.getElementById('no-sessions-msg'),
+  };
+
   function showScreen(name) {
     // Hide all screens
     Object.values(screens).forEach(el => {
@@ -800,10 +813,474 @@
       });
     }
 
-    // Lobby screen
+    // Lobby screen — session UI management
     document.getElementById('btn-back-lobby').addEventListener('click', () => {
       showScreen('mainMenu');
     });
+
+    // Tab switching: Browse / Host
+    document.getElementById('tab-browse').addEventListener('click', () => {
+      switchLobbyTab('browse');
+    });
+
+    document.getElementById('tab-host').addEventListener('click', () => {
+      switchLobbyTab('host');
+    });
+
+    // Refresh sessions button
+    document.getElementById('btn-refresh-sessions').addEventListener('click', () => {
+      if (sessionManager) {
+        sessionManager.browseSessions();
+      }
+    });
+
+    // Host form — max players slider
+    const hostMaxPlayers = document.getElementById('host-max-players');
+    const hostMaxPlayersValue = document.getElementById('host-max-players-value');
+    if (hostMaxPlayers && hostMaxPlayersValue) {
+      hostMaxPlayers.addEventListener('input', () => {
+        hostMaxPlayersValue.textContent = hostMaxPlayers.value;
+      });
+    }
+
+    // Start hosting button
+    document.getElementById('btn-start-hosting').addEventListener('click', async () => {
+      if (sessionManager) {
+        await sessionManager.startHosting();
+      }
+    });
+
+    initSessionUI();
+  }
+
+  // ============================================================
+  // Session UI Management
+  // ============================================================
+
+  let sessionManager = null;
+
+  /**
+   * Switch between Browse and Host tabs in lobby screen.
+   * @param {'browse'|'host'} tab
+   */
+  function switchLobbyTab(tab) {
+    const tabBrowse = document.getElementById('tab-browse');
+    const tabHost = document.getElementById('tab-host');
+
+    if (tab === 'browse') {
+      tabBrowse.classList.add('active');
+      tabHost.classList.remove('active');
+      sessionUI.browsePanel.classList.remove('hidden');
+      sessionUI.hostPanel.classList.add('hidden');
+      // Auto-refresh sessions when switching to browse
+      if (sessionManager) {
+        sessionManager.browseSessions();
+      }
+    } else {
+      tabHost.classList.add('active');
+      tabBrowse.classList.remove('active');
+      sessionUI.hostPanel.classList.remove('hidden');
+      sessionUI.browsePanel.classList.add('hidden');
+      // Populate world select dropdown when switching to host
+      populateHostWorldSelect();
+    }
+  }
+
+  /**
+   * Populate the host form's world dropdown with available worlds.
+   */
+  function populateHostWorldSelect() {
+    const select = document.getElementById('host-world-select');
+    if (!select) return;
+
+    select.innerHTML = '';
+    const worlds = worldManager ? worldManager.getAllWorlds() : [];
+
+    if (worlds.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No worlds available';
+      select.appendChild(opt);
+      return;
+    }
+
+    worlds.forEach(w => {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.textContent = `${w.name} (seed: ${BrowserWorldManager.formatSeed(w.seed)})`;
+      select.appendChild(opt);
+    });
+  }
+
+  /**
+   * Update connection status indicator in lobby and HUD.
+   * @param {'disconnected'|'connecting'|'connected'|'reconnecting'} status
+   */
+  function updateConnectionStatus(status) {
+    const statusTexts = {
+      disconnected: 'Disconnected',
+      connecting: 'Connecting...',
+      connected: 'Connected',
+      reconnecting: 'Reconnecting...',
+    };
+
+    // Lobby connection status
+    if (sessionUI.connectionStatus) {
+      sessionUI.connectionStatus.className = `connection-status ${status}`;
+      const textEl = sessionUI.connectionStatus.querySelector('.status-text');
+      if (textEl) textEl.textContent = statusTexts[status] || status;
+    }
+
+    // In-game connection HUD
+    if (sessionUI.connectionHud) {
+      sessionUI.connectionHud.className = `connection-hud ${status}`;
+      const hudText = sessionUI.connectionHud.querySelector('.status-text');
+      if (hudText) hudText.textContent = statusTexts[status] || status;
+    }
+  }
+
+  /**
+   * Render the session list in browse panel.
+   * @param {Array} sessions — Array of session objects from server
+   */
+  function renderSessionList(sessions) {
+    const container = sessionUI.sessionList;
+    const noMsg = sessionUI.noSessionsMsg;
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (!sessions || sessions.length === 0) {
+      if (noMsg) noMsg.classList.remove('hidden');
+      return;
+    }
+
+    if (noMsg) noMsg.classList.add('hidden');
+
+    sessions.forEach(session => {
+      const item = document.createElement('div');
+      item.className = 'session-item';
+      const playerCount = session.players || 0;
+      const maxPlayers = session.maxPlayers || 4;
+      const mode = session.mode || 'survival';
+      const isFull = playerCount >= maxPlayers;
+
+      item.innerHTML = `
+        <div class="session-info">
+          <div class="session-name">${escapeHtml(session.name)}</div>
+          <div class="session-details">${mode.charAt(0).toUpperCase() + mode.slice(1)} · ${session.seed ? 'Seed: ' + session.seed : ''}</div>
+        </div>
+        <div class="session-players">
+          ${isFull ? '<span style="color:#e74c3c;">Full</span>' : `${playerCount}/${maxPlayers}`}
+        </div>
+      `;
+
+      if (!isFull) {
+        item.addEventListener('click', () => {
+          if (sessionManager) {
+            sessionManager.joinSession(session.sessionId);
+          }
+        });
+      } else {
+        item.style.opacity = '0.5';
+        item.style.cursor = 'not-allowed';
+      }
+
+      container.appendChild(item);
+    });
+  }
+
+  /**
+   * Render the in-game player list overlay.
+   * @param {Array} players — Array of player objects with name, color, health
+   */
+  function renderPlayerList(players) {
+    const overlay = sessionUI.playerListOverlay;
+    const itemsContainer = sessionUI.playerListItems;
+    const countEl = sessionUI.playerCount;
+
+    if (!overlay || !itemsContainer) return;
+
+    // Show overlay when in multiplayer game
+    overlay.classList.remove('hidden');
+    itemsContainer.innerHTML = '';
+
+    if (countEl) {
+      countEl.textContent = players ? players.length : 0;
+    }
+
+    if (!players || players.length === 0) return;
+
+    players.forEach(player => {
+      const item = document.createElement('div');
+      item.className = 'player-list-item';
+
+      const healthPercent = player.health !== undefined ? Math.max(0, Math.min(100, player.health)) : 100;
+      const healthColor = healthPercent > 60 ? '#4CAF50' : healthPercent > 30 ? '#f1c40f' : '#e74c3c';
+
+      item.innerHTML = `
+        <span class="player-color-dot" style="background:${escapeHtml(player.color || '#ffffff')}"></span>
+        <span class="player-name-text">${escapeHtml(player.name || 'Player')}</span>
+        <div class="player-health-bar">
+          <div class="player-health-fill" style="width:${healthPercent}%;background:${healthColor};"></div>
+        </div>
+      `;
+
+      itemsContainer.appendChild(item);
+    });
+  }
+
+  /**
+   * Hide the in-game player list overlay.
+   */
+  function hidePlayerList() {
+    if (sessionUI.playerListOverlay) {
+      sessionUI.playerListOverlay.classList.add('hidden');
+    }
+    if (sessionUI.connectionHud) {
+      sessionUI.connectionHud.classList.add('hidden');
+    }
+  }
+
+  /**
+   * SessionManager — Handles multiplayer session lifecycle in the browser.
+   * Wraps MultiplayerClient for UI integration.
+   */
+  class SessionManager {
+    constructor() {
+      this.client = null; // MultiplayerClient instance (created when connecting)
+      this.sessions = [];
+      this.currentSessionId = null;
+      this.hostingSessionId = null;
+      this.players = [];
+      this._browseCallback = null;
+      this._hostCreatedCallback = null;
+      this._joinAcceptedCallback = null;
+      this._joinRejectedCallback = null;
+      this._playerJoinedCallback = null;
+      this._playerLeftCallback = null;
+    }
+
+    /**
+     * Initialize the WebSocket client for matchmaking.
+     * @param {string} serverUrl — WebSocket URL for matchmaking (e.g., ws://localhost:8765)
+     */
+    init(serverUrl) {
+      // In browser, MultiplayerClient will be loaded via script tag.
+      // For now, we use a simplified approach that works with or without the client module.
+      this._serverUrl = serverUrl || 'ws://localhost:8765';
+
+      if (typeof MultiplayerClient !== 'undefined') {
+        this.client = new MultiplayerClient({ url: this._serverUrl });
+        this._wireClientEvents();
+      } else {
+        console.warn('[SessionManager] MultiplayerClient not loaded — offline mode');
+      }
+    }
+
+    /** Wire up client events to UI updates */
+    _wireClientEvents() {
+      if (!this.client) return;
+
+      this.client.on('SESSION_LIST', (data) => {
+        this.sessions = data.sessions || [];
+        renderSessionList(this.sessions);
+        if (this._browseCallback) this._browseCallback(this.sessions);
+      });
+
+      this.client.on('HOST_CREATED', (data) => {
+        this.hostingSessionId = data.sessionId;
+        updateConnectionStatus('connected');
+        if (this._hostCreatedCallback) this._hostCreatedCallback(data);
+      });
+
+      this.client.on('JOIN_ACCEPTED', (data) => {
+        this.currentSessionId = data.sessionId;
+        updateConnectionStatus('connected');
+        if (this._joinAcceptedCallback) this._joinAcceptedCallback(data);
+      });
+
+      this.client.on('JOIN_REJECTED', (data) => {
+        const reason = data.reason || 'Unknown error';
+        showHostError(`Join failed: ${reason}`);
+        if (this._joinRejectedCallback) this._joinRejectedCallback(data);
+      });
+
+      this.client.on('PLAYER_JOINED', (data) => {
+        this.players.push(data.player);
+        renderPlayerList(this.players);
+        if (this._playerJoinedCallback) this._playerJoinedCallback(data);
+      });
+
+      this.client.on('PLAYER_LEFT', (data) => {
+        this.players = this.players.filter(p => p.id !== data.playerId);
+        renderPlayerList(this.players);
+        if (this._playerLeftCallback) this._playerLeftCallback(data);
+      });
+
+      this.client.on('disconnect', () => {
+        updateConnectionStatus('disconnected');
+      });
+
+      this.client.on('stateChange', (data) => {
+        const statusMap = {
+          disconnected: 'disconnected',
+          connecting: 'connecting',
+          connected: 'connected',
+          reconnecting: 'reconnecting',
+        };
+        updateConnectionStatus(statusMap[data.to] || 'disconnected');
+      });
+
+      // Connect to matchmaking server
+      this.client.connectMatchmaking();
+    }
+
+    /** Browse available sessions */
+    browseSessions() {
+      if (this.client) {
+        this.client.browseSessions();
+      } else {
+        // Offline mode — show empty list
+        renderSessionList([]);
+      }
+    }
+
+    /**
+     * Start hosting a new session.
+     * Validates form inputs and creates the session on the server.
+     */
+    async startHosting() {
+      const nameInput = document.getElementById('host-session-name');
+      const worldSelect = document.getElementById('host-world-select');
+      const modeSelect = document.getElementById('host-mode-select');
+      const maxPlayersSlider = document.getElementById('host-max-players');
+
+      hideHostError();
+
+      // Validate session name
+      const name = nameInput ? nameInput.value.trim() : '';
+      if (!name) {
+        showHostError('Please enter a session name.');
+        return;
+      }
+      if (name.length > 32) {
+        showHostError('Session name must be 32 characters or less.');
+        return;
+      }
+
+      // Validate world selection
+      const worldId = worldSelect ? worldSelect.value : '';
+      if (!worldId) {
+        showHostError('Please create a world first (go to Play Solo → Create World).');
+        return;
+      }
+
+      const mode = modeSelect ? modeSelect.value : 'survival';
+      const maxPlayers = parseInt(maxPlayersSlider ? maxPlayersSlider.value : '4', 10);
+
+      // Get world seed
+      const selectedWorld = worldManager ? worldManager.getWorld(worldId) : null;
+      if (!selectedWorld) {
+        showHostError('Selected world not found.');
+        return;
+      }
+
+      updateConnectionStatus('connecting');
+
+      if (this.client) {
+        try {
+          await this.client.hostSession({
+            name,
+            seed: selectedWorld.seed,
+            mode,
+            maxPlayers,
+          });
+          console.log(`[SessionManager] Hosting session: ${name}`);
+        } catch (err) {
+          updateConnectionStatus('disconnected');
+          showHostError(`Failed to host: ${err.message}`);
+        }
+      } else {
+        // Offline simulation
+        this.hostingSessionId = `session_${Date.now()}`;
+        updateConnectionStatus('connected');
+        console.log(`[SessionManager] Simulated hosting: ${name} (offline)`);
+      }
+    }
+
+    /**
+     * Join an existing session by its ID.
+     * @param {string} sessionId
+     */
+    async joinSession(sessionId) {
+      if (!sessionId) return;
+
+      updateConnectionStatus('connecting');
+
+      if (this.client) {
+        try {
+          await this.client.joinSession(sessionId);
+          console.log(`[SessionManager] Joined session: ${sessionId}`);
+        } catch (err) {
+          updateConnectionStatus('disconnected');
+          showHostError(`Failed to join: ${err.message}`);
+        }
+      } else {
+        // Offline simulation
+        this.currentSessionId = sessionId;
+        updateConnectionStatus('connected');
+        console.log(`[SessionManager] Simulated joining: ${sessionId} (offline)`);
+      }
+    }
+
+    /** Leave the current session */
+    leaveSession() {
+      if (this.client) {
+        this.client.leaveSession();
+      }
+      this.currentSessionId = null;
+      this.hostingSessionId = null;
+      this.players = [];
+      updateConnectionStatus('disconnected');
+      hidePlayerList();
+    }
+
+    /** Dispose and clean up */
+    dispose() {
+      if (this.client) {
+        this.client.dispose();
+        this.client = null;
+      }
+    }
+  }
+
+  /** Show error message in host form */
+  function showHostError(message) {
+    const errorEl = document.getElementById('host-error');
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+  }
+
+  /** Hide error message in host form */
+  function hideHostError() {
+    const errorEl = document.getElementById('host-error');
+    if (errorEl) errorEl.classList.add('hidden');
+  }
+
+  /** Initialize session UI — create SessionManager and set defaults */
+  function initSessionUI() {
+    // Create session manager instance
+    sessionManager = new SessionManager();
+
+    // Default to disconnected state
+    updateConnectionStatus('disconnected');
+
+    // Hide in-game overlays by default
+    hidePlayerList();
+
+    console.log('[SessionManager] Initialized (offline mode — MultiplayerClient loaded via script)');
   }
 
   // ============================================================

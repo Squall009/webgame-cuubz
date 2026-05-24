@@ -276,8 +276,29 @@ const lobbyScreen = document.getElementById('lobby-screen');
 assertExists(lobbyScreen, '#lobby-screen exists');
 if (lobbyScreen) {
   assert(lobbyScreen.classList.contains('hidden'), 'Lobby screen starts hidden');
+  // Connection status indicator
+  assertExists(document.getElementById('connection-status'), '#connection-status exists');
+  // Tab navigation
+  assertExists(document.getElementById('tab-browse'), '#tab-browse tab exists');
+  assertExists(document.getElementById('tab-host'), '#tab-host tab exists');
+  // Browse panel
+  assertExists(document.getElementById('browse-panel'), '#browse-panel exists');
   assertExists(document.getElementById('session-list'), '#session-list container exists');
-  assertExists(document.getElementById('btn-create-session'), '#btn-create-session button exists');
+  assertExists(document.getElementById('no-sessions-msg'), '#no-sessions-msg exists');
+  assertExists(document.getElementById('btn-refresh-sessions'), '#btn-refresh-sessions exists');
+  // Host panel
+  assertExists(document.getElementById('host-panel'), '#host-panel exists');
+  assertExists(document.getElementById('host-session-name'), '#host-session-name input exists');
+  assertExists(document.getElementById('host-world-select'), '#host-world-select exists');
+  assertExists(document.getElementById('host-mode-select'), '#host-mode-select exists');
+  assertExists(document.getElementById('host-max-players'), '#host-max-players slider exists');
+  assertExists(document.getElementById('btn-start-hosting'), '#btn-start-hosting button exists');
+  // Connection HUD (in-game)
+  assertExists(document.getElementById('connection-hud'), '#connection-hud exists');
+  // Player list overlay (in-game)
+  assertExists(document.getElementById('player-list-overlay'), '#player-list-overlay exists');
+  assertExists(document.getElementById('player-count'), '#player-count exists');
+  assertExists(document.getElementById('player-list-items'), '#player-list-items exists');
 }
 
 // ─── Inventory Screen ─────────────────────────────────────────

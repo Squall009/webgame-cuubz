@@ -175,11 +175,58 @@
   <!-- Multiplayer Lobby Screen -->
   <div id="lobby-screen" class="screen hidden">
     <h2>Multiplayer Lobby</h2>
-    <div id="session-list"></div>
-    <div class="menu-buttons">
-      <button id="btn-create-session" class="menu-btn primary">Create Session</button>
+    <!-- Connection Status Indicator -->
+    <div id="connection-status" class="connection-status disconnected">
+      <span class="status-dot"></span>
+      <span class="status-text">Disconnected</span>
+    </div>
+    <!-- Tab Navigation: Browse / Host -->
+    <div class="lobby-tabs">
+      <button id="tab-browse" class="lobby-tab active">Browse Sessions</button>
+      <button id="tab-host" class="lobby-tab">Host Session</button>
+    </div>
+    <!-- Browse Tab: Session List -->
+    <div id="browse-panel" class="lobby-panel">
+      <div id="session-list"></div>
+      <p id="no-sessions-msg" class="lobby-empty hidden">No sessions available. Be the first to host!</p>
+      <button id="btn-refresh-sessions" class="menu-btn secondary" style="margin-top:8px;">Refresh</button>
+    </div>
+    <!-- Host Tab: Session Creation -->
+    <div id="host-panel" class="lobby-panel hidden">
+      <div class="host-form">
+        <label for="host-session-name">Session Name:</label>
+        <input type="text" id="host-session-name" maxlength="32" placeholder="My Awesome World">
+        <label for="host-world-select">World:</label>
+        <select id="host-world-select"></select>
+        <label for="host-mode-select">Game Mode:</label>
+        <select id="host-mode-select">
+          <option value="survival">Survival</option>
+          <option value="creative">Creative</option>
+        </select>
+        <label for="host-max-players">Max Players:</label>
+        <input type="range" id="host-max-players" min="2" max="4" value="4">
+        <span id="host-max-players-value">4</span>
+        <div id="host-error" class="modal-error hidden"></div>
+      </div>
+      <div class="menu-buttons">
+        <button id="btn-start-hosting" class="menu-btn primary">Start Hosting</button>
+      </div>
+    </div>
+    <div class="menu-buttons" style="margin-top:16px;">
       <button id="btn-back-lobby" class="menu-btn secondary">Back</button>
     </div>
+  </div>
+
+  <!-- Connection Status HUD (in-game) -->
+  <div id="connection-hud" class="connection-hud hidden">
+    <span class="status-dot"></span>
+    <span class="status-text">Connected</span>
+  </div>
+
+  <!-- Player List Overlay (in-game, top-left HUD) -->
+  <div id="player-list-overlay" class="player-list-overlay hidden">
+    <div class="player-list-header">Players (<span id="player-count">0</span>)</div>
+    <div id="player-list-items"></div>
   </div>
 
   <!-- Inventory Screen (toggleable in-game) -->

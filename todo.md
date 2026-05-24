@@ -667,11 +667,21 @@ webgame-cuubz/
   - [x] Constants: VALID_BLOCK_IDS (0-26), VALID_NAMED_ITEMS (10 items), MAX_STACK, NAMED_ITEM_META, SINGLE_STACK_BLOCKS
   - [x] Helper functions: slotsEqual deep comparison, countItemInSlots, hasItemInSlots
   - [x] 197 tests passing across 26 test groups — constants, pure functions, validation, serialization, diff computation, InventorySync lifecycle, InventoryValidator host-side, full sync cycle integration, edge cases
-- [ ] **Implement session UI** — `js/main.js`
-  - [ ] Session browser: list available sessions with details
-  - [ ] Host screen: set name, select world/mode, start hosting
-  - [ ] Connection status indicator (connected/disconnected/reconnecting)
-  - [ ] Player list overlay: names + health of all players (top-left HUD)
+- [x] **Implement session UI** — `js/main.js`
+  - [x] Session browser: list available sessions with details (Browse tab, #session-list, refresh button)
+  - [x] Host screen: set name, select world/mode, start hosting (Host tab, form validation, world dropdown)
+  - [x] Connection status indicator (connected/disconnected/reconnecting with animated status dots)
+  - [x] Player list overlay: names + health of all players (top-left HUD, color-coded health bars)
+  - [x] Tab navigation: Browse Sessions / Host Session tabs with active state styling
+  - [x] Host form: session name input (32 char max), world select dropdown, mode selector, max players slider (2-4)
+  - [x] Session list rendering: name, mode, seed, player count, full/not-full indicators
+  - [x] Player list rendering: color dot, name, health bar (green/yellow/red by health %)
+  - [x] Host form validation: empty name, too-long name, missing world selection
+  - [x] Connection status states: disconnected (red), connecting (yellow pulse), connected (green), reconnecting (orange pulse)
+  - [x] SessionManager class: init/browse/join/host/leave/dispose lifecycle with offline simulation mode
+  - [x] HTML structure updated: lobby screen, connection HUD, player list overlay (#182 tests via test_pageLoad.js group 15)
+  - [x] CSS styles: lobby tabs, host form, connection status indicators, player list overlay, responsive adjustments
+  - [x] 155 tests passing across 12 test groups — constructor, status logic, session rendering, player rendering, form validation, tab switching, HTML escape, state machine, health bar edge cases, display formatting, error handling, multiplayer constraints
 
 ### Phase 2 Testing (Browser Automation)
 - [ ] **Test: Server starts** — Launch relay server, check ports

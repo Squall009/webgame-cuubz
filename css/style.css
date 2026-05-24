@@ -648,6 +648,8 @@ html, body {
   gap: 8px;
   margin-bottom: 20px;
   width: min(400px, 80vw);
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .session-item {
@@ -664,6 +666,255 @@ html, body {
 .session-item:hover {
   border-color: #4CAF50;
   background: rgba(76,175,80,0.1);
+}
+
+.session-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #e0e0e0;
+}
+
+.session-details {
+  font-size: 12px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.session-players {
+  font-size: 12px;
+  color: #4CAF50;
+  text-align: right;
+}
+
+/* --- Lobby Tabs --- */
+.lobby-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.lobby-tab {
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  color: #888;
+  transition: all 0.15s ease;
+}
+
+.lobby-tab:hover {
+  color: #e0e0e0;
+  background: rgba(255,255,255,0.08);
+}
+
+.lobby-tab.active {
+  background: rgba(76,175,80,0.3);
+  color: #4CAF50;
+}
+
+.lobby-panel.hidden {
+  display: none !important;
+}
+
+.lobby-empty {
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+  padding: 20px;
+}
+
+/* --- Host Form --- */
+.host-form {
+  width: min(320px, 80vw);
+  margin-bottom: 16px;
+}
+
+.host-form label {
+  display: block;
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 4px;
+  margin-top: 12px;
+}
+
+.host-form input[type="text"],
+.host-form select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.host-form input[type="range"] {
+  width: 100%;
+  accent-color: #4CAF50;
+}
+
+/* --- Connection Status Indicator --- */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  width: fit-content;
+}
+
+.connection-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.connection-status.connected .status-dot {
+  background: #4CAF50;
+  box-shadow: 0 0 6px rgba(76,175,80,0.5);
+}
+
+.connection-status.connected {
+  background: rgba(76,175,80,0.15);
+  color: #4CAF50;
+}
+
+.connection-status.disconnected .status-dot {
+  background: #e74c3c;
+}
+
+.connection-status.disconnected {
+  background: rgba(231,76,60,0.15);
+  color: #e74c3c;
+}
+
+.connection-status.connecting .status-dot {
+  background: #f1c40f;
+  animation: pulse-dot 1s infinite;
+}
+
+.connection-status.connecting {
+  background: rgba(241,196,15,0.15);
+  color: #f1c40f;
+}
+
+.connection-status.reconnecting .status-dot {
+  background: #e67e22;
+  animation: pulse-dot 0.5s infinite;
+}
+
+.connection-status.reconnecting {
+  background: rgba(230,126,34,0.15);
+  color: #e67e22;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* --- Connection HUD (in-game) --- */
+.connection-hud {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 155;
+  pointer-events: none;
+}
+
+.connection-hud .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.connection-hud.connected .status-dot { background: #4CAF50; }
+.connection-hud.disconnected .status-dot { background: #e74c3c; }
+.connection-hud.reconnecting .status-dot { background: #f1c40f; animation: pulse-dot 0.5s infinite; }
+
+.connection-hud.connected { background: rgba(76,175,80,0.2); color: #4CAF50; }
+.connection-hud.disconnected { background: rgba(231,76,60,0.2); color: #e74c3c; }
+.connection-hud.reconnecting { background: rgba(241,196,15,0.2); color: #f1c40f; }
+
+/* --- Player List Overlay (in-game) --- */
+.player-list-overlay {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  width: min(180px, 30vw);
+  background: rgba(0,0,0,0.6);
+  border-radius: 8px;
+  padding: 8px;
+  z-index: 155;
+  pointer-events: none;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.player-list-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f1c40f;
+  margin-bottom: 4px;
+}
+
+.player-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.player-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #e0e0e0;
+}
+
+.player-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.player-name-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-health-bar {
+  width: 40px;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.player-health-fill {
+  height: 100%;
+  background: #4CAF50;
+  border-radius: 2px;
+  transition: width 0.3s ease, background-color 0.3s ease;
 }
 
 /* --- Responsive Adjustments --- */
