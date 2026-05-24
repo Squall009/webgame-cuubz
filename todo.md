@@ -741,9 +741,21 @@ webgame-cuubz/
   - [x] Stats tracking accurate (playersTracked, chunksLoaded, chunksDirty, totalStreamed)
   - [x] Edge cases: no players, invalid coords, null position
   - [x] Full tick cycle simulation with maxChunksPerTick limit
-- [ ] **Test: Server validation** — Client sends invalid block change
-  - [ ] Host rejects invalid break/place
-  - [ ] Inventory properly validated before changes
+- [x] **Test: Server validation** — Client sends invalid block change (86 assertions via test_serverValidation.js)
+  - [x] Host rejects invalid break/place
+  - [x] Inventory properly validated before changes
+  - [x] Coordinate validation: integer check, Y bounds (-32 to 64), reach distance
+  - [x] Block place type validation: negative/undefined rejected, zero (air) accepted
+  - [x] Movement rotation validation: non-numeric rejected
+  - [x] InventoryValidator hotbar slot checking (slot 27+ = global hotbar index)
+  - [x] Multi-player independent validation per player
+  - [x] Quest update validation: numeric progress, questId required
+  - [x] RateLimiter: allows exactly N actions per window, blocks overflow
+  - [x] Inventory utility functions: isValidTypeId, validateSlot, slotsEqual
+  - [x] VALID_BLOCK_IDS/VALID_NAMED_ITEMS as Sets, MAX_STACK per-category object
+  - [x] Custom config overrides: reachDistance, yMin/yMax
+  - [x] processInventoryUpdate with strict mode sanitization
+  - [x] unregisterPlayer returns save data for persistence
 - [ ] **Test: Max player enforcement** — 4+ join attempts
   - [ ] 4th player joins, 5th rejected with "full" message
 - [ ] **Test: Character save on disconnect** — Player leaves session
