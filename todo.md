@@ -441,12 +441,21 @@ webgame-cuubz/
   - [x] Quest 25: Final boss — beat the game
   - [x] Each quest has specific item/kill/exploration requirements
   - [x] Quest items placed during world generation at deterministic locations
-- [ ] **Implement boss system** — `js/entities/boss.js`
-  - [ ] Boss entity class with health, AI state machine, attack patterns
-  - [ ] Boss spawn triggered by quest progression + key item
-  - [ ] 4 unique bosses: different attacks, sizes, behaviors
-  - [ ] Final boss: multi-phase fight
-  - [ ] Boss death triggers quest completion
+- [x] **Implement boss system** — `js/entities/boss.js`
+  - [x] Boss entity class with health, AI state machine (IDLE/PATROL/AGGRO/ATTACK/PHASE_TRANSITION/DEAD), attack patterns
+  - [x] Boss spawn triggered by quest progression + key item (via onDeath callback → quest completion)
+  - [x] 5 unique bosses defined: Forest Warden (500HP, 2 phases), Lava Titan (800HP, 20% armor, 2 phases), Frost Serpent (1000HP, 2 phases), Corruption Overlord (1500HP, 30% armor, summon/shield/beam/nova), Final Seal (2000HP, 3 phases)
+  - [x] Final boss: multi-phase fight with phase-specific attacks (Fire Storm → Void Summon/Dark Beam → Elemental Cyclone/Final Nova)
+  - [x] Boss death triggers quest completion via onDeath callback (bossId, questId, titleReward)
+  - [x] Attack system: cooldown tracking, range checks, phase-based attack filtering, damage multipliers per phase
+  - [x] Shield buffs (Crystal Shield reduces incoming damage by 50%)
+  - [x] Minion spawning from summon attacks with health/damage/position tracking
+  - [x] Patrol AI: random movement within spawn radius, aggro detection range, chase behavior
+  - [x] Phase transitions on health thresholds with attack speed/damage multipliers
+  - [x] BossManager: spawn/get/remove/update all bosses, callback system (onBossDeath/onBossSpawn/onPhaseChange)
+  - [x] Serialization/deserialization for persistence (health, phase, position, minions)
+  - [x] getStateSummary() for HUD/debugging display
+  - [x] 369 tests passing across 23 test groups — constants, definitions structure, attack validation, helpers, constructor, health/damage, shields, phase transitions, multi-phase final boss, attack system, cooldowns, AI state machine, death callback, minion spawning, reset, serialization, BossManager CRUD, manager update, summaries, edge cases
 
 ### Audio Foundation
 - [ ] **Procedural sound effects** — `js/audio/sfx.js`
