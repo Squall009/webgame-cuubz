@@ -405,11 +405,19 @@ webgame-cuubz/
   - [x] Load spawn on world entry, update on bed use
 
 ### Quest System (World-State Based)
-- [ ] **Implement quest system** — `js/systems/questSystem.js`
-  - [ ] Quest data structure: id, name, description, type, requirements, reward
-  - [ ] World-state storage for quest progress (shared by all players)
-  - [ ] Quest tracker UI: current quest + next objective
-  - [ ] Quest completion logic and progression chain
+- [x] **Implement quest system** — `js/systems/questSystem.js`
+  - [x] Quest data structure: id, name, description, type, requirements, reward
+  - [x] World-state storage for quest progress (shared by all players)
+  - [x] Quest tracker UI hooks: getCurrentQuest, getNextQuest, getProgress
+  - [x] Quest completion logic and progression chain (Q01→Q25)
+  - [x] 25 quests defined across 4 dungeons + final boss
+  - [x] Boss definitions: forest_guardian, sand_wraith, frost_titan, corruption_overlord, world_ender
+  - [x] Requirement types: COLLECT, EXPLORE, KILL, CRAFT, PLACE, DIALOGUE, BOSS
+  - [x] Reward types: ITEM, UNLOCK, XP, ACHIEVEMENT
+  - [x] Serialization/deserialization for persistence round-trips
+  - [x] Callback system: onQuestComplete, onProgressUpdate, onUnlock, onAchievement
+  - [x] Quest availability checking (previous quest must complete first)
+  - [x] 486 tests passing — constants, catalog structure, boss definitions, tracker construction, static methods, Q01-Q11 progression, callbacks, serialization round-trip, edge cases
 - [ ] **Implement quest markers** — `js/entities/questMarker.js`
   - [ ] Glowing post/entity in world at quest target locations
   - [ ] Visible from distance (particle effect or beacon)
