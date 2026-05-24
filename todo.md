@@ -654,11 +654,19 @@ webgame-cuubz/
   - [x] Node.js testable — Three.js mesh creation gated behind browser checks
   - [x] Utility functions: distanceBetween, normalizeAngle, isInRenderDistance, shadeColor
   - [x] 168 tests passing across 22 test groups — constants, PingTracker, RemotePlayerState CRUD/interpolation/staleness/serialization, voxel character builder, color utilities, PlayerSyncManager lifecycle/callbacks/game mode/clear, edge cases, integration cycle
-- [ ] **Implement inventory sync** — `js/multiplayer/inventorySync.js`
-  - [ ] Send inventory to host on join
-  - [ ] Host validates block breaks/places against inventory
-  - [ ] Inventory updates broadcast to all players
-  - [ ] Save character inventory on disconnect/exit
+- [x] **Implement inventory sync** — `js/multiplayer/inventorySync.js` (197 tests via test_inventorySync.js)
+  - [x] Send inventory to host on join (createJoinPayload → INVENTORY_UPDATE message)
+  - [x] Host validates block breaks/places against inventory (InventoryValidator class: validateBlockBreak, validateBlockPlace)
+  - [x] Inventory updates broadcast to all players (INVENTORY_SYNC relay protocol)
+  - [x] Save character inventory on disconnect/exit (createSavePayload / unregisterPlayer returns save data)
+  - [x] Pure utility functions: getItemCategory, getMaxStackSize, isValidTypeId, validateSlot, validateInventory
+  - [x] Serialization/deserialization: serializeInventory, deserializeInventory with round-trip validation
+  - [x] Diff computation: computeInventoryDiff detects changed slots, applyInventoryDiff restores state
+  - [x] InventorySync class: join flow, periodic sync timer, remote inventory tracking, save/restore lifecycle
+  - [x] InventoryValidator class: player registration, strict/non-strict modes, sanitization of invalid items
+  - [x] Constants: VALID_BLOCK_IDS (0-26), VALID_NAMED_ITEMS (10 items), MAX_STACK, NAMED_ITEM_META, SINGLE_STACK_BLOCKS
+  - [x] Helper functions: slotsEqual deep comparison, countItemInSlots, hasItemInSlots
+  - [x] 197 tests passing across 26 test groups — constants, pure functions, validation, serialization, diff computation, InventorySync lifecycle, InventoryValidator host-side, full sync cycle integration, edge cases
 - [ ] **Implement session UI** — `js/main.js`
   - [ ] Session browser: list available sessions with details
   - [ ] Host screen: set name, select world/mode, start hosting
