@@ -712,11 +712,21 @@ webgame-cuubz/
   - [x] Max player enforcement: 4th accepted, 5th rejected with "Session is full"
   - [x] PLAYER_JOINED broadcast sent to existing players when new player joins
   - [x] Host playerId consistency: same ID used across matchmaking and game session (server fix in session.js)
-- [ ] **Test: Multiplayer sync** — Two players in same world
-  - [ ] Remote player visible with correct color + name tag
-  - [ ] Movement synchronized between clients
-  - [ ] Block changes validated by host, broadcast to all
-  - [ ] Inventory updates synced correctly
+- [x] **Test: Multiplayer sync** — Two players in same world (92 assertions via test_multiplayerSync.js)
+  - [x] Remote player visible with correct color + name tag
+  - [x] Movement synchronized between clients
+  - [x] Block changes validated by host, broadcast to all
+  - [x] Inventory updates synced correctly
+  - [x] Full E2E pipeline: Matchmaking → Host Session → Game Session Join → Player Sync
+  - [x] PLAYER_JOINED includes character name, color, and starting position
+  - [x] PLAYER_MOVE broadcast excludes sender (no self-echo)
+  - [x] Rapid movement broadcasts all delivered in order
+  - [x] Invalid block break rejected: too far away, non-integer coords, out-of-bounds Y
+  - [x] Invalid block place rejected: negative blockType
+  - [x] BLOCK_BREAK/BLOCK_PLACE broadcast to ALL players including sender
+  - [x] INVENTORY_SYNC relayed with full inventory array (typeId, count, null slots)
+  - [x] Heartbeat keepalive tracking — no errors after heartbeat
+  - [x] PLAYER_LEFT broadcast on disconnect, session state consistent
 - [ ] **Test: Chunk streaming** — Players at different locations
   - [ ] Each player's surrounding chunks loaded
   - [ ] World doesn't disappear when players spread out
