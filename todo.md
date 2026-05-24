@@ -596,11 +596,18 @@ webgame-cuubz/
   - [x] User-level service (no sudo required)
 
 ### Client Multiplayer Integration
-- [ ] **Implement WebSocket client** — `js/multiplayer/client.js`
-  - [ ] Connect/disconnect to relay server
-  - [ ] Send/receive messages with retry logic
-  - [ ] Heartbeat keepalive, reconnection handler
-  - [ ] Message queue for reliable delivery ordering
+- [x] **Implement WebSocket client** — `js/multiplayer/client.js` (156 tests via test_multiplayerClient.js)
+  - [x] Connect/disconnect to relay server
+  - [x] Send/receive messages with retry logic
+  - [x] Heartbeat keepalive, reconnection handler
+  - [x] Message queue for reliable delivery ordering
+  - [x] Dual connection management: WSConnection (low-level) + MultiplayerClient (high-level)
+  - [x] Matchmaking protocol: HOST, BROWSE, JOIN, LEAVE with event routing
+  - [x] Game session protocol: JOIN, MOVE, BREAK_BLOCK, PLACE_BLOCK, INVENTORY_UPDATE, HEARTBEAT
+  - [x] Exponential backoff reconnection with jitter (1s base → 30s cap)
+  - [x] Bounded message queue (500 max, FIFO ordering, oldest dropped on overflow)
+  - [x] Protocol consistency verified against server/session.js and matchmaking.js
+  - [x] Browser-safe: works in Node.js test mode with null WebSocket factory
 - [ ] **Implement host logic** — `js/multiplayer/host.js`
   - [ ] Register session with matchmaking relay
   - [ ] Authoritative block change validation before broadcast
