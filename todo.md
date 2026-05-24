@@ -487,12 +487,24 @@ webgame-cuubz/
   - [x] 465 tests passing across 23 test groups — constants, chord math, day/night volume, swell, detuning, manager lifecycle, integration, edge cases, musical theory
 
 ### Main Menu Flow
-- [ ] **Implement menu system** — `js/main.js`
-  - [ ] Main screen: Play Solo, Host Multiplayer, Join Multiplayer, Settings
-  - [ ] Character selection screen (3 slots, create/edit/delete)
-  - [ ] World selection screen (3 slots, create/delete)
-  - [ ] Mode selection: Creative or Survival
-  - [ ] Settings panel: render distance, volume, controls hint
+- [x] **Implement menu system** — `js/main.js`
+  - [x] Main screen: Play Solo, Host Multiplayer, Join Multiplayer, Settings
+  - [x] Character selection screen (3 slots, create/edit/delete)
+  - [x] World selection screen (3 slots, create/delete)
+  - [x] Mode selection: Creative or Survival
+  - [x] Settings panel: render distance, volume, controls hint
+  - [x] Screen management with showScreen() + hidden class toggling
+  - [x] BrowserCharacterManager: validateName/validateColor/generateId/canCreateMore/getRemainingSlots/create/update/delete/duplicate prevention
+  - [x] BrowserWorldManager: create/delete/select worlds with seed-based biome preview
+  - [x] Modal system: unified create/edit modal for characters and worlds
+  - [x] Delete confirmation modals for both characters and worlds
+  - [x] Menu navigation wiring: btn-play-solo → characterScreen → worldScreen → modeScreen → startGame
+  - [x] Host Multiplayer flow: btn-host-multiplayer → lobbyScreen
+  - [x] Join Multiplayer flow: btn-join-multiplayer → lobbyScreen
+  - [x] Settings screen: render distance slider (3-12 chunks), volume slider, music volume slider, controls hint
+  - [x] Loading screen with animated progress bar simulation
+  - [x] Mobile detection: touch device + narrow screen check → enable touch controls overlay
+  - [x] Initialization flow: IndexedDB init → load characters → load worlds → wire menus → show main menu
 
 ### Phase 1 Testing (Browser Automation)
 - [ ] **Test: Page loads** — Navigate to game URL, check console
