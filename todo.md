@@ -514,10 +514,10 @@ webgame-cuubz/
   - [x] Caves generate underground with connectivity
   - [x] Trees/cacti/features placed in correct biomes
   - [x] Ore veins present at appropriate depths
-- [ ] **Test: Chunk loading** — Move player across boundaries
-  - [ ] Seamless transitions between chunks (no gaps/tears)
-  - [ ] Caves continue seamlessly across chunk edges
-  - [ ] Distant chunks unload properly
+- [x] **Test: Chunk loading** — Move player across boundaries (51 assertions via test_chunkLoading.js)
+  - [x] Seamless transitions between chunks (no gaps/tears)
+  - [x] Caves continue seamlessly across chunk edges
+  - [x] Distant chunks unload properly
 - [ ] **Test: Player movement** — WASD + jump on desktop
   - [ ] Movement in camera direction, gravity works
   - [ ] Collision prevents walking through blocks
