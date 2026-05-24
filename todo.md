@@ -518,10 +518,18 @@ webgame-cuubz/
   - [x] Seamless transitions between chunks (no gaps/tears)
   - [x] Caves continue seamlessly across chunk edges
   - [x] Distant chunks unload properly
-- [ ] **Test: Player movement** — WASD + jump on desktop
-  - [ ] Movement in camera direction, gravity works
-  - [ ] Collision prevents walking through blocks
-  - [ ] Sprint consumes stamina
+- [x] **Test: Player movement** — WASD + jump on desktop (106 assertions via test_playerMovementIntegration.js)
+  - [x] Movement in camera direction, gravity works
+  - [x] Collision prevents walking through blocks
+  - [x] Sprint consumes stamina
+  - [x] KeyboardInput event handling: W/A/S/D/Space/Shift/E key mapping
+  - [x] Camera-relative movement at yaw=0, π/2, π, -π/2
+  - [x] Strafe left/right, backward movement, diagonal normalization
+  - [x] Jump only when on ground (no double jump)
+  - [x] Touch control simulation: joystick X/Y axis, swipe-to-look deltas, tap detection
+  - [x] Full integration: KeyboardInput → Player update → World collision pipeline
+  - [x] Sprint multiplier increases speed, stamina depletion via SurvivalSystem
+  - [x] Edge cases: world bounds clamp, respawn reset, meter clamping during update
 - [ ] **Test: Block interaction** — Crosshair targeting + break/place
   - [ ] Target block highlighted, breaks on click
   - [ ] Place block on correct face

@@ -91,10 +91,22 @@
 |--------|-------|
 | 🔴 OPEN | 0 |
 | 🟡 FIXING | 0 |
-| 🟢 FIXED | 16 |
-| **Total** | **16** |
+| 🟢 FIXED | 17 |
+| **Total** | **17** |
 
-> ✅ All bugs fixed! Phase 2 server files implemented.
+> ✅ All bugs fixed! Player movement integration tests complete.
+
+### Bug #16: _checkCollision called without world parameter — collision detection always returned false
+- **Found:** May 24, 2026 during task "Test: Player movement"
+- **Status:** 🟢 FIXED
+- **Description:** `_moveWithCollision()` called `this._checkCollision(x, y, z)` but the method signature is `_checkCollision(x, y, z, world)`. The `world` parameter was never passed, so `_checkCollision` always received `undefined` for `world`, causing `if (!world) return false;` to always execute — meaning collision detection was completely non-functional. Player would fall through any terrain without stopping.
+- **Reproduction Steps:** Create a mock world with ground blocks at y=0, place player at y=2 with downward velocity — player falls through ground instead of colliding.
+- **Root Cause:** Three call sites in `_moveWithCollision()` (X/Y/Z axis movement) were missing the `world` argument when calling `_checkCollision()`. The method had a 4-parameter signature but was called with only 3 arguments.
+- **Fix Applied:** Added `world` as the 4th argument to all three `_checkCollision()` calls in `_moveWithCollision()`:
+  - `this._checkCollision(newX, this.position.y, this.position.z, world)` — X axis
+  - `this._checkCollision(this.position.x, newY, this.position.z, world)` — Y axis  
+  - `this._checkCollision(this.position.x, this.position.y, newZ, world)` — Z axis
+- **Verified:** May 24, 2026 — test_playerMovementIntegration.js passes all 106 assertions including collision detection tests (Group 4). Full suite: 27/27 tests passing.
 
 ### Bug #14: Phase 2 server files marked complete but don't exist
 - **Found:** May 24, 2026 during task "Test: Page loads"

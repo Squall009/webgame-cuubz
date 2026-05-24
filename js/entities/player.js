@@ -95,15 +95,15 @@ class Player {
     
     // Move in X axis with collision
     const newX = this.position.x + this.velocity.x * deltaTime;
-    if (!this._checkCollision(newX, this.position.y, this.position.z)) {
+    if (!this._checkCollision(newX, this.position.y, this.position.z, world)) {
       this.position.x = newX;
     } else {
       this.velocity.x = 0;
     }
-    
+
     // Move in Y axis with collision
     const newY = this.position.y + this.velocity.y * deltaTime;
-    if (!this._checkCollision(this.position.x, newY, this.position.z)) {
+    if (!this._checkCollision(this.position.x, newY, this.position.z, world)) {
       this.position.y = newY;
       this.onGround = false;
     } else {
@@ -119,7 +119,7 @@ class Player {
     
     // Move in Z axis with collision
     const newZ = this.position.z + this.velocity.z * deltaTime;
-    if (!this._checkCollision(this.position.x, this.position.y, newZ)) {
+    if (!this._checkCollision(this.position.x, this.position.y, newZ, world)) {
       this.position.z = newZ;
     } else {
       this.velocity.z = 0;
