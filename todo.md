@@ -809,10 +809,24 @@ webgame-cuubz/
   - [x] ParticleEffect class: position tracking, velocity, lifetime, alpha/scale curves
   - [x] ChunkMeshBuilder updated: flower/torch transparency in face culling
   - [x] 47 feature placer tests passing (18 groups) + 111 biome effects tests passing (17 groups)
-- [ ] **Cave polish** — `js/world/caveGenerator.js`
-  - [ ] Torches/light sources in caves (player placeable)
-  - [ ] Cave stalactite/stalagmite features
-  - [ ] Glowstone-like ore blocks for cave lighting
+- [x] **Cave polish** — `js/world/caveGenerator.js`
+  - [x] Torches/light sources in caves (player placeable)
+    - [x] CAVE_TORCH block type (ID=29): solid=false, transparent=true, lightSource=true, placeable=true
+    - [x] `placeTorchesInCaves()`: deterministic torch placement in cave spaces with min-separation enforcement
+    - [x] `_isCaveSpace()`: detects enclosed cave positions (≥3 solid neighbors)
+    - [x] `_findTorchSurface()`: finds valid attachment surfaces (ceiling→floor→walls priority)
+    - [x] `_isTooCloseToTorch()`: Manhattan distance separation check
+  - [x] Cave stalactite/stalagmite features
+    - [x] `generateFormations()`: master method for stalactites + stalagmites
+    - [x] `_generateStalactites()`: stone formations hanging from cave ceilings (configurable chance/height)
+    - [x] `_generateStalagmites()`: stone formations rising from cave floors
+    - [x] Deterministic placement via noise hash for seamless chunk edges
+    - [x] Safety: never overwrites non-air blocks, respects bedrock bounds
+  - [x] Glowstone-like ore blocks for cave lighting
+    - [x] GLOWSTONE block type (ID=30): solid=true, lightSource=true (already implemented in featurePlacer.js)
+    - [x] `placeGlowstoneInCaves()` in FeaturePlacer: rare placement (~0.3%) in underground air spaces
+  - [x] `countFormations()`: debug utility counting stalactites/stalagmites/torches per chunk
+  - [x] 62 tests passing across 20 test groups — constructor defaults, stalactite generation, stalagmite generation, formation safety (no overwrite), bounds checking, determinism, torch placement, torch separation enforcement, cave space detection, surface finding, proximity checks, formation counting, full pipeline integration, edge cases (empty/bedrock/air chunks), water safety, block type properties
 
 ### Gameplay Polish
 - [ ] **Creative mode full implementation** — `js/game.js`

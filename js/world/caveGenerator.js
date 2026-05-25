@@ -1,10 +1,11 @@
 /**
  * Cuubz — Cave Generator
  * 3D tube caves using noise thresholding with seamless chunk edges.
+ * Includes: stalactites, stalagmites, torch placement for cave lighting.
  */
 
 const NoiseGenerator = require('./noise');
-const { BLOCK_TYPES, CHUNK_WIDTH, CHUNK_DEPTH } = require('./chunkData');
+const { BLOCK_TYPES, CHUNK_WIDTH, CHUNK_DEPTH, MIN_Y, MAX_Y } = require('./chunkData');
 
 class CaveGenerator {
   constructor(seed) {
@@ -15,6 +16,15 @@ class CaveGenerator {
     this.tunnelRadius = 2.5;       // Base tunnel radius
     this.largeCavernChance = 0.1;  // Chance of large cavern at a point
     this.largeCavernRadius = 6;    // Radius of large caverns
+    
+    // Stalactite/stalagmite parameters
+    this.stalactiteChance = 0.04;   // Chance per ceiling air block
+    this.stalagmiteChance = 0.03;   // Chance per floor air block
+    this.maxFormationHeight = 4;    // Max height for stalactites/stalagmites
+    
+    // Torch placement parameters
+    this.torchChance = 0.008;       // Chance per cave air block (sparse)
+    this.torchMinSeparation = 5;    // Min blocks between torches in same column
   }
 
   /**
@@ -158,6 +168,277 @@ class CaveGenerator {
     }
     
     return connectedChunks > 1; // Connected if reaches adjacent chunk
+  }
+
+  /**
+   * Generate stalactites (hanging from cave ceiling) and stalagmites (rising from cave floor)
+   * Called after cave generation is complete.
+   * Uses deterministic noise for placement to ensure seamless chunk edges.
+   */
+  generateFormations(chunk) {
+    this._generateStalactites(chunk);
+    this._generateStalagmites(chunk);
+  }
+
+  /**
+   * Generate stalactites — stone formations hanging from cave ceilings
+   */
+  _generateStalactites(chunk) {
+    for (let lx = 0; lx < CHUNK_WIDTH; lx++) {
+      for (let lz = 0; lz < CHUNK_DEPTH; lz++) {
+        const wx = chunk.worldX + lx;
+        const wz = chunk.worldZ + lz;
+
+        // Scan from top down to find ceiling air blocks in caves
+        for (let y = MAX_Y - 1; y > MIN_Y + 1; y--) {
+          const currentBlock = chunk.getBlock(lx, y, lz);
+          
+          // Find solid block above with air below it (ceiling)
+          if (currentBlock === BLOCK_TYPES.AIR) {
+            const above = chunk.getBlock(lx, y + 1, lz);
+            
+            // Check if above is stone/cave ceiling material
+            if (above !== BLOCK_TYPES.STONE && above !== BLOCK_TYPES.GRAVEL && 
+                above !== BLOCK_TYPES.OBSIDIAN && above !== BLOCK_TYPES.BLACKSTONE) {
+              continue;
+            }
+
+            // Deterministic stalactite placement based on world position
+            const roll = this.noise.hash(wx + 300, wz + 300 + y);
+            if (roll >= this.stalactiteChance) continue;
+
+            // Generate stalactite height (1-4 blocks)
+            const heightRoll = this.noise.hash(wx + 400, wz + 400 + y);
+            const height = 1 + Math.floor(heightRoll * this.maxFormationHeight);
+
+            // Place stalactite downward from ceiling
+            for (let h = 1; h <= height; h++) {
+              const targetY = y - h + 1;
+              if (targetY < MIN_Y) break;
+              
+              // Don't overwrite existing non-air blocks
+              if (chunk.getBlock(lx, targetY, lz) !== BLOCK_TYPES.AIR) break;
+              
+              chunk.setBlock(lx, targetY, lz, BLOCK_TYPES.STONE);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Generate stalagmites — stone formations rising from cave floors
+   */
+  _generateStalagmites(chunk) {
+    for (let lx = 0; lx < CHUNK_WIDTH; lx++) {
+      for (let lz = 0; lz < CHUNK_DEPTH; lz++) {
+        const wx = chunk.worldX + lx;
+        const wz = chunk.worldZ + lz;
+
+        // Scan from bottom up to find floor air blocks in caves
+        for (let y = MIN_Y + 1; y < MAX_Y - 1; y++) {
+          const currentBlock = chunk.getBlock(lx, y, lz);
+          
+          // Find solid block below with air above it (floor)
+          if (currentBlock === BLOCK_TYPES.AIR) {
+            const below = chunk.getBlock(lx, y - 1, lz);
+            
+            // Check if below is stone/cave floor material
+            if (below !== BLOCK_TYPES.STONE && below !== BLOCK_TYPES.GRAVEL &&
+                below !== BLOCK_TYPES.OBSIDIAN && below !== BLOCK_TYPES.BLACKSTONE) {
+              continue;
+            }
+
+            // Deterministic stalagmite placement based on world position
+            const roll = this.noise.hash(wx + 500, wz + 500 + y);
+            if (roll >= this.stalagmiteChance) continue;
+
+            // Generate stalagmite height (1-4 blocks)
+            const heightRoll = this.noise.hash(wx + 600, wz + 600 + y);
+            const height = 1 + Math.floor(heightRoll * this.maxFormationHeight);
+
+            // Place stalagmite upward from floor
+            for (let h = 1; h <= height; h++) {
+              const targetY = y + h - 1;
+              if (targetY >= MAX_Y) break;
+              
+              // Don't overwrite existing non-air blocks
+              if (chunk.getBlock(lx, targetY, lz) !== BLOCK_TYPES.AIR) break;
+              
+              chunk.setBlock(lx, targetY, lz, BLOCK_TYPES.STONE);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Place torches in caves for ambient lighting
+   * Torches are placed on walls, ceilings, and floors of cave spaces.
+   * Uses min-separation to avoid clustering.
+   */
+  placeTorchesInCaves(chunk) {
+    // Track torch positions to enforce minimum separation
+    const torchPositions = new Set();
+
+    for (let lx = 0; lx < CHUNK_WIDTH; lx++) {
+      for (let lz = 0; lz < CHUNK_DEPTH; lz++) {
+        const wx = chunk.worldX + lx;
+        const wz = chunk.worldZ + lz;
+
+        // Scan underground region only
+        for (let y = MIN_Y + 1; y < 5; y++) {
+          const currentBlock = chunk.getBlock(lx, y, lz);
+          
+          // Only consider cave air spaces
+          if (currentBlock !== BLOCK_TYPES.AIR) continue;
+
+          // Check if this is a cave space (surrounded by solid blocks)
+          if (!this._isCaveSpace(chunk, lx, y, lz)) continue;
+
+          // Enforce minimum separation between torches
+          const posKey = `${lx},${y},${lz}`;
+          if (this._isTooCloseToTorch(torchPositions, lx, y, lz)) continue;
+
+          // Deterministic torch placement
+          const roll = this.noise.hash(wx + 700, wz + 700 + y * 13);
+          if (roll >= this.torchChance) continue;
+
+          // Find a valid surface to attach the torch
+          const torchPos = this._findTorchSurface(chunk, lx, y, lz);
+          if (!torchPos) continue;
+
+          // Place torch
+          chunk.setBlock(torchPos.x, torchPos.y, torchPos.z, BLOCK_TYPES.CAVE_TORCH);
+          torchPositions.add(`${torchPos.x},${torchPos.y},${torchPos.z}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Check if a position is inside a cave space (air surrounded by solid blocks)
+   */
+  _isCaveSpace(chunk, lx, y, lz) {
+    const checks = [
+      // Above
+      chunk.getBlock(lx, y + 1, lz),
+      // Below
+      chunk.getBlock(lx, y - 1, lz),
+      // Left
+      lx > 0 ? chunk.getBlock(lx - 1, y, lz) : BLOCK_TYPES.AIR,
+      // Right
+      lx < 15 ? chunk.getBlock(lx + 1, y, lz) : BLOCK_TYPES.AIR,
+      // Front
+      lz > 0 ? chunk.getBlock(lx, y, lz - 1) : BLOCK_TYPES.AIR,
+      // Back
+      lz < 15 ? chunk.getBlock(lx, y, lz + 1) : BLOCK_TYPES.AIR,
+    ];
+
+    // Need at least 3 solid neighbors to be "inside" a cave (not open surface)
+    let solidCount = 0;
+    for (const block of checks) {
+      if (block !== BLOCK_TYPES.AIR && block !== BLOCK_TYPES.WATER) solidCount++;
+    }
+    return solidCount >= 3;
+  }
+
+  /**
+   * Check if position is too close to existing torches
+   */
+  _isTooCloseToTorch(torchPositions, lx, y, lz) {
+    for (const pos of torchPositions) {
+      const [tx, ty, tz] = pos.split(',').map(Number);
+      const dist = Math.abs(lx - tx) + Math.abs(y - ty) + Math.abs(lz - tz);
+      if (dist <= this.torchMinSeparation) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Find a valid surface adjacent to an air position for torch placement.
+   * Checks ceiling, floor, then walls in priority order.
+   */
+  _findTorchSurface(chunk, lx, y, lz) {
+    const directions = [
+      // Ceiling (torch on top of block above)
+      { dx: 0, dy: 1, dz: 0 },
+      // Floor (torch on top of block below)
+      { dx: 0, dy: -1, dz: 0 },
+      // Walls
+      { dx: -1, dy: 0, dz: 0 },
+      { dx: 1, dy: 0, dz: 0 },
+      { dx: 0, dy: 0, dz: -1 },
+      { dx: 0, dy: 0, dz: 1 },
+    ];
+
+    for (const dir of directions) {
+      const nx = lx + dir.dx;
+      const ny = y + dir.dy;
+      const nz = lz + dir.dz;
+
+      // Check bounds
+      if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < MIN_Y || ny >= MAX_Y) continue;
+
+      const neighborBlock = chunk.getBlock(nx, ny, nz);
+      
+      // Need a solid surface to attach to
+      if (neighborBlock === BLOCK_TYPES.AIR || neighborBlock === BLOCK_TYPES.WATER) continue;
+
+      // For ceiling: place torch on the block below (in the air space)
+      if (dir.dy === 1) {
+        return { x: lx, y: y, z: lz };
+      }
+      // For floor: place torch on top of the floor block
+      if (dir.dy === -1) {
+        // Torch goes in the air space above the floor block
+        return { x: lx, y: y, z: lz };
+      }
+      // For walls: place torch on the wall face
+      return { x: nx, y: ny, z: nz };
+    }
+
+    return null; // No valid surface found
+  }
+
+  /**
+   * Count formations in a chunk (debug/stats utility)
+   */
+  countFormations(chunk) {
+    let stalactites = 0;
+    let stalagmites = 0;
+    let torches = 0;
+
+    for (let lx = 0; lx < CHUNK_WIDTH; lx++) {
+      for (let lz = 0; lz < CHUNK_DEPTH; lz++) {
+        for (let y = MIN_Y + 1; y < MAX_Y - 1; y++) {
+          const block = chunk.getBlock(lx, y, lz);
+          
+          if (block === BLOCK_TYPES.CAVE_TORCH) {
+            torches++;
+            continue;
+          }
+
+          // Detect stalactite: stone block hanging from ceiling (stone above, air below)
+          if (block === BLOCK_TYPES.STONE) {
+            const above = chunk.getBlock(lx, y + 1, lz);
+            const below = chunk.getBlock(lx, y - 1, lz);
+            if (above !== BLOCK_TYPES.AIR && below === BLOCK_TYPES.AIR) {
+              stalactites++;
+              continue;
+            }
+            // Detect stalagmite: stone block rising from floor (stone below, air above)
+            if (below !== BLOCK_TYPES.AIR && above === BLOCK_TYPES.AIR) {
+              stalagmites++;
+            }
+          }
+        }
+      }
+    }
+
+    return { stalactites, stalagmites, torches };
   }
 }
 
