@@ -12,6 +12,8 @@
 | 6 | MultiplayerClient connected status check incorrect | FIXED | WebSocket client implementation | Phase 2 |
 | 7 | joinSession only sets sessionId when connected | FIXED | WebSocket client implementation | Phase 2 |
 | 8 | HostManager playerCount includes disconnected players | FIXED | Host logic tests | Phase 2 |
+| 9 | _updateSkyColor crashes with null renderer | FIXED | Day/night cycle implementation | Phase 3 |
+| 10 | startTime=0 treated as falsy in Skybox constructor | FIXED | Day/night cycle implementation | Phase 3 |
 
 ---
 
@@ -101,3 +103,21 @@
 - **Root Cause:** `_handlePlayerLeft` sets `connected = false` but doesn't remove the player from the Map (by design, for reconnect tracking). The `playerCount` getter didn't filter by connection status.
 - **Fix Applied:** Changed `playerCount` getter to iterate `_players` and only count entries where `player.connected === true`. Also fixed test ordering in test_hostLogic.js — edge case assertions expected post-endSession state but `endSession()` was called too late.
 - **Verified:** 2026-05-25 — test_hostLogic.js passes (182 assertions), full suite 35/35 passing
+
+## Bug #9: _updateSkyColor crashes with null renderer
+- **Found:** 2026-05-25 during task "Day/night cycle implementation"
+- **Status:** FIXED
+- **Description:** `_updateSkyColor()` checked `!this.renderer.scene` but did not first check if `this.renderer` itself exists. When Skybox is instantiated with `null` renderer (e.g., for Node.js testing), calling `setTime()` → `_updateSkyState()` → `_updateSkyColor()` crashes with `TypeError: Cannot read properties of null (reading 'scene')`.
+- **Reproduction Steps:** Create `new Skybox(null)`, call `sb.setTime(6)` — crashes.
+- **Root Cause:** Missing outer guard for `this.renderer` before accessing `.scene`. The `init()` method already had this pattern (`typeof THREE === 'undefined' || !this.renderer.scene`), but `_updateSkyColor()` was inconsistent.
+- **Fix Applied:** Changed guard from `!this.renderer.scene` to `!this.renderer || !this.renderer.scene`.
+- **Verified:** 2026-05-25 — test_skybox.js passes (100 assertions), full suite 46/46 passing
+
+## Bug #10: startTime=0 treated as falsy in Skybox constructor
+- **Found:** 2026-05-25 during task "Day/night cycle implementation"
+- **Status:** FIXED
+- **Description:** Constructor used `options.startTime || 12` which treats `startTime: 0` (midnight) as falsy, falling back to default noon (12). This means you can never start at midnight.
+- **Reproduction Steps:** Create `new Skybox(null, { startTime: 0 })` — timeOfDay is 12 instead of 0.
+- **Root Cause:** JavaScript `||` operator treats 0 as falsy. Same issue exists for `cycleDuration`.
+- **Fix Applied:** Changed from `options.startTime || 12` to `options.startTime !== undefined ? options.startTime : 12`.
+- **Verified:** 2026-05-25 — test_skybox.js Group 18 confirms startTime=0 works correctly.

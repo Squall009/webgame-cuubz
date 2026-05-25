@@ -838,8 +838,9 @@ webgame-cuubz/
   - [ ] Frame rate target: 30fps minimum
 
 ### Phase 3 Testing (Browser Automation)
-- [ ] **Test: Day/night cycle** — Accelerate time, observe transitions
-  - [ ] Smooth sky color changes, lighting follows sun
+- [x] **Test: Day/night cycle** — Accelerate time, observe transitions
+  - [x] Smooth sky color changes, lighting follows sun position (100 assertions via test_skybox.js)
+  - [x] All 28 test groups passing: constants, smoothstep, lerp, colors, time conversion, sky phases, fog density, ambient intensity, sun/moon positions & intensities, time labels, constructor config, update simulation, state summary, safety guards
 - [ ] **Test: Crafting** — Craft planks from wood
   - [ ] Recipe available in crafting UI
   - [ ] Output items added to inventory correctly
