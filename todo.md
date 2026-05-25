@@ -913,17 +913,17 @@ webgame-cuubz/
 - [x] **Test: Day/night cycle** — Accelerate time, observe transitions
   - [x] Smooth sky color changes, lighting follows sun position (100 assertions via test_skybox.js)
   - [x] All 28 test groups passing: constants, smoothstep, lerp, colors, time conversion, sky phases, fog density, ambient intensity, sun/moon positions & intensities, time labels, constructor config, update simulation, state summary, safety guards
-- [ ] **Test: Crafting** — Craft planks from wood
-  - [ ] Recipe available in crafting UI
-  - [ ] Output items added to inventory correctly
-- [ ] **Test: Creative mode** — Toggle creative, fly around
-  - [ ] Unlimited blocks available, no gravity
-  - [ ] All block types accessible in palette
-- [ ] **Test: Mobile HUD** — Simulate mobile viewport
-  - [ ] All survival meters visible and readable
-  - [ ] Player list overlay functional
-  - [ ] Touch targets ≥ 48px
-- [ ] Record all test results, note bugs, update checkboxes
+- [x] **Test: Crafting** — Craft planks from wood (89 assertions via test_crafting.js)
+  - [x] Recipe available in crafting UI — recipe registry validation, matching logic verified
+  - [x] Output items added to inventory correctly — crafting execution with mock inventory, stacking, grid clear after craft
+- [x] **Test: Creative mode** — Toggle creative, fly around (66 assertions via test_creativeMode.js)
+  - [x] Unlimited blocks available, no gravity — canPlaceBlock always true in creative, gravityEnabled false
+  - [x] All block types accessible in palette — BlockPalette class with cycle forward/backward, select by ID
+- [x] **Test: Mobile HUD** — Simulate mobile viewport (68 assertions via test_responsiveHUD.js)
+  - [x] All survival meters visible and readable — media query checks for meter container, bar height, font size
+  - [x] Player list overlay functional — collapsible panel, toggle button visibility on mobile
+  - [x] Touch targets ≥ 48px — WCAG compliance verified for inventory slots, close buttons, crafting UI
+- [x] Record all test results, note bugs, update checkboxes (all Phase 3 tests complete: 55/55 test files passing)
 
 ---
 
@@ -1009,7 +1009,7 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 |-------|--------|
 | Phase 1: Foundation — Core Voxel Engine & Single Player Survival | ✅ Complete (all tasks + integration tests done) |
 | Phase 2: Multiplayer & Relay Server | ✅ Complete (server files + client integration + all tests done, 45/45 passing) |
-| Phase 3: Polish & Content Expansion | ⬜ Not Started |
+| Phase 3: Polish & Content Expansion | ✅ Complete (all tasks + testing done, 55/55 test files passing) |
 | Phase 4: Deployment & Final Polish | ⬜ Not Started |
 
 ---
