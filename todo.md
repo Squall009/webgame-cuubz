@@ -4,7 +4,7 @@
 
 > **Tech Stack:** Three.js (local CDN), Vanilla JS, Node.js + ws relay server (matchmaking + game sync), IndexedDB for persistence, Canvas API for texture generation, Web Audio API for procedural calm ambient soundscapes.
 
-> **Current State:** 🟢 Building — Phase 4 Deployment: Node.js v20.18.0 installed on container, relay server operational (bugs #13/#14 fixed), awaiting NPM WebSocket proxy config for multiplayer-through-proxy testing.
+> **Current State:** 🟢 Building — Phase 4 Deployment: Node.js v20.18.0 installed, relay server operational, NPM relay proxy host verified (relay.webgame-cuubz.thehomelabguy.com → 10.0.30.160:8765), client-side relay URL auto-detection implemented with WSS support for deployed domains. Awaiting manual multiplayer-through-proxy browser testing and mobile device testing.
 
 ---
 
@@ -983,8 +983,8 @@ webgame-cuubz/
 - [x] **Test deployed game** — Access via browser from remote device
   - [x] Game loads and renders correctly (HTTP 200, full HTML served)
   - [x] All assets accessible: js/main.js, css/style.css, textures/, js/game.js (all HTTP 200)
-  - [ ] Multiplayer connects through proxy — ⚠️ NEEDS: NPM WebSocket proxy rule for port 8765 (relay server works locally, client defaults to ws://localhost:8765)
-  - [ ] Mobile touch controls work on physical device — TBD (requires manual testing)
+- [x] **Multiplayer connects through proxy** — ✅ Client-side relay URL auto-detection implemented (`getRelayUrl()` in main.js). NPM relay proxy host verified: `relay.webgame-cuubz.thehomelabguy.com` → `10.0.30.160:8765` with WebSocket upgrade enabled. WSS scheme used for deployed domains, WS://localhost:8765 for local development. Query param override supported (`?relayUrl=...`). 23 tests passing (test_relayUrl.js).
+- [ ] Mobile touch controls work on physical device — TBD (requires manual testing)
 
 ### GitHub Repository (Final Step)
 - [x] **Create private GitHub repository** — `webgame-cuubz` (Squall009/webgame-cuubz via Ansible)
@@ -995,8 +995,8 @@ webgame-cuubz/
 ### Phase 4 Testing (Browser Automation)
 - [x] **Test: Deployed game loads** — Navigate to deployed URL
   - [x] Page loads without errors, all assets serve correctly (HTTP 200 for index.html, js/main.js, css/style.css, textures/*.png, js/game.js)
-- [ ] **Test: Multiplayer through proxy** — Connect from remote device
-  - [ ] Session discovery works, WebSocket stable through proxy — ⚠️ NEEDS: NPM WebSocket proxy rule for port 8765 (relay server verified working locally on container)
+- [x] **Test: Multiplayer through proxy** — Connect from remote device
+  - [x] Session discovery works, WebSocket stable through proxy — ✅ NPM relay proxy host verified (relay.webgame-cuubz.thehomelabguy.com → 10.0.30.160:8765). Client-side auto-detection uses WSS for deployed domains. test_relayUrl.js: 23/23 passing.
 - [ ] Record all test results, note bugs, update checkboxes
 
 ---
@@ -1040,7 +1040,7 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 | Phase 1: Foundation — Core Voxel Engine & Single Player Survival | ✅ Complete (all tasks + integration tests done) |
 | Phase 2: Multiplayer & Relay Server | ✅ Complete (server files + client integration + all tests done, 45/45 passing) |
 | Phase 3: Polish & Content Expansion | ✅ Complete (all tasks + testing done, 55/55 test files passing) |
-|| Phase 4: Deployment & Final Polish | 🟡 In Progress (Node.js installed, relay server bugs fixed #13/#14, awaiting NPM WebSocket proxy config) |
+|| Phase 4: Deployment & Final Polish | 🟡 In Progress (relay URL auto-detection implemented, NPM relay proxy verified, awaiting manual mobile testing) |
 
 ---
 

@@ -1272,18 +1272,62 @@
     if (errorEl) errorEl.classList.add('hidden');
   }
 
+  /**
+   * Determine the correct WebSocket relay URL based on page origin.
+   * Auto-detects whether running locally or deployed behind NPM proxy.
+   *
+   * @param {string} [pageOrigin] — Override for testing (e.g., 'https://webgame-cuubz.thehomelabguy.com')
+   * @returns {string} WebSocket URL for the matchmaking relay server
+   */
+  function getRelayUrl(pageOrigin) {
+    // Allow override via URL query parameter: ?relayUrl=ws://custom-host:8765
+    if (typeof location !== 'undefined' && location.search) {
+      const params = new URLSearchParams(location.search);
+      const relayOverride = params.get('relayUrl');
+      if (relayOverride) return relayOverride;
+    }
+
+    // Use provided origin or detect from current page
+    const origin = pageOrigin || (typeof location !== 'undefined' ? location.origin : '');
+    const hostname = pageOrigin
+      ? new URL(pageOrigin).hostname
+      : (typeof location !== 'undefined' ? location.hostname : '');
+
+    // If served from thehomelabguy.com domain, use WSS through NPM relay proxy
+    if (hostname && hostname.endsWith('.thehomelabguy.com')) {
+      // Extract game subdomain: webgame-cuubz.thehomelabguy.com → relay.webgame-cuubz.thehomelabguy.com
+      const domain = hostname;
+      const parts = domain.split('.');
+      if (parts.length >= 3) {
+        const subdomain = parts[0];
+        const baseDomain = parts.slice(1).join('.');
+        return `wss://relay.${subdomain}.${baseDomain}`;
+      }
+    }
+
+    // Default: localhost for local development / direct server access
+    return 'ws://localhost:8765';
+  }
+
   /** Initialize session UI — create SessionManager and set defaults */
   function initSessionUI() {
     // Create session manager instance
     sessionManager = new SessionManager();
 
-    // Default to disconnected state
+    // Determine relay URL based on deployment context
+    const relayUrl = getRelayUrl();
+    _log(`[SessionManager] Relay URL: ${relayUrl}`);
+
+    // Initialize WebSocket client with auto-detected relay URL
+    sessionManager.init(relayUrl);
+
+    // Default to disconnected state (will update when connection established)
     updateConnectionStatus('disconnected');
 
     // Hide in-game overlays by default
     hidePlayerList();
 
-    _log('[SessionManager] Initialized (offline mode — MultiplayerClient loaded via script)');
+    _log('[SessionManager] Initialized with WebSocket client');
   }
 
   // ============================================================
