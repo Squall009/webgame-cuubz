@@ -37,6 +37,12 @@ class ChunkManager {
     // Callbacks
     this._onRenderDistanceChange = options.onRenderDistanceChange || null;
 
+    // Disposed flag — prevents new work and clearTimeout leaks
+    this._disposed = false;
+    
+    // Store setTimeout ID for cleanup on dispose
+    this._buildTimeoutId = null;
+
     // Wire up performance optimizer callbacks if present
     if (this.performanceOptimizer) {
       const self = this;
@@ -105,6 +111,8 @@ class ChunkManager {
    * Queue a chunk for async building
    */
   _queueBuild(cx, cz) {
+    if (this._disposed) return; // Prevent new work after dispose
+
     this.buildQueue.push({ cx, cz });
 
     if (!this.building) {
@@ -116,6 +124,8 @@ class ChunkManager {
    * Process build queue asynchronously (one chunk per frame to avoid stutter)
    */
   _processQueue() {
+    if (this._disposed) return; // Stop processing after dispose
+
     if (this.buildQueue.length === 0) {
       this.building = false;
       return;
@@ -127,8 +137,8 @@ class ChunkManager {
     const { cx, cz } = this.buildQueue.shift();
     this._buildChunk(cx, cz);
 
-    // Continue next frame
-    setTimeout(() => this._processQueue(), 0);
+    // Continue next frame — store timeout ID for cleanup on dispose
+    this._buildTimeoutId = setTimeout(() => this._processQueue(), 0);
   }
 
   /**
@@ -200,6 +210,15 @@ class ChunkManager {
    * Dispose of resources.
    */
   dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+
+    // Cancel pending build timeout to prevent setTimeout leak
+    if (this._buildTimeoutId !== null) {
+      clearTimeout(this._buildTimeoutId);
+      this._buildTimeoutId = null;
+    }
+
     this.buildQueue = [];
     this.building = false;
 

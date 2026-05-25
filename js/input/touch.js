@@ -21,6 +21,12 @@ class TouchInput {
     this.justTapped = false;
     this.tapTimeout = null;
     
+    // Disposed flag for cleanup safety
+    this._disposed = false;
+    
+    // Store bound handler references for removal on dispose
+    this._handlers = {};
+    
     if (typeof window !== 'undefined') {
       this._bindEvents();
     }
@@ -30,23 +36,33 @@ class TouchInput {
     const joystickZone = document.getElementById('joystick-zone');
     const lookZone = document.getElementById('look-zone');
     
+    // Store bound references for cleanup
+    this._handlers.onJoystickStart = (e) => this._onJoystickStart(e);
+    this._handlers.onJoystickMove = (e) => this._onJoystickMove(e);
+    this._handlers.onJoystickEnd = (e) => this._onJoystickEnd(e);
+    this._handlers.onLookStart = (e) => this._onLookStart(e);
+    this._handlers.onLookMove = (e) => this._onLookMove(e);
+    this._handlers.onLookEnd = (e) => this._onLookEnd(e);
+    
     if (joystickZone) {
-      joystickZone.addEventListener('touchstart', (e) => this._onJoystickStart(e), { passive: false });
-      joystickZone.addEventListener('touchmove', (e) => this._onJoystickMove(e), { passive: false });
-      joystickZone.addEventListener('touchend', (e) => this._onJoystickEnd(e), { passive: false });
+      joystickZone.addEventListener('touchstart', this._handlers.onJoystickStart, { passive: false });
+      joystickZone.addEventListener('touchmove', this._handlers.onJoystickMove, { passive: false });
+      joystickZone.addEventListener('touchend', this._handlers.onJoystickEnd, { passive: false });
     }
     
     if (lookZone) {
-      lookZone.addEventListener('touchstart', (e) => this._onLookStart(e), { passive: false });
-      lookZone.addEventListener('touchmove', (e) => this._onLookMove(e), { passive: false });
-      lookZone.addEventListener('touchend', (e) => this._onLookEnd(e), { passive: false });
+      lookZone.addEventListener('touchstart', this._handlers.onLookStart, { passive: false });
+      lookZone.addEventListener('touchmove', this._handlers.onLookMove, { passive: false });
+      lookZone.addEventListener('touchend', this._handlers.onLookEnd, { passive: false });
     }
     
     // Mobile action buttons
     const jumpBtn = document.getElementById('btn-jump-mobile');
     if (jumpBtn) {
-      jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); this.jump = true; });
-      jumpBtn.addEventListener('touchend', (e) => { e.preventDefault(); this.jump = false; });
+      this._handlers.onJumpStart = (e) => { e.preventDefault(); this.jump = true; };
+      this._handlers.onJumpEnd = (e) => { e.preventDefault(); this.jump = false; };
+      jumpBtn.addEventListener('touchstart', this._handlers.onJumpStart);
+      jumpBtn.addEventListener('touchend', this._handlers.onJumpEnd);
     }
   }
 
@@ -171,6 +187,48 @@ class TouchInput {
     const tapped = this.justTapped;
     this.justTapped = false;
     return tapped;
+  }
+
+  /**
+   * Clean up event listeners, timers, and release resources.
+   * Call when the game is shutting down or switching screens.
+   * Idempotent — safe to call multiple times.
+   */
+  dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+
+    // Clear tap timeout timer
+    if (this.tapTimeout) {
+      clearTimeout(this.tapTimeout);
+      this.tapTimeout = null;
+    }
+
+    // Remove all event listeners
+    if (typeof document !== 'undefined') {
+      const joystickZone = document.getElementById('joystick-zone');
+      if (joystickZone) {
+        if (this._handlers.onJoystickStart) joystickZone.removeEventListener('touchstart', this._handlers.onJoystickStart);
+        if (this._handlers.onJoystickMove) joystickZone.removeEventListener('touchmove', this._handlers.onJoystickMove);
+        if (this._handlers.onJoystickEnd) joystickZone.removeEventListener('touchend', this._handlers.onJoystickEnd);
+      }
+
+      const lookZone = document.getElementById('look-zone');
+      if (lookZone) {
+        if (this._handlers.onLookStart) lookZone.removeEventListener('touchstart', this._handlers.onLookStart);
+        if (this._handlers.onLookMove) lookZone.removeEventListener('touchmove', this._handlers.onLookMove);
+        if (this._handlers.onLookEnd) lookZone.removeEventListener('touchend', this._handlers.onLookEnd);
+      }
+
+      const jumpBtn = document.getElementById('btn-jump-mobile');
+      if (jumpBtn) {
+        if (this._handlers.onJumpStart) jumpBtn.removeEventListener('touchstart', this._handlers.onJumpStart);
+        if (this._handlers.onJumpEnd) jumpBtn.removeEventListener('touchend', this._handlers.onJumpEnd);
+      }
+    }
+
+    // Clear handler references to allow GC
+    this._handlers = null;
   }
 }
 

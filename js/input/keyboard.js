@@ -19,14 +19,25 @@ class KeyboardInput {
     // Key press events (for single-press actions)
     this.justPressed = {};
     
+    // Disposed flag for cleanup safety
+    this._disposed = false;
+    
+    // Store bound handler references for removal on dispose
+    this._onKeyDownBound = null;
+    this._onKeyUpBound = null;
+    
     if (typeof window !== 'undefined') {
       this._bindEvents();
     }
   }
 
   _bindEvents() {
-    document.addEventListener('keydown', (e) => this._onKeyDown(e));
-    document.addEventListener('keyup', (e) => this._onKeyUp(e));
+    // Store bound references so we can remove them on dispose
+    this._onKeyDownBound = (e) => this._onKeyDown(e);
+    this._onKeyUpBound = (e) => this._onKeyUp(e);
+    
+    document.addEventListener('keydown', this._onKeyDownBound);
+    document.addEventListener('keyup', this._onKeyUpBound);
   }
 
   _onKeyDown(e) {
@@ -64,6 +75,7 @@ class KeyboardInput {
    * Clear just-pressed flags (call once per frame)
    */
   update() {
+    if (this._disposed) return;
     this.justPressed = {};
   }
 
@@ -72,6 +84,31 @@ class KeyboardInput {
    */
   isJustPressed(code) {
     return !!this.justPressed[code];
+  }
+
+  /**
+   * Clean up event listeners and release resources.
+   * Call when the game is shutting down or switching screens.
+   * Idempotent — safe to call multiple times.
+   */
+  dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+
+    if (typeof document !== 'undefined') {
+      if (this._onKeyDownBound) {
+        document.removeEventListener('keydown', this._onKeyDownBound);
+      }
+      if (this._onKeyUpBound) {
+        document.removeEventListener('keyup', this._onKeyUpBound);
+      }
+    }
+
+    // Clear references to allow GC
+    this._onKeyDownBound = null;
+    this._onKeyUpBound = null;
+    this.keys = null;
+    this.justPressed = null;
   }
 }
 
