@@ -18,6 +18,8 @@
 
 'use strict';
 
+const { WebSocket } = require('ws');
+
 class Matchmaking {
   /**
    * @param {object} config

@@ -25,8 +25,17 @@ const sessions = new Map(); // sessionId → SessionManager instance
 // ─── Matchmaking Server (Lobby) ───────────────────────────────
 
 const matchmakingServer = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Cuubz Matchmaking Relay\n');
+  if (req.url === '/health') {
+    const activeSessions = sessions.size;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', activeSessions, uptime: process.uptime() }));
+  } else if (req.url === '/sessions') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(matchmaking.listSessions()));
+  } else {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Cuubz Matchmaking Relay\n');
+  }
 });
 
 const matchmakingWSS = new WebSocketServer({ server: matchmakingServer });
@@ -142,19 +151,6 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[SERVER] Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// ─── Health Check Endpoint ────────────────────────────────────
-
-matchmakingServer.on('request', (req, res) => {
-  if (req.url === '/health') {
-    const activeSessions = sessions.size;
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', activeSessions, uptime: process.uptime() }));
-  } else if (req.url === '/sessions') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(matchmaking.listSessions()));
-  }
 });
 
 module.exports = { matchmaking, sessions };

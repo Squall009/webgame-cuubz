@@ -16,6 +16,8 @@
 | 10 | startTime=0 treated as falsy in Skybox constructor | FIXED | Day/night cycle implementation | Phase 3 |
 | 11 | receiveType missing for type-filtered message receiving | FIXED | Multiplayer stress test | Phase 4 |
 | 12 | Out-of-range block coordinates in multiplayer stress test | FIXED | Multiplayer stress test | Phase 4 |
+| 13 | Duplicate HTTP handlers crash on /health endpoint | FIXED | Relay server deployment testing | Phase 4 |
+| 14 | WebSocket.OPEN reference error in matchmaking.js | FIXED | Relay server deployment testing | Phase 4 |
 
 ---
 
@@ -141,3 +143,21 @@
 - **Root Cause:** Test coordinates not validated against `_validateBlockBreak` reach distance check (>6 blocks = rejected with ERROR sent only to sender, no broadcast to others)
 - **Fix Applied:** Changed BREAK_BLOCK to (3,20,3) dist~5.2 and PLACE_BLOCK to (2,20,2) dist~3.5 — both within 6-block reach distance
 - **Verified:** 2026-05-24 — test_multiplayerStress.js passes 44/44
+
+## Bug #13: Duplicate HTTP handlers crash on /health endpoint
+- **Found:** 2026-05-25 during task "Relay server deployment testing"
+- **Status:** FIXED
+- **Description:** `server/index.js` had two HTTP request handlers for the matchmaking server. The first handler (line 27) responded to ALL requests with a plain text response. The second handler (line 149, `.on('request')`) tried to handle `/health` and `/sessions` routes with JSON responses. When a request hit `/health`, the first handler sent headers + body, then the second handler attempted `res.writeHead()` again — causing `ERR_HTTP_HEADERS_SENT: Cannot write headers after they are sent to the client` and crashing the server process.
+- **Reproduction Steps:** Start relay server, send HTTP GET to `http://localhost:8765/health` — server crashes with uncaught exception.
+- **Root Cause:** Two competing HTTP request handlers registered on the same server instance. The `.on('request')` pattern adds an additional listener alongside the `createServer((req, res) => ...)` callback. Both fire for every request.
+- **Fix Applied:** Consolidated all routing logic into a single `http.createServer()` handler with if/else branching for `/health`, `/sessions`, and default responses. Removed the duplicate `.on('request')` listener entirely.
+- **Verified:** 2026-05-25 — health endpoint returns JSON, sessions endpoint returns array, root URL returns plain text. Server no longer crashes on HTTP requests.
+
+## Bug #14: WebSocket.OPEN reference error in matchmaking.js
+- **Found:** 2026-05-25 during task "Relay server deployment testing"
+- **Status:** FIXED
+- **Description:** `Matchmaking._send()` method checks `ws.readyState === WebSocket.OPEN` to verify the connection is open before sending. However, `WebSocket` was not imported in `matchmaking.js`, causing `ReferenceError: WebSocket is not defined`. This crashed the server on first client connection because `_send()` is called immediately in the connection handler to send the WELCOME message.
+- **Reproduction Steps:** Start relay server with fixed HTTP handlers, connect a WebSocket client — server crashes with `WebSocket is not defined` when trying to send WELCOME message.
+- **Root Cause:** `index.js` imports `{ WebSocketServer, WebSocket } = require('ws')`, but `matchmaking.js` doesn't import anything from `ws`. The `WebSocket` class reference in `_send()` was assumed to be available globally (it isn't in Node.js).
+- **Fix Applied:** Added `const { WebSocket } = require('ws');` import at top of `matchmaking.js`.
+- **Verified:** 2026-05-25 — WebSocket client connects successfully, receives WELCOME message with playerId, server logs show clean connect/disconnect cycle.
