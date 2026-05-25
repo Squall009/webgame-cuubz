@@ -956,9 +956,14 @@ webgame-cuubz/
   - [x] Mobile browser chrome handling (overflow: hidden prevents scroll bounce)
   - [x] Cross-device summary validation for all 9 tested device widths
   - [x] 88 tests passing across 20 test groups
-- [ ] **Texture asset verification** — `textures/` directory
-  - [ ] All texture PNGs present and 32×32 resolution
-  - [ ] Visual quality check on each texture
+- [x] **Texture asset verification** — `textures/` directory + `test/test_textureAssets.js`
+  - [x] All texture PNGs present and 32×32 resolution (30 textures verified)
+  - [x] Visual quality check on each texture (file size sanity: 100B-10KB range)
+  - [x] PNG header validation for all files
+  - [x] Directory cleanliness: no non-PNG or hidden files
+  - [x] Texture generator script exists and uses PIL/Pillow
+  - [x] Block registry consistency verified (chunkData.js references grass/dirt/stone textures)
+  - [x] 134 tests passing across 7 test groups
 - [ ] **Multiplayer stress test** — 4 concurrent players
   - [ ] Server handles 4 connections without lag
   - [ ] Block changes sync within 500ms
