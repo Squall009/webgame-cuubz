@@ -843,10 +843,16 @@ webgame-cuubz/
   - [x] Player creative physics: `setCreativeMode()`, `flyMode`, `flySpeed`, `isFlying` getter, enhanced horizontal speed (1.5x)
   - [x] Creative mode update loop: no gravity, fly mode vertical movement with velocity damping
   - [x] 66 tests passing across 14 test groups — constants, constructor defaults, mode switching, player physics, fly toggle, double-tap detection, fly speed, block placement, palette CRUD/cycling, callbacks, integration cycle, edge cases
-- [ ] **Crafting system** — `js/systems/crafting.js`
-  - [ ] Basic recipes: planks from wood, beds from wool+planks
-  - [ ] Crafting UI with recipe grid
-  - [ ] Recipe discovery (learn as you progress)
+- [x] **Crafting system** — `js/systems/crafting.js`
+  - [x] Basic recipes: planks from wood (1→4), beds from planks (3→1), cave torches, obsidian, blackstone
+  - [x] Crafting UI with recipe grid — 3×3 crafting grid with slot-based matching
+  - [x] Recipe discovery system — Recipes discovered by stage, auto-discover stage 1 recipes on init
+  - [x] Recipe registry: 5 recipes defined (planks, bed, cave_torch, obsidian, blackstone)
+  - [x] Grid-based pattern matching — Order-independent ingredient counting
+  - [x] Inventory integration: consume ingredients, add output items with stacking support
+  - [x] Callback system: `onCraftComplete`, `onRecipeDiscovered` for UI integration
+  - [x] `canCraft()` check before execution, grid clear after successful craft
+  - [x] 89 tests passing across 13 test groups — registry, structure validation, planks recipe, bed recipe, constructor, recipe matching, crafting execution, insufficient ingredients, discovery system, available recipes, grid clear, callbacks, edge cases
 - [ ] **Player list HUD** — `css/style.css` + `js/multiplayer/playerSync.js`
   - [ ] Top-left overlay showing all other players
   - [ ] Name + color dot + health bar for each player
