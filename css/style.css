@@ -862,8 +862,10 @@ html, body {
   border-radius: 8px;
   padding: 8px;
   z-index: 155;
-  pointer-events: none;
+  pointer-events: auto;
   border: 1px solid rgba(255,255,255,0.1);
+  transition: max-height 0.3s ease;
+  overflow: hidden;
 }
 
 .player-list-header {
@@ -871,12 +873,46 @@ html, body {
   font-weight: 700;
   color: #f1c40f;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Toggle button for mobile collapse */
+.player-list-toggle {
+  background: none !important;
+  border: none !important;
+  color: #f1c40f !important;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  margin-left: 4px;
+  line-height: 1;
+  pointer-events: auto;
+  min-width: 16px;
+  min-height: 16px;
+  display: none; /* Hidden on desktop, shown via JS on mobile */
+}
+
+.player-list-toggle:hover {
+  color: #fff !important;
 }
 
 .player-list-items {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+  max-height: 500px;
+  opacity: 1;
+}
+
+/* Collapsed state — hide player items */
+.player-list-items.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+  overflow: hidden;
 }
 
 .player-list-item {
@@ -885,6 +921,7 @@ html, body {
   gap: 6px;
   font-size: 11px;
   color: #e0e0e0;
+  pointer-events: none;
 }
 
 .player-color-dot {
@@ -946,6 +983,38 @@ html, body {
   #mobile-actions {
     right: 10px;
     bottom: 60px;
+  }
+
+  /* Player list HUD — mobile adjustments */
+  .player-list-overlay {
+    width: min(150px, 35vw);
+    top: 4px;
+    left: 4px;
+    padding: 6px;
+  }
+
+  .player-list-header {
+    font-size: 10px;
+  }
+
+  .player-list-toggle {
+    display: inline !important; /* Show toggle on mobile */
+    min-width: 24px !important;
+    min-height: 24px !important; /* Touch target ≥ 24px on mobile */
+  }
+
+  .player-list-item {
+    font-size: 10px;
+  }
+
+  .player-color-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .player-health-bar {
+    width: 30px;
+    height: 3px;
   }
 }
 

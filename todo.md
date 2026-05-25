@@ -853,10 +853,17 @@ webgame-cuubz/
   - [x] Callback system: `onCraftComplete`, `onRecipeDiscovered` for UI integration
   - [x] `canCraft()` check before execution, grid clear after successful craft
   - [x] 89 tests passing across 13 test groups — registry, structure validation, planks recipe, bed recipe, constructor, recipe matching, crafting execution, insufficient ingredients, discovery system, available recipes, grid clear, callbacks, edge cases
-- [ ] **Player list HUD** — `css/style.css` + `js/multiplayer/playerSync.js`
-  - [ ] Top-left overlay showing all other players
-  - [ ] Name + color dot + health bar for each player
-  - [ ] Collapsible panel on mobile
+- [x] **Player list HUD** — `css/style.css` + `js/multiplayer/playerListHUD.js`
+  - [x] Top-left overlay showing all other players
+  - [x] Name + color dot + health bar for each player (green >60%, yellow >30%, red ≤30%)
+  - [x] Collapsible panel on mobile (toggle button in header, auto-hide items with CSS transition)
+  - [x] PlayerListHUD class: show/hide/updatePlayers/addPlayer/removePlayer/clear lifecycle
+  - [x] PlayerListState pure state machine for Node.js testing
+  - [x] escapeHtml XSS prevention utility
+  - [x] getHealthColor threshold function
+  - [x] Mobile breakpoint detection (600px) with auto-collapse toggle visibility
+  - [x] onToggle callback system
+  - [x] 131 tests passing across 28 test groups — constants, escapeHtml, health colors, mobile viewport, state machine CRUD/update/remove/clear/toggle/summary/validation/duplicates, HUD class null safety/player management/collapse/visible/callbacks/dedup/lifecycle/destroy, integration simulation, edge cases
 
 ### Audio Polish
 - [ ] **Biome ambient sound transitions** — `js/audio/ambient.js`
