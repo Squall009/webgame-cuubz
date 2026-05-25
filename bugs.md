@@ -14,6 +14,8 @@
 | 8 | HostManager playerCount includes disconnected players | FIXED | Host logic tests | Phase 2 |
 | 9 | _updateSkyColor crashes with null renderer | FIXED | Day/night cycle implementation | Phase 3 |
 | 10 | startTime=0 treated as falsy in Skybox constructor | FIXED | Day/night cycle implementation | Phase 3 |
+| 11 | receiveType missing for type-filtered message receiving | FIXED | Multiplayer stress test | Phase 4 |
+| 12 | Out-of-range block coordinates in multiplayer stress test | FIXED | Multiplayer stress test | Phase 4 |
 
 ---
 
@@ -121,3 +123,21 @@
 - **Root Cause:** JavaScript `||` operator treats 0 as falsy. Same issue exists for `cycleDuration`.
 - **Fix Applied:** Changed from `options.startTime || 12` to `options.startTime !== undefined ? options.startTime : 12`.
 - **Verified:** 2026-05-25 — test_skybox.js Group 18 confirms startTime=0 works correctly.
+
+## Bug #11: receiveType missing for type-filtered message receiving
+- **Found:** 2026-05-24 during task "Multiplayer stress test"
+- **Status:** FIXED
+- **Description:** TestClient lacked `receiveType()` method to find specific message types in buffer. Stale PLAYER_JOINED messages from the join sequence were consumed first by `receive()`, causing broadcast tests (BLOCK_BREAK, INVENTORY_SYNC) to fail since they expected the first message to be the broadcast.
+- **Reproduction Steps:** Run test_multiplayerStress.js — Group 2 and 4 fail because queued PLAYER_JOINED from join sequence are consumed instead of expected broadcasts
+- **Root Cause:** `drain()` clears queue but messages arrive asynchronously after drain; `receive()` returns first message regardless of type. After P2-P4 join, each client has 1-3 buffered PLAYER_JOINED messages that persist.
+- **Fix Applied:** Added `receiveType(expectedType, timeout)` method that (1) searches buffer for matching type, and (2) if not found, waits for new messages while discarding non-matching ones. Updated Group 2 and 4 tests to use `receiveType()` instead of `receive()`.
+- **Verified:** 2026-05-24 — test_multiplayerStress.js passes 44/44
+
+## Bug #12: Out-of-range block coordinates in multiplayer stress test
+- **Found:** 2026-05-24 during task "Multiplayer stress test"
+- **Status:** FIXED
+- **Description:** BREAK_BLOCK test used coords (10,20,10) which is ~14 blocks from player position (0,20,0), exceeding server max reach of 6 blocks. PLACE_BLOCK used (15,20,15) with same issue (~21 blocks). Server silently rejected these via `_validateBlockBreak`/`_validateBlockPlace` distance check, so no broadcast was sent to any client.
+- **Reproduction Steps:** Send BREAK_BLOCK with x:10,z:10 while player at origin — receives nothing because validation fails (dist > 6)
+- **Root Cause:** Test coordinates not validated against `_validateBlockBreak` reach distance check (>6 blocks = rejected with ERROR sent only to sender, no broadcast to others)
+- **Fix Applied:** Changed BREAK_BLOCK to (3,20,3) dist~5.2 and PLACE_BLOCK to (2,20,2) dist~3.5 — both within 6-block reach distance
+- **Verified:** 2026-05-24 — test_multiplayerStress.js passes 44/44

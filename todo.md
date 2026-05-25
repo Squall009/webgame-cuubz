@@ -964,11 +964,14 @@ webgame-cuubz/
   - [x] Texture generator script exists and uses PIL/Pillow
   - [x] Block registry consistency verified (chunkData.js references grass/dirt/stone textures)
   - [x] 134 tests passing across 7 test groups
-- [ ] **Multiplayer stress test** — 4 concurrent players
-  - [ ] Server handles 4 connections without lag
-  - [ ] Block changes sync within 500ms
-  - [ ] Player disconnect/reconnect handled gracefully
-  - [ ] Inventory sync correct across all clients
+- [x] **Multiplayer stress test** — 4 concurrent players (test_multiplayerStress.js: 44/44 passing)
+  - [x] Server handles 4 connections without lag
+  - [x] Block changes sync within 500ms (BLOCK_BREAK broadcast to all 4 players)
+  - [x] Player disconnect/reconnect handled gracefully (PLAYER_LEFT broadcast, rejoin works)
+  - [x] Inventory sync correct across all clients (INVENTORY_SYNC to all 4 players)
+  - [x] Movement sync excludes sender (PLAYER_MOVE to 3 others)
+  - [x] Heartbeat keepalive updates lastHeartbeat on all players
+  - [x] Invalid message handling: out-of-range break, out-of-bounds Y, non-integer coords, negative blockType → ERROR
 
 ### Deployment
 - [ ] **Generate sync.sh from template** — `sed` from skill template with remote IP
