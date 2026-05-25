@@ -896,10 +896,18 @@ webgame-cuubz/
   - [x] Extra small screens breakpoint (360px): labels hidden, smaller slots, more compact quest tracker
   - [x] !important usage minimized (≤ 8 in mobile MQ, mostly pre-existing player-list-toggle)
   - [x] 68 tests passing across 15 test groups — media queries, meters visibility, hotbar positioning, inventory fullscreen, quest tracker compactness, touch targets, crosshair hiding, damage flash, crafting UI, settings panel, XS screens, player list preservation, base CSS structure, HTML structure, cascade safety
-- [ ] **Performance optimization** — `js/renderer/chunkManager.js`
-  - [ ] Reduced render distance on mobile detection
-  - [ ] Lower geometry detail option for weak devices
-  - [ ] Frame rate target: 30fps minimum
+- [x] **Performance optimization** — `js/renderer/chunkManager.js` + `js/renderer/performanceOptimizer.js`
+  - [x] Device capability detection: touch device, mobile viewport, GPU tier estimation (HIGH/MEDIUM/LOW)
+  - [x] Reduced render distance on mobile detection (MEDIUM=4, LOW=3 vs HIGH=6)
+  - [x] Lower geometry detail option for weak devices (lowQualityMode flag)
+  - [x] Frame rate target: 30fps minimum for mobile, 60fps desktop
+  - [x] Dynamic FPS monitoring with PerformanceMonitor class (frame time tracking)
+  - [x] Automatic render distance adjustment based on FPS (cooldown-based to avoid oscillation)
+  - [x] Critical FPS (<20) triggers aggressive reduction + low quality mode
+  - [x] ChunkManager integration: accepts PerformanceOptimizer, syncs render distance both ways
+  - [x] Memory usage estimation utility for different render distances
+  - [x] PerformanceOptimizer class with device detection, adjustment, state reporting
+  - [x] 106 tests passing across 14 groups (77 performance optimizer + 29 chunk manager)
 
 ### Phase 3 Testing (Browser Automation)
 - [x] **Test: Day/night cycle** — Accelerate time, observe transitions
