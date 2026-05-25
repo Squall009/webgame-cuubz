@@ -866,11 +866,21 @@ webgame-cuubz/
   - [x] 131 tests passing across 28 test groups — constants, escapeHtml, health colors, mobile viewport, state machine CRUD/update/remove/clear/toggle/summary/validation/duplicates, HUD class null safety/player management/collapse/visible/callbacks/dedup/lifecycle/destroy, integration simulation, edge cases
 
 ### Audio Polish
-- [ ] **Biome ambient sound transitions** — `js/audio/ambient.js`
-  - [ ] Smooth crossfade between biome sounds
-  - [ ] Lava crackle/bubble sounds in lava biome
-  - [ ] Eerie whispers/drone in corrupt biome
-  - [ ] Birds/wind for healthy biomes
+- [x] **Biome ambient sound transitions** — `js/audio/ambient.js`
+  - [x] Smooth crossfade between biome sounds (existing CROSSFADE_DURATION mechanism + atmospheric layer swap)
+  - [x] Lava crackle/bubble sounds in lava biome (`crackle` + `bubbles` layer types via `_startCrackleLayer`/`_startBubblesLayer`)
+  - [x] Eerie whispers/drone in corrupt biome (`whisper` layer type via `_startWhisperLayer` with LFO modulation)
+  - [x] Birds/wind for healthy biomes (`birds` + `wind` layer types via `_startBirdsLayer`/`_startWindLayer`)
+  - [x] BIOME_SOUND_LAYERS config: all 8 biomes defined with appropriate atmospheric layers
+  - [x] LAYER_DEFAULTS: default params for crackle, whisper, birds, wind, bubbles
+  - [x] Pure utility functions: getBiomeSoundLayers, validateSoundLayer, resolveSoundLayer
+  - [x] Schedule calculators: calculateCrackleSchedule, calculateBirdSchedule, calculateBubbleSchedule (deterministic PRNG)
+  - [x] calculateAtmosphericVolume with day/night cycle + atmospheric multiplier (0.6)
+  - [x] Helper utilities: getAllUsedLayerTypes, getBiomesUsingLayerType, validateAllSoundLayers
+  - [x] AmbientManager updated: separate atmosphericGain node, _startAtmosphericLayers/_stopAtmosphericLayers
+  - [x] setBiome() now swaps both base drone + atmospheric layers with crossfade
+  - [x] getStateSummary() includes atmosphericLayers and atmosphericLayerCount
+  - [x] 249 tests passing across 20 test groups — constants, layer assignments, parameter ranges, defaults, validation (valid/invalid), resolve merging, schedule determinism, day/night volume, biome lookups, integration consistency, manager properties, edge cases
 
 ### Mobile Polish
 - [ ] **Responsive HUD** — `css/style.css`

@@ -130,6 +130,68 @@ const DEFAULT_AMBIENT_VOLUME = {
 };
 
 // ============================================================
+// Biome Atmospheric Sound Layers
+// ============================================================
+
+/**
+ * Biome-specific atmospheric sound layer definitions.
+ * Each biome can have multiple atmospheric layers beyond the base drone.
+ * These are procedural sound parameters — no external audio files needed.
+ *
+ * Layer types:
+ * - 'crackle': Short noise bursts (lava bubbles popping, fire crackle)
+ * - 'whisper': Low-frequency modulated noise with detuning (eerie ambient)
+ * - 'birds': Periodic short chirps using sine sweeps (healthy biomes)
+ * - 'wind': Filtered noise sweep with amplitude modulation (tundra/desert/ocean)
+ * - 'bubbles': Subtle periodic tone pulses (lava, toxic slime pools)
+ */
+const BIOME_SOUND_LAYERS = {
+  plains: [
+    { type: 'birds', volume: 0.04, rate: 3.0, chirpCount: 2, pitchRange: [800, 1600] },
+    { type: 'wind', volume: 0.02, filterFreq: 600, windStrength: 0.3 },
+  ],
+  forest: [
+    { type: 'birds', volume: 0.05, rate: 2.5, chirpCount: 3, pitchRange: [700, 1800] },
+    { type: 'wind', volume: 0.015, filterFreq: 400, windStrength: 0.2 },
+  ],
+  desert: [
+    { type: 'wind', volume: 0.06, filterFreq: 300, windStrength: 0.7 },
+  ],
+  tundra: [
+    { type: 'wind', volume: 0.05, filterFreq: 200, windStrength: 0.8 },
+  ],
+  mountains: [
+    { type: 'wind', volume: 0.04, filterFreq: 350, windStrength: 0.6 },
+  ],
+  ocean: [
+    // Ocean already has noiseLayer from base config; add wind for surface effect
+    { type: 'wind', volume: 0.03, filterFreq: 500, windStrength: 0.4 },
+  ],
+  lava: [
+    { type: 'crackle', volume: 0.06, burstDuration: 0.08, rate: 0.5, noiseRatio: 0.9 },
+    { type: 'bubbles', volume: 0.04, freqBase: 120, freqRange: 40, rate: 1.2, pulseWidth: 0.15 },
+  ],
+  corrupt: [
+    { type: 'whisper', volume: 0.05, baseFreq: 80, modRate: 0.3, detuneCents: 15 },
+    { type: 'bubbles', volume: 0.03, freqBase: 60, freqRange: 20, rate: 2.0, pulseWidth: 0.3 },
+  ],
+};
+
+/**
+ * Default parameters for each atmospheric layer type.
+ */
+const LAYER_DEFAULTS = {
+  crackle: { volume: 0.05, burstDuration: 0.1, rate: 1.0, noiseRatio: 0.9 },
+  whisper: { volume: 0.04, baseFreq: 60, modRate: 0.2, detuneCents: 10 },
+  birds:   { volume: 0.03, rate: 2.0, chirpCount: 2, pitchRange: [800, 1500] },
+  wind:    { volume: 0.03, filterFreq: 400, windStrength: 0.5 },
+  bubbles: { volume: 0.03, freqBase: 100, freqRange: 30, rate: 1.0, pulseWidth: 0.2 },
+};
+
+/** All valid atmospheric layer types */
+const VALID_LAYER_TYPES = ['crackle', 'whisper', 'birds', 'wind', 'bubbles'];
+
+// ============================================================
 // Pure Utility Functions (testable without AudioContext)
 // ============================================================
 
@@ -289,6 +351,255 @@ function validateBiomeConfig(biomeName) {
 }
 
 // ============================================================
+// Atmospheric Sound Layer Utilities (testable without AudioContext)
+// ============================================================
+
+/**
+ * Get atmospheric sound layers for a biome. Returns empty array if none defined.
+ */
+function getBiomeSoundLayers(biomeName) {
+  return BIOME_SOUND_LAYERS[biomeName] || [];
+}
+
+/**
+ * Validate an atmospheric layer definition has all required fields for its type.
+ */
+function validateSoundLayer(layer) {
+  if (!layer || !layer.type) {
+    return { valid: false, error: 'Missing layer type' };
+  }
+
+  if (!VALID_LAYER_TYPES.includes(layer.type)) {
+    return { valid: false, error: `Invalid layer type: ${layer.type}` };
+  }
+
+  const defaults = LAYER_DEFAULTS[layer.type];
+  if (!defaults) {
+    return { valid: false, error: `Unknown defaults for type: ${layer.type}` };
+  }
+
+  // Check required fields per type
+  switch (layer.type) {
+    case 'crackle':
+      if (layer.burstDuration === undefined && !layer.burstDuration) {
+        return { valid: false, error: 'crackle layer requires burstDuration' };
+      }
+      break;
+    case 'whisper':
+      if (layer.baseFreq === undefined || layer.baseFreq <= 0) {
+        return { valid: false, error: 'whisper layer requires positive baseFreq' };
+      }
+      break;
+    case 'birds':
+      if (!layer.pitchRange || layer.pitchRange.length !== 2 || layer.pitchRange[0] >= layer.pitchRange[1]) {
+        return { valid: false, error: 'birds layer requires valid pitchRange [min, max]' };
+      }
+      break;
+    case 'wind':
+      if (layer.filterFreq === undefined || layer.filterFreq <= 0) {
+        return { valid: false, error: 'wind layer requires positive filterFreq' };
+      }
+      break;
+    case 'bubbles':
+      if (layer.freqBase === undefined || layer.freqBase <= 0) {
+        return { valid: false, error: 'bubbles layer requires positive freqBase' };
+      }
+      break;
+  }
+
+  // Validate volume range
+  const vol = layer.volume !== undefined ? layer.volume : defaults.volume;
+  if (vol < 0 || vol > 1) {
+    return { valid: false, error: `Volume ${vol} out of range [0, 1]` };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Merge a sound layer with its type defaults. Missing fields get default values.
+ */
+function resolveSoundLayer(layer) {
+  const defaults = LAYER_DEFAULTS[layer.type];
+  if (!defaults) return layer;
+
+  const resolved = { ...defaults, ...layer };
+
+  // Ensure pitchRange is always an array of 2 elements for birds
+  if (resolved.type === 'birds' && Array.isArray(resolved.pitchRange)) {
+    resolved.pitchRange = [
+      Math.max(20, resolved.pitchRange[0] || defaults.pitchRange[0]),
+      Math.min(8000, resolved.pitchRange[1] || defaults.pitchRange[1]),
+    ];
+  }
+
+  return resolved;
+}
+
+/**
+ * Calculate crackle burst timing schedule.
+ * Returns array of { time, duration, volume } events for a given duration window.
+ * Uses seeded PRNG for deterministic scheduling.
+ */
+function calculateCrackleSchedule(rate, burstDuration, windowSeconds, seed) {
+  const events = [];
+  let rng = seed || 42;
+
+  // Simple LCG PRNG for determinism
+  function nextRand() {
+    rng = (rng * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (rng >>> 0) / 0xFFFFFFFF;
+  }
+
+  let time = 0;
+  while (time < windowSeconds) {
+    // Exponential inter-arrival: mean = rate seconds between bursts
+    const interval = -Math.log(1 - nextRand()) * rate;
+    time += interval;
+    if (time >= windowSeconds) break;
+
+    events.push({
+      time,
+      duration: burstDuration * (0.5 + 0.5 * nextRand()), // Vary within 50%-100%
+      volume: 0.7 + 0.3 * nextRand(), // Vary within 70%-100%
+    });
+  }
+
+  return events;
+}
+
+/**
+ * Calculate bird chirp timing and pitch schedule.
+ */
+function calculateBirdSchedule(rate, chirpCount, pitchRange, windowSeconds, seed) {
+  const events = [];
+  let rng = seed || 123;
+
+  function nextRand() {
+    rng = (rng * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (rng >>> 0) / 0xFFFFFFFF;
+  }
+
+  let time = 0;
+  while (time < windowSeconds) {
+    // Bird calls happen in bursts — exponential interval
+    const interval = -Math.log(1 - nextRand()) * rate + 0.5;
+    time += interval;
+    if (time >= windowSeconds) break;
+
+    // Generate chirpCount chirps in a short burst
+    for (let i = 0; i < chirpCount; i++) {
+      const chirpTime = time + i * 0.15 * nextRand();
+      const pitchMin = pitchRange[0];
+      const pitchMax = pitchRange[1];
+      const pitch = pitchMin + (pitchMax - pitchMin) * nextRand();
+
+      events.push({
+        time: chirpTime,
+        frequency: Math.round(pitch),
+        duration: 0.05 + 0.05 * nextRand(), // 50-100ms chirp
+      });
+    }
+  }
+
+  return events;
+}
+
+/**
+ * Calculate bubble pulse schedule for lava/corrupt biomes.
+ */
+function calculateBubbleSchedule(freqBase, freqRange, rate, pulseWidth, windowSeconds, seed) {
+  const events = [];
+  let rng = seed || 777;
+
+  function nextRand() {
+    rng = (rng * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (rng >>> 0) / 0xFFFFFFFF;
+  }
+
+  let time = 0;
+  while (time < windowSeconds) {
+    const interval = -Math.log(1 - nextRand()) * rate;
+    time += interval;
+    if (time >= windowSeconds) break;
+
+    events.push({
+      time,
+      frequency: freqBase + (freqRange * (nextRand() * 2 - 1)), // ±range from base
+      duration: pulseWidth * (0.5 + 0.5 * nextRand()),
+    });
+  }
+
+  return events;
+}
+
+/**
+ * Calculate effective atmospheric volume considering day/night cycle and master volume.
+ */
+function calculateAtmosphericVolume(layerVolume, timeOfDay, masterVolume) {
+  const dawnStart = 0.20, dawnEnd = 0.30;
+  const duskStart = 0.70, duskEnd = 0.80;
+
+  let dayNightMult;
+
+  if (timeOfDay >= dawnStart && timeOfDay < dawnEnd) {
+    const t = (timeOfDay - dawnStart) / (dawnEnd - dawnStart);
+    dayNightMult = DAY_NIGHT_VOLUMES.night +
+      (DAY_NIGHT_VOLUMES.day - DAY_NIGHT_VOLUMES.night) * smoothstep(t);
+  } else if (timeOfDay >= duskStart && timeOfDay < duskEnd) {
+    const t = (timeOfDay - duskStart) / (duskEnd - duskStart);
+    dayNightMult = DAY_NIGHT_VOLUMES.day +
+      (DAY_NIGHT_VOLUMES.night - DAY_NIGHT_VOLUMES.day) * smoothstep(t);
+  } else if (timeOfDay >= dawnEnd && timeOfDay < duskStart) {
+    dayNightMult = DAY_NIGHT_VOLUMES.day;
+  } else {
+    dayNightMult = DAY_NIGHT_VOLUMES.night;
+  }
+
+  // Atmospheric sounds are quieter than base drone — apply 0.6 multiplier
+  const atmosphericMultiplier = 0.6;
+  return Math.max(0, Math.min(1, layerVolume * dayNightMult * masterVolume * atmosphericMultiplier));
+}
+
+/**
+ * Get all unique sound layer types used across all biomes.
+ */
+function getAllUsedLayerTypes() {
+  const types = new Set();
+  for (const layers of Object.values(BIOME_SOUND_LAYERS)) {
+    for (const layer of layers) {
+      types.add(layer.type);
+    }
+  }
+  return Array.from(types);
+}
+
+/**
+ * Get biomes that use a specific layer type.
+ */
+function getBiomesUsingLayerType(type) {
+  return Object.keys(BIOME_SOUND_LAYERS).filter(biome =>
+    BIOME_SOUND_LAYERS[biome].some(l => l.type === type)
+  );
+}
+
+/**
+ * Validate all biome sound layer configs.
+ */
+function validateAllSoundLayers() {
+  const errors = [];
+  for (const [biome, layers] of Object.entries(BIOME_SOUND_LAYERS)) {
+    for (let i = 0; i < layers.length; i++) {
+      const result = validateSoundLayer(layers[i]);
+      if (!result.valid) {
+        errors.push(`${biome}[${i}]: ${result.error}`);
+      }
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+// ============================================================
 // AmbientManager Class — Browser Audio Playback
 // ============================================================
 
@@ -300,6 +611,7 @@ class AmbientManager {
   constructor(options = {}) {
     this.ctx = null;
     this.masterGain = null;
+    this.atmosphericGain = null; // Separate gain node for atmospheric layers
     this.currentBiome = 'plains';
     this.timeOfDay = 0.5; // Default: noon
     this.volume = { ...DEFAULT_AMBIENT_VOLUME };
@@ -309,6 +621,8 @@ class AmbientManager {
     this._currentConfig = getBiomeAmbientConfig('plains');
     this._swellStartTime = 0;
     this._crossfadeActive = false;
+    this._atmosphericLayers = []; // Active atmospheric layer nodes
+    this._atmosphericIntervals = []; // Scheduled interval IDs for periodic sounds
 
     if (options.volume) {
       Object.assign(this.volume, options.volume);
@@ -330,6 +644,11 @@ class AmbientManager {
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = this.volume.master;
       this.masterGain.connect(this.ctx.destination);
+
+      // Separate gain node for atmospheric layers (quieter than base drone)
+      this.atmosphericGain = this.ctx.createGain();
+      this.atmosphericGain.gain.value = 0.6;
+      this.atmosphericGain.connect(this.ctx.destination);
 
       if (this.ctx.state === 'suspended') {
         this.ctx.resume();
@@ -388,14 +707,16 @@ class AmbientManager {
       return;
     }
 
-    // Fade out current ambient
+    // Fade out current ambient + atmospheric layers
     this._fadeOutCurrent();
+    this._stopAtmosphericLayers();
 
-    // After crossfade, start new ambient
+    // After crossfade, start new ambient + atmospheric layers
     setTimeout(() => {
       this.currentBiome = biomeName;
       this._currentConfig = newConfig;
       this._startAmbientForConfig(newConfig);
+      this._startAtmosphericLayers(biomeName);
     }, CROSSFADE_DURATION * 1000);
   }
 
@@ -437,6 +758,7 @@ class AmbientManager {
    * Get state summary for debugging/HUD.
    */
   getStateSummary() {
+    const layers = getBiomeSoundLayers(this.currentBiome);
     return {
       initialized: this._initialized,
       enabled: this.enabled,
@@ -445,6 +767,8 @@ class AmbientManager {
       masterVolume: this.volume.master,
       effectiveVolume: this._initialized ? this.getEffectiveVolume() : null,
       activeSources: this._activeSources.length,
+      atmosphericLayers: layers.map(l => l.type),
+      atmosphericLayerCount: layers.length,
     };
   }
 
@@ -565,6 +889,239 @@ class AmbientManager {
 
     this._activeSources.push(source);
   }
+
+  // ----------------------------------------------------------
+  // Atmospheric Layer Methods
+  // ----------------------------------------------------------
+
+  /**
+   * Stop all atmospheric layer sounds and clear scheduled intervals.
+   */
+  _stopAtmosphericLayers() {
+    // Clear periodic sound intervals
+    for (const id of this._atmosphericIntervals) {
+      clearInterval(id);
+    }
+    this._atmosphericIntervals = [];
+
+    // Stop atmospheric sources
+    for (const layer of this._atmosphericLayers) {
+      try {
+        if (layer.source) layer.source.stop();
+      } catch (_) {}
+    }
+    this._atmosphericLayers = [];
+  }
+
+  /**
+   * Start atmospheric sound layers for the given biome.
+   */
+  _startAtmosphericLayers(biomeName) {
+    if (!this._initialized || !this.ctx || !this.atmosphericGain) return;
+
+    const layers = getBiomeSoundLayers(biomeName);
+    if (layers.length === 0) return;
+
+    for (const layerDef of layers) {
+      const resolved = resolveSoundLayer(layerDef);
+      try {
+        switch (resolved.type) {
+          case 'crackle':
+            this._startCrackleLayer(resolved);
+            break;
+          case 'whisper':
+            this._startWhisperLayer(resolved);
+            break;
+          case 'birds':
+            this._startBirdsLayer(resolved);
+            break;
+          case 'wind':
+            this._startWindLayer(resolved);
+            break;
+          case 'bubbles':
+            this._startBubblesLayer(resolved);
+            break;
+        }
+      } catch (e) {
+        console.warn(`Failed to start ${resolved.type} layer for ${biomeName}:`, e.message);
+      }
+    }
+  }
+
+  /**
+   * Start crackle layer — periodic short noise bursts.
+   */
+  _startCrackleLayer(config) {
+    const intervalMs = (config.rate || 1) * 1000;
+    const id = setInterval(() => {
+      if (!this._initialized || !this.ctx) return;
+
+      const bufferSize = this.ctx.sampleRate * config.burstDuration;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2) - 1;
+      }
+
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(config.volume * config.noiseRatio, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + config.burstDuration);
+
+      source.connect(gain);
+      gain.connect(this.atmosphericGain);
+      source.start();
+    }, intervalMs);
+
+    this._atmosphericIntervals.push(id);
+  }
+
+  /**
+   * Start whisper layer — low-frequency modulated noise with detuning.
+   */
+  _startWhisperLayer(config) {
+    if (!this.ctx) return;
+
+    // Create a low oscillator for the drone base
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(config.baseFreq, this.ctx.currentTime);
+
+    // LFO modulation for eerie wobble
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(config.modRate, this.ctx.currentTime);
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.setValueAtTime(config.detuneCents || 10, this.ctx.currentTime);
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.detune);
+
+    // Apply additional detuning for unease
+    osc.detune.setValueAtTime((config.detuneCents || 10) * (Math.random() - 0.5), this.ctx.currentTime);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(config.volume, this.ctx.currentTime);
+
+    osc.connect(gain);
+    gain.connect(this.atmosphericGain);
+    osc.start();
+    lfo.start();
+
+    this._atmosphericLayers.push({ source: osc, type: 'whisper' });
+    this._atmosphericLayers.push({ source: lfo, type: 'whisper-lfo' });
+  }
+
+  /**
+   * Start birds layer — periodic short chirps using sine sweeps.
+   */
+  _startBirdsLayer(config) {
+    const intervalMs = (config.rate || 2) * 1000;
+    const id = setInterval(() => {
+      if (!this._initialized || !this.ctx) return;
+
+      const chirpCount = config.chirpCount || 2;
+      for (let i = 0; i < chirpCount; i++) {
+        const chirpTime = this.ctx.currentTime + i * 0.15;
+        const pitchMin = config.pitchRange[0] || 800;
+        const pitchMax = config.pitchRange[1] || 1500;
+        const freq = pitchMin + (pitchMax - pitchMin) * Math.random();
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, chirpTime);
+        // Quick pitch sweep upward for natural chirp feel
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.3, chirpTime + 0.04);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.001, chirpTime);
+        gain.gain.linearRampToValueAtTime(config.volume, chirpTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, chirpTime + 0.08);
+
+        osc.connect(gain);
+        gain.connect(this.atmosphericGain);
+        osc.start(chirpTime);
+        osc.stop(chirpTime + 0.1);
+      }
+    }, intervalMs);
+
+    this._atmosphericIntervals.push(id);
+  }
+
+  /**
+   * Start wind layer — filtered noise with amplitude modulation.
+   */
+  _startWindLayer(config) {
+    if (!this.ctx) return;
+
+    const bufferSize = this.ctx.sampleRate * 4; // 4-second buffer for looping
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2) - 1;
+    }
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+
+    // Bandpass filter for wind character
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(config.filterFreq, this.ctx.currentTime);
+    filter.Q.setValueAtTime(0.5 + config.windStrength * 0.5, this.ctx.currentTime);
+
+    // Amplitude modulation for gusts
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(0.1 + config.windStrength * 0.1, this.ctx.currentTime);
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.setValueAtTime(config.volume * config.windStrength, this.ctx.currentTime);
+    lfo.connect(lfoGain);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(config.volume, this.ctx.currentTime);
+    lfoGain.connect(gain.gain);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.atmosphericGain);
+    source.start();
+    lfo.start();
+
+    this._atmosphericLayers.push({ source, type: 'wind' });
+    this._atmosphericLayers.push({ source: lfo, type: 'wind-lfo' });
+  }
+
+  /**
+   * Start bubbles layer — periodic low-frequency tone pulses.
+   */
+  _startBubblesLayer(config) {
+    const intervalMs = (config.rate || 1) * 1000;
+    const id = setInterval(() => {
+      if (!this._initialized || !this.ctx) return;
+
+      const freq = config.freqBase + (config.freqRange || 30) * (Math.random() * 2 - 1);
+      const duration = config.pulseWidth * (0.5 + 0.5 * Math.random());
+
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(config.volume, this.ctx.currentTime + duration * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+      osc.connect(gain);
+      gain.connect(this.atmosphericGain);
+      osc.start();
+      osc.stop(this.ctx.currentTime + duration + 0.01);
+    }, intervalMs);
+
+    this._atmosphericIntervals.push(id);
+  }
 }
 
 // ============================================================
@@ -579,6 +1136,9 @@ module.exports = {
   DAY_NIGHT_VOLUMES,
   CROSSFADE_DURATION,
   DEFAULT_AMBIENT_VOLUME,
+  BIOME_SOUND_LAYERS,
+  LAYER_DEFAULTS,
+  VALID_LAYER_TYPES,
 
   // Pure utility functions (testable without AudioContext)
   getNoteFrequency,
@@ -590,6 +1150,18 @@ module.exports = {
   calculateDetunedFrequency,
   getAvailableBiomes,
   validateBiomeConfig,
+
+  // Atmospheric sound layer utilities
+  getBiomeSoundLayers,
+  validateSoundLayer,
+  resolveSoundLayer,
+  calculateCrackleSchedule,
+  calculateBirdSchedule,
+  calculateBubbleSchedule,
+  calculateAtmosphericVolume,
+  getAllUsedLayerTypes,
+  getBiomesUsingLayerType,
+  validateAllSoundLayers,
 
   // Browser class
   AmbientManager,
