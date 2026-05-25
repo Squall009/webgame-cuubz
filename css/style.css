@@ -1062,3 +1062,49 @@ html, body {
   border-color: #4CAF50;
   box-shadow: 0 0 12px rgba(76, 175, 80, 0.3);
 }
+
+/* --- Day/Night Indicator HUD --- */
+#day-night-indicator {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 150;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #e0e0e0;
+  letter-spacing: 1px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.5s ease;
+}
+
+#day-night-indicator[data-is-night="true"] {
+  background: rgba(10, 10, 46, 0.8);
+  color: #aab;
+}
+
+#day-night-indicator[data-phase="dawn"],
+#day-night-indicator[data-phase="sunset"] {
+  background: rgba(255, 107, 53, 0.3);
+  color: #ffd;
+}
+
+/* Night indicator icon animation */
+#day-night-indicator::before {
+  content: '';
+  display: inline-block;
+  margin-right: 4px;
+}
+
+@media (max-width: 768px) {
+  #day-night-indicator {
+    top: 8px;
+    right: 8px;
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+}

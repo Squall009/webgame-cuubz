@@ -780,11 +780,20 @@ webgame-cuubz/
 ## Phase 3: Polish & Content Expansion
 
 ### World Polish
-- [ ] **Day/night cycle** — `js/renderer/skybox.js`
-  - [ ] Configurable cycle length (e.g., 5 min full cycle)
-  - [ ] Sun/moon movement, sky color transitions
-  - [ ] Ambient light changes affecting visibility
-  - [ ] Night indicator on HUD
+- [x] **Day/night cycle** — `js/renderer/skybox.js`
+  - [x] Configurable cycle length (default 300s = 5 min full cycle)
+  - [x] Sun/moon movement with proper angle calculations
+  - [x] Sky color transitions: midnight → dawn → sunrise → day → sunset → dusk → night
+  - [x] Ambient light changes affecting visibility (fog density: 0.008 day / 0.025 night)
+  - [x] Night indicator on HUD (#day-night-indicator with phase-aware styling)
+  - [x] Sun color warmth variation (warm white at noon, orange near horizon)
+  - [x] Moon intensity with sun interference washout
+  - [x] Cloud opacity reduction at night
+  - [x] Phase change callback system for game event integration
+  - [x] Time fraction getter for ambient audio day/night volume integration
+  - [x] CSS styles for night indicator (phase-aware colors, mobile responsive)
+  - [x] HTML element #day-night-indicator added to index.html
+  - [x] 164 tests passing across 28 test groups — constants, smoothstep, lerp, color math, time conversion, sky colors, daytime detection, phases, fog density, ambient intensity, sun/moon positions & intensities, sun color, time labels/formatting, Skybox class constructor/config/time methods/phase detection/cycle duration/update simulation/state summary/init safety/dispose safety/full cycle simulation/time fraction/instance getters
 - [ ] **Biome visual polish** — `js/world/featurePlacer.js`
   - [ ] Flower variety in Plains biomes
   - [ ] Tree density variation in Forest
