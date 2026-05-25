@@ -4,7 +4,7 @@
 
 > **Tech Stack:** Three.js (local CDN), Vanilla JS, Node.js + ws relay server (matchmaking + game sync), IndexedDB for persistence, Canvas API for texture generation, Web Audio API for procedural calm ambient soundscapes.
 
-> **Current State:** 🟢 Building — Phase 1 World Generation complete. Rendering engine, input systems, player physics, persistence all implemented with tests.
+> **Current State:** 🟢 Building — Phase 4 Deployment: Node.js v20.18.0 installed on container, relay server operational (bugs #13/#14 fixed), awaiting NPM WebSocket proxy config for multiplayer-through-proxy testing.
 
 ---
 
@@ -977,13 +977,14 @@ webgame-cuubz/
 - [x] **Deploy game files to server** — `./sync.sh` via rsync (10.0.30.160)
   - [x] All HTML/CSS/JS files synced
   - [x] Texture PNGs synced (30 textures verified)
-  - [x] Server directory deployed (Node.js relay — ⚠️ requires `npm install` once Node.js is available on container)
+  - [x] Server directory deployed (Node.js relay — ✅ Node.js v20.18.0 installed via user-level binary, `npm install` completed)
+  - [x] Relay server bugs fixed: #13 (duplicate HTTP handler crash), #14 (WebSocket import missing)
 - [x] **Setup NPM proxy** — Reverse proxy for game on dedicated LXC container (webgame-cuubz.thehomelabguy.com → 10.0.30.160:80, already existed from prior provisioning)
 - [x] **Test deployed game** — Access via browser from remote device
   - [x] Game loads and renders correctly (HTTP 200, full HTML served)
   - [x] All assets accessible: js/main.js, css/style.css, textures/, js/game.js (all HTTP 200)
-  - [ ] Multiplayer connects through proxy — ⚠️ BLOCKED: Node.js/npm not installed on container (relay server requires `npm install`)
-  - [ ] Mobile touch controls work on physical device — TBD
+  - [ ] Multiplayer connects through proxy — ⚠️ NEEDS: NPM WebSocket proxy rule for port 8765 (relay server works locally, client defaults to ws://localhost:8765)
+  - [ ] Mobile touch controls work on physical device — TBD (requires manual testing)
 
 ### GitHub Repository (Final Step)
 - [x] **Create private GitHub repository** — `webgame-cuubz` (Squall009/webgame-cuubz via Ansible)
@@ -995,7 +996,7 @@ webgame-cuubz/
 - [x] **Test: Deployed game loads** — Navigate to deployed URL
   - [x] Page loads without errors, all assets serve correctly (HTTP 200 for index.html, js/main.js, css/style.css, textures/*.png, js/game.js)
 - [ ] **Test: Multiplayer through proxy** — Connect from remote device
-  - [ ] Session discovery works, WebSocket stable through proxy — ⚠️ BLOCKED: Node.js/npm not installed on container
+  - [ ] Session discovery works, WebSocket stable through proxy — ⚠️ NEEDS: NPM WebSocket proxy rule for port 8765 (relay server verified working locally on container)
 - [ ] Record all test results, note bugs, update checkboxes
 
 ---
@@ -1039,7 +1040,7 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 | Phase 1: Foundation — Core Voxel Engine & Single Player Survival | ✅ Complete (all tasks + integration tests done) |
 | Phase 2: Multiplayer & Relay Server | ✅ Complete (server files + client integration + all tests done, 45/45 passing) |
 | Phase 3: Polish & Content Expansion | ✅ Complete (all tasks + testing done, 55/55 test files passing) |
-|| Phase 4: Deployment & Final Polish | 🟡 In Progress (sync.sh generated, awaiting server provisioning) |
+|| Phase 4: Deployment & Final Polish | 🟡 In Progress (Node.js installed, relay server bugs fixed #13/#14, awaiting NPM WebSocket proxy config) |
 
 ---
 
