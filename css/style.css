@@ -959,20 +959,52 @@ html, body {
   .game-title {
     letter-spacing: 4px;
   }
-  
+
   .menu-btn {
     padding: 12px 20px;
     font-size: 14px;
   }
-  
+
+  /* === SURVIVAL METERS — Visible on mobile viewport === */
   #meters-container {
-    width: 35vw;
+    width: min(180px, 50vw);
+    top: 4px;
+    left: 4px;
+    gap: 2px;
   }
-  
+
+  .meter {
+    gap: 3px;
+  }
+
+  .meter-bar {
+    height: 6px; /* Thinner bars on mobile */
+  }
+
+  .meter-label {
+    font-size: 8px; /* Smaller labels on mobile */
+    min-width: 40px;
+  }
+
+  /* === HOTBAR — Positioned above joystick on mobile === */
+  #hotbar-container {
+    bottom: auto;
+    top: calc(50% + 60px); /* Center vertically, offset below middle */
+    left: 20px;
+    transform: none;
+  }
+
+  #hotbar {
+    gap: 2px;
+    padding: 4px;
+  }
+
   .hotbar-slot {
-    width: 40px;
-    height: 40px;
-    font-size: 20px;
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+    min-width: 36px; /* Touch target ≥ 36px */
+    min-height: 36px;
   }
 
   #joystick-zone {
@@ -985,7 +1017,82 @@ html, body {
     bottom: 60px;
   }
 
-  /* Player list HUD — mobile adjustments */
+  /* === INVENTORY OVERLAY — Full-screen on mobile === */
+  .overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    background: rgba(0,0,0,0.95);
+  }
+
+  #inventory-grid {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    max-width: 100%;
+  }
+
+  .inventory-slot {
+    width: 56px; /* Larger touch targets on mobile */
+    height: 56px;
+    min-width: 48px; /* Touch target ≥ 48px */
+    min-height: 48px;
+  }
+
+  .overlay-close {
+    top: 8px;
+    right: 8px;
+    font-size: 28px;
+    padding: 8px;
+    min-width: 48px; /* Touch target ≥ 48px */
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* === QUEST TRACKER — Compact on mobile === */
+  #quest-tracker {
+    top: auto;
+    bottom: 12px;
+    right: 8px;
+    width: min(160px, 45vw);
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.75);
+    border-radius: 6px;
+    max-height: 80px; /* Limit height to avoid covering gameplay */
+    overflow: hidden;
+  }
+
+  .quest-header {
+    font-size: 9px;
+    margin-bottom: 2px;
+  }
+
+  .quest-current {
+    font-size: 10px;
+    margin-bottom: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .quest-objective {
+    font-size: 8px;
+    line-height: 1.2;
+  }
+
+  .quest-progress {
+    font-size: 7px;
+    margin-top: 2px;
+  }
+
+  /* === PLAYER LIST HUD — Mobile adjustments === */
   .player-list-overlay {
     width: min(150px, 35vw);
     top: 4px;
@@ -1015,6 +1122,70 @@ html, body {
   .player-health-bar {
     width: 30px;
     height: 3px;
+  }
+
+  /* === CRAFTING UI — Mobile adjustments === */
+  #crafting-grid {
+    grid-template-columns: repeat(3, 48px);
+    gap: 6px;
+  }
+
+  .crafting-slot {
+    width: 48px;
+    height: 48px;
+    min-width: 48px; /* Touch target ≥ 48px */
+    min-height: 48px;
+  }
+
+  /* === DAMAGE FLASH — Mobile adjustments === */
+  #damage-flash {
+    opacity: 0.7; /* Slightly less intense on mobile */
+  }
+
+  /* === CROSSHAIR — Hide on mobile (use touch instead) === */
+  #crosshair {
+    display: none;
+  }
+
+  /* === SETTINGS PANEL — Mobile adjustments === */
+  .settings-panel {
+    width: min(300px, 90vw);
+    padding: 16px;
+  }
+
+  .settings-group label {
+    font-size: 12px;
+  }
+
+  .settings-group input[type="range"] {
+    width: 100%;
+    height: 24px; /* Larger touch target for sliders */
+  }
+}
+
+/* Extra small screens (phones in portrait < 360px) */
+@media (max-width: 360px) {
+  #meters-container {
+    width: min(140px, 55vw);
+  }
+
+  .meter-label {
+    display: none; /* Hide labels on very small screens */
+  }
+
+  .hotbar-slot {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+
+  #quest-tracker {
+    width: min(120px, 50vw);
+    padding: 4px 6px;
+  }
+
+  .quest-current {
+    font-size: 9px;
   }
 }
 

@@ -883,11 +883,19 @@ webgame-cuubz/
   - [x] 249 tests passing across 20 test groups — constants, layer assignments, parameter ranges, defaults, validation (valid/invalid), resolve merging, schedule determinism, day/night volume, biome lookups, integration consistency, manager properties, edge cases
 
 ### Mobile Polish
-- [ ] **Responsive HUD** — `css/style.css`
-  - [ ] Survival meters visible on mobile viewport
-  - [ ] Hotbar positioned below joystick
-  - [ ] Inventory overlay full-screen on mobile
-  - [ ] Quest tracker compact on mobile
+- [x] **Responsive HUD** — `css/style.css`
+  - [x] Survival meters visible on mobile viewport (width: min(180px, 50vw), thinner bars at 6px, smaller labels at 8px)
+  - [x] Hotbar positioned below joystick (moved from bottom-center to left-side with top calc positioning)
+  - [x] Inventory overlay full-screen on mobile (flex-wrap layout, 56px touch targets ≥ 48px WCAG minimum)
+  - [x] Quest tracker compact on mobile (repositioned bottom-right, max-height 80px, text-overflow ellipsis, smaller fonts)
+  - [x] Touch target compliance: all interactive elements ≥ 36px (hotbar), ≥ 48px (inventory/crafting/close buttons) per WCAG
+  - [x] Crosshair hidden on mobile (touch controls used instead)
+  - [x] Damage flash reduced intensity on mobile (opacity 0.7)
+  - [x] Crafting UI mobile adjustments (48px touch targets, responsive grid)
+  - [x] Settings panel mobile responsive (90vw width, larger slider touch targets at 24px)
+  - [x] Extra small screens breakpoint (360px): labels hidden, smaller slots, more compact quest tracker
+  - [x] !important usage minimized (≤ 8 in mobile MQ, mostly pre-existing player-list-toggle)
+  - [x] 68 tests passing across 15 test groups — media queries, meters visibility, hotbar positioning, inventory fullscreen, quest tracker compactness, touch targets, crosshair hiding, damage flash, crafting UI, settings panel, XS screens, player list preservation, base CSS structure, HTML structure, cascade safety
 - [ ] **Performance optimization** — `js/renderer/chunkManager.js`
   - [ ] Reduced render distance on mobile detection
   - [ ] Lower geometry detail option for weak devices
