@@ -79,8 +79,8 @@ class ChunkMeshBuilder {
    * Check if a block type is transparent (for face culling)
    */
   _isTransparent(blockType) {
-    // Block types that are transparent: air, water, leaves, lava, toxic slime
-    const transparentTypes = [0, 6, 8, 15, 17]; // AIR, WATER, LEAVES, LAVA, TOXIC_SLIME
+    // Block types that are transparent: air, water, leaves, lava, toxic slime, flowers, torches
+    const transparentTypes = [0, 6, 8, 15, 17, 27, 28, 29]; // AIR, WATER, LEAVES, LAVA, TOXIC_SLIME, RED_FLOWER, YELLOW_FLOWER, CAVE_TORCH
     return transparentTypes.includes(blockType);
   }
 

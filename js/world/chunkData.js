@@ -32,6 +32,10 @@ const BLOCK_TYPES = {
   APPLE:           24,
   QUEST_KEY:       25,
   BOSS_SPAWN:      26,
+  RED_FLOWER:      27,
+  YELLOW_FLOWER:   28,
+  CAVE_TORCH:      29,
+  GLOWSTONE:       30,
 };
 
 // Block properties
@@ -63,6 +67,10 @@ const BLOCK_PROPERTIES = {
   [BLOCK_TYPES.APPLE]:           { solid: false, transparent: true, hardness: 0, damage: 0, drop: 'apple', foodItem: true },
   [BLOCK_TYPES.QUEST_KEY]:       { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, questItem: true },
   [BLOCK_TYPES.BOSS_SPAWN]:      { solid: false, transparent: true, hardness: -1, damage: 0, drop: null }, // invisible trigger
+  [BLOCK_TYPES.RED_FLOWER]:      { solid: false, transparent: true, hardness: 0, damage: 0, drop: null, decorative: true },
+  [BLOCK_TYPES.YELLOW_FLOWER]:   { solid: false, transparent: true, hardness: 0, damage: 0, drop: null, decorative: true },
+  [BLOCK_TYPES.CAVE_TORCH]:      { solid: false, transparent: true, hardness: 0, damage: 0, drop: null, lightSource: true, placeable: true },
+  [BLOCK_TYPES.GLOWSTONE]:       { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, lightSource: true },
 };
 
 const CHUNK_WIDTH = 16;

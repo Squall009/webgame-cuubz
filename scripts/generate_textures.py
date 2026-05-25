@@ -648,6 +648,111 @@ def gen_bed(seed=125):
     return img
 
 
+def gen_red_flower(seed=126):
+    """Red flower — small decorative block for plains biomes."""
+    random.seed(seed)
+    img = Image.new("RGBA", (32, 32))
+    draw = ImageDraw.Draw(img)
+    cx, cy = 16, 20
+    
+    # Stem (green line going up from bottom)
+    draw.line([(cx, 31), (cx, cy + 4)], fill=(50, 140, 30), width=2)
+    
+    # Petals: 5 red petals in a circle
+    petal_colors = [(200, 40, 40), (220, 60, 50), (180, 30, 30)]
+    for i in range(5):
+        angle = math.radians(i * 72 - 90)  # Spread around center
+        px = int(cx + math.cos(angle) * 6)
+        py = int(cy + math.sin(angle) * 6)
+        color = petal_colors[i % len(petal_colors)]
+        draw.ellipse([px - 4, py - 4, px + 4, py + 4], fill=color)
+    
+    # Center: yellow dot
+    draw.ellipse([cx - 3, cy - 3, cx + 3, cy + 3], fill=(220, 200, 40))
+    
+    return img
+
+
+def gen_yellow_flower(seed=127):
+    """Yellow flower — small decorative block for plains biomes."""
+    random.seed(seed)
+    img = Image.new("RGBA", (32, 32))
+    draw = ImageDraw.Draw(img)
+    cx, cy = 16, 20
+    
+    # Stem (green line going up from bottom)
+    draw.line([(cx, 31), (cx, cy + 4)], fill=(50, 140, 30), width=2)
+    
+    # Petals: 5 yellow petals in a circle
+    petal_colors = [(220, 200, 40), (240, 210, 50), (200, 180, 30)]
+    for i in range(5):
+        angle = math.radians(i * 72 - 90)
+        px = int(cx + math.cos(angle) * 6)
+        py = int(cy + math.sin(angle) * 6)
+        color = petal_colors[i % len(petal_colors)]
+        draw.ellipse([px - 4, py - 4, px + 4, py + 4], fill=color)
+    
+    # Center: orange-brown dot
+    draw.ellipse([cx - 3, cy - 3, cx + 3, cy + 3], fill=(180, 120, 30))
+    
+    return img
+
+
+def gen_cave_torch(seed=128):
+    """Cave torch — player placeable light source for caves."""
+    random.seed(seed)
+    img = Image.new("RGBA", (32, 32))
+    draw = ImageDraw.Draw(img)
+    
+    # Stick: brown vertical line
+    draw.line([(16, 8), (16, 28)], fill=(100, 70, 30), width=3)
+    
+    # Flame: orange-yellow teardrop shape at top
+    flame_base = [(14, 10), (18, 10), (16, 2)]
+    draw.polygon(flame_base, fill=(255, 180, 30))
+    
+    # Inner flame: brighter yellow core
+    inner_flame = [(15, 9), (17, 9), (16, 4)]
+    draw.polygon(inner_flame, fill=(255, 240, 100))
+    
+    # Glow halo: semi-transparent warm glow around flame
+    for r in range(8, 14):
+        alpha = max(0, int(40 * (1 - (r - 8) / 6)))
+        if alpha > 0:
+            draw.ellipse([16 - r, 5 - r + 2, 16 + r, 5 + r + 2],
+                        outline=(255, 160, 40, alpha))
+    
+    return img
+
+
+def gen_glowstone(seed=129):
+    """Glowstone — emissive light source block found in caves."""
+    random.seed(seed)
+    img = Image.new("RGB", (32, 32))
+    n = PerlinNoise(seed)
+    
+    for y in range(32):
+        for x in range(32):
+            nv = n.octave_noise2d(x / 6.0, y / 6.0, octaves=3, persistence=0.5)
+            
+            # Bright warm yellow-white glowstone
+            r = clamp_color(240 + nv * 15)
+            g = clamp_color(220 + nv * 20)
+            b = clamp_color(160 + nv * 40)
+            
+            # Grid pattern: darker lines forming a cross-hatch
+            gx = x % 8 < 1 or (x + 4) % 8 < 1
+            gy = y % 8 < 1 or (y + 4) % 8 < 1
+            if gx or gy:
+                r = clamp_color(r - 30)
+                g = clamp_color(g - 25)
+                b = clamp_color(b - 20)
+            
+            img.putpixel((x, y), (r, g, b))
+    
+    return img
+
+
 # ============================================================================
 # Texture Registry — maps filename → generator function
 # ============================================================================
@@ -679,6 +784,10 @@ TEXTURE_GENERATORS = {
     "apple.png": gen_apple,
     "quest_key.png": gen_quest_key,
     "bed.png": gen_bed,
+    "red_flower.png": gen_red_flower,
+    "yellow_flower.png": gen_yellow_flower,
+    "cave_torch.png": gen_cave_torch,
+    "glowstone.png": gen_glowstone,
 }
 
 

@@ -794,12 +794,21 @@ webgame-cuubz/
   - [x] CSS styles for night indicator (phase-aware colors, mobile responsive)
   - [x] HTML element #day-night-indicator added to index.html
   - [x] 164 tests passing across 28 test groups — constants, smoothstep, lerp, color math, time conversion, sky colors, daytime detection, phases, fog density, ambient intensity, sun/moon positions & intensities, sun color, time labels/formatting, Skybox class constructor/config/time methods/phase detection/cycle duration/update simulation/state summary/init safety/dispose safety/full cycle simulation/time fraction/instance getters
-- [ ] **Biome visual polish** — `js/world/featurePlacer.js`
-  - [ ] Flower variety in Plains biomes
-  - [ ] Tree density variation in Forest
-  - [ ] Lava flow animation with particle effects
-  - [ ] Toxic slime pool bubbling animation
-  - [ ] Corrupt biome ambient purple fog effect
+- [x] **Biome visual polish** — `js/world/featurePlacer.js` + `js/renderer/biomeEffects.js`
+  - [x] Flower variety in Plains biomes (RED_FLOWER=27, YELLOW_FLOWER=28, deterministic hash-based selection)
+  - [x] Tree density variation in Forest (noise-based perlin clustering, 0.5x-1.5x multiplier)
+  - [x] Lava flow animation with particle effects (UV scroll at 0.5 texels/sec, bubble particles)
+  - [x] Toxic slime pool bubbling animation (UV scroll at 0.3 texels/sec, bubble particles)
+  - [x] Corrupt biome ambient purple fog effect (day/night color transition, density pulse)
+  - [x] Cave glowstone generation (GLOWSTONE=30, rare placement in cave air spaces)
+  - [x] Cave torch block type (CAVE_TORCH=29, player placeable light source)
+  - [x] Forest trees taller with wider canopies (5-7 blocks vs 4-5 for plains)
+  - [x] Flower cluster placement (20% chance of secondary nearby flower)
+  - [x] New textures generated: red_flower.png, yellow_flower.png, cave_torch.png, glowstone.png
+  - [x] BiomeEffects class: init/update/dispose lifecycle, Three.js integration
+  - [x] ParticleEffect class: position tracking, velocity, lifetime, alpha/scale curves
+  - [x] ChunkMeshBuilder updated: flower/torch transparency in face culling
+  - [x] 47 feature placer tests passing (18 groups) + 111 biome effects tests passing (17 groups)
 - [ ] **Cave polish** — `js/world/caveGenerator.js`
   - [ ] Torches/light sources in caves (player placeable)
   - [ ] Cave stalactite/stalagmite features
