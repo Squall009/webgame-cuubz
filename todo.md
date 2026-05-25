@@ -832,10 +832,17 @@ webgame-cuubz/
   - [x] 62 tests passing across 20 test groups — constructor defaults, stalactite generation, stalagmite generation, formation safety (no overwrite), bounds checking, determinism, torch placement, torch separation enforcement, cave space detection, surface finding, proximity checks, formation counting, full pipeline integration, edge cases (empty/bedrock/air chunks), water safety, block type properties
 
 ### Gameplay Polish
-- [ ] **Creative mode full implementation** — `js/game.js`
-  - [ ] Unlimited blocks, no gravity, fly mode (double-tap space)
-  - [ ] Block palette selector for all block types
-  - [ ] Toggle between Creative and Survival
+- [x] **Creative mode full implementation** — `js/game.js`
+  - [x] Unlimited blocks — `canPlaceBlock()` always returns true in creative mode, no inventory check
+  - [x] No gravity — `gravityEnabled` flag disables gravity in creative mode
+  - [x] Fly mode (double-tap space) — `DoubleTapDetector` class with 300ms threshold, `toggleFlyMode()` method
+  - [x] Block palette selector for all block types — `BlockPalette` class with cycle forward/backward, select by ID
+  - [x] Toggle between Creative and Survival — `setMode()` with callback system (`onModeChange`)
+  - [x] Game mode constants: `Game.MODES.SURVIVAL`, `Game.MODES.CREATIVE`
+  - [x] `isCreative()` / `isSurvival()` helper methods
+  - [x] Player creative physics: `setCreativeMode()`, `flyMode`, `flySpeed`, `isFlying` getter, enhanced horizontal speed (1.5x)
+  - [x] Creative mode update loop: no gravity, fly mode vertical movement with velocity damping
+  - [x] 66 tests passing across 14 test groups — constants, constructor defaults, mode switching, player physics, fly toggle, double-tap detection, fly speed, block placement, palette CRUD/cycling, callbacks, integration cycle, edge cases
 - [ ] **Crafting system** — `js/systems/crafting.js`
   - [ ] Basic recipes: planks from wood, beds from wool+planks
   - [ ] Crafting UI with recipe grid
