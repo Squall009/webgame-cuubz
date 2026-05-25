@@ -810,9 +810,12 @@ webgame-cuubz/
   - [x] ChunkMeshBuilder updated: flower/torch transparency in face culling
   - [x] 47 feature placer tests passing (18 groups) + 111 biome effects tests passing (17 groups)
 - [x] **Cave polish** — `js/world/caveGenerator.js`
-  - [x] Torches/light sources in caves (player placeable)
-    - [x] CAVE_TORCH block type (ID=29): solid=false, transparent=true, lightSource=true, placeable=true
-    - [x] `placeTorchesInCaves()`: deterministic torch placement in cave spaces with min-separation enforcement
+  - [x] Torches/light sources in caves (player placeable) — CAVE_TORCH block type (ID=29), non-solid, transparent, lightSource, placeable
+  - [x] Cave stalactite/stalagmite features — Deterministic generation via noise hash, max height 4, seamless across chunks
+  - [x] Glowstone-like ore blocks for cave lighting — GLOWSTONE block type (ID=30), solid, lightSource
+  - [x] Torch placement system: min-separation enforcement, surface detection (ceiling/floor/wall), water safety
+  - [x] Formation counting utility for debug/stats
+  - [x] 62 tests passing across 20 test groups — constructor defaults, stalactite/stalagmite generation, formation safety/bounds/determinism, torch placement/separation/water safety, cave space detection, surface finding, CAVE_TORCH/GLOWSTONE properties, full pipeline integration, edge cases
     - [x] `_isCaveSpace()`: detects enclosed cave positions (≥3 solid neighbors)
     - [x] `_findTorchSurface()`: finds valid attachment surfaces (ceiling→floor→walls priority)
     - [x] `_isTooCloseToTorch()`: Manhattan distance separation check

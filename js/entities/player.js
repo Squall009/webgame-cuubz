@@ -1,6 +1,11 @@
 /**
  * Cuubz — Player Entity
  * Movement, physics, AABB collision against solid blocks.
+ * 
+ * Creative Mode Support:
+ * - gravityEnabled: false in creative mode (no falling)
+ * - flyMode: toggleable via double-tap space (frees movement vertically)
+ * - flySpeed: enhanced vertical movement speed when flying
  */
 
 class Player {
@@ -20,10 +25,15 @@ class Player {
     this.height = 1.8;
     
     // Physics constants
-    this.gravity = -25;      // blocks/s²
-    this.jumpVelocity = 9;   // blocks/s
-    this.moveSpeed = 5;      // blocks/s (walking)
+    this.gravity = -25;       // blocks/s²
+    this.jumpVelocity = 9;    // blocks/s
+    this.moveSpeed = 5;       // blocks/s (walking)
     this.sprintMultiplier = 1.6;
+    
+    // Creative mode physics
+    this.gravityEnabled = true;  // Default: gravity on (survival mode)
+    this.flyMode = false;        // Fly mode toggle state
+    this.flySpeed = 8;           // Vertical speed when flying (blocks/s)
     
     // State
     this.onGround = false;
@@ -34,11 +44,64 @@ class Player {
   }
 
   /**
+   * Enable or disable creative mode physics.
+   * @param {boolean} creative — true to enable creative mode physics
+   */
+  setCreativeMode(creative) {
+    if (creative) {
+      // Creative mode: no gravity, enable fly speed
+      this.gravityEnabled = false;
+      this.flySpeed = 8;
+      // Don't auto-enable fly mode — player must double-tap space
+    } else {
+      // Survival mode: gravity on, fly mode off
+      this.gravityEnabled = true;
+      this.flyMode = false;
+    }
+  }
+
+  /**
+   * Toggle fly mode. Only works when creative mode is active (gravity disabled).
+   */
+  toggleFlyMode() {
+    if (!this.gravityEnabled) {
+      // Only allow fly mode in creative mode
+      this.flyMode = !this.flyMode;
+    }
+  }
+
+  /**
+   * Check if player is currently flying.
+   * Flying = fly mode enabled AND moving vertically (not on ground).
+   * @returns {boolean}
+   */
+  get isFlying() {
+    return this.flyMode && !this.onGround;
+  }
+
+  /**
    * Update player physics and movement
    */
   update(deltaTime, inputState, world) {
-    // Apply gravity
-    this.velocity.y += this.gravity * deltaTime;
+    // Apply gravity (only in survival mode)
+    if (this.gravityEnabled) {
+      this.velocity.y += this.gravity * deltaTime;
+    }
+    
+    // Fly mode vertical movement (creative mode only)
+    if (this.flyMode && !this.gravityEnabled) {
+      if (inputState.jump) {
+        this.velocity.y = this.flySpeed;
+      } else if (inputState.sneak || inputState.backward_fly) {
+        this.velocity.y = -this.flySpeed;
+      } else {
+        // No vertical input — slow down vertical velocity
+        this.velocity.y *= 0.9;
+        if (Math.abs(this.velocity.y) < 0.1) {
+          this.velocity.y = 0;
+        }
+      }
+    }
     
     // Get movement direction from camera yaw
     const moveX = Math.sin(this.yaw);
@@ -46,8 +109,11 @@ class Player {
     const sideX = Math.cos(this.yaw);
     const sideZ = -Math.sin(this.yaw);
     
-    // Calculate movement speed
+    // Calculate movement speed (faster in creative mode)
     let speed = this.moveSpeed;
+    if (!this.gravityEnabled) {
+      speed *= 1.5; // Creative mode horizontal speed boost
+    }
     if (this.isSprinting) speed *= this.sprintMultiplier;
     
     // Apply input-based movement
@@ -68,8 +134,8 @@ class Player {
     this.velocity.x = dx;
     this.velocity.z = dz;
     
-    // Handle jump
-    if (inputState.jump && this.onGround) {
+    // Handle jump (survival mode only — fly mode handles vertical in creative)
+    if (this.gravityEnabled && inputState.jump && this.onGround) {
       this.velocity.y = this.jumpVelocity;
       this.onGround = false;
     }
@@ -163,7 +229,7 @@ class Player {
    */
   _isSolid(blockType) {
     // Import from chunkData when available
-    const solidTypes = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 22, 23, 25];
+    const solidTypes = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 22, 25];
     return solidTypes.includes(blockType);
   }
 
