@@ -934,7 +934,28 @@ webgame-cuubz/
   - [x] Console.log cleanup (remove debug statements) — Created `js/util/logger.js` with CuubzLogger.DEBUG toggle. Replaced all client-side debug console.log calls in game.js, main.js, multiplayer/client.js, multiplayer/host.js with `_log()` no-op. Kept console.warn/error for production error handling. Server-side console.log preserved for operational logging. 15 tests added (test_logger.js).
   - [x] Error handling on all WebSocket operations — Added try/catch to WSConnection.onerror (triggers disconnect+reconnect), _flushQueue, _sendRaw, connectMatchmaking, _connectToGameSession, disconnect, dispose; server-side _send/_broadcast in session.js and matchmaking.js; ws.onerror cleanup in session.js/matchmaking.js; process-level uncaughtException/unhandledRejection handlers in index.js; session HTTP listen error handler. Fixed dispose() ordering bug (_disposed set before cleanup). 22 tests added (test_websocketErrorHandling.js).
   - [x] Memory leak check (chunk disposal, event listener cleanup) — Added `dispose()` methods to `KeyboardInput`, `MouseInput`, `TouchInput` with proper event listener removal via stored handler references. Fixed `ChunkManager._processQueue()` setTimeout leak by adding `_disposed` flag + `_buildTimeoutId` tracking. All input modules now store bound handler references (`_onKeyDownBound`, etc.) for `removeEventListener` on cleanup. 23 assertions in test_memoryLeaks.js — dispose existence, idempotency, callback nullification, build queue cleanup after dispose.
-  - [ ] Mobile viewport testing across device sizes
+  - [x] **Mobile viewport testing across device sizes** — `test/test_mobileViewports.js`
+  - [x] Viewport meta tag validation (width=device-width, initial-scale=1, user-scalable=no)
+  - [x] Touch-action CSS property verification (touch-action: none on body)
+  - [x] Media query structure validation (600px, 360px, 768px breakpoints in correct cascade order)
+  - [x] Device simulation — Galaxy Fold inner (280px): XS + mobile MQs apply, labels hidden
+  - [x] Device simulation — Galaxy S21 (360px): boundary test at exactly 360px
+  - [x] Device simulation — iPhone SE (375px): only mobile MQ, labels visible
+  - [x] Device simulation — iPhone 12/13 (390px): quest tracker compact, crafting ≥ 48px
+  - [x] Device simulation — iPhone Pro Max (428px): joystick zone + mobile actions positioned
+  - [x] Device simulation — iPad Mini (768px): tablet MQ only, crosshair visible
+  - [x] Device simulation — iPad Pro 11" (834px): pure desktop styles
+  - [x] Device simulation — iPad Pro 12.9" (1024px): clamp() fluid typography verified
+  - [x] Comprehensive touch target audit (WCAG ≥ 48px primary, ≥ 24px secondary)
+  - [x] Breakpoint boundary edge cases (359/360/361, 599/600/601, 767/768/769)
+  - [x] UI completeness across device categories (HUD, meters, hotbar, quest, crosshair)
+  - [x] CSS performance checks (minimal universal selectors, targeted MQ overrides)
+  - [x] Landscape orientation readiness (width-based MQs handle landscape correctly)
+  - [x] Safe area / notch considerations (full-screen canvas coverage verified)
+  - [x] High-DPI / Retina display readiness (DPR delegated to Three.js renderer)
+  - [x] Mobile browser chrome handling (overflow: hidden prevents scroll bounce)
+  - [x] Cross-device summary validation for all 9 tested device widths
+  - [x] 88 tests passing across 20 test groups
 - [ ] **Texture asset verification** — `textures/` directory
   - [ ] All texture PNGs present and 32×32 resolution
   - [ ] Visual quality check on each texture
