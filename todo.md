@@ -932,7 +932,7 @@ webgame-cuubz/
 ### Pre-Deployment
 - [x] **Final code review** — All files
   - [x] Console.log cleanup (remove debug statements) — Created `js/util/logger.js` with CuubzLogger.DEBUG toggle. Replaced all client-side debug console.log calls in game.js, main.js, multiplayer/client.js, multiplayer/host.js with `_log()` no-op. Kept console.warn/error for production error handling. Server-side console.log preserved for operational logging. 15 tests added (test_logger.js).
-  - [ ] Error handling on all WebSocket operations
+  - [x] Error handling on all WebSocket operations — Added try/catch to WSConnection.onerror (triggers disconnect+reconnect), _flushQueue, _sendRaw, connectMatchmaking, _connectToGameSession, disconnect, dispose; server-side _send/_broadcast in session.js and matchmaking.js; ws.onerror cleanup in session.js/matchmaking.js; process-level uncaughtException/unhandledRejection handlers in index.js; session HTTP listen error handler. Fixed dispose() ordering bug (_disposed set before cleanup). 22 tests added (test_websocketErrorHandling.js).
   - [ ] Memory leak check (chunk disposal, event listener cleanup)
   - [ ] Mobile viewport testing across device sizes
 - [ ] **Texture asset verification** — `textures/` directory

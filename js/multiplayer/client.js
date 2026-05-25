@@ -250,7 +250,7 @@ class WSConnection {
         this._setState(CLIENT_STATE.DISCONNECTED);
         this._emit('disconnect', { code: event.code, reason: event.reason });
 
-        // Attempt reconnection if not disposed
+        // Attempt reconnection if not disposed — check _disposed to prevent reconnect during dispose()
         if (!this._disposed) {
           this._scheduleReconnect();
         }
@@ -259,6 +259,16 @@ class WSConnection {
       this._socket.onerror = (err) => {
         console.error(`[WSConnection] Error on ${this.url}:`, err.message || err);
         this._emit('error', { message: err.message || 'WebSocket error' });
+        // Trigger disconnect + reconnect flow so the connection self-heals
+        if (!this._disposed && this._state === CLIENT_STATE.CONNECTED) {
+          this._stopHeartbeat();
+          try { this._socket.close(4000, 'Client error'); } catch (e) {}
+          this._socket = null;
+          this._setState(CLIENT_STATE.DISCONNECTED);
+          if (!this._disposed) {
+            this._scheduleReconnect();
+          }
+        }
       };
     } catch (err) {
       console.error(`[WSConnection] Connection failed:`, err.message);
@@ -296,7 +306,24 @@ class WSConnection {
   /** Dispose — release all resources, no reconnection */
   dispose() {
     this._disposed = true;
-    this.disconnect();
+    // Disconnect even though _disposed=true — we need cleanup (close socket, null reference)
+    // but the onclose guard checks _disposed to prevent reconnect scheduling
+    if (this._socket && this._socket.readyState === 1) {
+      this._sendRaw({ type: MESSAGE_TYPES.LEAVE });
+    }
+    this._stopHeartbeat();
+    this._cancelReconnect();
+
+    if (this._socket) {
+      try {
+        this._socket.close();
+      } catch (e) {
+        // Already closed
+      }
+      this._socket = null;
+    }
+
+    this._setState(CLIENT_STATE.DISCONNECTED);
     this._queue.clear();
     this._eventHandlers = {};
   }
@@ -356,7 +383,13 @@ class WSConnection {
     while (!this._queue.isEmpty && this.isConnected) {
       const item = this._queue.dequeue();
       if (item) {
-        this._sendRaw(item.data);
+        try {
+          this._sendRaw(item.data);
+        } catch (err) {
+          console.error(`[WSConnection] Queue flush failed:`, err.message);
+          // Stop flushing if connection broke mid-flush
+          break;
+        }
       }
     }
   }
@@ -647,16 +680,24 @@ class MultiplayerClient {
   connectMatchmaking() {
     if (this._disposed || this._matchmakingConn) return;
 
-    const url = `${this._getProtocol()}://${this.host}:${this.matchmakingPort}`;
-    this._matchmakingConn = new WSConnection({
-      url,
-      wsFactory: this._wsFactory,
-    });
+    try {
+      const url = `${this._getProtocol()}://${this.host}:${this.matchmakingPort}`;
+      this._matchmakingConn = new WSConnection({
+        url,
+        wsFactory: this._wsFactory,
+      });
 
-    // Wire up matchmaking event handlers
-    this._setupMatchmakingHandlers();
+      // Wire up matchmaking event handlers
+      this._setupMatchmakingHandlers();
 
-    this._matchmakingConn.connect();
+      this._matchmakingConn.connect();
+    } catch (err) {
+      console.error(`[MultiplayerClient] Failed to connect matchmaking:`, err.message);
+      if (this._matchmakingConn) {
+        this._matchmakingConn.dispose();
+        this._matchmakingConn = null;
+      }
+    }
   }
 
   /** Set up internal matchmaking message routing */
@@ -703,16 +744,24 @@ class MultiplayerClient {
   _connectToGameSession(sessionPort) {
     if (this._disposed || this._gameSessionConn) return;
 
-    const url = `${this._getProtocol()}://${this.host}:${sessionPort}`;
-    this._gameSessionConn = new WSConnection({
-      url,
-      wsFactory: this._wsFactory,
-    });
+    try {
+      const url = `${this._getProtocol()}://${this.host}:${sessionPort}`;
+      this._gameSessionConn = new WSConnection({
+        url,
+        wsFactory: this._wsFactory,
+      });
 
-    // Wire up game session event handlers
-    this._setupGameSessionHandlers();
+      // Wire up game session event handlers
+      this._setupGameSessionHandlers();
 
-    this._gameSessionConn.connect();
+      this._gameSessionConn.connect();
+    } catch (err) {
+      console.error(`[MultiplayerClient] Failed to connect game session:`, err.message);
+      if (this._gameSessionConn) {
+        this._gameSessionConn.dispose();
+        this._gameSessionConn = null;
+      }
+    }
   }
 
   /** Set up internal game session message routing */
@@ -821,15 +870,20 @@ class MultiplayerClient {
 
   /** Disconnect from all servers */
   disconnect() {
-    if (this._matchmakingConn) {
-      this._matchmakingConn.disconnect();
-      this._matchmakingConn = null;
+    try {
+      if (this._matchmakingConn) {
+        this._matchmakingConn.disconnect();
+        this._matchmakingConn = null;
+      }
+      if (this._gameSessionConn) {
+        this._gameSessionConn.disconnect();
+        this._gameSessionConn = null;
+      }
+    } catch (err) {
+      console.error(`[MultiplayerClient] Disconnect error:`, err.message);
+    } finally {
+      this._currentSessionId = null;
     }
-    if (this._gameSessionConn) {
-      this._gameSessionConn.disconnect();
-      this._gameSessionConn = null;
-    }
-    this._currentSessionId = null;
   }
 
   /** Dispose — release all resources */

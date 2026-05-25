@@ -89,6 +89,13 @@ class Matchmaking {
       // Handle errors
       ws.on('error', (err) => {
         console.error(`[MATCHMAKING] WebSocket error for ${playerId}:`, err.message);
+        // Clean up the client on WebSocket error to prevent dangling connections
+        const client = this.clients.get(ws);
+        if (client && client.sessionId) {
+          console.log(`[MATCHMAKING] Cleaning up session ${client.sessionId} due to error`);
+          this.onSessionLeave(client.sessionId);
+        }
+        this.clients.delete(ws);
       });
     });
   }
@@ -174,7 +181,11 @@ class Matchmaking {
    */
   _send(ws, data) {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(data));
+      try {
+        ws.send(JSON.stringify(data));
+      } catch (err) {
+        console.error(`[MATCHMAKING] Send failed:`, err.message);
+      }
     }
   }
 

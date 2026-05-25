@@ -61,6 +61,10 @@ const matchmaking = new Matchmaking({
     // Start listening
     sessionHttp.listen(sessionPort, () => {
       console.log(`[SESSION] ${sessionId} listening on port ${sessionPort}`);
+    }).on('error', (err) => {
+      console.error(`[SESSION] Failed to listen on port ${sessionPort}:`, err.message);
+      // Clean up the failed session
+      sessions.delete(sessionId);
     });
 
     return { sessionId, sessionPort };
@@ -109,10 +113,15 @@ matchmakingServer.listen(MATCHMAKING_PORT, () => {
 process.on('SIGINT', () => {
   console.log('\n[SERVER] Shutting down...');
   for (const [id, entry] of sessions) {
-    entry.session.dispose();
-    entry.httpServer.close();
+    try {
+      entry.session.dispose();
+      entry.httpServer.close();
+    } catch (e) {
+      console.error(`[SERVER] Error cleaning up session ${id}:`, e.message);
+    }
   }
-  matchmakingWSS.close();
+  sessions.clear();
+  try { matchmakingWSS.close(); } catch (e) {}
   matchmakingServer.close(() => {
     console.log('[SERVER] Shutdown complete.');
     process.exit(0);
@@ -121,6 +130,18 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   process.emit('SIGINT');
+});
+
+// ─── Process-Level Error Handlers ─────────────────────────────
+
+process.on('uncaughtException', (err) => {
+  console.error('[SERVER] Uncaught Exception:', err.message, err.stack);
+  // Attempt graceful shutdown
+  process.emit('SIGINT');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[SERVER] Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 // ─── Health Check Endpoint ────────────────────────────────────

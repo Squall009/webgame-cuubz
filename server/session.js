@@ -95,6 +95,11 @@ class SessionManager {
 
       ws.on('error', (err) => {
         console.error(`[SESSION ${this.sessionId}] WebSocket error:`, err.message);
+        // Clean up the player on WebSocket error to prevent dangling connections
+        const playerId = this._findPlayerIdByWs(ws);
+        if (playerId) {
+          this._removePlayer(playerId);
+        }
       });
     });
   }
@@ -430,7 +435,11 @@ class SessionManager {
    */
   _send(ws, data) {
     if (ws.readyState === 1) { // WebSocket.OPEN = 1
-      ws.send(JSON.stringify(data));
+      try {
+        ws.send(JSON.stringify(data));
+      } catch (err) {
+        console.error(`[SESSION ${this.sessionId}] Send failed:`, err.message);
+      }
     }
   }
 
@@ -439,10 +448,14 @@ class SessionManager {
    * @param {string|null} excludePlayerId — Player ID to exclude, or null to send to everyone
    */
   _broadcast(excludePlayerId, data) {
-    const msg = JSON.stringify(data);
     for (const player of this.players.values()) {
       if (excludePlayerId && player.playerId === excludePlayerId) continue;
-      this._send(player.ws, data);
+      try {
+        this._send(player.ws, data);
+      } catch (err) {
+        console.error(`[SESSION ${this.sessionId}] Broadcast to ${player.playerId} failed:`, err.message);
+        // Continue broadcasting to remaining players
+      }
     }
   }
 
