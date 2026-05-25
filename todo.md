@@ -974,7 +974,7 @@ webgame-cuubz/
   - [x] Invalid message handling: out-of-range break, out-of-bounds Y, non-integer coords, negative blockType → ERROR
 
 ### Deployment
-- [ ] **Generate sync.sh from template** — `sed` from skill template with remote IP
+- [x] **Generate sync.sh from template** — `sed` from skill template with remote IP 10.0.30.160 (dedicated LXC for Cuubz Node.js relay)
 - [ ] **Deploy game files to server** — `./sync.sh` via rsync
   - [ ] All HTML/CSS/JS files synced
   - [ ] Texture PNGs synced
@@ -1039,7 +1039,7 @@ All testing uses **Hermes browser automation** to open the game in a headless br
 | Phase 1: Foundation — Core Voxel Engine & Single Player Survival | ✅ Complete (all tasks + integration tests done) |
 | Phase 2: Multiplayer & Relay Server | ✅ Complete (server files + client integration + all tests done, 45/45 passing) |
 | Phase 3: Polish & Content Expansion | ✅ Complete (all tasks + testing done, 55/55 test files passing) |
-| Phase 4: Deployment & Final Polish | ⬜ Not Started |
+|| Phase 4: Deployment & Final Polish | 🟡 In Progress (sync.sh generated, awaiting server provisioning) |
 
 ---
 
