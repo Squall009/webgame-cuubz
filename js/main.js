@@ -6,6 +6,9 @@
 (function() {
   'use strict';
 
+  // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
+  const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+
   // ============================================================
   // Screen Management
   // ============================================================
@@ -675,7 +678,7 @@
         if (result.success) {
           closeCharModal();
           renderWorldSlots();
-          console.log(`[Cuubz] World created: ${result.world.name} (seed: ${BrowserWorldManager.formatSeed(result.world.seed)})`);
+          _log(`[Cuubz] World created: ${result.world.name} (seed: ${BrowserWorldManager.formatSeed(result.world.seed)})`);
         } else {
           showCharError(result.error);
         }
@@ -699,7 +702,7 @@
         if (result.success) {
           closeCharModal();
           renderCharacterSlots();
-          console.log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name} (${result.character.color})`);
+          _log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name} (${result.character.color})`);
         } else {
           showCharError(result.error);
         }
@@ -731,7 +734,7 @@
         if (result.success) {
           closeDeleteWorldModal();
           renderWorldSlots();
-          console.log(`[Cuubz] World deleted: ${worldId}`);
+          _log(`[Cuubz] World deleted: ${worldId}`);
         } else {
           alert(result.error);
         }
@@ -741,7 +744,7 @@
         if (result.success) {
           closeDeleteModal();
           renderCharacterSlots();
-          console.log(`[Cuubz] Character deleted: ${charId}`);
+          _log(`[Cuubz] Character deleted: ${charId}`);
         } else {
           alert(result.error);
         }
@@ -781,12 +784,12 @@
     });
 
     document.getElementById('btn-survival').addEventListener('click', () => {
-      console.log('[Cuubz] Mode: Survival');
+      _log('[Cuubz] Mode: Survival');
       startGame('survival');
     });
 
     document.getElementById('btn-creative').addEventListener('click', () => {
-      console.log('[Cuubz] Mode: Creative');
+      _log('[Cuubz] Mode: Creative');
       startGame('creative');
     });
 
@@ -1196,7 +1199,7 @@
             mode,
             maxPlayers,
           });
-          console.log(`[SessionManager] Hosting session: ${name}`);
+          _log(`[SessionManager] Hosting session: ${name}`);
         } catch (err) {
           updateConnectionStatus('disconnected');
           showHostError(`Failed to host: ${err.message}`);
@@ -1205,7 +1208,7 @@
         // Offline simulation
         this.hostingSessionId = `session_${Date.now()}`;
         updateConnectionStatus('connected');
-        console.log(`[SessionManager] Simulated hosting: ${name} (offline)`);
+        _log(`[SessionManager] Simulated hosting: ${name} (offline)`);
       }
     }
 
@@ -1221,7 +1224,7 @@
       if (this.client) {
         try {
           await this.client.joinSession(sessionId);
-          console.log(`[SessionManager] Joined session: ${sessionId}`);
+          _log(`[SessionManager] Joined session: ${sessionId}`);
         } catch (err) {
           updateConnectionStatus('disconnected');
           showHostError(`Failed to join: ${err.message}`);
@@ -1230,7 +1233,7 @@
         // Offline simulation
         this.currentSessionId = sessionId;
         updateConnectionStatus('connected');
-        console.log(`[SessionManager] Simulated joining: ${sessionId} (offline)`);
+        _log(`[SessionManager] Simulated joining: ${sessionId} (offline)`);
       }
     }
 
@@ -1280,7 +1283,7 @@
     // Hide in-game overlays by default
     hidePlayerList();
 
-    console.log('[SessionManager] Initialized (offline mode — MultiplayerClient loaded via script)');
+    _log('[SessionManager] Initialized (offline mode — MultiplayerClient loaded via script)');
   }
 
   // ============================================================
@@ -1288,7 +1291,7 @@
   // ============================================================
 
   function startGame(mode) {
-    console.log(`[Cuubz] Starting game in ${mode} mode...`);
+    _log(`[Cuubz] Starting game in ${mode} mode...`);
 
     const selected = characterManager ? characterManager.getSelectedCharacter() : null;
     if (!selected) {
@@ -1297,7 +1300,7 @@
       return;
     }
 
-    console.log(`[Cuubz] Playing as: ${selected.name} (${selected.color})`);
+    _log(`[Cuubz] Playing as: ${selected.name} (${selected.color})`);
 
     // Show loading screen
     showScreen('loadingScreen');
@@ -1326,7 +1329,7 @@
 
       if (progress >= 100) {
         clearInterval(interval);
-        console.log('[Cuubz] Game would start here. Engine modules not yet built.');
+        _log('[Cuubz] Game would start here. Engine modules not yet built.');
 
         setTimeout(() => {
           Object.values(screens).forEach(el => { if (el) el.classList.add('hidden'); });
@@ -1347,7 +1350,7 @@
 
     if (isTouchDevice || isNarrowScreen) {
       document.getElementById('touch-controls').classList.remove('hidden');
-      console.log('[Cuubz] Mobile/touch controls enabled');
+      _log('[Cuubz] Mobile/touch controls enabled');
     }
   }
 
@@ -1356,13 +1359,13 @@
   // ============================================================
 
   async function init() {
-    console.log('[Cuubz] Initializing...');
+    _log('[Cuubz] Initializing...');
 
     // Initialize PersistenceManager (IndexedDB)
     const persistence = new PersistenceManager();
     try {
       await persistence.init();
-      console.log('[Cuubz] IndexedDB initialized');
+      _log('[Cuubz] IndexedDB initialized');
     } catch (err) {
       console.error('[Cuubz] Failed to initialize IndexedDB:', err.message);
       // Fallback: use in-memory store if IndexedDB unavailable (e.g., testing)
@@ -1373,7 +1376,7 @@
     characterManager = new BrowserCharacterManager(persistence);
     try {
       await characterManager.init();
-      console.log(`[Cuubz] Loaded ${characterManager.getAllCharacters().length} characters`);
+      _log(`[Cuubz] Loaded ${characterManager.getAllCharacters().length} characters`);
     } catch (err) {
       console.error('[Cuubz] Failed to load characters:', err.message);
     }
@@ -1382,7 +1385,7 @@
     worldManager = new BrowserWorldManager(persistence);
     try {
       await worldManager.init();
-      console.log(`[Cuubz] Loaded ${worldManager.getAllWorlds().length} worlds`);
+      _log(`[Cuubz] Loaded ${worldManager.getAllWorlds().length} worlds`);
     } catch (err) {
       console.error('[Cuubz] Failed to load worlds:', err.message);
     }
@@ -1393,7 +1396,7 @@
     // Show main menu
     showScreen('mainMenu');
 
-    console.log('[Cuubz] Ready. Awaiting player input.');
+    _log('[Cuubz] Ready. Awaiting player input.');
   }
 
   // Start when DOM is ready

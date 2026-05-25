@@ -18,6 +18,9 @@
 
 'use strict';
 
+// Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
+const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+
 // Re-export from client.js for protocol consistency
 const { CLIENT_STATE, MESSAGE_TYPES } = require('./client');
 
@@ -473,7 +476,7 @@ class HostManager {
       this._client.onMatchmaking('HOST_CREATED', (data) => {
         this._sessionId = data.sessionId;
         this._setState(HOST_STATE.HOSTING);
-        console.log(`[HostManager] Session created: ${this._sessionId}`);
+        _log(`[HostManager] Session created: ${this._sessionId}`);
       });
 
       this._client.onMatchmaking('ERROR', (data) => {
@@ -598,7 +601,7 @@ class HostManager {
 
     this._players.set(playerId, playerState);
 
-    console.log(`[HostManager] Player joined: ${playerId} (${data.character?.name || 'Unknown'})`);
+    _log(`[HostManager] Player joined: ${playerId} (${data.character?.name || 'Unknown'})`);
 
     // Callback
     if (this.onPlayerJoined) {
@@ -625,7 +628,7 @@ class HostManager {
     player.connected = false;
     this._rateLimiter.clearPlayer(playerId);
 
-    console.log(`[HostManager] Player left: ${playerId}`);
+    _log(`[HostManager] Player left: ${playerId}`);
 
     // Callback
     if (this.onPlayerLeft) {

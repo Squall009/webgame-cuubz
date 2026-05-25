@@ -930,8 +930,8 @@ webgame-cuubz/
 ## Phase 4: Deployment & Final Polish
 
 ### Pre-Deployment
-- [ ] **Final code review** — All files
-  - [ ] Console.log cleanup (remove debug statements)
+- [x] **Final code review** — All files
+  - [x] Console.log cleanup (remove debug statements) — Created `js/util/logger.js` with CuubzLogger.DEBUG toggle. Replaced all client-side debug console.log calls in game.js, main.js, multiplayer/client.js, multiplayer/host.js with `_log()` no-op. Kept console.warn/error for production error handling. Server-side console.log preserved for operational logging. 15 tests added (test_logger.js).
   - [ ] Error handling on all WebSocket operations
   - [ ] Memory leak check (chunk disposal, event listener cleanup)
   - [ ] Mobile viewport testing across device sizes

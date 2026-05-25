@@ -10,6 +10,9 @@
  * - Toggle between Creative and Survival at runtime
  */
 
+// Debug logging — set CuubzLogger.DEBUG = true in console to enable
+const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+
 // ============================================================
 // Mode Constants
 // ============================================================
@@ -194,7 +197,7 @@ class Game {
     }
     this.running = true;
     this.lastTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    console.log(`[Game] Started in ${this.mode} mode`);
+    _log(`[Game] Started in ${this.mode} mode`);
   }
 
   /**
@@ -202,7 +205,7 @@ class Game {
    */
   stop() {
     this.running = false;
-    console.log('[Game] Stopped');
+    _log('[Game] Stopped');
   }
 
   /**
@@ -231,7 +234,7 @@ class Game {
       this.onModeChange(this.mode, oldMode);
     }
     
-    console.log(`[Game] Mode changed: ${oldMode} → ${this.mode}`);
+    _log(`[Game] Mode changed: ${oldMode} → ${this.mode}`);
   }
 
   /**

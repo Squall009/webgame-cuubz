@@ -13,6 +13,9 @@
 
 'use strict';
 
+// Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
+const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+
 // ─── Constants ──────────────────────────────────────────────────────
 
 const CLIENT_STATE = {
@@ -225,7 +228,7 @@ class WSConnection {
       this._socket = new this._wsFactory(this.url);
 
       this._socket.onopen = () => {
-        console.log(`[WSConnection] Connected to ${this.url}`);
+        _log(`[WSConnection] Connected to ${this.url}`);
         this._reconnectAttempts = 0; // Reset on successful connection
         this._setState(CLIENT_STATE.CONNECTED);
         this._startHeartbeat();
@@ -242,7 +245,7 @@ class WSConnection {
       };
 
       this._socket.onclose = (event) => {
-        console.log(`[WSConnection] Disconnected from ${this.url} (${event.code})`);
+        _log(`[WSConnection] Disconnected from ${this.url} (${event.code})`);
         this._stopHeartbeat();
         this._setState(CLIENT_STATE.DISCONNECTED);
         this._emit('disconnect', { code: event.code, reason: event.reason });
@@ -410,7 +413,7 @@ class WSConnection {
     const delay = this._calculateReconnectDelay();
     this._reconnectAttempts++;
 
-    console.log(`[WSConnection] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
+    _log(`[WSConnection] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
     this._setState(CLIENT_STATE.RECONNECTING);
 
     this._reconnectTimer = setTimeout(() => {
