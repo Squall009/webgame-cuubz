@@ -997,7 +997,7 @@ webgame-cuubz/
   - [x] Page loads without errors, all assets serve correctly (HTTP 200 for index.html, js/main.js, css/style.css, textures/*.png, js/game.js)
 - [x] **Test: Multiplayer through proxy** — Connect from remote device
   - [x] Session discovery works, WebSocket stable through proxy — ✅ NPM relay proxy host verified (relay.webgame-cuubz.thehomelabguy.com → 10.0.30.160:8765). Client-side auto-detection uses WSS for deployed domains. test_relayUrl.js: 23/23 passing.
-- [ ] Record all test results, note bugs, update checkboxes
+- [x] Record all test results, note bugs, update checkboxes — 62/62 tests passing (May 25, 2026). All phases complete. Only remaining item: manual mobile device testing (TBD).
 
 ---
 
