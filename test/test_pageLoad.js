@@ -80,8 +80,8 @@ const scripts = document.querySelectorAll('script[src]');
 assert(scripts.length >= 2, `At least 2 external scripts (found ${scripts.length})`);
 
 const scriptSrcs = Array.from(scripts).map(s => s.getAttribute('src'));
-assert(scriptSrcs.some(src => src.includes('three.js')), 'Three.js CDN script included');
-assert(scriptSrcs.includes('js/main.js'), 'Main JS entry point included');
+assert(scriptSrcs.some(src => src.includes('three.min.js')), 'Three.js local script included (js/three.min.js)');
+assert(scriptSrcs.some(src => src.includes('js/main.js')), 'Main JS entry point included');
 
 // ─── CSS References ───────────────────────────────────────────
 
@@ -91,7 +91,7 @@ const stylesheets = document.querySelectorAll('link[rel="stylesheet"]');
 assert(stylesheets.length >= 1, `At least 1 stylesheet (found ${stylesheets.length})`);
 
 const cssHrefs = Array.from(stylesheets).map(l => l.getAttribute('href'));
-assert(cssHrefs.includes('css/style.css'), 'style.css referenced');
+assert(cssHrefs.some(href => href.includes('css/style.css')), 'style.css referenced');
 
 // ─── Game Container ──────────────────────────────────────────
 
@@ -378,6 +378,7 @@ console.log('\nGroup 20: Required file existence');
 
 const requiredFiles = [
   'css/style.css',
+  'js/three.min.js',
   'js/main.js',
   'js/game.js',
   'js/world/noise.js',
@@ -439,8 +440,8 @@ for (const tex of textureFiles) {
 
 console.log('\nGroup 22: HTML structure validation');
 
-// Check no inline event handlers (should use addEventListener)
-const inlineHandlers = document.querySelectorAll('[onclick], [onload], [onerror]');
+// Check no inline event handlers on non-script elements (script onerror is OK for load failure detection)
+const inlineHandlers = document.querySelectorAll('script:not([onerror])[onclick], script:not([onerror])[onload], *:not(script)[onclick], *:not(script)[onload], *:not(script)[onerror]');
 assert(inlineHandlers.length === 0, `No inline event handlers found (found ${inlineHandlers.length})`);
 
 // Check all IDs are unique
@@ -449,17 +450,27 @@ const ids = Array.from(allElements).map(el => el.id);
 const uniqueIds = new Set(ids);
 assertEquals(ids.length, uniqueIds.size, `All element IDs are unique (${ids.length} elements, ${uniqueIds.size} unique)`);
 
-// ─── Three.js CDN Validation ──────────────────────────────────
+// ─── Three.js Local Reference Validation ──────────────────────
 
-console.log('\nGroup 23: Three.js CDN reference');
+console.log('\nGroup 23: Three.js local reference');
 
-const threeScript = Array.from(scripts).find(s => s.getAttribute('src').includes('three.js'));
+const threeScript = Array.from(scripts).find(s => s.getAttribute('src').includes('three.min.js'));
 assertExists(threeScript, 'Three.js script tag found');
 if (threeScript) {
   const src = threeScript.getAttribute('src');
-  assert(src.startsWith('https://'), 'Three.js loaded from HTTPS CDN');
-  assert(src.includes('three.min.js') || src.includes('/three.'), 'Three.js minified build referenced');
+  assertEquals(src, 'js/three.min.js', 'Three.js loaded from local file (not CDN)');
+  assert(threeScript.hasAttribute('onerror'), 'Three.js script has onerror handler for load failure detection');
 }
+
+// ─── No CDN Dependencies ──────────────────────────────────────
+
+console.log('\nGroup 24: No external CDN dependencies');
+
+const cdnScripts = Array.from(scripts).filter(s => {
+  const src = s.getAttribute('src') || '';
+  return src.startsWith('http://') || src.startsWith('https://');
+});
+assert(cdnScripts.length === 0, `No CDN scripts found (found ${cdnScripts.length})`);
 
 // ─── Summary ──────────────────────────────────────────────────
 
