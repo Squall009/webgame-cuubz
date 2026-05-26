@@ -27,6 +27,7 @@
   const modals = {
     createCharModal: document.getElementById('create-char-modal'),
     deleteCharModal: document.getElementById('delete-char-modal'),
+    createWorldModal: document.getElementById('create-world-modal'),
   };
 
   // Additional screen elements for session UI
@@ -333,14 +334,40 @@
   }
 
   function closeCharModal() {
-    console.error('[Cuubz] closeCharModal called, stack:', new Error().stack.split('\n').slice(1,4).join(' → '));
     if (modals.createCharModal) {
       modals.createCharModal.classList.add('hidden');
     }
     editingCharId = null;
-    // Restore color picker visibility
-    const colorLabel = document.getElementById('char-color').parentElement;
-    if (colorLabel) colorLabel.style.display = '';
+  }
+
+  // ============================================================
+  // World Modal Handlers
+  // ============================================================
+
+  function openCreateWorldModal() {
+    document.getElementById('world-name').value = '';
+    hideWorldError();
+    modals.createWorldModal.classList.remove('hidden');
+    // Force modal-content visible
+    const mc = modals.createWorldModal.querySelector('.modal-content');
+    if (mc) mc.style.display = 'block';
+    setTimeout(() => document.getElementById('world-name').focus(), 100);
+  }
+
+  function closeCreateWorldModal() {
+    if (modals.createWorldModal) {
+      modals.createWorldModal.classList.add('hidden');
+    }
+  }
+
+  function showWorldError(message) {
+    const errorEl = document.getElementById('world-error');
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+  }
+
+  function hideWorldError() {
+    document.getElementById('world-error').classList.add('hidden');
   }
 
   function openDeleteModal(char) {
@@ -546,10 +573,10 @@
   // ============================================================
 
  function renderWorldSlots() {
-    console.log('[Cuubz] renderWorldSlots called');
+    
     const container = document.getElementById('world-slots');
     if (!container) {
-      console.error('[Cuubz] renderWorldSlots: #world-slots not found!');
+      _log('[Cuubz] #world-slots not found');;
       return;
     }
 
@@ -656,7 +683,7 @@
 
   function initMenuNavigation() {
     try {
-      console.error('[Cuubz] === ENTERING initMenuNavigation ===');
+        _log('[Cuubz] initMenuNavigation');
       // Main menu buttons
       document.getElementById('btn-play-solo').addEventListener('click', () => {
         showScreen('characterScreen');
@@ -685,67 +712,26 @@
       openCreateModal();
     });
 
-     // Character modal — save (unified: handles both characters and worlds)
-    const saveBtn = document.getElementById('btn-save-char');
-    console.log('[Cuubz] Save button element:', saveBtn);
-    if (!saveBtn) {
-      console.error('[Cuubz] btn-save-char not found in DOM!');
-      return;
-    }
+     // Character modal — save (create or edit character)
+    document.getElementById('btn-save-char').addEventListener('click', async () => {
+      const name = document.getElementById('char-name').value.trim();
+      const color = document.getElementById('char-color').value;
 
-    saveBtn.addEventListener('click', async () => {
-      console.log('[Cuubz] *** SAVE BUTTON CLICKED ***');
-      try {
-        const title = document.getElementById('char-modal-title').textContent;
-        console.log('[Cuubz] Save button clicked, title:', title);
+      if (!name) { showCharError('Please enter a character name.'); return; }
 
-        if (title === 'Create New World') {
-          // Creating a world
-          const name = document.getElementById('char-name').value.trim();
-          console.log('[Cuubz] World creation attempt, name:', name);
-          if (!name) {
-            showCharError('Please enter a world name.');
-            return;
-          }
-          console.log('[Cuubz] Calling worldManager.createWorld...');
-          const result = await worldManager.createWorld(name);
-          console.log('[Cuubz] createWorld result:', result);
-          if (result.success) {
-            console.log('[Cuubz] Closing modal and rendering slots...');
-            closeCharModal();
-            renderWorldSlots();
-            _log(`[Cuubz] World created: ${result.world.name} (seed: ${BrowserWorldManager.formatSeed(result.world.seed)})`);
-          } else {
-            showCharError(result.error);
-          }
-        } else {
-          // Creating/editing a character
-          const name = document.getElementById('char-name').value.trim();
-          const color = document.getElementById('char-color').value;
+      let result;
+      if (editingCharId) {
+        result = await characterManager.updateCharacter(editingCharId, { name, color });
+      } else {
+        result = await characterManager.createCharacter(name, color);
+      }
 
-          if (!name) {
-            showCharError('Please enter a character name.');
-            return;
-          }
-
-          let result;
-          if (editingCharId) {
-            result = await characterManager.updateCharacter(editingCharId, { name, color });
-          } else {
-            result = await characterManager.createCharacter(name, color);
-          }
-
-          if (result.success) {
-            closeCharModal();
-            renderCharacterSlots();
-            _log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name} (${result.character.color})`);
-          } else {
-            showCharError(result.error);
-          }
-        }
-      } catch (err) {
-        console.error('[Cuubz] Error in save handler:', err);
-        showCharError('An error occurred: ' + err.message);
+      if (result.success) {
+        closeCharModal();
+        renderCharacterSlots();
+        _log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name}`);
+      } else {
+        showCharError(result.error);
       }
     });
 
@@ -804,81 +790,30 @@
       showScreen('characterScreen');
     });
 
-    // Create world button → open create modal (reuse char modal)
-    const createWorldBtn = document.getElementById('btn-create-world');
-    console.error('[Cuubz] btn-create-world element:', createWorldBtn);
-    if (createWorldBtn) {
-      createWorldBtn.addEventListener('click', () => {
-      console.error('[Cuubz] *** CREATE WORLD BUTTON CLICKED ***');
-      if (!worldManager) { console.error('[Cuubz] worldManager is null!'); return; }
-      if (!worldManager.canCreateMore()) { console.error('[Cuubz] Cannot create more worlds'); return; }
-      console.error('[Cuubz] Opening create world modal...');
-      editingCharId = null;
-      const titleEl = document.getElementById('char-modal-title');
-      if (titleEl) titleEl.textContent = 'Create New World'; else console.error('[Cuubz] #char-modal-title not found!');
-      const btnEl = document.getElementById('btn-save-char');
-      if (btnEl) btnEl.textContent = 'Create World'; else console.error('[Cuubz] #btn-save-char not found in handler!');
-      const nameInput = document.getElementById('char-name');
-      if (nameInput) nameInput.value = ''; else console.error('[Cuubz] #char-name not found!');
-      const colorLabel = document.getElementById('char-color').parentElement;
-      if (colorLabel) colorLabel.style.display = 'none';
-      hideCharError();
-      console.error('[Cuubz] createCharModal:', modals.createCharModal, 'classList before remove hidden:', Array.from(modals.createCharModal.classList));
-      
-      // Watch for what re-hides the modal immediately
-      const modalObserver = new MutationObserver((mutations) => {
-        mutations.forEach(m => {
-          if (m.attributeName === 'class') {
-            console.error('[Cuubz] MUTATION: class changed on modal to:', Array.from(modals.createCharModal.classList));
-          }
-        });
-      });
-      modalObserver.observe(modals.createCharModal, { attributes: true });
-      
-      modals.createCharModal.classList.remove('hidden');
-      
-      // Force visible - debug CSS issues
-      const contentEl = modals.createCharModal.querySelector('.modal-content');
-      if (contentEl) {
-        console.error('[Cuubz] modal-content computed styles:', 
-          'display:', getComputedStyle(contentEl).display,
-          'opacity:', getComputedStyle(contentEl).opacity,
-          'visibility:', getComputedStyle(contentEl).visibility,
-          'width:', getComputedStyle(contentEl).width,
-          'height:', getComputedStyle(contentEl).height);
-        contentEl.style.opacity = '1';
-        contentEl.style.visibility = 'visible';
-      }
-      console.error('[Cuubz] After removing hidden, classList:', Array.from(modals.createCharModal.classList), 'display:', getComputedStyle(modals.createCharModal).display);
-
-      // Watch for something re-hiding it using MutationObserver
-      const observer = new MutationObserver((mutations) => {
-        mutations.forEach(m => {
-          if (m.attributeName === 'class') {
-            console.error('[Cuubz] ⚠️ MODAL CLASS CHANGED to:', Array.from(modals.createCharModal.classList), 'display:', getComputedStyle(modals.createCharModal).display);
-          }
-        });
-      });
-      observer.observe(modals.createCharModal, { attributes: true });
-
-      // Also poll for 2 seconds to catch anything else
-      const checkInterval = setInterval(() => {
-        if (modals.createCharModal.classList.contains('hidden')) {
-          console.error('[Cuubz] ⚠️ MODAL WAS RE-HIDDEN by something!');
-          clearInterval(checkInterval);
-          observer.disconnect();
-        }
-      }, 100);
-      setTimeout(() => { clearInterval(checkInterval); observer.disconnect(); }, 3000);
-
-      setTimeout(() => {
-        document.getElementById('char-name').focus();
-        console.error('[Cuubz] Modal shown!');
-      }, 100);
+    // Create world button → open dedicated world modal
+    document.getElementById('btn-create-world').addEventListener('click', () => {
+      if (!worldManager || !worldManager.canCreateMore()) return;
+      openCreateWorldModal();
     });
-    } else {
-      console.error('[Cuubz] btn-create-world NOT FOUND in DOM!');
-    }
+
+    // World modal save handler
+    document.getElementById('btn-save-world').addEventListener('click', async () => {
+      const name = document.getElementById('world-name').value.trim();
+      if (!name) { showWorldError('Please enter a world name'); return; }
+      const result = await worldManager.createWorld(name);
+      if (result.success) {
+        closeCreateWorldModal();
+        renderWorldSlots();
+      } else {
+        showWorldError(result.error);
+      }
+    });
+
+    document.getElementById('btn-cancel-world').addEventListener('click', closeCreateWorldModal);
+    document.getElementById('world-name').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('btn-save-world').click();
+      if (e.key === 'Escape') closeCreateWorldModal();
+    });
 
     // Mode screen
     document.getElementById('btn-back-mode').addEventListener('click', () => {
@@ -956,7 +891,7 @@
     });
 
     initSessionUI();
-    console.error('[Cuubz] === initSessionUI done, ENDING initMenuNavigation ===');
+    _log('[Cuubz] initMenuNavigation complete');
   } catch (e) {
     console.error('[Cuubz] initMenuNavigation CRASHED:', e.message, '\n', e.stack);
   }
@@ -1447,38 +1382,128 @@
 
     // Show loading screen
     showScreen('loadingScreen');
-
-    const loadingProgress = document.getElementById('loading-progress');
     const loadingStatus = document.getElementById('loading-status');
+    const loadingProgress = document.getElementById('loading-progress');
 
-    let progress = 0;
-    const steps = [
-      { at: 10, msg: 'Initializing renderer...' },
-      { at: 30, msg: 'Generating terrain...' },
-      { at: 50, msg: 'Building chunk meshes...' },
-      { at: 70, msg: 'Placing features...' },
-      { at: 90, msg: 'Almost ready...' },
-    ];
+    // Get selected world
+    const currentWorld = worldManager ? worldManager.getSelectedWorld() : null;
+    if (!currentWorld) {
+      console.warn('[Cuubz] No world selected!');
+      showScreen('worldScreen');
+      return;
+    }
 
-    const interval = setInterval(() => {
-      progress += Math.random() * 15;
-      if (progress > 100) progress = 100;
+    loadingStatus.textContent = 'Initializing renderer...';
+    if (loadingProgress) loadingProgress.style.width = '10%';
 
-      for (const step of steps) {
-        if (progress >= step.at) loadingStatus.textContent = step.msg;
-      }
+    setTimeout(() => {
+      try {
+        // Hide all UI screens
+        Object.values(screens).forEach(el => { if (el) el.classList.add('hidden'); });
 
-      if (loadingProgress) loadingProgress.style.width = progress + '%';
+        const container = document.getElementById('game-container');
+        container.innerHTML = '';
 
-      if (progress >= 100) {
-        clearInterval(interval);
-        _log('[Cuubz] Game would start here. Engine modules not yet built.');
+        // Initialize VoxelRenderer
+        loadingStatus.textContent = 'Building 3D scene...';
+        if (loadingProgress) loadingProgress.style.width = '30%';
+
+        const renderer = new VoxelRenderer(container, window.innerWidth, window.innerHeight);
+        _log('[Cuubz] Renderer created');
+
+        // Initialize Player
+        loadingStatus.textContent = 'Creating player...';
+        if (loadingProgress) loadingProgress.style.width = '50%';
+
+        const player = new Player();
+        player.position.x = 0;
+        player.position.y = 30;
+        player.position.z = 0;
+
+        // Initialize World Generator
+        loadingStatus.textContent = 'Generating terrain...';
+        if (loadingProgress) loadingProgress.style.width = '60%';
+
+        const worldGen = new WorldGenerator(currentWorld.seed);
+
+        // Initialize Chunk Manager
+        loadingStatus.textContent = 'Loading chunks...';
+        if (loadingProgress) loadingProgress.style.width = '75%';
+
+        // Load initial chunks around spawn via update
+        const chunkManager = new ChunkManager(renderer, worldGen.generateChunk.bind(worldGen));
+        chunkManager.update(0, 0, performance.now());
+
+        // Initialize Game Engine
+        loadingStatus.textContent = 'Starting game loop...';
+        if (loadingProgress) loadingProgress.style.width = '90%';
+
+        const game = new CuubzGame();
+        game.mode = mode || 'survival';
+        game.player = player;
+        game.renderer = renderer;
+        game.chunkManager = chunkManager;
+        game.worldGen = worldGen;
+
+         // Set up camera to follow player — looking slightly downward to see terrain
+        const initCamPos = new THREE.Vector3(player.position.x, player.position.y, player.position.z);
+        renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
+
+        // Start game loop
+        loadingStatus.textContent = 'Almost ready...';
+        if (loadingProgress) loadingProgress.style.width = '100%';
 
         setTimeout(() => {
-          Object.values(screens).forEach(el => { if (el) el.classList.add('hidden'); });
-          const container = document.getElementById('game-container');
-          container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#4CAF50;font-size:24px;text-align:center;padding:20px;">Cuubz Engine<br><span style="font-size:14px;color:#888;">Engine modules building...</span></div>';
+          game.start(mode);
+
+          // Main render loop
+          function renderLoop() {
+            if (!game.running) return;
+
+            const now = performance.now();
+            game.delta = Math.min((now - game.lastTime) / 1000, 0.1);
+            game.lastTime = now;
+
+            // Update player position from input
+            const moveSpeed = 8 * game.delta;
+            if (window._input && window._input.keys) {
+              const keys = window._input.keys;
+              if (keys['KeyW'] || keys['ArrowUp']) player.position.z -= moveSpeed;
+              if (keys['KeyS'] || keys['ArrowDown']) player.position.z += moveSpeed;
+              if (keys['KeyA'] || keys['ArrowLeft']) player.position.x -= moveSpeed;
+              if (keys['KeyD'] || keys['ArrowRight']) player.position.x += moveSpeed;
+            }
+
+            // Keep player from falling below spawn height
+               if (player.position.y < 20) {
+                 player.position.y = 20;
+               }
+
+               // Update camera to follow player (convert plain object to Vector3)
+               const camPos = new THREE.Vector3(player.position.x, player.position.y, player.position.z);
+               renderer.updateCamera(camPos, 0, -Math.PI / 8);
+
+            // Render scene
+            renderer.render();
+
+            // Update chunk manager for player position
+            if (game.chunkManager) {
+              game.chunkManager.update(player.position.x, player.position.z, performance.now());
+            }
+
+            requestAnimationFrame(renderLoop);
+          }
+
+          game.lastTime = performance.now();
+          requestAnimationFrame(renderLoop);
+
+          _log('[Cuubz] Game started successfully in ' + mode + ' mode');
         }, 500);
+
+      } catch (err) {
+        console.error('[Cuubz] Game init failed:', err);
+        loadingStatus.textContent = 'Error: ' + err.message;
+        _log('[Cuubz] Game init error:', err.stack);
       }
     }, 200);
   }
@@ -1502,7 +1527,7 @@
   // ============================================================
 
   async function init() {
-    console.error('[Cuubz] === INIT STARTING ===');
+    _log('[Cuubz] INIT STARTING');
     try {
       _log('[Cuubz] Initializing...');
 
@@ -1521,7 +1546,7 @@
       await worldManager.init();
       _log(`[Cuubz] Loaded ${worldManager.getAllWorlds().length} worlds`);
 
-      console.error('[Cuubz] === Calling initMenuNavigation ===');
+      _log('[Cuubz] Calling initMenuNavigation');
       try {
         initMenuNavigation();
       } catch (e) {

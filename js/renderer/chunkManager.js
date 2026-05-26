@@ -24,9 +24,9 @@ class ChunkManager {
     this.buildQueue = [];
     this.building = false;
 
-    // Last player position (for dirty checking)
-    this.lastPlayerX = 0;
-    this.lastPlayerZ = 0;
+    // Force initial chunk load on startup (start far away so first update triggers)
+    this.lastPlayerX = -32;
+    this.lastPlayerZ = -32;
 
     // Performance optimizer integration
     this.performanceOptimizer = options.performanceOptimizer || null;
@@ -150,13 +150,36 @@ class ChunkManager {
     if (this.generatorFn) {
       const chunkData = this.generatorFn(cx, cz);
 
-      // TODO: Use ChunkMeshBuilder to build geometry
-      // const meshBuilder = new ChunkMeshBuilder();
-      // const meshData = meshBuilder.buildMeshData(chunkData);
-      // const geometry = meshBuilder.buildThreeGeometry(meshData);
+      // Build geometry using ChunkMeshBuilder
+      try {
+        const meshBuilder = new ChunkMeshBuilder();
+        const meshData = meshBuilder.buildMeshData(chunkData);
 
-      // For now, just track that the chunk is loaded
-      this.loadedChunks.set(key, { data: chunkData, built: true });
+        if (meshData.indices.length > 0) {
+          const geometry = meshBuilder.buildThreeGeometry(meshData);
+
+          // Create material — simple flat shading (no vertex colors yet)
+          const material = new THREE.MeshLambertMaterial({
+            color: 0x8B7355, // Earthy brown default
+            fog: true
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.set(cx * 16, 0, cz * 16);
+
+          // Add to renderer's chunk group
+          if (this.renderer.chunkGroup) {
+            this.renderer.chunkGroup.add(mesh);
+          }
+
+          _log(`[ChunkManager] Built chunk ${key}: ${meshData.indices.length / 6} faces`);
+        }
+
+        this.loadedChunks.set(key, { data: chunkData, built: true });
+      } catch (err) {
+        console.error(`[ChunkManager] Failed to build chunk ${key}:`, err);
+        this.loadedChunks.set(key, { data: chunkData, built: false });
+      }
     }
   }
 

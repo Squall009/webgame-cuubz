@@ -434,6 +434,7 @@ html, body {
 }
 
 .modal-content {
+  display: block;
   background: #1e1e2e;
   border-radius: 12px;
   padding: 24px;
