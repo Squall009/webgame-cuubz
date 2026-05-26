@@ -1138,13 +1138,16 @@ class BossManager {
 
 // ─── Module Exports ──────────────────────────────────────────────────
 
-module.exports = {
-  BOSS_STATES,
-  BOSS_DEFINITIONS,
-  Boss,
-  BossManager,
-  getBossDefinition,
-  getAllBossIds,
-  distanceBetween,
-  squaredDistance,
-};
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    BOSS_STATES,
+    BOSS_DEFINITIONS,
+    Boss,
+    BossManager,
+    getBossDefinition,
+    getAllBossIds,
+    distanceBetween,
+    squaredDistance,
+  };
+
+}

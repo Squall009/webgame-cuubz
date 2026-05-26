@@ -3,7 +3,7 @@
  * Global coordinate → chunk coordinate conversion, loading/unloading.
  */
 
-const { CHUNK_WIDTH, CHUNK_DEPTH } = require('./chunkData');
+// Use globals from chunkData.js: CHUNK_WIDTH, CHUNK_DEPTH
 
 class ChunkGrid {
   constructor() {
@@ -183,4 +183,7 @@ class ChunkGrid {
   }
 }
 
-module.exports = ChunkGrid;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = ChunkGrid;
+
+}

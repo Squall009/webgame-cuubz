@@ -244,4 +244,7 @@ class Chunk {
   }
 }
 
-module.exports = { Chunk, BLOCK_TYPES, BLOCK_PROPERTIES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, SEA_LEVEL, MIN_Y, MAX_Y };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { Chunk, BLOCK_TYPES, BLOCK_PROPERTIES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, SEA_LEVEL, MIN_Y, MAX_Y };
+
+}

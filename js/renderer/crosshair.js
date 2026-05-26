@@ -104,4 +104,7 @@ class Crosshair {
   }
 }
 
-module.exports = Crosshair;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = Crosshair;
+
+}

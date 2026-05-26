@@ -16,13 +16,17 @@
   const screens = {
     mainMenu: document.getElementById('main-menu'),
     characterScreen: document.getElementById('character-screen'),
-    createCharModal: document.getElementById('create-char-modal'),
-    deleteCharModal: document.getElementById('delete-char-modal'),
     worldScreen: document.getElementById('world-screen'),
     modeScreen: document.getElementById('mode-screen'),
     settingsScreen: document.getElementById('settings-screen'),
     lobbyScreen: document.getElementById('lobby-screen'),
     loadingScreen: document.getElementById('loading-screen'),
+  };
+
+  // Modal elements (NOT in screens — they must NOT be hidden by showScreen)
+  const modals = {
+    createCharModal: document.getElementById('create-char-modal'),
+    deleteCharModal: document.getElementById('delete-char-modal'),
   };
 
   // Additional screen elements for session UI
@@ -309,7 +313,7 @@
     document.getElementById('char-name').value = '';
     document.getElementById('char-color').value = DEFAULT_COLOR;
     hideCharError();
-    screens.createCharModal.classList.remove('hidden');
+    modals.createCharModal.classList.remove('hidden');
     setTimeout(() => document.getElementById('char-name').focus(), 100);
   }
 
@@ -320,7 +324,7 @@
     document.getElementById('char-name').value = char.name;
     document.getElementById('char-color').value = char.color;
     hideCharError();
-    screens.createCharModal.classList.remove('hidden');
+    modals.createCharModal.classList.remove('hidden');
     setTimeout(() => {
       const nameInput = document.getElementById('char-name');
       nameInput.focus();
@@ -329,7 +333,10 @@
   }
 
   function closeCharModal() {
-    screens.createCharModal.classList.add('hidden');
+    console.error('[Cuubz] closeCharModal called, stack:', new Error().stack.split('\n').slice(1,4).join(' → '));
+    if (modals.createCharModal) {
+      modals.createCharModal.classList.add('hidden');
+    }
     editingCharId = null;
     // Restore color picker visibility
     const colorLabel = document.getElementById('char-color').parentElement;
@@ -338,13 +345,13 @@
 
   function openDeleteModal(char) {
     document.getElementById('delete-char-name').textContent = `"${char.name}"`;
-    screens.deleteCharModal.dataset.charId = char.id;
-    screens.deleteCharModal.classList.remove('hidden');
+    modals.deleteCharModal.dataset.charId = char.id;
+    modals.deleteCharModal.classList.remove('hidden');
   }
 
   function closeDeleteModal() {
-    screens.deleteCharModal.classList.add('hidden');
-    delete screens.deleteCharModal.dataset.charId;
+    modals.deleteCharModal.classList.add('hidden');
+    delete modals.deleteCharModal.dataset.charId;
   }
 
   // ============================================================
@@ -353,13 +360,13 @@
 
   function openDeleteWorldModal(world) {
     document.getElementById('delete-char-name').textContent = `"${world.name}"`;
-    screens.deleteCharModal.dataset.worldId = world.id;
-    screens.deleteCharModal.classList.remove('hidden');
+    modals.deleteCharModal.dataset.worldId = world.id;
+    modals.deleteCharModal.classList.remove('hidden');
   }
 
   function closeDeleteWorldModal() {
-    screens.deleteCharModal.classList.add('hidden');
-    delete screens.deleteCharModal.dataset.worldId;
+    modals.deleteCharModal.classList.add('hidden');
+    delete modals.deleteCharModal.dataset.worldId;
   }
 
   function showCharError(message) {
@@ -538,18 +545,31 @@
   // World UI Rendering
   // ============================================================
 
-  function renderWorldSlots() {
+ function renderWorldSlots() {
+    console.log('[Cuubz] renderWorldSlots called');
     const container = document.getElementById('world-slots');
-    if (!container) return;
+    if (!container) {
+      console.error('[Cuubz] renderWorldSlots: #world-slots not found!');
+      return;
+    }
 
     container.innerHTML = '';
 
-    const worlds = worldManager ? worldManager.getAllWorlds() : [];
-    
+    let worlds = [];
+    try {
+      worlds = worldManager ? worldManager.getAllWorlds() : [];
+    } catch (err) {
+      console.error('[Cuubz] Error loading worlds for display:', err);
+    }
+
     // Render existing worlds
     worlds.forEach(world => {
-      const slot = createWorldSlotElement(world);
-      container.appendChild(slot);
+      try {
+        const slot = createWorldSlotElement(world);
+        container.appendChild(slot);
+      } catch (err) {
+        console.error('[Cuubz] Error rendering world slot:', err, world);
+      }
     });
 
     // Render empty slots
@@ -635,13 +655,15 @@
   // ============================================================
 
   function initMenuNavigation() {
-    // Main menu buttons
-    document.getElementById('btn-play-solo').addEventListener('click', () => {
-      showScreen('characterScreen');
-      renderCharacterSlots();
-    });
+    try {
+      console.error('[Cuubz] === ENTERING initMenuNavigation ===');
+      // Main menu buttons
+      document.getElementById('btn-play-solo').addEventListener('click', () => {
+        showScreen('characterScreen');
+        renderCharacterSlots();
+      });
 
-    document.getElementById('btn-host').addEventListener('click', () => {
+      document.getElementById('btn-host').addEventListener('click', () => {
       showScreen('lobbyScreen');
     });
 
@@ -663,49 +685,67 @@
       openCreateModal();
     });
 
-    // Character modal — save (unified: handles both characters and worlds)
-    document.getElementById('btn-save-char').addEventListener('click', async () => {
-      const title = document.getElementById('char-modal-title').textContent;
+     // Character modal — save (unified: handles both characters and worlds)
+    const saveBtn = document.getElementById('btn-save-char');
+    console.log('[Cuubz] Save button element:', saveBtn);
+    if (!saveBtn) {
+      console.error('[Cuubz] btn-save-char not found in DOM!');
+      return;
+    }
 
-      if (title === 'Create New World') {
-        // Creating a world
-        const name = document.getElementById('char-name').value.trim();
-        if (!name) {
-          showCharError('Please enter a world name.');
-          return;
-        }
-        const result = await worldManager.createWorld(name);
-        if (result.success) {
-          closeCharModal();
-          renderWorldSlots();
-          _log(`[Cuubz] World created: ${result.world.name} (seed: ${BrowserWorldManager.formatSeed(result.world.seed)})`);
+    saveBtn.addEventListener('click', async () => {
+      console.log('[Cuubz] *** SAVE BUTTON CLICKED ***');
+      try {
+        const title = document.getElementById('char-modal-title').textContent;
+        console.log('[Cuubz] Save button clicked, title:', title);
+
+        if (title === 'Create New World') {
+          // Creating a world
+          const name = document.getElementById('char-name').value.trim();
+          console.log('[Cuubz] World creation attempt, name:', name);
+          if (!name) {
+            showCharError('Please enter a world name.');
+            return;
+          }
+          console.log('[Cuubz] Calling worldManager.createWorld...');
+          const result = await worldManager.createWorld(name);
+          console.log('[Cuubz] createWorld result:', result);
+          if (result.success) {
+            console.log('[Cuubz] Closing modal and rendering slots...');
+            closeCharModal();
+            renderWorldSlots();
+            _log(`[Cuubz] World created: ${result.world.name} (seed: ${BrowserWorldManager.formatSeed(result.world.seed)})`);
+          } else {
+            showCharError(result.error);
+          }
         } else {
-          showCharError(result.error);
-        }
-      } else {
-        // Creating/editing a character
-        const name = document.getElementById('char-name').value.trim();
-        const color = document.getElementById('char-color').value;
+          // Creating/editing a character
+          const name = document.getElementById('char-name').value.trim();
+          const color = document.getElementById('char-color').value;
 
-        if (!name) {
-          showCharError('Please enter a character name.');
-          return;
-        }
+          if (!name) {
+            showCharError('Please enter a character name.');
+            return;
+          }
 
-        let result;
-        if (editingCharId) {
-          result = await characterManager.updateCharacter(editingCharId, { name, color });
-        } else {
-          result = await characterManager.createCharacter(name, color);
-        }
+          let result;
+          if (editingCharId) {
+            result = await characterManager.updateCharacter(editingCharId, { name, color });
+          } else {
+            result = await characterManager.createCharacter(name, color);
+          }
 
-        if (result.success) {
-          closeCharModal();
-          renderCharacterSlots();
-          _log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name} (${result.character.color})`);
-        } else {
-          showCharError(result.error);
+          if (result.success) {
+            closeCharModal();
+            renderCharacterSlots();
+            _log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name} (${result.character.color})`);
+          } else {
+            showCharError(result.error);
+          }
         }
+      } catch (err) {
+        console.error('[Cuubz] Error in save handler:', err);
+        showCharError('An error occurred: ' + err.message);
       }
     });
 
@@ -725,8 +765,8 @@
 
     // Delete modal — handles both character and world deletion
     document.getElementById('btn-confirm-delete-char').addEventListener('click', async () => {
-      const charId = screens.deleteCharModal.dataset.charId;
-      const worldId = screens.deleteCharModal.dataset.worldId;
+      const charId = modals.deleteCharModal.dataset.charId;
+      const worldId = modals.deleteCharModal.dataset.worldId;
 
       if (worldId) {
         // Deleting a world
@@ -752,7 +792,7 @@
     });
 
     document.getElementById('btn-cancel-delete-char').addEventListener('click', () => {
-      if (screens.deleteCharModal.dataset.worldId) {
+      if (modals.deleteCharModal.dataset.worldId) {
         closeDeleteWorldModal();
       } else {
         closeDeleteModal();
@@ -765,18 +805,80 @@
     });
 
     // Create world button → open create modal (reuse char modal)
-    document.getElementById('btn-create-world').addEventListener('click', () => {
-      if (worldManager && !worldManager.canCreateMore()) return;
+    const createWorldBtn = document.getElementById('btn-create-world');
+    console.error('[Cuubz] btn-create-world element:', createWorldBtn);
+    if (createWorldBtn) {
+      createWorldBtn.addEventListener('click', () => {
+      console.error('[Cuubz] *** CREATE WORLD BUTTON CLICKED ***');
+      if (!worldManager) { console.error('[Cuubz] worldManager is null!'); return; }
+      if (!worldManager.canCreateMore()) { console.error('[Cuubz] Cannot create more worlds'); return; }
+      console.error('[Cuubz] Opening create world modal...');
       editingCharId = null;
-      document.getElementById('char-modal-title').textContent = 'Create New World';
-      document.getElementById('btn-save-char').textContent = 'Create World';
-      document.getElementById('char-name').value = '';
+      const titleEl = document.getElementById('char-modal-title');
+      if (titleEl) titleEl.textContent = 'Create New World'; else console.error('[Cuubz] #char-modal-title not found!');
+      const btnEl = document.getElementById('btn-save-char');
+      if (btnEl) btnEl.textContent = 'Create World'; else console.error('[Cuubz] #btn-save-char not found in handler!');
+      const nameInput = document.getElementById('char-name');
+      if (nameInput) nameInput.value = ''; else console.error('[Cuubz] #char-name not found!');
       const colorLabel = document.getElementById('char-color').parentElement;
-      if (colorLabel) colorLabel.style.display = 'none'; // Hide color picker for worlds
+      if (colorLabel) colorLabel.style.display = 'none';
       hideCharError();
-      screens.createCharModal.classList.remove('hidden');
-      setTimeout(() => document.getElementById('char-name').focus(), 100);
+      console.error('[Cuubz] createCharModal:', modals.createCharModal, 'classList before remove hidden:', Array.from(modals.createCharModal.classList));
+      
+      // Watch for what re-hides the modal immediately
+      const modalObserver = new MutationObserver((mutations) => {
+        mutations.forEach(m => {
+          if (m.attributeName === 'class') {
+            console.error('[Cuubz] MUTATION: class changed on modal to:', Array.from(modals.createCharModal.classList));
+          }
+        });
+      });
+      modalObserver.observe(modals.createCharModal, { attributes: true });
+      
+      modals.createCharModal.classList.remove('hidden');
+      
+      // Force visible - debug CSS issues
+      const contentEl = modals.createCharModal.querySelector('.modal-content');
+      if (contentEl) {
+        console.error('[Cuubz] modal-content computed styles:', 
+          'display:', getComputedStyle(contentEl).display,
+          'opacity:', getComputedStyle(contentEl).opacity,
+          'visibility:', getComputedStyle(contentEl).visibility,
+          'width:', getComputedStyle(contentEl).width,
+          'height:', getComputedStyle(contentEl).height);
+        contentEl.style.opacity = '1';
+        contentEl.style.visibility = 'visible';
+      }
+      console.error('[Cuubz] After removing hidden, classList:', Array.from(modals.createCharModal.classList), 'display:', getComputedStyle(modals.createCharModal).display);
+
+      // Watch for something re-hiding it using MutationObserver
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach(m => {
+          if (m.attributeName === 'class') {
+            console.error('[Cuubz] ⚠️ MODAL CLASS CHANGED to:', Array.from(modals.createCharModal.classList), 'display:', getComputedStyle(modals.createCharModal).display);
+          }
+        });
+      });
+      observer.observe(modals.createCharModal, { attributes: true });
+
+      // Also poll for 2 seconds to catch anything else
+      const checkInterval = setInterval(() => {
+        if (modals.createCharModal.classList.contains('hidden')) {
+          console.error('[Cuubz] ⚠️ MODAL WAS RE-HIDDEN by something!');
+          clearInterval(checkInterval);
+          observer.disconnect();
+        }
+      }, 100);
+      setTimeout(() => { clearInterval(checkInterval); observer.disconnect(); }, 3000);
+
+      setTimeout(() => {
+        document.getElementById('char-name').focus();
+        console.error('[Cuubz] Modal shown!');
+      }, 100);
     });
+    } else {
+      console.error('[Cuubz] btn-create-world NOT FOUND in DOM!');
+    }
 
     // Mode screen
     document.getElementById('btn-back-mode').addEventListener('click', () => {
@@ -854,7 +956,11 @@
     });
 
     initSessionUI();
+    console.error('[Cuubz] === initSessionUI done, ENDING initMenuNavigation ===');
+  } catch (e) {
+    console.error('[Cuubz] initMenuNavigation CRASHED:', e.message, '\n', e.stack);
   }
+}
 
   // ============================================================
   // Session UI Management
@@ -1069,11 +1175,14 @@
      * @param {string} serverUrl — WebSocket URL for matchmaking (e.g., ws://localhost:8765)
      */
     init(serverUrl) {
-      // In browser, MultiplayerClient will be loaded via script tag.
-      // For now, we use a simplified approach that works with or without the client module.
       this._serverUrl = serverUrl || 'ws://localhost:8765';
 
       if (typeof MultiplayerClient !== 'undefined') {
+        const urlObj = new URL(this._serverUrl);
+        // TEMPORARY DISABLE: WebSocket proxy not configured yet. Re-enable after NPM /ws location is set up.
+        console.log('[Cuubz] Multiplayer disabled — WebSocket proxy at', this._serverUrl, 'not configured yet.');
+        return;
+
         this.client = new MultiplayerClient({ url: this._serverUrl });
         this._wireClientEvents();
       } else {
@@ -1287,22 +1396,12 @@
       if (relayOverride) return relayOverride;
     }
 
-    // Use provided origin or detect from current page
+    // Route WebSocket through the same domain via /ws path — reuses existing SSL cert.
+    // Nginx reverse proxy forwards /ws to the relay server on port 8765.
     const origin = pageOrigin || (typeof location !== 'undefined' ? location.origin : '');
-    const hostname = pageOrigin
-      ? new URL(pageOrigin).hostname
-      : (typeof location !== 'undefined' ? location.hostname : '');
-
-    // If served from thehomelabguy.com domain, use WSS through NPM relay proxy
-    if (hostname && hostname.endsWith('.thehomelabguy.com')) {
-      // Extract game subdomain: webgame-cuubz.thehomelabguy.com → relay.webgame-cuubz.thehomelabguy.com
-      const domain = hostname;
-      const parts = domain.split('.');
-      if (parts.length >= 3) {
-        const subdomain = parts[0];
-        const baseDomain = parts.slice(1).join('.');
-        return `wss://relay.${subdomain}.${baseDomain}`;
-      }
+    if (origin) {
+      const base = origin.replace('https://', 'wss://').replace('http://', 'ws://');
+      return `${base}/ws`;
     }
 
     // Default: localhost for local development / direct server access
@@ -1403,44 +1502,43 @@
   // ============================================================
 
   async function init() {
-    _log('[Cuubz] Initializing...');
-
-    // Initialize PersistenceManager (IndexedDB)
-    const persistence = new PersistenceManager();
+    console.error('[Cuubz] === INIT STARTING ===');
     try {
+      _log('[Cuubz] Initializing...');
+
+      // Initialize PersistenceManager (IndexedDB)
+      const persistence = new PersistenceManager();
       await persistence.init();
       _log('[Cuubz] IndexedDB initialized');
-    } catch (err) {
-      console.error('[Cuubz] Failed to initialize IndexedDB:', err.message);
-      // Fallback: use in-memory store if IndexedDB unavailable (e.g., testing)
-      console.warn('[Cuubz] Falling back to in-memory character storage');
-    }
 
-    // Initialize CharacterManager
-    characterManager = new BrowserCharacterManager(persistence);
-    try {
+      // Initialize CharacterManager
+      characterManager = new BrowserCharacterManager(persistence);
       await characterManager.init();
       _log(`[Cuubz] Loaded ${characterManager.getAllCharacters().length} characters`);
-    } catch (err) {
-      console.error('[Cuubz] Failed to load characters:', err.message);
-    }
 
-    // Initialize WorldManager
-    worldManager = new BrowserWorldManager(persistence);
-    try {
+      // Initialize WorldManager
+      worldManager = new BrowserWorldManager(persistence);
       await worldManager.init();
       _log(`[Cuubz] Loaded ${worldManager.getAllWorlds().length} worlds`);
+
+      console.error('[Cuubz] === Calling initMenuNavigation ===');
+      try {
+        initMenuNavigation();
+      } catch (e) {
+        console.error('[Cuubz] initMenuNavigation ERROR:', e);
+      }
+
+      try {
+        detectMobile();
+      } catch (e) {
+        console.error('[Cuubz] detectMobile ERROR:', e);
+      }
+
+      showScreen('mainMenu');
+      console.error('[Cuubz] === INIT COMPLETE ===');
     } catch (err) {
-      console.error('[Cuubz] Failed to load worlds:', err.message);
+      console.error('[Cuubz] FATAL init error:', err.message, err.stack);
     }
-
-    initMenuNavigation();
-    detectMobile();
-
-    // Show main menu
-    showScreen('mainMenu');
-
-    _log('[Cuubz] Ready. Awaiting player input.');
   }
 
   // Start when DOM is ready

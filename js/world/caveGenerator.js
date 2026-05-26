@@ -4,8 +4,8 @@
  * Includes: stalactites, stalagmites, torch placement for cave lighting.
  */
 
-const NoiseGenerator = require('./noise');
-const { BLOCK_TYPES, CHUNK_WIDTH, CHUNK_DEPTH, MIN_Y, MAX_Y } = require('./chunkData');
+// Use global NoiseGenerator (defined by noise.js)
+// Use globals from chunkData.js: BLOCK_TYPES, CHUNK_WIDTH, CHUNK_DEPTH, MIN_Y, MAX_Y
 
 class CaveGenerator {
   constructor(seed) {
@@ -442,4 +442,7 @@ class CaveGenerator {
   }
 }
 
-module.exports = CaveGenerator;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = CaveGenerator;
+
+}

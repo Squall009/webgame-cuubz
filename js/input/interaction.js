@@ -140,4 +140,7 @@ class BlockInteraction {
   }
 }
 
-module.exports = BlockInteraction;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = BlockInteraction;
+
+}

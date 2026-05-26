@@ -718,4 +718,7 @@ const _INLINE_BLOCK_PROPERTIES = {
   26: { solid: false, transparent: true, hardness: -1, damage: 0, drop: null }, // BOSS_SPAWN invisible
 };
 
-module.exports = { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS };
+
+}

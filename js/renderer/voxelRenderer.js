@@ -149,4 +149,7 @@ class VoxelRenderer {
   }
 }
 
-module.exports = VoxelRenderer;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = VoxelRenderer;
+
+}

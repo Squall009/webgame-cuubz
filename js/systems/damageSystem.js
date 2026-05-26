@@ -6,18 +6,7 @@
  */
 
 // Damage source constants (mirrored from survival.js)
-const DAMAGE_SOURCES = {
-  NONE: 'none',
-  LAVA: 'lava',
-  POISON: 'poison',
-  FALL: 'fall',
-  BOSS: 'boss',
-  HUNGER: 'hunger',
-  THIRST: 'thirst',
-};
-
-// Environmental damage rates (damage per second while in contact)
-// Keys match DAMAGE_SOURCES values (lowercase strings)
+// DAMAGE_SOURCES defined in survival.js — use global
 const ENVIRONMENTAL_DAMAGE_RATES = {
   [DAMAGE_SOURCES.LAVA]:    20.0,   // Rapid — kills in ~5 seconds
   [DAMAGE_SOURCES.POISON]:   5.0,   // Slower DoT — kills in ~20 seconds
@@ -625,19 +614,22 @@ class DamageSystem {
 }
 
 // Export all public interfaces
-module.exports = {
-  DamageSystem,
-  DamageFlashEffect,
-  DAMAGE_SOURCES,
-  ENVIRONMENTAL_DAMAGE_RATES,
-  POISON_CONFIG,
-  FALL_DAMAGE_CONFIG,
-  BOSS_ATTACKS,
-  getBlockDamageSource,
-  isDamagingBlock,
-  calculateFallDamage,
-  getEnvironmentalDamageRate,
-  getBossDefinition,
-  calculateBossAttackDamage,
-  getBossKeys,
-};
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    DamageSystem,
+    DamageFlashEffect,
+    DAMAGE_SOURCES,
+    ENVIRONMENTAL_DAMAGE_RATES,
+    POISON_CONFIG,
+    FALL_DAMAGE_CONFIG,
+    BOSS_ATTACKS,
+    getBlockDamageSource,
+    isDamagingBlock,
+    calculateFallDamage,
+    getEnvironmentalDamageRate,
+    getBossDefinition,
+    calculateBossAttackDamage,
+    getBossKeys,
+  };
+
+}

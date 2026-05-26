@@ -102,4 +102,7 @@ class SpawnManager {
   }
 }
 
-module.exports = SpawnManager;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = SpawnManager;
+
+}

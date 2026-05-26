@@ -1102,4 +1102,7 @@ class SurvivalSystem {
   }
 }
 
-module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, STAMINA_REGEN, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, STAMINA_REGEN, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS };
+
+}

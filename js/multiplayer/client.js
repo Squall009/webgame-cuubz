@@ -14,7 +14,8 @@
 'use strict';
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
-const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+var _log;
+if (typeof CuubzLogger !== 'undefined') { _log = CuubzLogger.log; } else { _log = function() {}; }
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -591,8 +592,20 @@ class MultiplayerClient {
    * @param {function|null} [config.wsFactory=null] — WebSocket constructor (auto-detected if null)
    */
   constructor(config) {
-    this.host = config.host;
-    this.matchmakingPort = config.matchmakingPort || 8765;
+    // Support full URL (e.g., wss://example.com/ws) or host + port combo.
+    this._explicitProtocol = null; // Override _getProtocol() when set
+    if (config.url) {
+      const urlObj = new URL(config.url);
+      this.host = urlObj.hostname;
+      this._wsPath = urlObj.pathname || '/';
+      const protocol = config.url.startsWith('wss') ? 'wss' : 'ws';
+      this._explicitProtocol = protocol; // Preserve explicit protocol from URL
+      this.matchmakingPort = protocol === 'wss' ? null : parseInt(urlObj.port || '8765', 10);
+    } else {
+      this.host = config.host;
+      this._wsPath = '/';
+      this.matchmakingPort = config.matchmakingPort !== undefined ? config.matchmakingPort : null;
+    }
     this._wsFactory = config.wsFactory || null;
 
     // Auto-detect WebSocket factory
@@ -674,6 +687,36 @@ class MultiplayerClient {
     );
   }
 
+  // ── Generic Event Registration (routes to matchmaking or game) ───────────────────
+
+  /**
+   * Generic event registration — auto-routes to matchmaking or game handlers.
+   * Used by SessionManager for simple event wiring.
+   */
+  on(eventType, callback) {
+    const matchmakingEvents = [
+      'SESSION_LIST', 'HOST_CREATED', 'JOIN_ACCEPTED', 'JOIN_REJECTED',
+      'LEFT_LOBBY', 'ERROR', 'disconnect', 'stateChange', 'WELCOME',
+    ];
+    if (matchmakingEvents.includes(eventType)) {
+      this.onMatchmaking(eventType, callback);
+    } else {
+      this.onGame(eventType, callback);
+    }
+  }
+
+  off(eventType, callback) {
+    const matchmakingEvents = [
+      'SESSION_LIST', 'HOST_CREATED', 'JOIN_ACCEPTED', 'JOIN_REJECTED',
+      'LEFT_LOBBY', 'ERROR', 'disconnect', 'stateChange', 'WELCOME',
+    ];
+    if (matchmakingEvents.includes(eventType)) {
+      this.offMatchmaking(eventType, callback);
+    } else {
+      this.offGame(eventType, callback);
+    }
+  }
+
   // ── Connection Management ─────────────────────────────────────
 
   /** Connect to matchmaking relay */
@@ -681,7 +724,8 @@ class MultiplayerClient {
     if (this._disposed || this._matchmakingConn) return;
 
     try {
-      const url = `${this._getProtocol()}://${this.host}:${this.matchmakingPort}`;
+      const port = this.matchmakingPort ? `:${this.matchmakingPort}` : '';
+      const url = `${this._getProtocol()}://${this.host}${port}${this._wsPath}`;
       this._matchmakingConn = new WSConnection({
         url,
         wsFactory: this._wsFactory,
@@ -690,9 +734,11 @@ class MultiplayerClient {
       // Wire up matchmaking event handlers
       this._setupMatchmakingHandlers();
 
+      // Disable automatic reconnection — SessionManager controls lifecycle
+      this._matchmakingConn._options.reconnectBaseDelay = 0; // Effectively disables reconnect
       this._matchmakingConn.connect();
     } catch (err) {
-      console.error(`[MultiplayerClient] Failed to connect matchmaking:`, err.message);
+      console.warn(`[MultiplayerClient] Matchmaking unavailable:`, err.message);
       if (this._matchmakingConn) {
         this._matchmakingConn.dispose();
         this._matchmakingConn = null;
@@ -798,6 +844,7 @@ class MultiplayerClient {
 
   /** Determine WebSocket protocol (ws vs wss) */
   _getProtocol() {
+    if (this._explicitProtocol) return this._explicitProtocol;
     // Use wss if running on HTTPS, ws otherwise
     if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
       return 'wss';
@@ -817,7 +864,13 @@ class MultiplayerClient {
   /** Host a new session */
   hostSession(name, worldSeed, mode) {
     if (this._matchmakingConn) {
-      this._matchmakingConn.sendHost(name, worldSeed, mode);
+      // Support both positional args and object param for SessionManager compatibility
+      if (typeof name === 'object' && name !== null) {
+        const { name: sessionName, seed, mode: gameMode } = name;
+        this._matchmakingConn.sendHost(sessionName, seed, gameMode);
+      } else {
+        this._matchmakingConn.sendHost(name, worldSeed, mode);
+      }
     }
   }
 
@@ -886,6 +939,11 @@ class MultiplayerClient {
     }
   }
 
+  /** Leave the current session — alias for disconnect() */
+  leaveSession() {
+    this.disconnect();
+  }
+
   /** Dispose — release all resources */
   dispose() {
     this._disposed = true;
@@ -902,13 +960,16 @@ class MultiplayerClient {
   }
 }
 
-// ─── Exports ────────────────────────────────────────────────────────
+// ─── Exports ────────────────────────────────────────────────
 
-module.exports = {
-  CLIENT_STATE,
-  DEFAULT_CONFIG,
-  MESSAGE_TYPES,
-  MessageQueue,
-  WSConnection,
-  MultiplayerClient,
-};
+if (typeof module !== 'undefined' && module.exports) {
+  // Node.js environment
+  module.exports = {
+    CLIENT_STATE,
+    DEFAULT_CONFIG,
+    MESSAGE_TYPES,
+    MessageQueue,
+    WSConnection,
+    MultiplayerClient,
+  };
+}

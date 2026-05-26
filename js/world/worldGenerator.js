@@ -3,9 +3,9 @@
  * Terrain generation with edge-seamless matching.
  */
 
-const { Chunk, BLOCK_TYPES, SEA_LEVEL, MIN_Y, MAX_Y, CHUNK_WIDTH, CHUNK_DEPTH } = require('./chunkData');
-const NoiseGenerator = require('./noise');
-const { BiomeSystem, BIOMES } = require('./biomeSystem');
+// Use globals from chunkData.js: Chunk, BLOCK_TYPES, SEA_LEVEL, MIN_Y, MAX_Y, CHUNK_WIDTH, CHUNK_DEPTH
+// Use global NoiseGenerator (defined by noise.js)
+// Use globals from biomeSystem.js: BiomeSystem, BIOMES
 
 class WorldGenerator {
   constructor(seed = Math.floor(Math.random() * 100000)) {
@@ -200,4 +200,7 @@ class WorldGenerator {
   }
 }
 
-module.exports = WorldGenerator;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = WorldGenerator;
+
+}

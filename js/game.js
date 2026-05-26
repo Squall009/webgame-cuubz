@@ -11,7 +11,8 @@
  */
 
 // Debug logging — set CuubzLogger.DEBUG = true in console to enable
-const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+var _log;
+if (typeof CuubzLogger !== 'undefined') { _log = CuubzLogger.log; } else { _log = function() {}; }
 
 // ============================================================
 // Mode Constants
@@ -81,8 +82,12 @@ class BlockPalette {
   constructor() {
     // Import BLOCK_TYPES when available, use defaults otherwise
     try {
-      const chunkData = require('./world/chunkData');
-      this._availableBlocks = this._getPlaceableBlocks(chunkData.BLOCK_TYPES);
+      const bt = typeof BLOCK_TYPES !== 'undefined' ? BLOCK_TYPES : null;
+      if (bt) {
+        this._availableBlocks = this._getPlaceableBlocks(bt);
+      } else {
+        this._availableBlocks = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14];
+      }
     } catch (e) {
       // Fallback: basic block types for testing without full module
       this._availableBlocks = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14];
@@ -318,4 +323,7 @@ if (typeof window !== 'undefined') {
   window.CuubzBlockPalette = BlockPalette;
 }
 
-module.exports = Game;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = Game;
+
+}

@@ -126,4 +126,7 @@ class ChunkMeshBuilder {
   }
 }
 
-module.exports = ChunkMeshBuilder;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = ChunkMeshBuilder;
+
+}

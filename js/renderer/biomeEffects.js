@@ -4,7 +4,7 @@
  * Updated each frame in the game loop via update(delta).
  */
 
-const { BLOCK_TYPES } = require('../world/chunkData');
+// Use global BLOCK_TYPES from chunkData.js
 
 /**
  * Lava flow animation configuration
@@ -302,4 +302,7 @@ class BiomeEffects {
   }
 }
 
-module.exports = { BiomeEffects, ParticleEffect, LAVA_ANIMATION, TOXIC_SLIME_ANIMATION, CORRUPT_FOG };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { BiomeEffects, ParticleEffect, LAVA_ANIMATION, TOXIC_SLIME_ANIMATION, CORRUPT_FOG };
+
+}

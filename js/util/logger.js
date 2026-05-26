@@ -16,7 +16,7 @@ class CuubzLogger {
   static DEBUG = false;
 
   static log(...args) {
-    if (this.DEBUG && typeof console !== 'undefined') {
+    if (CuubzLogger.DEBUG && typeof console !== 'undefined') {
       console.log(...args);
     }
   }
@@ -34,7 +34,13 @@ class CuubzLogger {
   }
 }
 
-export const log = CuubzLogger.log.bind(CuubzLogger);
-export const warn = CuubzLogger.warn.bind(CuubzLogger);
-export const error = CuubzLogger.error.bind(CuubzLogger);
-export { CuubzLogger };
+// Browser globals
+if (typeof window !== 'undefined') {
+  window.CuubzLogger = CuubzLogger;
+}
+
+// Node.js exports
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { CuubzLogger, log: CuubzLogger.log.bind(CuubzLogger), warn: CuubzLogger.warn.bind(CuubzLogger), error: CuubzLogger.error.bind(CuubzLogger) };
+
+}

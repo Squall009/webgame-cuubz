@@ -1128,41 +1128,44 @@ class AmbientManager {
 // Exports — everything for testing in Node.js
 // ============================================================
 
-module.exports = {
-  // Constants
-  NOTE_FREQS,
-  SCALES,
-  BIOME_AMBIENT_CONFIG,
-  DAY_NIGHT_VOLUMES,
-  CROSSFADE_DURATION,
-  DEFAULT_AMBIENT_VOLUME,
-  BIOME_SOUND_LAYERS,
-  LAYER_DEFAULTS,
-  VALID_LAYER_TYPES,
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    // Constants
+    NOTE_FREQS,
+    SCALES,
+    BIOME_AMBIENT_CONFIG,
+    DAY_NIGHT_VOLUMES,
+    CROSSFADE_DURATION,
+    DEFAULT_AMBIENT_VOLUME,
+    BIOME_SOUND_LAYERS,
+    LAYER_DEFAULTS,
+    VALID_LAYER_TYPES,
 
-  // Pure utility functions (testable without AudioContext)
-  getNoteFrequency,
-  calculateChordFrequencies,
-  getBiomeAmbientConfig,
-  calculateDayNightVolume,
-  smoothstep,
-  calculateSwellVolume,
-  calculateDetunedFrequency,
-  getAvailableBiomes,
-  validateBiomeConfig,
+    // Pure utility functions (testable without AudioContext)
+    getNoteFrequency,
+    calculateChordFrequencies,
+    getBiomeAmbientConfig,
+    calculateDayNightVolume,
+    smoothstep,
+    calculateSwellVolume,
+    calculateDetunedFrequency,
+    getAvailableBiomes,
+    validateBiomeConfig,
 
-  // Atmospheric sound layer utilities
-  getBiomeSoundLayers,
-  validateSoundLayer,
-  resolveSoundLayer,
-  calculateCrackleSchedule,
-  calculateBirdSchedule,
-  calculateBubbleSchedule,
-  calculateAtmosphericVolume,
-  getAllUsedLayerTypes,
-  getBiomesUsingLayerType,
-  validateAllSoundLayers,
+    // Atmospheric sound layer utilities
+    getBiomeSoundLayers,
+    validateSoundLayer,
+    resolveSoundLayer,
+    calculateCrackleSchedule,
+    calculateBirdSchedule,
+    calculateBubbleSchedule,
+    calculateAtmosphericVolume,
+    getAllUsedLayerTypes,
+    getBiomesUsingLayerType,
+    validateAllSoundLayers,
 
-  // Browser class
-  AmbientManager,
-};
+    // Browser class
+    AmbientManager,
+  };
+
+}

@@ -235,4 +235,7 @@ class ChunkManager {
   }
 }
 
-module.exports = ChunkManager;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = ChunkManager;
+
+}

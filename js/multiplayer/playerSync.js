@@ -824,21 +824,24 @@ function isInRenderDistance(pos1, pos2, maxDistance) {
 
 // ─── Exports ───────────────────────────────────────────────────────
 
-module.exports = {
-  // Constants
-  INTERPOLATION_CONFIG,
-  REMOTE_PLAYER_STATES,
-  DEFAULT_REMOTE_PLAYER,
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    // Constants
+    INTERPOLATION_CONFIG,
+    REMOTE_PLAYER_STATES,
+    DEFAULT_REMOTE_PLAYER,
 
-  // Classes
-  PingTracker,
-  RemotePlayerState,
-  PlayerSyncManager,
+    // Classes
+    PingTracker,
+    RemotePlayerState,
+    PlayerSyncManager,
 
-  // Utilities
-  buildVoxelCharacter,
-  shadeColor,
-  distanceBetween,
-  normalizeAngle,
-  isInRenderDistance,
-};
+    // Utilities
+    buildVoxelCharacter,
+    shadeColor,
+    distanceBetween,
+    normalizeAngle,
+    isInRenderDistance,
+  };
+
+}

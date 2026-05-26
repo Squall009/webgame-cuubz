@@ -232,4 +232,7 @@ class TouchInput {
   }
 }
 
-module.exports = TouchInput;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = TouchInput;
+
+}

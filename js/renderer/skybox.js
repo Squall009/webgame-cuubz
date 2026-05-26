@@ -672,29 +672,32 @@ class Skybox {
 // Exports — Pure utilities for testing, class for browser use
 // ============================================================
 
-module.exports = Skybox;
-module.exports.smoothstep = smoothstep;
-module.exports.lerp = lerp;
-module.exports.lerpColor = lerpColor;
-module.exports.hexToRGB = hexToRGB;
-module.exports.hoursToFraction = hoursToFraction;
-module.exports.fractionToHours = fractionToHours;
-module.exports.getSkyColorForTime = getSkyColorForTime;
-module.exports.isDaytime = isDaytime;
-module.exports.getSkyPhase = getSkyPhase;
-module.exports.getFogDensityForTime = getFogDensityForTime;
-module.exports.getAmbientIntensityForTime = getAmbientIntensityForTime;
-module.exports.getSunAngleForTime = getSunAngleForTime;
-module.exports.getMoonAngleForTime = getMoonAngleForTime;
-module.exports.getSunElevation = getSunElevation;
-module.exports.getMoonElevation = getMoonElevation;
-module.exports.getSunColorForTime = getSunColorForTime;
-module.exports.getSunIntensity = getSunIntensity;
-module.exports.getMoonIntensity = getMoonIntensity;
-module.exports.getTimeOfDayLabel = getTimeOfDayLabel;
-module.exports.formatGameTime = formatGameTime;
-module.exports.DEFAULT_CYCLE_DURATION = DEFAULT_CYCLE_DURATION;
-module.exports.FOG_DENSITY_DAY = FOG_DENSITY_DAY;
-module.exports.FOG_DENSITY_NIGHT = FOG_DENSITY_NIGHT;
-module.exports.AMBIENT_LIGHT = AMBIENT_LIGHT;
-module.exports.SKY_COLORS = SKY_COLORS;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = Skybox;
+  module.exports.smoothstep = smoothstep;
+  module.exports.lerp = lerp;
+  module.exports.lerpColor = lerpColor;
+  module.exports.hexToRGB = hexToRGB;
+  module.exports.hoursToFraction = hoursToFraction;
+  module.exports.fractionToHours = fractionToHours;
+  module.exports.getSkyColorForTime = getSkyColorForTime;
+  module.exports.isDaytime = isDaytime;
+  module.exports.getSkyPhase = getSkyPhase;
+  module.exports.getFogDensityForTime = getFogDensityForTime;
+  module.exports.getAmbientIntensityForTime = getAmbientIntensityForTime;
+  module.exports.getSunAngleForTime = getSunAngleForTime;
+  module.exports.getMoonAngleForTime = getMoonAngleForTime;
+  module.exports.getSunElevation = getSunElevation;
+  module.exports.getMoonElevation = getMoonElevation;
+  module.exports.getSunColorForTime = getSunColorForTime;
+  module.exports.getSunIntensity = getSunIntensity;
+  module.exports.getMoonIntensity = getMoonIntensity;
+  module.exports.getTimeOfDayLabel = getTimeOfDayLabel;
+  module.exports.formatGameTime = formatGameTime;
+  module.exports.DEFAULT_CYCLE_DURATION = DEFAULT_CYCLE_DURATION;
+  module.exports.FOG_DENSITY_DAY = FOG_DENSITY_DAY;
+  module.exports.FOG_DENSITY_NIGHT = FOG_DENSITY_NIGHT;
+  module.exports.AMBIENT_LIGHT = AMBIENT_LIGHT;
+  module.exports.SKY_COLORS = SKY_COLORS;
+
+}

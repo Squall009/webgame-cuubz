@@ -3,14 +3,15 @@
  * Temperature/moisture noise maps for biome distribution.
  */
 
-const { BLOCK_TYPES } = require('./chunkData');
+// Use global BLOCK_TYPES (defined by chunkData.js) — require() only works in Node.js
+const _BLOCK_TYPES = typeof BLOCK_TYPES !== 'undefined' ? BLOCK_TYPES : {};
 
 // Biome definitions with surface blocks, height modifiers, and features
 const BIOMES = {
   PLAINS: {
     id: 'plains',
     name: 'Plains',
-    surfaceBlocks: [BLOCK_TYPES.GRASS, BLOCK_TYPES.DIRT],
+    surfaceBlocks: [_BLOCK_TYPES.GRASS, _BLOCK_TYPES.DIRT],
     minHeight: -5, maxHeight: 8,
     heightModifier: 0.3,
     features: ['trees_sparse', 'flowers'],
@@ -21,7 +22,7 @@ const BIOMES = {
   FOREST: {
     id: 'forest',
     name: 'Forest',
-    surfaceBlocks: [BLOCK_TYPES.GRASS, BLOCK_TYPES.DIRT],
+    surfaceBlocks: [_BLOCK_TYPES.GRASS, _BLOCK_TYPES.DIRT],
     minHeight: -3, maxHeight: 12,
     heightModifier: 0.4,
     features: ['trees_dense', 'tall_trunks'],
@@ -32,7 +33,7 @@ const BIOMES = {
   DESERT: {
     id: 'desert',
     name: 'Desert',
-    surfaceBlocks: [BLOCK_TYPES.SAND, BLOCK_TYPES.GRAVEL],
+    surfaceBlocks: [_BLOCK_TYPES.SAND, _BLOCK_TYPES.GRAVEL],
     minHeight: -2, maxHeight: 6,
     heightModifier: 0.35,
     features: ['cacti'],
@@ -43,7 +44,7 @@ const BIOMES = {
   TUNDRA: {
     id: 'tundra',
     name: 'Tundra',
-    surfaceBlocks: [BLOCK_TYPES.SNOW, BLOCK_TYPES.ICE],
+    surfaceBlocks: [_BLOCK_TYPES.SNOW, _BLOCK_TYPES.ICE],
     minHeight: -2, maxHeight: 8,
     heightModifier: 0.35,
     features: ['sparse_vegetation', 'snow_layers'],
@@ -54,7 +55,7 @@ const BIOMES = {
   MOUNTAINS: {
     id: 'mountains',
     name: 'Mountains',
-    surfaceBlocks: [BLOCK_TYPES.STONE, BLOCK_TYPES.GRAVEL],
+    surfaceBlocks: [_BLOCK_TYPES.STONE, _BLOCK_TYPES.GRAVEL],
     minHeight: 5, maxHeight: 50,
     heightModifier: 0.8,
     features: ['exposed_ores'],
@@ -65,7 +66,7 @@ const BIOMES = {
   OCEAN: {
     id: 'ocean',
     name: 'Ocean',
-    surfaceBlocks: [BLOCK_TYPES.SAND], // ocean floor
+    surfaceBlocks: [_BLOCK_TYPES.SAND], // ocean floor
     minHeight: -32, maxHeight: -1,
     heightModifier: 0.1,
     features: ['coral_structures'],
@@ -76,7 +77,7 @@ const BIOMES = {
   LAVA: {
     id: 'lava',
     name: 'Lava',
-    surfaceBlocks: [BLOCK_TYPES.OBSIDIAN, BLOCK_TYPES.BLACKSTONE],
+    surfaceBlocks: [_BLOCK_TYPES.OBSIDIAN, _BLOCK_TYPES.BLACKSTONE],
     minHeight: -5, maxHeight: 5,
     heightModifier: 0.3,
     features: ['lava_pools'],
@@ -87,7 +88,7 @@ const BIOMES = {
   CORRUPT: {
     id: 'corrupt',
     name: 'Corrupt',
-    surfaceBlocks: [BLOCK_TYPES.CORRUPT_STONE],
+    surfaceBlocks: [_BLOCK_TYPES.CORRUPT_STONE],
     minHeight: -3, maxHeight: 5,
     heightModifier: 0.35,
     features: ['toxic_pools', 'quest_markers'],
@@ -166,7 +167,7 @@ class BiomeSystem {
    * Get surface block type for a biome at given height
    */
   getSurfaceBlock(biome, height) {
-    if (biome.surfaceBlocks.length === 0) return BLOCK_TYPES.STONE;
+    if (biome.surfaceBlocks.length === 0) return _BLOCK_TYPES.STONE;
     
     // Use height to pick between surface variants
     const idx = Math.min(1, Math.max(0, Math.floor((height - biome.minHeight) / (biome.maxHeight - biome.minHeight))));
@@ -174,4 +175,7 @@ class BiomeSystem {
   }
 }
 
-module.exports = { BiomeSystem, BIOMES, BIOME_LIST };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { BiomeSystem, BIOMES, BIOME_LIST };
+
+}

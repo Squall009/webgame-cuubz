@@ -591,29 +591,32 @@ class SoundManager {
 // Exports — everything for testing in Node.js
 // ============================================================
 
-module.exports = {
-  // Constants
-  SFX_CATEGORY,
-  BLOCK_MATERIALS,
-  MATERIAL_SOUND_PARAMS,
-  FOOTSTEP_SURFACES,
-  FOOTSTEP_PARAMS,
-  SPECIAL_SFX_PARAMS,
-  DEFAULT_VOLUME,
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    // Constants
+    SFX_CATEGORY,
+    BLOCK_MATERIALS,
+    MATERIAL_SOUND_PARAMS,
+    FOOTSTEP_SURFACES,
+    FOOTSTEP_PARAMS,
+    SPECIAL_SFX_PARAMS,
+    DEFAULT_VOLUME,
 
-  // Pure utility functions (testable without AudioContext)
-  getMaterialParams,
-  getFootstepParams,
-  getSpecialSfxParams,
-  calculateVolume,
-  blockIdToMaterial,
-  biomeToFootstepSurface,
+    // Pure utility functions (testable without AudioContext)
+    getMaterialParams,
+    getFootstepParams,
+    getSpecialSfxParams,
+    calculateVolume,
+    blockIdToMaterial,
+    biomeToFootstepSurface,
 
-  // Noise generation (pure functions)
-  generateNoiseBuffer,
-  rms,
-  sampleRange,
+    // Noise generation (pure functions)
+    generateNoiseBuffer,
+    rms,
+    sampleRange,
 
-  // Browser class
-  SoundManager,
-};
+    // Browser class
+    SoundManager,
+  };
+
+}

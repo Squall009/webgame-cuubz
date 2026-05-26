@@ -130,4 +130,7 @@ class MouseInput {
   }
 }
 
-module.exports = MouseInput;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = MouseInput;
+
+}

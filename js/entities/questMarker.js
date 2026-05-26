@@ -418,9 +418,9 @@ class QuestMarkerManager {
     if (!this._questSystem) return 0;
 
     this.markers = [];
-    const { QUEST_REGISTRY } = require('../systems/questSystem.js');
+    const qr = typeof QUEST_REGISTRY !== 'undefined' ? QUEST_REGISTRY : [];
 
-    for (const quest of QUEST_REGISTRY) {
+    for (const quest of qr) {
       const pos = this._questSystem.getMarkerPosition(quest.id, this.worldSeed);
       if (!pos) continue;
 
@@ -503,9 +503,9 @@ class QuestMarkerManager {
    * @returns {Array<QuestMarker>} Markers in the given stage range
    */
   getMarkersByStageRange(minStage, maxStage) {
-    const { QUEST_REGISTRY } = require('../systems/questSystem.js');
+    const qr = typeof QUEST_REGISTRY !== 'undefined' ? QUEST_REGISTRY : [];
     const stageIds = new Set(
-      QUEST_REGISTRY.filter(q => q.stage >= minStage && q.stage <= maxStage).map(q => q.id)
+      qr.filter(q => q.stage >= minStage && q.stage <= maxStage).map(q => q.id)
     );
     return this.markers.filter(m => stageIds.has(m.questId));
   }

@@ -10,7 +10,7 @@
  * - Callback system for UI integration
  */
 
-const { BLOCK_TYPES } = require('../world/chunkData');
+// Use global BLOCK_TYPES from chunkData.js
 
 // ============================================================
 // Recipe Definitions
@@ -374,7 +374,10 @@ class CraftingSystem {
 // Exports
 // ============================================================
 
-module.exports = {
-  RECIPES,
-  CraftingSystem,
-};
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    RECIPES,
+    CraftingSystem,
+  };
+
+}

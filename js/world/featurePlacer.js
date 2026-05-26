@@ -5,8 +5,8 @@
  * Includes biome visual polish: flower variety, tree density variation, glowstone in caves.
  */
 
-const { BLOCK_TYPES, MIN_Y, MAX_Y } = require('./chunkData');
-const NoiseGenerator = require('./noise');
+// Use globals from chunkData.js: BLOCK_TYPES, MIN_Y, MAX_Y
+// Use global NoiseGenerator (defined by noise.js)
 
 class FeaturePlacer {
   constructor(seed) {
@@ -331,4 +331,7 @@ class FeaturePlacer {
   }
 }
 
-module.exports = FeaturePlacer;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = FeaturePlacer;
+
+}

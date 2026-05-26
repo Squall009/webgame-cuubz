@@ -216,4 +216,7 @@ class NoiseGenerator {
   }
 }
 
-module.exports = NoiseGenerator;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = NoiseGenerator;
+
+}

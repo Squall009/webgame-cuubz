@@ -3,8 +3,8 @@
  * Ore vein placement in caves and mountains with depth-based rarity.
  */
 
-const { BLOCK_TYPES } = require('./chunkData');
-const NoiseGenerator = require('./noise');
+// Use global BLOCK_TYPES from chunkData.js
+// Use global NoiseGenerator (defined by noise.js)
 
 class OreGenerator {
   constructor(seed) {
@@ -123,4 +123,7 @@ class OreGenerator {
   }
 }
 
-module.exports = OreGenerator;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = OreGenerator;
+
+}

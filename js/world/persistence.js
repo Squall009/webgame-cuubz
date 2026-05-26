@@ -214,4 +214,7 @@ class PersistenceManager {
   }
 }
 
-module.exports = PersistenceManager;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = PersistenceManager;
+
+}

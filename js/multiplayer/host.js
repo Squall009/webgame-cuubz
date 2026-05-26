@@ -19,10 +19,11 @@
 'use strict';
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
-const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+var _log;
+if (typeof CuubzLogger !== 'undefined') { _log = CuubzLogger.log; } else { _log = function() {}; }
 
 // Re-export from client.js for protocol consistency
-const { CLIENT_STATE, MESSAGE_TYPES } = require('./client');
+// Use globals from client.js: CLIENT_STATE, MESSAGE_TYPES (server-side only)
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -279,7 +280,7 @@ class RateLimiter {
 /**
  * Tracks state for a remote player in the host session.
  */
-class RemotePlayerState {
+class HostRemotePlayer {
   constructor(playerId, character, position) {
     this.playerId = playerId;
     this.character = character || { name: 'Player', color: '#ffffff' };
@@ -327,7 +328,7 @@ class RemotePlayerState {
 
   /** Deserialize from persistence */
   static deserialize(data) {
-    const player = new RemotePlayerState(data.playerId, data.character, data.position);
+    const player = new HostRemotePlayer(data.playerId, data.character, data.position);
     player.rotation = data.rotation || { yaw: 0, pitch: 0 };
     player.inventory = data.inventory || [];
     player.joinedAt = data.joinedAt || Date.now();
@@ -593,7 +594,7 @@ class HostManager {
     // Don't duplicate existing players
     if (this._players.has(playerId)) return;
 
-    const playerState = new RemotePlayerState(
+    const playerState = new HostRemotePlayer(
       playerId,
       data.character,
       data.position
@@ -1058,18 +1059,21 @@ class HostManager {
 
 // ─── Exports ──────────────────────────────────────────────────────
 
-module.exports = {
-  HOST_STATE,
-  DEFAULT_HOST_CONFIG,
-  // Validation functions (exported for testing)
-  validateBlockBreak,
-  validateBlockPlace,
-  validateMove,
-  validateInventory,
-  validateQuestUpdate,
-  // Utility classes
-  RateLimiter,
-  RemotePlayerState,
-  // Main class
-  HostManager,
-};
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    HOST_STATE,
+    DEFAULT_HOST_CONFIG,
+    // Validation functions (exported for testing)
+    validateBlockBreak,
+    validateBlockPlace,
+    validateMove,
+    validateInventory,
+    validateQuestUpdate,
+    // Utility classes
+    RateLimiter,
+    RemotePlayerState,
+    // Main class
+    HostManager,
+  };
+
+}

@@ -20,7 +20,7 @@
 
 'use strict';
 
-const { CHUNK_WIDTH, CHUNK_DEPTH } = require('../world/chunkData');
+// Use globals from chunkData.js: CHUNK_WIDTH, CHUNK_DEPTH
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -659,10 +659,13 @@ class ChunkStreamer {
 
 // ─── Exports ──────────────────────────────────────────────
 
-module.exports = {
-  DEFAULT_STREAM_CONFIG,
-  CHUNK_STATE,
-  ChunkCompressor,
-  ChunkStreamEntry,
-  ChunkStreamer,
-};
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    DEFAULT_STREAM_CONFIG,
+    CHUNK_STATE,
+    ChunkCompressor,
+    ChunkStreamEntry,
+    ChunkStreamer,
+  };
+
+}

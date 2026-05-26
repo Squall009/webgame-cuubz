@@ -512,28 +512,31 @@ class PerformanceOptimizer {
 
 // --- Module Exports ---
 
-module.exports = {
-  // Constants
-  DEVICE_TIERS,
-  RENDER_DISTANCE_BY_TIER,
-  FPS_TARGETS,
-  ADJUSTMENT_INTERVAL,
-  ADJUSTMENT_STEP,
-  ADJUSTMENT_COOLDOWN,
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    // Constants
+    DEVICE_TIERS,
+    RENDER_DISTANCE_BY_TIER,
+    FPS_TARGETS,
+    ADJUSTMENT_INTERVAL,
+    ADJUSTMENT_STEP,
+    ADJUSTMENT_COOLDOWN,
 
-  // Pure utility functions
-  isTouchDevice,
-  isMobileViewport,
-  estimateDeviceTier,
-  calculateRecommendedRenderDistance,
-  calculateFPSTarget,
-  calculateChunkCount,
-  estimateMemoryUsage,
-  shouldReduceRenderDistance,
-  shouldIncreaseRenderDistance,
-  calculateNewRenderDistance,
+    // Pure utility functions
+    isTouchDevice,
+    isMobileViewport,
+    estimateDeviceTier,
+    calculateRecommendedRenderDistance,
+    calculateFPSTarget,
+    calculateChunkCount,
+    estimateMemoryUsage,
+    shouldReduceRenderDistance,
+    shouldIncreaseRenderDistance,
+    calculateNewRenderDistance,
 
-  // Classes
-  PerformanceMonitor,
-  PerformanceOptimizer
-};
+    // Classes
+    PerformanceMonitor,
+    PerformanceOptimizer
+  };
+
+}
