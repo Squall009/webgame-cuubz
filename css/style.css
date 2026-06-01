@@ -1349,3 +1349,72 @@ html, body {
     padding: 4px 8px;
   }
 }
+
+/* --- Debug: Texture Atlas Overlay (top-right corner) --- */
+#atlas-overlay {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 170;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+#atlas-overlay.hidden {
+  display: none !important;
+}
+
+#atlas-label {
+  font-size: 10px;
+  color: #aaa;
+  text-align: center;
+  margin-bottom: 4px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+#atlas-canvas {
+  width: 256px;
+  height: 256px;
+  image-rendering: pixelated;
+  border-radius: 4px;
+  display: block;
+}
+
+/* --- Debug: Block Hover Tooltip (bottom-center) --- */
+#block-tooltip {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 170;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 6px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+#block-tooltip.hidden {
+  display: none !important;
+}
+
+#tooltip-block-id {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1c40f;
+  font-family: monospace;
+}
+
+#tooltip-block-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  text-transform: capitalize;
+}

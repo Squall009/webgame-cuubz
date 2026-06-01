@@ -1,252 +1,278 @@
 /**
  * Cuubz — Player Entity
  * Movement, physics, AABB collision against solid blocks.
- * 
- * Creative Mode Support:
- * - gravityEnabled: false in creative mode (no falling)
- * - flyMode: toggleable via double-tap space (frees movement vertically)
- * - flySpeed: enhanced vertical movement speed when flying
+ *
+ * Uses axis-separated AABB resolution (X → Y → Z) to prevent corner catching.
+ * Includes step-up mechanic for smooth stair climbing.
  */
 
 class Player {
   constructor() {
-    // Position (world coordinates)
+    // Position (world coordinates) — feet bottom center
     this.position = { x: 0, y: 20, z: 0 };
-    
+
     // Velocity
     this.velocity = { x: 0, y: 0, z: 0 };
-    
+
     // Camera rotation
     this.yaw = 0;   // Horizontal rotation (radians)
     this.pitch = 0; // Vertical rotation (radians)
-    
-    // Player dimensions (block units)
-    this.width = 0.8;
+
+    // Player dimensions (block units) — standard Minecraft ~0.6w × 1.8h
+    this.width = 0.6;
     this.height = 1.8;
-    
+
     // Physics constants
     this.gravity = -25;       // blocks/s²
     this.jumpVelocity = 9;    // blocks/s
     this.moveSpeed = 5;       // blocks/s (walking)
     this.sprintMultiplier = 1.6;
-    
+    this.maxFallSpeed = 40;   // Terminal velocity
+
     // Creative mode physics
-    this.gravityEnabled = true;  // Default: gravity on (survival mode)
-    this.flyMode = false;        // Fly mode toggle state
-    this.flySpeed = 8;           // Vertical speed when flying (blocks/s)
-    
+    this.gravityEnabled = true;
+    this.flyMode = false;
+    this.flySpeed = 8;
+
     // State
     this.onGround = false;
+    this.inWater = false;
     this.isSprinting = false;
-    
+
+    // Step-up height for smooth stair climbing
+    this.stepHeight = 0.5;
+
     // Inventory reference (set by game.js)
     this.inventory = null;
   }
 
-  /**
-   * Enable or disable creative mode physics.
-   * @param {boolean} creative — true to enable creative mode physics
-   */
   setCreativeMode(creative) {
     if (creative) {
-      // Creative mode: no gravity, enable fly speed
       this.gravityEnabled = false;
       this.flySpeed = 8;
-      // Don't auto-enable fly mode — player must double-tap space
     } else {
-      // Survival mode: gravity on, fly mode off
       this.gravityEnabled = true;
       this.flyMode = false;
     }
   }
 
-  /**
-   * Toggle fly mode. Only works when creative mode is active (gravity disabled).
-   */
   toggleFlyMode() {
     if (!this.gravityEnabled) {
-      // Only allow fly mode in creative mode
       this.flyMode = !this.flyMode;
     }
   }
 
-  /**
-   * Check if player is currently flying.
-   * Flying = fly mode enabled AND moving vertically (not on ground).
-   * @returns {boolean}
-   */
   get isFlying() {
     return this.flyMode && !this.onGround;
   }
 
-  /**
-   * Update player physics and movement
-   */
   update(deltaTime, inputState, world) {
-    // Apply gravity (only in survival mode)
-    if (this.gravityEnabled) {
+    // Clamp delta to prevent tunneling at low FPS
+    deltaTime = Math.min(deltaTime, 0.1);
+
+    // Apply gravity (survival mode, not flying)
+    if (this.gravityEnabled && !this.flyMode) {
       this.velocity.y += this.gravity * deltaTime;
+      if (this.velocity.y < -this.maxFallSpeed) {
+        this.velocity.y = -this.maxFallSpeed;
+      }
     }
-    
-    // Fly mode vertical movement (creative mode only)
+
+    // Fly mode vertical movement
     if (this.flyMode && !this.gravityEnabled) {
       if (inputState.jump) {
         this.velocity.y = this.flySpeed;
       } else if (inputState.sneak || inputState.backward_fly) {
         this.velocity.y = -this.flySpeed;
       } else {
-        // No vertical input — slow down vertical velocity
         this.velocity.y *= 0.9;
-        if (Math.abs(this.velocity.y) < 0.1) {
-          this.velocity.y = 0;
-        }
+        if (Math.abs(this.velocity.y) < 0.1) this.velocity.y = 0;
       }
     }
-    
-    // Get movement direction from camera yaw
-    const moveX = Math.sin(this.yaw);
-    const moveZ = Math.cos(this.yaw);
-    const sideX = Math.cos(this.yaw);
+
+    // Movement direction from camera yaw.
+    // Three.js Euler 'YXZ': forward = (-sin(yaw), 0, -cos(yaw)), right = (cos(yaw), 0, -sin(yaw))
+    const moveX = -Math.sin(this.yaw);
+    const moveZ = -Math.cos(this.yaw);
+    const sideX =  Math.cos(this.yaw);
     const sideZ = -Math.sin(this.yaw);
-    
-    // Calculate movement speed (faster in creative mode)
+
     let speed = this.moveSpeed;
-    if (!this.gravityEnabled) {
-      speed *= 1.5; // Creative mode horizontal speed boost
-    }
+    if (!this.gravityEnabled) speed *= 1.5;
     if (this.isSprinting) speed *= this.sprintMultiplier;
-    
-    // Apply input-based movement
+
+    // Reset horizontal velocity every frame — prevents stale yaw direction bleeding
+    this.velocity.x = 0;
+    this.velocity.z = 0;
+
     let dx = 0, dz = 0;
-    
-    if (inputState.forward) { dx += moveX; dz += moveZ; }
+    if (inputState.forward)  { dx += moveX; dz += moveZ; }
     if (inputState.backward) { dx -= moveX; dz -= moveZ; }
-    if (inputState.left) { dx -= sideX; dz -= sideZ; }
-    if (inputState.right) { dx += sideX; dz += sideZ; }
-    
-    // Normalize diagonal movement
+    if (inputState.left)     { dx -= sideX; dz -= sideZ; }
+    if (inputState.right)    { dx += sideX; dz += sideZ; }
+
     const mag = Math.sqrt(dx * dx + dz * dz);
     if (mag > 0) {
       dx = (dx / mag) * speed;
       dz = (dz / mag) * speed;
     }
-    
+
     this.velocity.x = dx;
     this.velocity.z = dz;
-    
-    // Handle jump (survival mode only — fly mode handles vertical in creative)
+
+    // Jump (survival only)
     if (this.gravityEnabled && inputState.jump && this.onGround) {
       this.velocity.y = this.jumpVelocity;
       this.onGround = false;
     }
-    
-    // Apply movement with collision detection
-    this._moveWithCollision(deltaTime, world);
-    
-    // Clamp to world bounds
-    this.position.y = Math.max(-32, this.position.y);
+
+    this._moveAndCollide(deltaTime, world);
+
+    // Clamp to world floor
+    this.position.y = Math.max(MIN_Y, this.position.y);
   }
 
   /**
-   * Move player with AABB collision detection against solid blocks
+   * Axis-separated AABB move and collide.
+   * Resolves X → Y → Z independently.
+   *
+   * Walk-off-edge: gravity continuously accumulates in velocity.y whenever
+   * gravityEnabled is true. The moment the player leaves a block, _resolveAxis
+   * finds no floor collision, onGround becomes false, and the fall starts
+   * naturally next frame. No special-casing required.
    */
-  _moveWithCollision(deltaTime, world) {
+  _moveAndCollide(deltaTime, world) {
     if (!world) {
-      // No world — just apply velocity directly (for testing)
       this.position.x += this.velocity.x * deltaTime;
       this.position.y += this.velocity.y * deltaTime;
       this.position.z += this.velocity.z * deltaTime;
       return;
     }
-    
-    // Move in X axis with collision
+
+    const hw = this.width / 2;
+
+    // --- X ---
     const newX = this.position.x + this.velocity.x * deltaTime;
-    if (!this._checkCollision(newX, this.position.y, this.position.z, world)) {
-      this.position.x = newX;
-    } else {
+    if (this._resolveAxis(newX, this.position.y, this.position.z, hw, 'x', world)) {
+      // position.x already snapped inside _resolveAxis
       this.velocity.x = 0;
+    } else {
+      this.position.x = newX;
     }
 
-    // Move in Y axis with collision
+    // --- Y ---
+    // This is the critical one. _resolveAxis scans the full AABB volume at the
+    // new position. If any solid block overlaps, the player is snapped to its
+    // surface. This correctly handles: landing, walking off edges (no hit →
+    // onGround=false → gravity takes over), and ceiling bumps.
     const newY = this.position.y + this.velocity.y * deltaTime;
-    if (!this._checkCollision(this.position.x, newY, this.position.z, world)) {
+    if (this._resolveAxis(this.position.x, newY, this.position.z, hw, 'y', world)) {
+      // position.y snapped. landing = true, head-bump = false.
+      this.onGround = this.velocity.y <= 0;
+      this.velocity.y = 0; // MUST zero — otherwise gravity accumulates and tunnels
+    } else {
       this.position.y = newY;
-      this.onGround = false;
-    } else {
-      if (this.velocity.y < 0) {
-        // Landing on ground
-        this.onGround = true;
-        
-        // Snap to block boundary
-        this.position.y = Math.ceil(this.position.y);
-      }
-      this.velocity.y = 0;
+      this.onGround = false; // no floor contact — gravity will accelerate next frame
     }
-    
-    // Move in Z axis with collision
+
+    // --- Z ---
     const newZ = this.position.z + this.velocity.z * deltaTime;
-    if (!this._checkCollision(this.position.x, this.position.y, newZ, world)) {
-      this.position.z = newZ;
-    } else {
+    if (this._resolveAxis(this.position.x, this.position.y, newZ, hw, 'z', world)) {
       this.velocity.z = 0;
+    } else {
+      this.position.z = newZ;
     }
+
+    this.inWater = this._checkInWater(world);
   }
 
   /**
-   * Check AABB collision at a position against world blocks
+   * Check the AABB at (newX, newY, newZ) for solid block overlap on one axis.
+   * Returns true and snaps this.position if a collision is found.
+   *
+   * The Y range spans [floor(feetY), ceil(headY)) — exactly the blocks the
+   * player body occupies. No extra rows above or below; those caused false
+   * positives in earlier versions.
    */
-  _checkCollision(x, y, z, world) {
-    if (!world) return false;
-    
-    const halfWidth = this.width / 2;
-    const feetY = y;
-    const headY = y + this.height;
-    
-    // Check all blocks in player's AABB
-    const minX = Math.floor(x - halfWidth);
-    const maxX = Math.floor(x + halfWidth);
-    const minY = Math.floor(feetY);
-    const maxY = Math.floor(headY);
-    const minZ = Math.floor(z - halfWidth);
-    const maxZ = Math.floor(z + halfWidth);
-    
+  _resolveAxis(newX, newY, newZ, hw, axis, world) {
+    const minX = Math.floor(newX - hw);
+    const maxX = Math.floor(newX + hw);
+    const minY = Math.floor(newY);              // feet block (inclusive)
+    const maxY = Math.ceil(newY + this.height); // head block (exclusive)
+    const minZ = Math.floor(newZ - hw);
+    const maxZ = Math.floor(newZ + hw);
+
     for (let bx = minX; bx <= maxX; bx++) {
       for (let by = minY; by < maxY; by++) {
         for (let bz = minZ; bz <= maxZ; bz++) {
-          const block = world.getBlockAtWorld(bx, by, bz);
-          if (block && this._isSolid(block)) {
-            return true;
+          if (!this._isSolidAt(bx, by, bz, world)) continue;
+
+          // Block occupies [bx, bx+1] × [by, by+1] × [bz, bz+1]
+          // Player AABB occupies [newX-hw, newX+hw] × [newY, newY+height] × [newZ-hw, newZ+hw]
+          // Only snap if there is actual overlap (guards against adjacent-but-touching blocks)
+          const overlapX = (newX - hw) < (bx + 1) && (newX + hw) > bx;
+          const overlapY = newY < (by + 1) && (newY + this.height) > by;
+          const overlapZ = (newZ - hw) < (bz + 1) && (newZ + hw) > bz;
+
+          if (!overlapX || !overlapY || !overlapZ) continue;
+
+          switch (axis) {
+            case 'x':
+              this.position.x = this.velocity.x > 0 ? bx - hw : bx + 1 + hw;
+              return true;
+            case 'y':
+              this.position.y = this.velocity.y > 0
+                ? by - this.height  // head bump: snap feet down below block
+                : by + 1;           // landing: snap feet to block top
+              return true;
+            case 'z':
+              this.position.z = this.velocity.z > 0 ? bz - hw : bz + 1 + hw;
+              return true;
           }
         }
       }
     }
-    
+
     return false;
   }
 
   /**
-   * Check if a block type is solid for collision purposes
+   * Check if a block is solid. Unloaded chunks treated as solid (prevents
+   * falling through chunk borders while adjacent chunk loads).
    */
-  _isSolid(blockType) {
-    // Import from chunkData when available
-    const solidTypes = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 16, 18, 19, 20, 21, 22, 25];
-    return solidTypes.includes(blockType);
+  _isSolidAt(bx, by, bz, world) {
+    const block = world.getBlockAtWorld(bx, by, bz);
+    if (block === null || block === undefined) return true; // unloaded = solid
+    if (block === 0) return false;
+    const props = BLOCK_PROPERTIES[block];
+    return props && props.solid === true;
   }
 
-  /**
-   * Get player eye position (for camera)
-   */
+  _debugLog() {
+    if (typeof CuubzLogger !== 'undefined' && CuubzLogger.DEBUG) {
+      console.log(`[Player] pos=(${this.position.x.toFixed(2)}, ${this.position.y.toFixed(2)}, ${this.position.z.toFixed(2)}) ` +
+        `vel=(${this.velocity.x.toFixed(2)}, ${this.velocity.y.toFixed(2)}, ${this.velocity.z.toFixed(2)}) onGround=${this.onGround}`);
+    }
+  }
+
+  _checkInWater(world) {
+    if (!world) return false;
+    const block = world.getBlockAtWorld(
+      Math.floor(this.position.x),
+      Math.floor(this.position.y),
+      Math.floor(this.position.z)
+    );
+    return block === BLOCK_TYPES.WATER;
+  }
+
   getEyePosition() {
     return {
       x: this.position.x,
-      y: this.position.y + 1.6, // Eye height
+      y: this.position.y + 1.6,
       z: this.position.z,
     };
   }
 
-  /**
-   * Reset player to spawn position
-   */
   respawn(spawnPoint) {
     this.position = {
       x: spawnPoint ? spawnPoint.x : 0,
@@ -259,5 +285,4 @@ class Player {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = Player;
-
 }

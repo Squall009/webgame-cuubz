@@ -275,14 +275,15 @@ class CharacterManager {
   /**
    * Select a character for play.
    */
-  selectCharacter(id) {
+  async selectCharacter(id) {
     const character = this.getCharacter(id);
     if (!character) {
       return { success: false, error: `Character "${id}" not found` };
     }
     this.selectedId = id;
-    // Update lastPlayed timestamp
+    // Update lastPlayed timestamp and persist
     character.lastPlayed = Date.now();
+    await this.storage.saveCharacter(character);
     return { success: true, character };
   }
 

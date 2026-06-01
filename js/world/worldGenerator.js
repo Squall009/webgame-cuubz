@@ -1,6 +1,9 @@
 /**
- * Cuubz — World Generator
- * Terrain generation with edge-seamless matching.
+ * Cuubz — World Generator (Rewritten)
+ * Terrain generation with clear layer structure:
+ * - Layer 0: Bedrock
+ * - Layers 1-32: Ground and caves (at or below sea level)
+ * - Layers 33-96: Mountains, air, trees
  */
 
 // Use globals from chunkData.js: Chunk, BLOCK_TYPES, SEA_LEVEL, MIN_Y, MAX_Y, CHUNK_WIDTH, CHUNK_DEPTH
@@ -20,7 +23,7 @@ class WorldGenerator {
     
     this.biomeSystem = new BiomeSystem(this.biomeTempNoise, this.biomeMoistureNoise);
     
-    // Water level
+    // Water level at sea level (layer 32)
     this.waterLevel = SEA_LEVEL;
   }
 
@@ -29,133 +32,156 @@ class WorldGenerator {
    */
   generateChunk(chunkX, chunkZ) {
     const chunk = new Chunk(chunkX, chunkZ);
-    
+
     const worldStartX = chunk.worldX;
     const worldStartZ = chunk.worldZ;
-    
-    // Pre-compute biome for each column (for performance)
-    const biomeCache = new Map();
-    
+
+    // Pre-compute biome for this chunk
+    const biomeKey = `${Math.floor(worldStartX / 16)},${Math.floor(worldStartZ / 16)}`;
+    const biome = this.biomeSystem.getBiome(worldStartX, worldStartZ);
+
+    let totalBlocksGenerated = 0;
+
+    // Generate terrain column by column
     for (let lx = 0; lx < CHUNK_WIDTH; lx++) {
       for (let lz = 0; lz < CHUNK_DEPTH; lz++) {
         const wx = worldStartX + lx;
         const wz = worldStartZ + lz;
-        
-        // Get biome for this column
-        const biomeKey = `${Math.floor(wx / 16)},${Math.floor(wz / 16)}`;
-        if (!biomeCache.has(biomeKey)) {
-          biomeCache.set(biomeKey, this.biomeSystem.getBiome(wx, wz));
-        }
-        const biome = biomeCache.get(biomeKey);
-        
-        // Generate heightmap for this column
-        const height = this._getHeight(wx, wz, biome);
-        
+
+        // Calculate surface height based on noise and biome
+        const surfaceHeight = this._getSurfaceHeight(wx, wz, biome);
+
         // Fill column from bottom to top
-        for (let y = MIN_Y; y <= MAX_Y; y++) {
+        for (let y = MIN_Y; y < MAX_Y; y++) {
           let blockType = BLOCK_TYPES.AIR;
-          
-          if (y < MIN_Y + 2) {
-            // Bedrock layer at bottom
+
+          if (y === 0) {
+            // Layer 0: Bedrock
             blockType = BLOCK_TYPES.BEDROCK;
-          } else if (y < height - 4) {
-            // Deep underground — stone with potential ores/caves
+          } else if (y < surfaceHeight - 4 && y <= SEA_LEVEL) {
+            // Deep underground (below sea level): stone with ores/caves
             blockType = this._getUndergroundBlock(wx, y, wz, biome);
-          } else if (y < height) {
-            // Transition zone — dirt/stone mix
-            blockType = this._getTransitionBlock(y, height, biome);
-          } else if (y === height) {
-            // Surface block based on biome
-            blockType = this.biomeSystem.getSurfaceBlock(biome, height);
             
-            // Special biome surfaces
-            if (biome === BIOMES.DESERT) blockType = BLOCK_TYPES.SAND;
-            else if (biome === BIOMES.TUNDRA && height >= SEA_LEVEL) blockType = BLOCK_TYPES.SNOW;
-            else if (biome === BIOMES.LAVA) blockType = BLOCK_TYPES.BLACKSTONE;
-            else if (biome === BIOMES.CORRUPT) blockType = BLOCK_TYPES.CORRUPT_STONE;
-          } else if (y <= this.waterLevel && y > height) {
-            // Water fill up to sea level
-            blockType = BLOCK_TYPES.WATER;
+            // Cave generation using noise
+            const caveValue = this.caveNoise.perlin3(wx * 0.05, y * 0.1, wz * 0.05);
+            if (caveValue > 0.6 && y < surfaceHeight - 2) {
+              blockType = BLOCK_TYPES.AIR; // Cave!
+            }
+          } else if (y < surfaceHeight && y <= SEA_LEVEL) {
+            // Transition zone near surface (below sea level): dirt/stone mix
+            const distFromSurface = surfaceHeight - y;
+            blockType = distFromSurface <= 2 ? BLOCK_TYPES.DIRT : BLOCK_TYPES.STONE;
+            
+            // Water fill if below sea level and no solid ground
+            if (y < this.waterLevel && blockType === BLOCK_TYPES.AIR) {
+              blockType = BLOCK_TYPES.WATER;
+            }
+          } else if (y === surfaceHeight) {
+            // Surface block based on biome
+            if (biome === BIOMES.DESERT) {
+              blockType = BLOCK_TYPES.SAND;
+            } else if (biome === BIOMES.TUNDRA && y >= SEA_LEVEL) {
+              blockType = BLOCK_TYPES.SNOW;
+            } else if (biome === BIOMES.LAVA) {
+              blockType = BLOCK_TYPES.BLACKSTONE;
+            } else if (biome === BIOMES.CORRUPT) {
+              blockType = BLOCK_TYPES.CORRUPT_STONE;
+            } else {
+              blockType = BLOCK_TYPES.GRASS; // Default: grass
+            }
+            
+            // Water fill if surface is below sea level
+            if (y < this.waterLevel && blockType !== BLOCK_TYPES.WATER) {
+              blockType = BLOCK_TYPES.WATER;
+            }
+          } else if (y > surfaceHeight && y <= SEA_LEVEL) {
+            // Above surface but still at or below sea level: water fill
+            if (y <= this.waterLevel) {
+              blockType = BLOCK_TYPES.WATER;
+            }
           }
-          
+
+          if (blockType !== 0) totalBlocksGenerated++;
           chunk.setBlock(lx, y, lz, blockType);
+        }
+
+        // Generate trees on surface (only above sea level)
+        if (surfaceHeight > SEA_LEVEL && surfaceHeight < MAX_Y - 10) {
+          const treeNoise = this.heightNoise.perlin2(wx * 0.5, wz * 0.5);
+          if (treeNoise > 0.7 && Math.random() < 0.3) {
+            this._generateTree(chunk, lx, surfaceHeight + 1, lz);
+          }
         }
       }
     }
-    
+
+    console.log(`[WorldGen] Chunk ${chunkX},${chunkZ}: generated ${totalBlocksGenerated} blocks.`);
+
     return chunk;
   }
 
   /**
-   * Calculate terrain height at world coordinates
+   * Calculate surface height at world coordinates
    */
-  _getHeight(wx, wz, biome) {
+  _getSurfaceHeight(wx, wz, biome) {
     // Base height from noise (multi-octave for detail)
     const baseHeight = this.heightNoise.octaveNoise2(
-      wx * 0.005, wz * 0.005, 4, 0.5
+      wx * 0.015, wz * 0.015, 4, 0.5
     );
     
     // Apply biome height modifier
     const modifier = biome ? biome.heightModifier : 0.4;
     
-    // Map noise (-1 to 1) to height range
+    // Map noise (-1 to 1) to height range based on biome
     const normalizedHeight = (baseHeight + 1) / 2; // 0-1
     
     let minHeight, maxHeight;
     if (biome === BIOMES.OCEAN) {
-      minHeight = -30;
-      maxHeight = -5;
+      minHeight = SEA_LEVEL - 5;
+      maxHeight = SEA_LEVEL - 2;
     } else if (biome === BIOMES.MOUNTAINS) {
-      minHeight = 8;
-      maxHeight = 45;
+      minHeight = SEA_LEVEL + 10;
+      maxHeight = MAX_Y - 10;
     } else if (biome === BIOMES.LAVA) {
-      minHeight = -2;
-      maxHeight = 3;
+      minHeight = SEA_LEVEL - 2;
+      maxHeight = SEA_LEVEL + 3;
     } else if (biome === BIOMES.CORRUPT) {
-      minHeight = -1;
-      maxHeight = 4;
+      minHeight = SEA_LEVEL - 1;
+      maxHeight = SEA_LEVEL + 4;
     } else {
-      minHeight = -5;
-      maxHeight = 15;
+      // Plains, Forest, Desert, Tundra: moderate terrain
+      minHeight = SEA_LEVEL - 5;
+      maxHeight = SEA_LEVEL + 20;
     }
     
-    return Math.floor(minHeight + normalizedHeight * (maxHeight - minHeight) * modifier);
+    return Math.floor(minHeight + normalizedHeight * (maxHeight - minHeight));
   }
 
   /**
-   * Get underground block with cave and ore generation
+   * Get underground block with ore generation and caves
    */
   _getUndergroundBlock(wx, y, wz, biome) {
-    // Cave detection using 3D noise thresholding
-    const caveValue = this.caveNoise.octaveNoise3(
-      wx * 0.05, y * 0.08, wz * 0.05, 3, 0.5
-    );
-    
-    if (caveValue > 0.3) {
-      return BLOCK_TYPES.AIR; // Cave space
-    }
-    
     // Start with stone
     let block = BLOCK_TYPES.STONE;
     
     // Ore generation based on depth and noise
     const oreValue = this.oreNoise.perlin3(wx * 0.1, y * 0.1, wz * 0.1);
     
-    if (y < -20 && oreValue > 0.7) {
+    if (y < SEA_LEVEL - 20 && oreValue > 0.7) {
       block = BLOCK_TYPES.DIAMOND_ORE; // Diamond deep underground
-    } else if (y < -10 && oreValue > 0.6) {
+    } else if (y < SEA_LEVEL - 10 && oreValue > 0.6) {
       block = BLOCK_TYPES.GOLD_ORE; // Gold at medium depth
-    } else if (y < 0 && oreValue > 0.5) {
+    } else if (y < SEA_LEVEL && oreValue > 0.5) {
       block = BLOCK_TYPES.IRON_ORE; // Iron above sea level underground
     } else if (oreValue > 0.45) {
       block = BLOCK_TYPES.COAL_ORE; // Coal everywhere shallow
     }
     
     // Biome-specific underground
-    if (biome === BIOMES.LAVA && y < -10 && Math.random() < 0.02) {
+    if (biome === BIOMES.LAVA && y < SEA_LEVEL - 10 && Math.random() < 0.02) {
       block = BLOCK_TYPES.LAVA;
     }
-    if (biome === BIOMES.CORRUPT && y < 0 && Math.random() < 0.01) {
+    if (biome === BIOMES.CORRUPT && y < SEA_LEVEL && Math.random() < 0.01) {
       block = BLOCK_TYPES.CORRUPT_CRYSTAL;
     }
     
@@ -163,18 +189,34 @@ class WorldGenerator {
   }
 
   /**
-   * Get transition zone block (between bedrock/stone and surface)
+   * Generate a tree at the given position
    */
-  _getTransitionBlock(y, height, biome) {
-    const distFromSurface = height - y;
+  _generateTree(chunk, x, y, z) {
+    const trunkHeight = 4 + Math.floor(Math.random() * 3); // 4-6 blocks tall
     
-    if (biome === BIOMES.DESERT) return BLOCK_TYPES.SAND;
-    if (biome === BIOMES.TUNDRA) return distFromSurface <= 2 ? BLOCK_TYPES.SNOW : BLOCK_TYPES.STONE;
-    if (biome === BIOMES.LAVA) return BLOCK_TYPES.BLACKSTONE;
-    if (biome === BIOMES.CORRUPT) return BLOCK_TYPES.CORRUPT_STONE;
+    // Trunk
+    for (let i = 0; i < trunkHeight && y + i < MAX_Y; i++) {
+      chunk.setBlock(x, y + i, z, BLOCK_TYPES.WOOD_LOG);
+    }
     
-    // Plains, Forest, Mountains: dirt near surface, stone below
-    return distFromSurface <= 3 ? BLOCK_TYPES.DIRT : BLOCK_TYPES.STONE;
+    // Leaves (simple sphere-ish shape)
+    const leafStartY = y + trunkHeight - 2;
+    const leafEndY = y + trunkHeight + 1;
+    for (let ly = leafStartY; ly <= leafEndY && ly < MAX_Y; ly++) {
+      for (let lx = x - 2; lx <= x + 2; lx++) {
+        for (let lz = z - 2; lz <= z + 2; lz++) {
+          if (lx >= 0 && lx < CHUNK_WIDTH && lz >= 0 && lz < CHUNK_DEPTH) {
+            const dist = Math.abs(lx - x) + Math.abs(ly - y - trunkHeight) + Math.abs(lz - z);
+            if (dist <= 3) {
+              // Don't overwrite trunk
+              if (!(lx === x && lz === z && ly >= y && ly < y + trunkHeight)) {
+                chunk.setBlock(lx, ly, lz, BLOCK_TYPES.LEAVES);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   /**

@@ -1,6 +1,6 @@
 /**
  * Cuubz — Chunk Data Structure
- * 16×16×96 block array (Z: -32 to +64, layer 0 = sea level)
+ * 16×16×96 block array (Y: 0 to 95, layer 0 = bedrock, layer 32 = sea level)
  */
 
 // Block type registry
@@ -75,10 +75,10 @@ const BLOCK_PROPERTIES = {
 
 const CHUNK_WIDTH = 16;
 const CHUNK_DEPTH = 16;
-const CHUNK_HEIGHT = 96; // Z: -32 to +64
-const SEA_LEVEL = 0;
-const MIN_Y = -32;
-const MAX_Y = 64;
+const CHUNK_HEIGHT = 96; // Y: 0 to 95
+const SEA_LEVEL = 32;    // Sea level at layer 32
+const MIN_Y = 0;         // Bedrock at layer 0
+const MAX_Y = 96;        // Top of world at layer 95 (index 95)
 
 class Chunk {
   /**
@@ -111,12 +111,32 @@ class Chunk {
   }
 
   /**
-   * Get block at local coordinates
+   * Get block at local coordinates (neighbor-aware)
    */
   getBlock(x, y, z) {
-    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < MIN_Y || y >= MAX_Y) {
-      return BLOCK_TYPES.AIR; // Out of bounds = air
+    if (y < MIN_Y || y >= MAX_Y) return BLOCK_TYPES.AIR; // Vertical bounds are absolute
+
+    // Check X boundaries — delegate to neighbor chunks if available
+    if (x < 0 && this.neighbors.negativeX) {
+      return this.neighbors.negativeX.getBlock(CHUNK_WIDTH + x, y, z);
     }
+    if (x >= CHUNK_WIDTH && this.neighbors.positiveX) {
+      return this.neighbors.positiveX.getBlock(x - CHUNK_WIDTH, y, z);
+    }
+    // Check Z boundaries — delegate to neighbor chunks if available
+    if (z < 0 && this.neighbors.negativeZ) {
+      return this.neighbors.negativeZ.getBlock(x, y, CHUNK_DEPTH + z);
+    }
+    if (z >= CHUNK_DEPTH && this.neighbors.positiveZ) {
+      return this.neighbors.positiveZ.getBlock(x, y, z - CHUNK_DEPTH);
+    }
+
+    // Out of X/Z bounds with no neighbors → treat as air
+    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH) {
+      return BLOCK_TYPES.AIR;
+    }
+
+    // Within local bounds — direct lookup
     const index = this._localIndex(x, y, z);
     return this.blocks[index];
   }

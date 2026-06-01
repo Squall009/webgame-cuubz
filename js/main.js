@@ -267,10 +267,10 @@
     `;
 
     // Click to select character → navigate to world screen
-    slot.addEventListener('click', (e) => {
+    slot.addEventListener('click', async (e) => {
       if (e.target.closest('.char-slot-action-btn')) return; // Don't trigger on action buttons
       if (characterManager) {
-        characterManager.selectCharacter(char.id);
+        await characterManager.selectCharacter(char.id);
         renderCharacterSlots();
         // Navigate to world selection after picking character
         showScreen('worldScreen');
@@ -542,11 +542,12 @@
       return [...this.worlds];
     }
 
-    selectWorld(id) {
+    async selectWorld(id) {
       const world = this.getWorld(id);
       if (!world) return { success: false, error: 'World not found' };
       this.selectedId = id;
       world.lastPlayed = Date.now();
+      await this.persistence.saveWorld(world);
       return { success: true, world };
     }
 
@@ -658,10 +659,10 @@
     `;
 
     // Click to select world → go to mode screen
-    slot.addEventListener('click', (e) => {
+    slot.addEventListener('click', async (e) => {
       if (e.target.closest('.world-slot-action-btn')) return;
       if (worldManager) {
-        worldManager.selectWorld(world.id);
+        await worldManager.selectWorld(world.id);
         renderWorldSlots();
         showScreen('modeScreen');
       }
@@ -1368,7 +1369,7 @@
   // Game Start
   // ============================================================
 
-  function startGame(mode) {
+  async function startGame(mode) {
     _log(`[Cuubz] Starting game in ${mode} mode...`);
 
     const selected = characterManager ? characterManager.getSelectedCharacter() : null;
@@ -1396,7 +1397,7 @@
     loadingStatus.textContent = 'Initializing renderer...';
     if (loadingProgress) loadingProgress.style.width = '10%';
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         // Hide all UI screens
         Object.values(screens).forEach(el => { if (el) el.classList.add('hidden'); });
@@ -1411,95 +1412,360 @@
         const renderer = new VoxelRenderer(container, window.innerWidth, window.innerHeight);
         _log('[Cuubz] Renderer created');
 
-        // Initialize Player
-        loadingStatus.textContent = 'Creating player...';
-        if (loadingProgress) loadingProgress.style.width = '50%';
+        // Initialize Input Systems
+        loadingStatus.textContent = 'Setting up controls...';
+        if (loadingProgress) loadingProgress.style.width = '40%';
 
-        const player = new Player();
-        player.position.x = 0;
-        player.position.y = 30;
-        player.position.z = 0;
+        const keyboard = new KeyboardInput();
+        const canvas = renderer.domElement;
+        const mouse = new MouseInput(canvas);
 
-        // Initialize World Generator
+        // Request pointer lock on canvas click
+        canvas.addEventListener('click', () => {
+          if (!mouse.locked) {
+            mouse.requestPointerLock();
+          }
+        });
+
+        // Initialize World Generator first (needed for spawn height)
+        const sensitivity = 0.002;
         loadingStatus.textContent = 'Generating terrain...';
-        if (loadingProgress) loadingProgress.style.width = '60%';
+        if (loadingProgress) loadingProgress.style.width = '50%';
 
         const worldGen = new WorldGenerator(currentWorld.seed);
 
-        // Initialize Chunk Manager
-        loadingStatus.textContent = 'Loading chunks...';
-        if (loadingProgress) loadingProgress.style.width = '75%';
+        // Initialize Texture Atlas (async)
+        loadingStatus.textContent = 'Loading textures...';
+        if (loadingProgress) loadingProgress.style.width = '60%';
 
-        // Load initial chunks around spawn via update
-        const chunkManager = new ChunkManager(renderer, worldGen.generateChunk.bind(worldGen));
-        chunkManager.update(0, 0, performance.now());
+        const textureAtlas = new TextureAtlas();
+        await textureAtlas.buildAtlas();
 
-        // Initialize Game Engine
-        loadingStatus.textContent = 'Starting game loop...';
-        if (loadingProgress) loadingProgress.style.width = '90%';
+        // Wire up texture atlas to debug overlay (top-right corner)
+        const atlasOverlay = document.getElementById('atlas-overlay');
+        const atlasCanvasEl = document.getElementById('atlas-canvas');
+        if (atlasOverlay && atlasCanvasEl && textureAtlas.canvas) {
+          const ctx = atlasCanvasEl.getContext('2d');
+          const srcW = textureAtlas.canvas.width;
+          const srcH = textureAtlas.canvas.height;
 
-        const game = new CuubzGame();
-        game.mode = mode || 'survival';
-        game.player = player;
-        game.renderer = renderer;
-        game.chunkManager = chunkManager;
-        game.worldGen = worldGen;
+          // Scale canvas to fit nicely in the overlay (max 300px wide)
+          const maxDisplayWidth = Math.min(300, window.innerWidth - 40);
+          const scale = maxDisplayWidth / srcW;
+          atlasCanvasEl.width = Math.round(srcW * scale);
+          atlasCanvasEl.height = Math.round(srcH * scale);
 
-         // Set up camera to follow player — looking slightly downward to see terrain
-        const initCamPos = new THREE.Vector3(player.position.x, player.position.y, player.position.z);
-        renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
+          // Draw the atlas scaled down
+          ctx.imageSmoothingEnabled = false; // Keep pixelated
+          ctx.drawImage(textureAtlas.canvas, 0, 0, atlasCanvasEl.width, atlasCanvasEl.height);
 
-        // Start game loop
-        loadingStatus.textContent = 'Almost ready...';
-        if (loadingProgress) loadingProgress.style.width = '100%';
+          // Draw block ID labels on each tile for visual verification
+          const debugInfo = textureAtlas.getDebugInfo();
+          if (debugInfo) {
+            ctx.font = `bold ${Math.max(8, Math.round(10 * scale))}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
 
-        setTimeout(() => {
-          game.start(mode);
+            for (const info of debugInfo) {
+              const x = info.col * srcW / textureAtlas.gridW;
+              const y = info.row * srcH / textureAtlas.gridH;
+              const w = srcW / textureAtlas.gridW;
+              const h = srcH / textureAtlas.gridH;
 
-          // Main render loop
-          function renderLoop() {
-            if (!game.running) return;
+              // Draw label background
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+              ctx.fillRect(x * scale, y * scale, w * scale, Math.min(h * scale, 14 * scale));
 
-            const now = performance.now();
-            game.delta = Math.min((now - game.lastTime) / 1000, 0.1);
-            game.lastTime = now;
-
-            // Update player position from input
-            const moveSpeed = 8 * game.delta;
-            if (window._input && window._input.keys) {
-              const keys = window._input.keys;
-              if (keys['KeyW'] || keys['ArrowUp']) player.position.z -= moveSpeed;
-              if (keys['KeyS'] || keys['ArrowDown']) player.position.z += moveSpeed;
-              if (keys['KeyA'] || keys['ArrowLeft']) player.position.x -= moveSpeed;
-              if (keys['KeyD'] || keys['ArrowRight']) player.position.x += moveSpeed;
+              // Draw block ID text
+              ctx.fillStyle = '#ffffff';
+              const label = `${info.blockId}_${info.sideNum}`;
+              ctx.fillText(label, (x + w / 2) * scale, (y + h / 2 - 1) * scale);
             }
-
-            // Keep player from falling below spawn height
-               if (player.position.y < 20) {
-                 player.position.y = 20;
-               }
-
-               // Update camera to follow player (convert plain object to Vector3)
-               const camPos = new THREE.Vector3(player.position.x, player.position.y, player.position.z);
-               renderer.updateCamera(camPos, 0, -Math.PI / 8);
-
-            // Render scene
-            renderer.render();
-
-            // Update chunk manager for player position
-            if (game.chunkManager) {
-              game.chunkManager.update(player.position.x, player.position.z, performance.now());
-            }
-
-            requestAnimationFrame(renderLoop);
           }
 
-          game.lastTime = performance.now();
-          requestAnimationFrame(renderLoop);
+          // Draw grid lines
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+          ctx.lineWidth = 1;
+          for (let col = 0; col <= textureAtlas.gridW; col++) {
+            const gx = (col * srcW / textureAtlas.gridW) * scale;
+            ctx.beginPath();
+            ctx.moveTo(gx, 0);
+            ctx.lineTo(gx, atlasCanvasEl.height);
+            ctx.stroke();
+          }
+          for (let row = 0; row <= textureAtlas.gridH; row++) {
+            const gy = (row * srcH / textureAtlas.gridH) * scale;
+            ctx.beginPath();
+            ctx.moveTo(0, gy);
+            ctx.lineTo(atlasCanvasEl.width, gy);
+            ctx.stroke();
+          }
 
-          _log('[Cuubz] Game started successfully in ' + mode + ' mode');
-        }, 500);
+          // atlasOverlay stays hidden — remove this line to show debug overlay during gameplay
+          console.log(`[Cuubz] Texture atlas built: ${textureAtlas.totalTiles} tiles in ${textureAtlas.gridW}x${textureAtlas.gridH} grid`);
+        }
 
+        // Initialize Chunk Manager with texture atlas
+        loadingStatus.textContent = 'Loading chunks...';
+        if (loadingProgress) loadingProgress.style.width = '85%';
+
+        // Load initial chunks around spawn via update
+        const chunkManager = new ChunkManager(renderer, worldGen.generateChunk.bind(worldGen), {
+          textureAtlas: textureAtlas,
+          renderDistance: 4,
+          persistence: characterManager ? characterManager.storage : null,
+          worldId: currentWorld.id,
+        });
+        chunkManager.update(0, 0, performance.now());
+
+        // Wait for initial chunks to finish building, then link neighbors and rebuild meshes
+        function waitForChunksAndLink() {
+          if (chunkManager.building) {
+            setTimeout(waitForChunksAndLink, 50);
+            return;
+          }
+
+          // All chunks loaded — link neighbor references for correct face culling
+          chunkManager.linkNeighbors();
+
+          // Rebuild all chunk meshes with proper neighbor data
+          let rebuiltCount = 0;
+          for (const [key, entry] of chunkManager.loadedChunks) {
+            if (entry.data && entry.built) {
+              const [cx, cz] = key.split(',').map(Number);
+              chunkManager.rebuildChunkMesh(cx, cz);
+              rebuiltCount++;
+            }
+          }
+
+          console.log(`[Cuubz] Linked neighbors and rebuilt ${rebuiltCount} chunk meshes`);
+
+          // Calculate spawn height from ACTUAL loaded chunk at (0,0)
+          const spawnEntry = chunkManager.loadedChunks.get('0,0');
+          let spawnHeight = 32; // Default fallback
+          
+          if (spawnEntry?.data) {
+            // Scan from top down to find highest solid block in center of chunk
+            for (let y = MAX_Y - 1; y >= MIN_Y; y--) {
+              const block = spawnEntry.data.getBlock(8, y, 8);
+              if (block !== 0 && BLOCK_PROPERTIES[block]?.solid) {
+                // Spawn on top of the solid block — feet at y+1.625 for natural standing position
+                spawnHeight = y + 1.625;
+                _log(`[Cuubz] Spawn at Y=${spawnHeight} (on solid block ${block} at Y=${y})`);
+                break;
+              }
+            }
+          } else {
+            _log('[Cuubz] WARNING: Chunk 0,0 not loaded, using default spawn height');
+          }
+
+          // Initialize Player at terrain level
+          loadingStatus.textContent = 'Creating player...';
+          if (loadingProgress) loadingProgress.style.width = '90%';
+
+          const player = new Player();
+          player.position.x = 0;
+          player.position.y = spawnHeight;
+          player.position.z = 0;
+          player.pitch = -Math.PI / 8; // Sync with initial camera pitch
+          
+          _log(`[Cuubz] Player spawned at (${player.position.x}, ${player.position.y}, ${player.position.z})`);
+
+          // Handle mouse movement for camera rotation (pointer lock) — must be after player exists
+          document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement === canvas) {
+              player.yaw -= e.movementX * sensitivity;
+              player.pitch -= e.movementY * sensitivity;
+              // Clamp pitch to avoid flipping at gimbal lock limits
+              player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
+            }
+          });
+
+          // Initialize Game Engine
+          loadingStatus.textContent = 'Starting game loop...';
+          if (loadingProgress) loadingProgress.style.width = '90%';
+
+          const game = new CuubzGame();
+          game.mode = mode || 'survival';
+          game.player = player;
+          game.renderer = renderer;
+          game.chunkManager = chunkManager;
+          game.worldGen = worldGen;
+          game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
+
+           // Set up camera at player eye level — looking slightly downward to see terrain
+          const initCamPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
+          renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
+
+          // Initialize Block Interaction system
+          const blockInteraction = new BlockInteraction({
+            renderer: renderer,
+            chunkManager: chunkManager,
+            mouse: mouse,
+            player: player,
+          });
+
+          // Start game loop
+          loadingStatus.textContent = 'Almost ready...';
+          if (loadingProgress) loadingProgress.style.width = '100%';
+
+          // Create a simple world-like object for collision detection
+          const chunkWorld = {
+            getBlockAtWorld: function(bx, by, bz) {
+              const cx = Math.floor(bx / 16);
+              const cz = Math.floor(bz / 16);
+              const key = `${cx},${cz}`;
+              const entry = chunkManager.loadedChunks.get(key);
+              if (entry && entry.data) {
+                const lx = ((bx % 16) + 16) % 16; // Handle negative modulo
+                const lz = ((bz % 16) + 16) % 16;
+                return entry.data.getBlock(lx, by, lz);
+              }
+              return null; // Unloaded chunk → treat as solid (prevents falling through borders)
+            }
+          };
+
+          setTimeout(() => {
+            game.start(mode);
+
+            // Main render loop
+            function renderLoop() {
+              if (!game.running) return;
+
+              const now = performance.now();
+              game.delta = Math.min((now - game.lastTime) / 1000, 0.1);
+              game.lastTime = now;
+
+              // Update keyboard just-pressed flags
+              keyboard.update();
+
+              // Update mouse pointer lock state
+              if (document.pointerLockElement === canvas) {
+                mouse.locked = true;
+              } else {
+                mouse.locked = false;
+              }
+
+              // Apply mouse movement to player yaw/pitch (pointer lock)
+              if (mouse._onMouseMoveBound) {
+                // Mouse movement handled via pointerlockchange event
+              }
+
+              // Build input state for player.update()
+              const inputState = {
+                forward: keyboard.forward,
+                backward: keyboard.backward,
+                left: keyboard.left,
+                right: keyboard.right,
+                jump: keyboard.jump,
+                sprint: keyboard.sprint,
+                sneak: keyboard.keys['ShiftLeft'] || keyboard.keys['ShiftRight'],
+              };
+
+              // Update player physics with input (pass chunkWorld for collision)
+              player.update(game.delta, inputState, chunkWorld);
+              
+              // Debug: log player state every 60 frames
+              if (game.frameCount % 60 === 0) {
+                console.log(`[Player] pos=(${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}) vel=(${player.velocity.x.toFixed(2)}, ${player.velocity.y.toFixed(2)}, ${player.velocity.z.toFixed(2)}) onGround=${player.onGround}`);
+              }
+
+              // Update block interaction (break/place)
+              if (blockInteraction) {
+                blockInteraction.update(game.delta);
+              }
+
+              // Keep player from falling below spawn height
+              if (player.position.y < spawnHeight - 10) {
+                player.position.y = spawnHeight;
+                player.velocity.y = 0;
+              }
+
+              // Update camera to follow player at eye level
+              const camPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
+              renderer.updateCamera(camPos, player.yaw, player.pitch);
+
+              // Render scene
+              renderer.render();
+
+              // DEBUG: Hover raycasting — show block ID at crosshair center
+              const tooltip = document.getElementById('block-tooltip');
+              const tooltipId = document.getElementById('tooltip-block-id');
+              const tooltipName = document.getElementById('tooltip-block-name');
+              if (renderer.camera && renderer.chunkGroup) {
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), renderer.camera);
+                raycaster.far = 7; // Same as block interaction range
+
+                const intersects = raycaster.intersectObjects(renderer.chunkGroup.children, true);
+                if (intersects.length > 0) {
+                  const hit = intersects[0];
+                  const obj = hit.object;
+                  if (obj.userData && obj.userData.chunkKey && obj.userData.blockIdToName) {
+                    // Calculate block position from intersection point.
+                    // Mesh position is the chunk origin in world space.
+                    // IMPORTANT: hit.point sits on the surface, so floor() can land
+                    // in the air block above. We check both the hit position and
+                    // one block below to find the actual solid block.
+                    const meshPos = obj.position;
+
+                    const localX = Math.floor(hit.point.x - meshPos.x);
+                    const localY = Math.floor(hit.point.y - meshPos.y);
+                    const localZ = Math.floor(hit.point.z - meshPos.z);
+
+                    // Clamp to chunk bounds (X/Z: 0-15, Y: -32 to 64)
+                    if (localX >= 0 && localX < 16 && localZ >= 0 && localZ < 16 && localY >= -32 && localY <= 64) {
+                      try {
+                        // First check the exact hit position
+                        let blockId = obj.userData.chunkData.getBlock(localX, localY, localZ);
+
+                        // If that's air, check one block below (hit point is on surface boundary)
+                        if (blockId === 0 && localY > -32) {
+                          blockId = obj.userData.chunkData.getBlock(localX, localY - 1, localZ);
+                        }
+
+                        const blockName = obj.userData.blockIdToName[blockId] || 'unknown';
+
+                        tooltipId.textContent = `ID: ${blockId}`;
+                        tooltipName.textContent = blockName.replace(/_/g, ' ');
+                        tooltip.classList.remove('hidden');
+                      } catch (e) {
+                        // Block out of range — hide tooltip
+                        tooltip.classList.add('hidden');
+                      }
+                    } else {
+                      tooltip.classList.add('hidden');
+                    }
+                  } else {
+                    tooltip.classList.add('hidden');
+                  }
+                } else {
+                  tooltip.classList.add('hidden');
+                }
+              }
+
+              // Update chunk manager for player position
+              if (game.chunkManager) {
+                game.chunkManager.update(player.position.x, player.position.z, performance.now());
+              }
+
+              // Periodic save dirty chunks to localStorage
+              if (game.persistence) {
+                game.persistence.periodicSave();
+              }
+
+              requestAnimationFrame(renderLoop);
+            }
+
+            game.lastTime = performance.now();
+            requestAnimationFrame(renderLoop);
+
+            _log('[Cuubz] Game started successfully in ' + mode + ' mode');
+          }, 500);
+        }
+
+        // Start the wait loop
+        waitForChunksAndLink();
       } catch (err) {
         console.error('[Cuubz] Game init failed:', err);
         loadingStatus.textContent = 'Error: ' + err.message;

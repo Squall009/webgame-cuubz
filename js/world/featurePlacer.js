@@ -102,7 +102,7 @@ class FeaturePlacer {
     for (let y = MAX_Y - 1; y >= MIN_Y; y--) {
       const block = chunk.getBlock(lx, y, lz);
       if (block !== BLOCK_TYPES.AIR && block !== BLOCK_TYPES.WATER && block !== BLOCK_TYPES.LEAVES) {
-        return y + 1; // Return the air block above surface
+        return Math.min(y + 1, MAX_Y - 1); // Clamp to valid bounds
       }
     }
     return null;

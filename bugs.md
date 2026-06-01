@@ -18,6 +18,62 @@
 | 12 | Out-of-range block coordinates in multiplayer stress test | FIXED | Multiplayer stress test | Phase 4 |
 | 13 | Duplicate HTTP handlers crash on /health endpoint | FIXED | Relay server deployment testing | Phase 4 |
 | 14 | WebSocket.OPEN reference error in matchmaking.js | FIXED | Relay server deployment testing | Phase 4 |
+| 15 | Chunk seam artifacts — no neighbor-aware face culling | OPEN | Geometry audit | Phase 0 |
+| 16 | blockIdToName mapping wrong for IDs 22+ | OPEN | Geometry audit | Phase 0 |
+| 17 | transparentIds set uses wrong block IDs | OPEN | Geometry audit | Phase 0 |
+| 18 | Cave generation runs twice with different seeds | OPEN | Geometry audit | Phase 0 |
+| 19 | Transparent geometry never separated (dead code) | OPEN | Geometry audit | Phase 0 |
+| 21 | _findSurface returns Y beyond MAX_Y | OPEN | Geometry audit | Phase 0 |
+
+---
+
+## Bug #15: Chunk seam artifacts — no neighbor-aware face culling
+- **Found:** 2026-05-28 during task "Geometry audit"
+- **Status:** OPEN
+- **Description:** `chunkMeshBuilder.js` only checks blocks within the current chunk via `chunk.getBlock(nx, ny, nz)`. For edge blocks (e.g. x=15), checking positive-X neighbor returns AIR since it's out-of-bounds. Every edge block always renders its outer face regardless of adjacent chunk contents → visible seams between chunks.
+- **Reproduction Steps:** Generate two adjacent chunks, load them in scene — visible seam lines at boundaries.
+- **Root Cause:** `buildMeshData()` calls `chunk.getBlock(nx, ny, nz)` for neighbor checks but never consults chunk neighbors for cross-chunk data. Chunk class has a `neighbors` map set by ChunkGrid, but mesh builder ignores it entirely.
+- **Fix Applied:** (pending)
+
+## Bug #16: blockIdToName mapping wrong for IDs 22+
+- **Found:** 2026-05-28 during task "Geometry audit"
+- **Status:** OPEN
+- **Description:** The `blockIdToName` map in `chunkMeshBuilder.js` diverges from `BLOCK_TYPES` in `chunkData.js` for IDs 22+. ID 22 (CORRUPT_CRYSTAL) maps to `'corrupt_cry'`, ID 23 (BED) maps to `'yellow_flower'`, etc. TextureAtlas lookup fails → blocks render as stone or broken textures.
+- **Reproduction Steps:** Generate corrupt biome terrain — corrupt crystals, beds, quest keys all render with wrong textures.
+- **Root Cause:** `blockIdToName` map was manually typed and fell out of sync with the BLOCK_TYPES enum. The texture atlas uses these names for lookup.
+- **Fix Applied:** (pending)
+
+## Bug #17: transparentIds set uses wrong block IDs
+- **Found:** 2026-05-28 during task "Geometry audit"
+- **Status:** OPEN
+- **Description:** `transparentIds` in chunkMeshBuilder.js includes IDs 22, 23, 24, 25 that map to CORRUPT_CRYSTAL (solid), BED (solid), APPLE (non-solid), QUEST_KEY (solid). Solid blocks treated as transparent → extra faces rendered and Z-fighting artifacts.
+- **Reproduction Steps:** Generate world with corrupt biome — corrupt crystals render incorrectly due to transparency flag.
+- **Root Cause:** Author mapped IDs based on an outdated block type list where indices were shifted. Current BLOCK_TYPES enum assigns different meanings to these numeric IDs.
+- **Fix Applied:** (pending)
+
+## Bug #18: Cave generation runs twice with different seeds
+- **Found:** 2026-05-28 during task "Geometry audit"
+- **Status:** OPEN
+- **Description:** Both `worldGenerator.js` `_getUndergroundBlock()` and standalone `caveGenerator.js` carve caves using identical noise parameters (`wx * 0.05, y * 0.08, wz * 0.05`) but different seeds. When both run sequentially on same chunk, two independent cave patterns carve through each other → Swiss-cheese porosity far above intended density.
+- **Reproduction Steps:** Generate any underground chunk — caves are excessively porous with double-carved tunnels.
+- **Root Cause:** `worldGenerator.js` already carves caves inline during terrain generation (line 130-135). If game flow also calls `caveGenerator.applyCaves(chunk)` afterward, same region carved twice with different seeds → ~2x cave volume removed.
+- **Fix Applied:** (pending)
+
+## Bug #19: Transparent geometry never separated (dead code)
+- **Found:** 2026-05-28 during task "Geometry audit"
+- **Status:** OPEN
+- **Description:** `chunkMeshBuilder.buildMeshData()` merges ALL faces (solid + transparent) into a single geometry. Never sets `geometry.userData.transparentGeometry`. But `chunkManager.js` checks for it — condition is never true. Code path for separating water/lava/leaves into second render pass with proper depth sorting is dead code → Z-fighting on all transparent blocks.
+- **Reproduction Steps:** Look at water or lava surfaces — z-fighting artifacts visible due to shared geometry with opaque faces.
+- **Root Cause:** `buildMeshData()` was designed to output separate solid/transparent arrays but separation logic was never implemented. ChunkManager has consumer code ready but nothing ever produces it.
+- **Fix Applied:** (pending)
+
+## Bug #21: _findSurface returns Y beyond MAX_Y
+- **Found:** 2026-05-28 during task "Geometry audit"
+- **Status:** OPEN
+- **Description:** `_findSurface()` in FeaturePlacer scans from `MAX_Y - 1` downward and returns `y + 1`. If highest solid block is at `MAX_Y - 1` (=63), it returns 64 which equals MAX_Y — outside valid chunk bounds. Trees/features placed there silently fail due to boundary checks but waste computation.
+- **Reproduction Steps:** Generate terrain with surface at y=63 (mountain biome). FeaturePlacer attempts tree placement at y=64 — silently skipped.
+- **Root Cause:** `_findSurface` returns `y + 1` without clamping to MAX_Y - 1. Consumer code checks bounds but surface calculation itself is wrong.
+- **Fix Applied:** (pending)
 
 ---
 

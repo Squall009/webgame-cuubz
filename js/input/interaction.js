@@ -1,146 +1,259 @@
 /**
  * Cuubz — Block Interaction System
- * Raycast from camera center through crosshair for break/place.
+ * Handles block breaking and placing via mouse input + raycasting.
  */
 
 class BlockInteraction {
-  constructor(crosshair, player) {
-    this.crosshair = crosshair;
-    this.player = player;
-    
-    // Break progress (for holding attack)
+  /**
+   * @param {Object} options - Configuration
+   * @param {VoxelRenderer} options.renderer - Voxel renderer with raycast() method
+   * @param {ChunkManager} options.chunkManager - Chunk manager for updating chunks
+   * @param {MouseInput} options.mouse - Mouse input handler
+   * @param {Player} options.player - Player entity
+   */
+  constructor(options) {
+    this.renderer = options.renderer;
+    this.chunkManager = options.chunkManager;
+    this.mouse = options.mouse;
+    this.player = options.player;
+
+    // Interaction range (blocks)
+    this.breakRange = 7;
+    this.placeRange = 7;
+
+    // Break animation state
     this.breakProgress = 0;
-    this.breakTarget = null;
-    this.breakDuration = 1.0; // seconds to break a block
-    
-    // Events/callbacks
-    this.onBlockBreak = null;
-    this.onBlockPlace = null;
+    this.breakingBlock = null; // { blockPos, faceNormal }
+
+    // Block types that can be broken/placed
+    this.unbreakableBlocks = new Set([11]); // BEDROCK is unbreakable (id=11)
+
+    // Selected block type for placing (from hotbar)
+    this.selectedBlockType = 3; // Default: STONE
   }
 
   /**
-   * Update interaction state per frame
+   * Update interaction state each frame.
+   * @param {number} delta - Time delta in seconds
    */
-  update(deltaTime) {
-    if (!this.crosshair) return;
-    
-    const target = this.crosshair.getTargetBlock();
-    
-    // Handle block breaking (hold left click / tap on mobile)
-    if (target && this._isBreaking()) {
-      if (!this.breakTarget || !this._sameBlock(this.breakTarget, target)) {
-        this.breakTarget = target;
-        this.breakProgress = 0;
+  update(delta) {
+    if (!this.mouse || !this.renderer) return;
+
+    // Handle block breaking on left click
+    if (this.mouse.justLeftClicked) {
+      this._tryBreakBlock();
+    }
+
+    // Handle block placing on right click
+    if (this.mouse.justRightClicked) {
+      this._tryPlaceBlock();
+    }
+  }
+
+  /**
+   * Get the block position and face normal from raycast hit.
+   * @returns {{ blockPos, faceNormal, chunkX, chunkZ } | null}
+   */
+  _getTargetBlock() {
+    const hit = this.renderer.raycast(this.breakRange);
+    if (!hit || !hit.point) return null;
+
+    // Calculate world position of the block face
+    const point = hit.point;
+    const normal = hit.faceNormal;
+
+    // Block position is the integer coordinates of the block being targeted
+    const bx = Math.floor(point.x - (normal ? normal.x * 0.5 : 0));
+    const by = Math.floor(point.y - (normal ? normal.y * 0.5 : 0));
+    const bz = Math.floor(point.z - (normal ? normal.z * 0.5 : 0));
+
+    // Chunk coordinates
+    const chunkX = Math.floor(bx / 16);
+    const chunkZ = Math.floor(bz / 16);
+
+    return { blockPos: { x: bx, y: by, z: bz }, faceNormal: normal, chunkX, chunkZ };
+  }
+
+  /**
+   * Try to break the targeted block.
+   */
+  _tryBreakBlock() {
+    const target = this._getTargetBlock();
+    if (!target) return;
+
+    const { blockPos, chunkX, chunkZ } = target;
+
+    // Get chunk data
+    const chunkData = this.chunkManager.getChunkData(chunkX, chunkZ);
+    if (!chunkData) return;
+
+    // Check distance to player
+    const dx = blockPos.x - this.player.position.x;
+    const dy = blockPos.y - this.player.position.y;
+    const dz = blockPos.z - this.player.position.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    if (dist > this.breakRange) return;
+
+    // Get block type at position
+    const blockType = chunkData.getBlock(blockPos.x, blockPos.y, blockPos.z);
+    if (blockType === 0 || this.unbreakableBlocks.has(blockType)) return;
+
+    // Break the block (set to AIR)
+    chunkData.setBlock(blockPos.x, blockPos.y, blockPos.z, 0);
+
+    // Mark chunk as dirty for saving
+    this.chunkManager.markChunkDirty(chunkX, chunkZ);
+
+    // Rebuild chunk mesh
+    this._rebuildChunk(chunkX, chunkZ);
+
+    _log(`[BlockInteraction] Broke block ${blockType} at (${blockPos.x}, ${blockPos.y}, ${blockPos.z})`);
+  }
+
+  /**
+   * Try to place a block on the targeted face.
+   */
+  _tryPlaceBlock() {
+    const target = this._getTargetBlock();
+    if (!target) return;
+
+    const { blockPos, faceNormal, chunkX, chunkZ } = target;
+
+    if (!faceNormal) return;
+
+    // Calculate placement position (adjacent to the face)
+    const placeX = blockPos.x + Math.round(faceNormal.x);
+    const placeY = blockPos.y + Math.round(faceNormal.y);
+    const placeZ = blockPos.z + Math.round(faceNormal.z);
+
+    // Check distance to player
+    const dx = placeX - this.player.position.x;
+    const dy = placeY - this.player.position.y;
+    const dz = placeZ - this.player.position.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    if (dist > this.placeRange) return;
+
+    // Don't place inside player
+    const px = Math.floor(this.player.position.x);
+    const py = Math.floor(this.player.position.y);
+    const pz = Math.floor(this.player.position.z);
+    if (placeX === px && (placeY === py || placeY === py + 1) && placeZ === pz) return;
+
+    // Find which chunk contains the placement position
+    const targetChunkX = Math.floor(placeX / 16);
+    const targetChunkZ = Math.floor(placeZ / 16);
+
+    // Get or generate chunk data for target chunk
+    let chunkData = this.chunkManager.getChunkData(targetChunkX, targetChunkZ);
+    if (!chunkData) {
+      // Chunk not loaded yet — skip placing
+      return;
+    }
+
+    // Place the block
+    chunkData.setBlock(placeX, placeY, placeZ, this.selectedBlockType);
+
+    // Mark chunk as dirty for saving
+    this.chunkManager.markChunkDirty(targetChunkX, targetChunkZ);
+
+    // Rebuild chunk mesh
+    this._rebuildChunk(targetChunkX, targetChunkZ);
+
+    _log(`[BlockInteraction] Placed block ${this.selectedBlockType} at (${placeX}, ${placeY}, ${placeZ})`);
+  }
+
+  /**
+   * Rebuild a chunk's mesh after block changes.
+   */
+  _rebuildChunk(cx, cz) {
+    const key = `${cx},${cz}`;
+    const entry = this.chunkManager.loadedChunks.get(key);
+    if (!entry || !entry.data) return;
+
+    // Remove old meshes from scene
+    if (entry.mesh) {
+      if (this.renderer.chunkGroup) {
+        this.renderer.chunkGroup.remove(entry.mesh);
       }
-      
-      this.breakProgress += deltaTime;
-      
-      // Show break progress UI (TODO)
-      this._updateBreakUI();
-      
-      if (this.breakProgress >= this.breakDuration) {
-        this._breakBlock(target);
-        this.breakProgress = 0;
-        this.breakTarget = null;
+      if (entry.mesh.geometry) entry.mesh.geometry.dispose();
+      if (entry.mesh.material) entry.mesh.material.dispose();
+    }
+
+    if (entry.transMesh) {
+      if (this.renderer.chunkGroup) {
+        this.renderer.chunkGroup.remove(entry.transMesh);
       }
-    } else {
-      this.breakTarget = null;
-      this.breakProgress = 0;
+      if (entry.transMesh.geometry) entry.transMesh.geometry.dispose();
+      if (entry.transMesh.material) entry.transMesh.material.dispose();
     }
-    
-    // Handle block placing (right click / secondary tap)
-    if (target && this._isPlacing()) {
-      const placePos = this.crosshair.getPlacePosition();
-      
-      if (placePos && !this._isInsidePlayer(placePos)) {
-        this._placeBlock(placePos);
-        this._consumePlaceAction();
+
+    // Rebuild meshes
+    const chunkData = entry.data;
+    const meshBuilder = new ChunkMeshBuilder();
+    const meshData = meshBuilder.buildMeshData(chunkData, this.chunkManager.textureAtlas);
+    let solidMesh = null;
+    let transMesh = null;
+
+    if (meshData.indices.length > 0 || (meshData.transparentIndices && meshData.transparentIndices.length > 0)) {
+      const geoResult = meshBuilder.buildThreeGeometry(meshData, chunkData);
+
+      // Solid mesh
+      if (geoResult.solidGeometry) {
+        let material;
+        if (this.chunkManager.textureAtlas && this.chunkManager.textureAtlas.loaded) {
+          material = new THREE.MeshLambertMaterial({
+            map: this.chunkManager.textureAtlas.getTexture(),
+            fog: true
+          });
+        } else {
+          material = new THREE.MeshLambertMaterial({
+            color: 0x8B7355,
+            fog: true
+          });
+        }
+
+        solidMesh = new THREE.Mesh(geoResult.solidGeometry, material);
+        solidMesh.position.set(cx * 16, 0, cz * 16);
+        if (this.renderer.chunkGroup) {
+          this.renderer.chunkGroup.add(solidMesh);
+        }
+      }
+
+      // Transparent mesh
+      if (geoResult.transparentGeometry) {
+        const transMaterial = new THREE.MeshLambertMaterial({
+          map: this.chunkManager.textureAtlas ? this.chunkManager.textureAtlas.getTexture() : null,
+          transparent: true,
+          opacity: 0.6,
+          depthWrite: false,
+          fog: true
+        });
+
+        transMesh = new THREE.Mesh(geoResult.transparentGeometry, transMaterial);
+        transMesh.position.set(cx * 16, 0, cz * 16);
+        if (this.renderer.chunkGroup) {
+          this.renderer.chunkGroup.add(transMesh);
+        }
       }
     }
+
+    // Update entry
+    entry.mesh = solidMesh;
+    entry.transMesh = transMesh;
+    entry.built = !!(solidMesh || transMesh);
   }
 
   /**
-   * Break a block at the target position
+   * Set the selected block type for placing.
+   * @param {number} blockType - Block type ID from BLOCK_TYPES
    */
-  _breakBlock(target) {
-    if (this.onBlockBreak) {
-      this.onBlockBreak(target);
-    }
-    
-    // TODO: Add block to inventory, play break sound
-  }
-
-  /**
-   * Place a block at the target face
-   */
-  _placeBlock(position) {
-    if (this.onBlockPlace) {
-      const selectedSlot = this.player ? this.player.inventory?.selectedSlot : 0;
-      this.onBlockPlace(position, selectedSlot);
-    }
-    
-    // TODO: Remove block from inventory, play place sound
-  }
-
-  /**
-   * Check if player is breaking (holding attack)
-   */
-  _isBreaking() {
-    // Desktop: left mouse button held
-    // Mobile: break button or long tap
-    return false; // Will be wired to input handlers
-  }
-
-  /**
-   * Check if player is placing
-   */
-  _isPlacing() {
-    // Desktop: right click
-    // Mobile: place button
-    return false; // Will be wired to input handlers
-  }
-
-  /**
-   * Consume the place action (prevent repeat)
-   */
-  _consumePlaceAction() {
-    // Clear the placing flag
-  }
-
-  /**
-   * Check if position is inside player bounding box
-   */
-  _isInsidePlayer(pos) {
-    if (!this.player) return false;
-    
-    const px = this.player.position.x;
-    const py = this.player.position.y;
-    const pz = this.player.position.z;
-    
-    // Player dimensions: ~0.8 wide × 1.8 tall
-    return (
-      Math.abs(pos.x - px) < 0.5 &&
-      Math.abs(pos.z - pz) < 0.5 &&
-      pos.y >= py && pos.y <= py + 1.8
-    );
-  }
-
-  /**
-   * Check if two block positions are the same
-   */
-  _sameBlock(a, b) {
-    return a.x === b.x && a.y === b.y && a.z === b.z;
-  }
-
-  /**
-   * Update break progress UI
-   */
-  _updateBreakUI() {
-    // TODO: Show progress bar near crosshair
+  setSelectedBlockType(blockType) {
+    this.selectedBlockType = blockType;
   }
 }
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = BlockInteraction;
-
 }

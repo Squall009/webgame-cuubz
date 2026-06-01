@@ -66,6 +66,9 @@ class VoxelRenderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.container.appendChild(this.renderer.domElement);
     
+    // Expose domElement for external access (input handlers)
+    this.domElement = this.renderer.domElement;
+    
     // Lighting — ambient + directional sun
     const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
     this.scene.add(ambientLight);

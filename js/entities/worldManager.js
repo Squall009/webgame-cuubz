@@ -304,14 +304,15 @@ class WorldManager {
   /**
    * Select a world for play.
    */
-  selectWorld(id) {
+  async selectWorld(id) {
     const world = this.getWorld(id);
     if (!world) {
       return { success: false, error: `World "${id}" not found` };
     }
     this.selectedId = id;
-    // Update lastPlayed timestamp
+    // Update lastPlayed timestamp and persist
     world.lastPlayed = Date.now();
+    await this.storage.saveWorld(world);
     return { success: true, world };
   }
 
