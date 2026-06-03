@@ -346,6 +346,9 @@
 
   function openCreateWorldModal() {
     document.getElementById('world-name').value = '';
+    // Generate a random seed and display it (user can edit or leave blank for another random)
+    const randomSeed = Math.floor(Math.random() * 0xFFFFFFFF);
+    document.getElementById('world-seed').value = String(randomSeed);
     hideWorldError();
     modals.createWorldModal.classList.remove('hidden');
     // Force modal-content visible
@@ -801,7 +804,21 @@
     document.getElementById('btn-save-world').addEventListener('click', async () => {
       const name = document.getElementById('world-name').value.trim();
       if (!name) { showWorldError('Please enter a world name'); return; }
-      const result = await worldManager.createWorld(name);
+
+      // Parse seed from input — blank means random, invalid values fall back to random
+      let seed = undefined;
+      const seedInput = document.getElementById('world-seed').value.trim();
+      if (seedInput !== '') {
+        const parsed = parseInt(seedInput, 10);
+        if (!isNaN(parsed)) {
+          seed = parsed;
+        } else {
+          showWorldError('Seed must be a valid integer (or leave blank for random)');
+          return;
+        }
+      }
+
+      const result = await worldManager.createWorld(name, seed);
       if (result.success) {
         closeCreateWorldModal();
         renderWorldSlots();
@@ -1417,6 +1434,7 @@
         if (loadingProgress) loadingProgress.style.width = '40%';
 
         const keyboard = new KeyboardInput();
+        const touch = new TouchInput();
         const canvas = renderer.domElement;
         const mouse = new MouseInput(canvas);
 
@@ -1509,10 +1527,10 @@
         loadingStatus.textContent = 'Loading chunks...';
         if (loadingProgress) loadingProgress.style.width = '85%';
 
-        // Load initial chunks around spawn via update
+        // Load initial chunks around spawn via update (renderDistance 8 = ~17x17 chunk area)
         const chunkManager = new ChunkManager(renderer, worldGen.generateChunk.bind(worldGen), {
           textureAtlas: textureAtlas,
-          renderDistance: 4,
+          renderDistance: 8,
           persistence: characterManager ? characterManager.storage : null,
           worldId: currentWorld.id,
         });
@@ -1540,36 +1558,121 @@
 
           console.log(`[Cuubz] Linked neighbors and rebuilt ${rebuiltCount} chunk meshes`);
 
-          // Calculate spawn height from ACTUAL loaded chunk at (0,0)
-          const spawnEntry = chunkManager.loadedChunks.get('0,0');
-          let spawnHeight = 32; // Default fallback
-          
-          if (spawnEntry?.data) {
-            // Scan from top down to find highest solid block in center of chunk
-            for (let y = MAX_Y - 1; y >= MIN_Y; y--) {
-              const block = spawnEntry.data.getBlock(8, y, 8);
-              if (block !== 0 && BLOCK_PROPERTIES[block]?.solid) {
-                // Spawn on top of the solid block — feet at y+1.625 for natural standing position
-                spawnHeight = y + 1.625;
-                _log(`[Cuubz] Spawn at Y=${spawnHeight} (on solid block ${block} at Y=${y})`);
-                break;
+          // Calculate spawn position — search all loaded chunks for dry plains surface (GRASS/DIRT)
+          // Must have: ground block above sea level, no water directly above it, adjacent columns clear
+          let bestSpawnX = 0, bestSpawnZ = 0, bestSpawnY = MIN_Y;
+          let debugCandidates = 0, debugRejectedByWater = 0, debugRejectedByAdjacent = 0, debugAccepted = 0;
+
+          function isColumnClear(entry, lx, lz, fromY, toY) {
+            // Check that all blocks from 'fromY' up to 'toY' are AIR (no water or solid blocks)
+            for (let y = fromY; y <= toY; y++) {
+              if (entry.data.getBlock(lx, y, lz) !== BLOCK_TYPES.AIR) return false;
+            }
+            return true;
+          }
+
+          function isAdjacentClear(entry, lx, lz, spawnY, cx, cz) {
+            // Check the 8 adjacent columns at spawn height and one above — must be AIR
+            for (let dx = -1; dx <= 1; dx++) {
+              for (let dz = -1; dz <= 1; dz++) {
+                if (dx === 0 && dz === 0) continue; // Skip center column
+                const nx = lx + dx, nz = lz + dz;
+
+                // If within this chunk, check directly
+                if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16) {
+                  if (!isColumnClear(entry, nx, nz, spawnY - 2, spawnY + 3)) return false;
+                  continue;
+                }
+
+                // If outside this chunk boundary, check the neighbor chunk instead of rejecting outright
+                const neighborCx = cx + Math.floor(nx / 16);
+                const neighborCz = cz + Math.floor(nz / 16);
+                const key = `${neighborCx},${neighborCz}`;
+                const neighborEntry = chunkManager.loadedChunks.get(key);
+
+                // If neighbor chunk exists and is built, check it
+                if (neighborEntry?.data && neighborEntry.built) {
+                  const localNx = ((nx % 16) + 16) % 16;
+                  const localNz = ((nz % 16) + 16) % 16;
+                  if (!isColumnClear(neighborEntry, localNx, localNz, spawnY - 2, spawnY + 3)) return false;
+                } else {
+                  // Neighbor chunk not loaded — treat as solid (safe default)
+                  return false;
+                }
               }
             }
-          } else {
-            _log('[Cuubz] WARNING: Chunk 0,0 not loaded, using default spawn height');
+            return true;
           }
+
+          for (const [key, entry] of chunkManager.loadedChunks) {
+            if (!entry?.data || !entry.built) continue;
+            const [cx, cz] = key.split(',').map(Number);
+
+            // Scan this chunk's columns from top down for plains surface blocks
+            for (let lx = 0; lx < 16; lx++) {
+              for (let lz = 0; lz < 16; lz++) {
+                for (let y = MAX_Y - 1; y >= MIN_Y; y--) {
+                  const block = entry.data.getBlock(lx, y, lz);
+                  // Plains surface blocks: GRASS and DIRT are solid ground
+                  if ((block === BLOCK_TYPES.GRASS || block === BLOCK_TYPES.DIRT) && BLOCK_PROPERTIES[block]?.solid) {
+                    debugCandidates++;
+
+                    // Must be above sea level (or fallback if nothing else found)
+                    if (y <= 28 && bestSpawnY !== MIN_Y) continue;
+
+                    // Check column from ground up to y+4 is clear AIR — enough for player headroom (no water/leaves blocking)
+                    const colClear = isColumnClear(entry, lx, lz, y + 1, y + 4);
+                    if (!colClear) {
+                      debugRejectedByWater++;
+                      continue;
+                    }
+
+                    // Check adjacent columns are clear so player doesn't spawn in a wall
+                    const adjClear = isAdjacentClear(entry, lx, lz, y + 1, cx, cz);
+                    if (!adjClear) {
+                      debugRejectedByAdjacent++;
+                      continue;
+                    }
+
+                    debugAccepted++;
+
+                    // This is a valid dry spawn point — prefer highest Y
+                    const worldX = cx * 16 + lx;
+                    const worldZ = cz * 16 + lz;
+                    if (y > bestSpawnY) {
+                      bestSpawnX = worldX;
+                      bestSpawnZ = worldZ;
+                      bestSpawnY = y;
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          console.log(`[Cuubz] Spawn search: ${debugCandidates} grass/dirt candidates, ${debugAccepted} accepted, ${debugRejectedByWater} rejected (column not clear), ${debugRejectedByAdjacent} rejected (adjacent blocked)`);
+          if (bestSpawnY === MIN_Y) {
+            console.warn(`[Cuubz] WARNING: No valid dry spawn found! Falling back to Y=${MIN_Y + 1.625 + 2}`);
+          } else {
+            console.log(`[Cuubz] Spawn selected at world (${bestSpawnX}, ${bestSpawnY}, ${bestSpawnZ})`);
+          }
+
+          const spawnHeight = bestSpawnY + 1.625 + 2; // +2 units so player drops onto surface cleanly
+          _log(`[Cuubz] Spawn at Y=${spawnHeight} (on plains ground, +2 above surface)`);
 
           // Initialize Player at terrain level
           loadingStatus.textContent = 'Creating player...';
           if (loadingProgress) loadingProgress.style.width = '90%';
 
           const player = new Player();
-          player.position.x = 0;
+          player.position.x = bestSpawnX + 0.5; // Center in chunk column
           player.position.y = spawnHeight;
-          player.position.z = 0;
+          player.position.z = bestSpawnZ + 0.5;
           player.pitch = -Math.PI / 8; // Sync with initial camera pitch
+
+          console.log(`[Cuubz] Player placed at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})`);
           
-          _log(`[Cuubz] Player spawned at (${player.position.x}, ${player.position.y}, ${player.position.z})`);
+          _log(`[Cuubz] Player spawned at (${player.position.x}, ${player.position.y}, ${player.position.z}) on dry ground`);
 
           // Handle mouse movement for camera rotation (pointer lock) — must be after player exists
           document.addEventListener('mousemove', (e) => {
@@ -1592,6 +1695,7 @@
           game.chunkManager = chunkManager;
           game.worldGen = worldGen;
           game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
+          game.frameCount = 0; // Frame counter for debug logging
 
            // Set up camera at player eye level — looking slightly downward to see terrain
           const initCamPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
@@ -1603,6 +1707,7 @@
             chunkManager: chunkManager,
             mouse: mouse,
             player: player,
+            touch: touch, // Mobile break/place support
           });
 
           // Start game loop
@@ -1638,6 +1743,9 @@
 
               // Update keyboard just-pressed flags
               keyboard.update();
+              
+              // Update touch input (clears per-frame state)
+              touch.update();
 
               // Update mouse pointer lock state
               if (document.pointerLockElement === canvas) {
@@ -1651,19 +1759,44 @@
                 // Mouse movement handled via pointerlockchange event
               }
 
-              // Build input state for player.update()
+              // Build merged input state (keyboard OR touch — both can contribute)
               const inputState = {
-                forward: keyboard.forward,
-                backward: keyboard.backward,
-                left: keyboard.left,
-                right: keyboard.right,
-                jump: keyboard.jump,
-                sprint: keyboard.sprint,
+                forward: keyboard.forward || (touch.joystickY < -0.3),
+                backward: keyboard.backward || (touch.joystickY > 0.3),
+                left: keyboard.left || (touch.joystickX < -0.3),
+                right: keyboard.right || (touch.joystickX > 0.3),
+                jump: keyboard.jump || touch.jump,
+                sprint: keyboard.sprint, // No mobile sprint yet — could add a dedicated button later
                 sneak: keyboard.keys['ShiftLeft'] || keyboard.keys['ShiftRight'],
               };
 
               // Update player physics with input (pass chunkWorld for collision)
               player.update(game.delta, inputState, chunkWorld);
+              
+              // Apply touch look deltas to player rotation (swipe right half of screen)
+              const look = touch.consumeLookDeltas();
+              if (look.x !== 0 || look.y !== 0) {
+                player.yaw -= look.x * sensitivity;
+                player.pitch -= look.y * sensitivity;
+                // Clamp pitch to avoid flipping at gimbal lock limits
+                player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
+              }
+              
+              // Handle fly mode toggle (F key — single press only)
+              if (keyboard.consumeFlyToggle() && !player.gravityEnabled && player.flyMode) {
+                console.log('[Cuubz] ⬇️ FLY MODE DEACTIVATED — falling back to survival physics');
+                player.gravityEnabled = true;
+                player.flyMode = false;
+                player.velocity.y = 0;
+              }
+              
+              // Update fly mode indicator HUD
+              const flyIndicator = document.getElementById('fly-mode-indicator');
+              if (player.flyMode && !player.gravityEnabled) {
+                if (flyIndicator) flyIndicator.classList.remove('hidden');
+              } else {
+                if (flyIndicator) flyIndicator.classList.add('hidden');
+              }
               
               // Debug: log player state every 60 frames
               if (game.frameCount % 60 === 0) {
@@ -1675,8 +1808,11 @@
                 blockInteraction.update(game.delta);
               }
 
-              // Keep player from falling below spawn height
-              if (player.position.y < spawnHeight - 10) {
+              // Emergency rescue: only teleport if player falls completely out of the world.
+              // The old threshold was spawnHeight-10 which fired whenever you entered
+              // a cave or deep hole (e.g. spawnHeight=34 → fires at Y=24, above bedrock).
+              // Now only fires at MIN_Y-5 — the player must be genuinely below bedrock.
+              if (player.position.y < MIN_Y - 5) {
                 player.position.y = spawnHeight;
                 player.velocity.y = 0;
               }

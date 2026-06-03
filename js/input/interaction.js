@@ -16,6 +16,8 @@ class BlockInteraction {
     this.chunkManager = options.chunkManager;
     this.mouse = options.mouse;
     this.player = options.player;
+    // Optional touch input for mobile break/place (set by main.js)
+    this.touch = null;
 
     // Interaction range (blocks)
     this.breakRange = 7;
@@ -37,15 +39,19 @@ class BlockInteraction {
    * @param {number} delta - Time delta in seconds
    */
   update(delta) {
-    if (!this.mouse || !this.renderer) return;
+    if (!this.renderer) return;
 
-    // Handle block breaking on left click
-    if (this.mouse.justLeftClicked) {
+    // Handle block breaking on left click (mouse) or break button held (touch)
+    const shouldBreak = this.mouse && this.mouse.justLeftClicked || 
+                        (this.touch && this.touch.breakPressed);
+    if (shouldBreak) {
       this._tryBreakBlock();
     }
 
-    // Handle block placing on right click
-    if (this.mouse.justRightClicked) {
+    // Handle block placing on right click (mouse) or place button held (touch)
+    const shouldPlace = this.mouse && this.mouse.justRightClicked || 
+                        (this.touch && this.touch.placePressed);
+    if (shouldPlace) {
       this._tryPlaceBlock();
     }
   }

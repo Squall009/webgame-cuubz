@@ -82,6 +82,9 @@
       <div class="quest-progress" id="quest-progress"></div>
     </div>
 
+    <!-- Fly Mode Indicator -->
+    <div id="fly-mode-indicator" class="hidden">🚀 FLY MODE — Space=Up, Shift/S=Down</div>
+
     <!-- Damage Flash -->
     <div id="damage-flash"></div>
   </div>
@@ -144,6 +147,8 @@
       <h3>Create New World</h3>
       <label for="world-name">World Name:</label>
       <input type="text" id="world-name" maxlength="32" placeholder="Enter world name...">
+      <label for="world-seed">Seed (optional, leave blank for random):</label>
+      <input type="text" id="world-seed" maxlength="15" placeholder="Random seed will be generated">
       <div id="world-error" class="modal-error hidden"></div>
       <div class="modal-buttons">
         <button id="btn-save-world" class="menu-btn primary">Create World</button>

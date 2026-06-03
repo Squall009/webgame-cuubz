@@ -21,6 +21,13 @@ class TouchInput {
     this.justTapped = false;
     this.tapTimeout = null;
     
+    // Mobile action button states (break, place)
+    this.breakPressed = false;
+    this.placePressed = false;
+    
+    // Jump button state
+    this.jump = false;
+    
     // Disposed flag for cleanup safety
     this._disposed = false;
     
@@ -63,6 +70,24 @@ class TouchInput {
       this._handlers.onJumpEnd = (e) => { e.preventDefault(); this.jump = false; };
       jumpBtn.addEventListener('touchstart', this._handlers.onJumpStart);
       jumpBtn.addEventListener('touchend', this._handlers.onJumpEnd);
+    }
+    
+    // Break block button
+    const breakBtn = document.getElementById('btn-break-mobile');
+    if (breakBtn) {
+      this._handlers.onBreakStart = (e) => { e.preventDefault(); this.breakPressed = true; };
+      this._handlers.onBreakEnd = (e) => { e.preventDefault(); this.breakPressed = false; };
+      breakBtn.addEventListener('touchstart', this._handlers.onBreakStart);
+      breakBtn.addEventListener('touchend', this._handlers.onBreakEnd);
+    }
+    
+    // Place block button
+    const placeBtn = document.getElementById('btn-place-mobile');
+    if (placeBtn) {
+      this._handlers.onPlaceStart = (e) => { e.preventDefault(); this.placePressed = true; };
+      this._handlers.onPlaceEnd = (e) => { e.preventDefault(); this.placePressed = false; };
+      placeBtn.addEventListener('touchstart', this._handlers.onPlaceStart);
+      placeBtn.addEventListener('touchend', this._handlers.onPlaceEnd);
     }
   }
 
@@ -224,6 +249,18 @@ class TouchInput {
       if (jumpBtn) {
         if (this._handlers.onJumpStart) jumpBtn.removeEventListener('touchstart', this._handlers.onJumpStart);
         if (this._handlers.onJumpEnd) jumpBtn.removeEventListener('touchend', this._handlers.onJumpEnd);
+      }
+
+      const breakBtn = document.getElementById('btn-break-mobile');
+      if (breakBtn) {
+        if (this._handlers.onBreakStart) breakBtn.removeEventListener('touchstart', this._handlers.onBreakStart);
+        if (this._handlers.onBreakEnd) breakBtn.removeEventListener('touchend', this._handlers.onBreakEnd);
+      }
+
+      const placeBtn = document.getElementById('btn-place-mobile');
+      if (placeBtn) {
+        if (this._handlers.onPlaceStart) placeBtn.removeEventListener('touchstart', this._handlers.onPlaceStart);
+        if (this._handlers.onPlaceEnd) placeBtn.removeEventListener('touchend', this._handlers.onPlaceEnd);
       }
     }
 

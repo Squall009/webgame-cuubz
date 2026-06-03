@@ -5,7 +5,7 @@
 Cuubz is a web-based Minecraft-style voxel game with multiplayer support for up to 4 players. It uses **vanilla JavaScript with no build tooling** — every `.js` file is loaded as a `<script>` tag in dependency order via `index.html`. Classes and constants are exposed on the global scope (no module imports).
 
 ### Tech Stack
-- **Three.js r134** (CDN) — 3D voxel rendering
+- **Three.js r134** (local copy) — 3D voxel rendering
 - **Vanilla JavaScript** — no bundler, no transpiler
 - **WebSocket** (`ws` library on server) — multiplayer networking
 - **IndexedDB** — persistent world/character saves in browser
@@ -38,6 +38,7 @@ webgame-cuubz/
 │   │   ├── spawnManager.js # Spawn point storage per world
 │   │   └── worldGenerator.js# Orchestrates terrain generation pipeline
 │   ├── renderer/           # Three.js rendering
+│   │   ├── textureAtlas.js      # Dynamic atlas from textures/ manifest.json
 │   │   ├── chunkMeshBuilder.js  # Face culling + geometry building per chunk
 │   │   ├── chunkManager.js      # Async chunk build/unload queue
 │   │   ├── voxelRenderer.js     # Three.js scene, camera, raycasting
@@ -78,14 +79,18 @@ webgame-cuubz/
 │   ├── index.js            # HTTP + WS server entry point
 │   ├── matchmaking.js      # Session discovery relay (port 8765)
 │   └── session.js          # Game session host (dynamic port per session)
-├── textures/               # 32×32 PNG block textures
+├── textures/               # 32×32 PNG block textures (30 files + manifest.json)
 ├── scripts/                # Python utility scripts
-│   └── generate_textures.py# Procedural texture generator
+│   ├── generate_textures.py# Procedural texture generator
+│   └── check_pillow.py     # Pillow library availability checker
 ├── test/                   # Node.js test suite (jsdom + mocked WebSocket)
 │   ├── run_tests.sh        # Test runner script
-│   └── test_*.js           # ~65 individual test files
-├── sync.sh                 # Deploy to game server via rsync
-└── package.json            # Dependencies: jsdom, ws
+│   └── test_*.js           # ~58 individual test files
+├── sync.sh                 # Deploy to game server via tar-over-SSH
+├── package.json            # Dependencies: jsdom, ws (in server/)
+├── todo.md                 # Implementation phases and tracking
+├── summary.md              # This file — architecture reference
+└── README.md               # Project overview
 ```
 
 ---
@@ -140,10 +145,10 @@ webgame-cuubz/
 | `BLOCK_PROPERTIES` | Object | Per-block: `{solid, transparent, hardness, damage, drop}` |
 | `CHUNK_WIDTH` | 16 | Blocks per chunk X axis |
 | `CHUNK_DEPTH` | 16 | Blocks per chunk Z axis |
-| `CHUNK_HEIGHT` | 96 | Total height (-32 to +64) |
-| `SEA_LEVEL` | 0 | Water surface level |
-| `MIN_Y` | -32 | Bottom of world |
-| `MAX_Y` | 64 | Top of world |
+|| `CHUNK_HEIGHT` | 96 | Total height (MIN_Y=0 to MAX_Y=95) ||
+|| `SEA_LEVEL` | 32 | Water surface level — aquifer threshold ||
+|| `MIN_Y` | 0 | Bottom of world (bedrock layer) ||
+|| `MAX_Y` | 96 | Top of world (exclusive, valid Y: 0–95) ||
 
 **Class:** `Chunk`
 
@@ -167,24 +172,37 @@ webgame-cuubz/
 
 ### `js/world/biomeSystem.js` — Biome Classification
 
-**Purpose:** Determine biome from noise values, select surface blocks.
-
-**Constants:**
-| Constant | Description |
-|----------|-------------|
-| `BIOMES` | Object with 8 biomes: Plains, Forest, Desert, Tundra, Mountains, Ocean, Lava, Corrupt |
-| `BIOME_LIST` | Array of biome names |
-
-Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, waterColor, skyTint}`
+**Purpose:** Determine biome from four noise-derived climate values, select surface/subsurface/fluid blocks.
 
 **Class:** `BiomeSystem`
 
-| Method | Description |
-|--------|-------------|
-| `.getBiome(temperature, humidity)` | Returns biome name from noise values |
-| `.biomeFromValues(temp, hum)` | Same as getBiome |
-| `.getBlendedBiome(t1, h1, t2, h2, weight)` | Blend between two biomes |
-| `.getSurfaceBlock(biomeName)` | Get surface block type ID for biome |
+|| Property/Method | Description ||
+|-----------------|-------------||
+| `BIOMES` | Object with 8 biomes: OCEAN, PLAINS, FOREST, DESERT, TUNDRA, MOUNTAINS, LAVA, CORRUPT — each has `{id, fluid, surface: [topBlock, subBlock]}` ||
+| `.getBiome(temp, humidity, continentalness, erosion)` | Classify biome from climate values (see thresholds below) ||
+
+**Biome Thresholds:**
+1. **Ocean** — continentalness < 0.35
+2. **Lava/Corrupt** — erosion > 0.8 (lava if temp > 0.5, corrupt otherwise)
+3. **Mountains** — continentalness > 0.7 AND erosion < 0.4
+4. **Desert** — temp > 0.6 AND humidity < 0.35
+5. **Forest** — temp > 0.6 AND humidity ≥ 0.35, OR temp ≤ 0.6 AND humidity > 0.5
+6. **Tundra** — temp < 0.35
+7. **Plains** — default (temp 0.35–0.6, humidity ≤ 0.5)
+
+**Biome Surface Blocks:**
+| Biome | Fluid | Top Block | Sub Block |
+|-------|-------|-----------|-----------|
+| Plains | WATER | GRASS | DIRT |
+| Forest | WATER | GRASS | DIRT |
+| Desert | AIR | SAND | SAND |
+| Tundra | ICE | SNOW | STONE |
+| Mountains | WATER | STONE* | STONE |
+| Ocean | WATER | SAND | GRAVEL |
+| Lava | LAVA | BLACKSTONE | BLACKSTONE |
+| Corrupt | TOXIC_SLIME | CORRUPT_STONE | OBSIDIAN |
+
+*Mountains use SNOW above Y=78.
 
 **Load Order:** After `noise.js`, before `worldGenerator.js`.
 
@@ -322,36 +340,107 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 ---
 
-### `js/world/worldGenerator.js` — World Generation Pipeline
+### `js/world/worldGenerator.js` — World Generation Pipeline (12-Phase)
 
-**Purpose:** Orchestrate terrain generation for a single chunk.
+**Purpose:** Orchestrate terrain generation for a single chunk using density-based voxel placement with biome shaping, cave carving, and aquifer resolution.
 
 **Class:** `WorldGenerator`
 
+|| Method | Description ||
+|--------|-------------||
+| `constructor(seed)` | Create with world seed; initializes NoiseGenerator + BiomeSystem |
+| `.generateChunk(chunkX, chunkZ)` | Full 12-phase pipeline (see below) |
+| `._sampleClimate(wx, wz)` | Sample temperature/humidity/continentalness/erosion grid for a chunk |
+| `._calculateDensity(wx, y, wz, climate, biome)` | Density function: continentalness + noise terms − gravity |
+| `._sampleCaves(wx, y, wz, biome)` | Cave threshold via low/high frequency noise comparison |
+| `._applySurfacePass(chunk, lx, lz, biome)` | Replace top stone with biome-specific surface blocks |
+| `._getOreAt(wx, wy, wz)` | Ore placement by depth (diamond <12, gold <22, iron <35) |
+| `._applyCarvers(chunk)` | Random sphere carver for caves/chambers |
+| `._carveSphere(chunk, wx, wy, wz, r)` | Carve air sphere, preserving water blocks below sea level |
+| `._placeDecor(chunk, x, y, z, biome)` | Trees, flowers, cacti based on biome + noise hash |
+
+**12-Phase Pipeline (per chunk):**
+1. **Climate Sampling** — Generate 16×16 grid of temp/humidity/continentalness/erosion values via Perlin noise with contrast stretching
+2. **Biome Classification** — For each column, classify biome from climate values (ocean <0.35 cont, lava/corrupt >0.8 eros, mountains high cont+low eros, then temp/humidity grid)
+3. **Density Calculation** — Per-column density = base continentalness + erosion noise + ridge noise + detail noise − exponential gravity
+4. **Biome Shaping** — Mountains: reduce gravity ×0.6, boost ridge ×1.8; Plains: flatten ridge ×0.3, push down gravity ×1.2
+5. **River Carving** — Low river noise values carve deep trenches (density −25)
+6. **Block Placement** — density > 0 → stone; else water/air based on aquifer threshold
+7. **Aquifer Resolution** — Water fills columns below `32 + aqNoise × 12` capped at sea level 32
+8. **Bedrock** — y=0 always set to BEDROCK
+9. **Ore Placement** — Density check for ore thresholds by depth
+10. **Carver Application** — Random sphere carvers (3% chance per chunk) carve tunnels/chambers
+11. **Surface Pass** — Scan top-down, replace first stone/ore with biome surface blocks (grass/dirt, sand, snow, etc.)
+12. **Decoration Placement** — Trees in forest, flowers in plains, cacti in desert
+
+**Load Order:** Last world module. Depends on `noise.js`, `biomeSystem.js`, `chunkData.js`.
+
+---
+
+### `js/main.js` — Browser Entry & Spawn Logic
+
+**Purpose:** Menu navigation, screen flow, chunk loading, player spawn, and game loop bootstrap.
+
+**Key spawn behavior (lines ~1560–1672):**
+- After all initial chunks are loaded (~17×17 area with renderDistance 8), scans **every loaded chunk** for plains surface blocks (`GRASS` or `DIRT`)
+- For each candidate, verifies:
+  - Ground block is above sea level (y > 28)
+  - Column directly above ground has ZERO blocks from y+1 all the way to Y=95 (top of world) — no trees, overhangs, water, or anything blocking sky
+  - All 8 adjacent columns at spawn height are clear of solid/fluid blocks (player won't clip into walls), **peeking into neighboring chunks** when a candidate is near a chunk boundary
+- Tracks the **actual world coordinates** `(bestSpawnX, bestSpawnZ)` of the highest valid dry spawn point found across all chunks
+- Player spawns centered in that column: `x = bestSpawnX + 0.5`, `z = bestSpawnZ + 0.5` at height = `bestSpawnY + 1.625 + 2` — the `+2` ensures a clean drop onto the surface
+- Falls back to `(0, 34, 0)` if no valid dry spawn found (shouldn't happen with large initial area)
+
+**Debug output (check browser console):**
+```
+[Cuubz] Spawn search: N grass/dirt candidates, M accepted, X rejected (column not clear), Y rejected (adjacent blocked)
+[Cuubz] WARNING: No valid dry spawn found! Falling back to Y=Z   ← if no candidate passed all checks
+[Cuubz] Spawn selected at world (X, Y, Z)                     ← final chosen coordinates
+[Cuubz] Player placed at (X.XX, Y.YY, Z.ZZ)                  ← actual player position
+```
+
+**World creation flow:**
+- Clicking "Create New World" opens a modal that pre-fills a random seed in the **Seed** input field
+- User can edit the seed or leave it blank — blank means generate another random seed on save
+- On save, the seed is parsed as an integer (supports negative values) and passed to `BrowserWorldManager.createWorld(name, seed)`
+- The world object stores the seed in both `world.seed` and `world.biomeMap.seed`
+- When starting a game (solo or multiplayer host), `currentWorld.seed` is passed to `new WorldGenerator(seed)` for deterministic terrain generation
+
+**Load Order:** Last file loaded in `index.html`. Depends on all other modules.
+
+---
+
+### `js/renderer/textureAtlas.js` — Dynamic Texture Atlas Builder
+
+**Purpose:** Dynamically scan `textures/` folder for PNG files matching the naming convention (`BLOCKID_SIDENUM-basefilename.png`) and build a single Three.js texture atlas with UV mapping computed from the manifest.
+
+**Class:** `TextureAtlas`
+
 | Method | Description |
 |--------|-------------|
-| `constructor(seed)` | Create with world seed |
-| `.generateChunk(chunkX, chunkZ)` | Full pipeline: height → surface → caves → ores → features |
-| `._getHeight(x, z)` | Get terrain height at world coords |
-| `._getUndergroundBlock(y, biome)` | Select underground block for depth/biome |
-| `._getTransitionBlock(surface, subsurface)` | Grass/dirt transition logic |
-| `.generateWorld(chunkCount)` | Generate multiple chunks in sequence |
+| `constructor()` | Initialize empty atlas state |
+| `.buildAtlas()` | Async: load manifest.json, scan textures, build canvas + THREE.Texture |
+| `_discoverTextures()` | Parse manifest or fall back to known block ID ranges |
+| `.getDebugInfo()` | Return array of `{blockId, sideNum, col, row}` for overlay rendering |
 
-**Pipeline Order:**
-1. Noise → heightmap
-2. BiomeSystem → biome classification
-3. Fill surface + subsurface blocks
-4. CaveGenerator → carve tunnels
-5. OreGenerator → place veins
-6. FeaturePlacer → trees, flowers, features
+**Key Properties:**
+- `sideMap[blockId]` → `{ count, baseSlot, tiles: [{file, col, row}] }` — maps each block ID to its atlas tile positions (supports multi-side blocks like grass_top/grass_side)
+- `nameToId[baseName]` → block ID — reverse lookup from texture name
+- `idToName[blockId]` → base name — display name for tooltips
+- `tileSize` — read from first loaded texture (default 32px)
+- `gridW/gridH/totalTiles` — atlas grid dimensions
 
-**Load Order:** Last world module. Depends on all other world modules.
+**Naming Convention:** Files must match `^(\d+)_(\d+)-(.+)\.png$` → `{blockId}_{sideNum}-{basename}.png`. Example: `1_0-grass_top.png`, `1_1-grass_side.png`, `2_0-dirt.png`.
+
+**Adding new textures:** Just drop a PNG in `textures/` with the correct naming convention — the next game load picks it up automatically.
+
+**Load Order:** Before `chunkMeshBuilder.js`. Used by `ChunkManager` to pass texture atlas to mesh builder for UV coordinate generation.
 
 ---
 
 ### `js/renderer/chunkMeshBuilder.js` — Mesh Builder
 
-**Purpose:** Build Three.js geometry from chunk data with face culling.
+**Purpose:** Build Three.js geometry from chunk data with face culling and UV mapping from the texture atlas.
 
 **Class:** `ChunkMeshBuilder`
 
@@ -362,7 +451,7 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | `.buildThreeGeometry(meshData, materialIndex)` | Create Three.js BufferGeometry |
 | `.estimateFaceCount(chunk)` | Approximate face count before building |
 
-**Load Order:** After `chunkData.js`. Used by `chunkManager.js`.
+**Load Order:** After `chunkData.js`, `textureAtlas.js`. Used by `chunkManager.js`.
 
 ---
 
@@ -374,18 +463,19 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(renderer, chunkGrid)` | Takes VoxelRenderer and ChunkGrid |
-| `.update(delta)` | Process build/unload queue each frame |
+| `constructor(renderer, generateFn, options)` | Takes renderer, world gen function, and config (textureAtlas, renderDistance, persistence, worldId) |
+| `.update(delta, playerX, playerZ, now)` | Process build/unload queue each frame |
 | `._queueBuild(cx, cz)` | Queue chunk for mesh generation |
-| `._processQueue()` | Build next pending chunk (async) |
+| `_processQueue()` | Build next pending chunk (async via setTimeout) |
 | `._buildChunk(cx, cz)` | Generate mesh and add to scene |
 | `._unloadChunk(cx, cz)` | Remove mesh from scene |
 | `.setRenderDistance(chunks)` | Update render distance setting |
 | `.getLoadedCount()` | Number of rendered chunks |
-| `.getPerformanceState()` | Return queue depth + loaded count |
+| `.linkNeighbors()` | Link neighbor references for face culling |
+| `.rebuildChunkMesh(cx, cz)` | Rebuild a chunk's mesh with updated neighbor data |
 | `.dispose()` | Clean up all meshes |
 
-**Load Order:** After `chunkData.js`, `chunkMeshBuilder.js`. Used by `voxelRenderer.js`.
+**Load Order:** After `chunkData.js`, `textureAtlas.js`, `chunkMeshBuilder.js`. Used by `voxelRenderer.js` and the main game loop.
 
 ---
 
@@ -397,10 +487,10 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(container)` | Initialize Three.js scene + WebGLRenderer |
+| `constructor(container, width, height)` | Initialize Three.js scene + WebGLRenderer |
 | `._initThree()` | Create scene, camera, lights, fog |
 | `.loadTexture(path)` | Load PNG texture into map |
-| `.updateCamera(position, rotation)` | Update camera position and look direction |
+| `.updateCamera(position, yaw, pitch)` | Update camera position and look direction |
 | `.render()` | Call renderer.render(scene, camera) |
 | `.onResize(width, height)` | Handle window resize |
 | `.addChunkMesh(geometry, position)` | Add chunk mesh to scene |
@@ -436,13 +526,11 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 **Purpose:** Sky color, fog density, sun/moon positioning, time-of-day display.
 
 **Constants:**
-| Constant | Value |
-|----------|-------|
-| `DEFAULT_CYCLE_DURATION` | 720 seconds (12 min full day) |
-| `FOG_DENSITY_DAY` | 0.002 |
-| `FOG_DENSITY_NIGHT` | 0.008 |
-| `AMBIENT_LIGHT` | Object with day/night intensity values |
-| `SKY_COLORS` | Color palette for dawn, day, dusk, night |
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `DEFAULT_CYCLE_DURATION` | 720 seconds (12 min full day) | Day cycle length |
+| `FOG_DENSITY_DAY` | 0.002 | Fog density during daytime |
+| `FOG_DENSITY_NIGHT` | 0.008 | Fog density at night |
 
 **Class:** `Skybox`
 
@@ -459,13 +547,7 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | `.isDay()` | Boolean: is it daytime? |
 | `.getPhase()` | String: 'dawn', 'day', 'dusk', 'night' |
 | `.getTimeLabel()` | Human-readable time string |
-| `.getTimeFraction()` | Normalized 0-1 for the day cycle |
-| `.getFogDensity()` | Current fog density value |
-| `.getAmbientIntensity()` | Current ambient light level |
-| `.getStateSummary()` | Debug state object |
 | `.dispose()` | Clean up meshes |
-
-**Helper Functions (also exported):** `smoothstep()`, `lerp()`, `hexToRGB()`, `lerpColor()`, `hoursToFraction()`, `fractionToHours()`, `getSkyColorForTime()`, `isDaytime()`, `getSkyPhase()`, etc.
 
 **Load Order:** After `voxelRenderer.js`. Used by `biomeEffects.js` for day/night volume.
 
@@ -487,10 +569,7 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | `.spawnToxicBubbles()` | Spawn toxic slime particles |
 | `.getFogDensity()` | Get corrupt fog density modifier |
 | `.getFogColorHex()` | Get fog color override for corrupt biome |
-| `.getActiveParticles()` | Count of active particles |
 | `.dispose()` | Clean up particle systems |
-
-**Class:** `ParticleEffect` — Individual particle with lifetime, velocity, alpha.
 
 **Load Order:** After `skybox.js`.
 
@@ -508,11 +587,6 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | `.getCurrentFPS()` | Return current smoothed FPS |
 | `.shouldCheckAdjustment()` | Check if FPS warrants render distance change |
 | `.getAdjustment()` | Get recommended delta to render distance |
-| `.getStateSummary()` | Debug state object |
-| `.reset()` | Clear FPS history |
-| `.getRenderDistance()` | Current recommended chunk count |
-| `.setRenderDistance(chunks)` | Manually set render distance |
-| `.getLowQualityMode()` | Boolean: is low-quality mode active? |
 | `.checkAndAdjust()` | Auto-adjust based on current FPS |
 | `.resetToDefaults()` | Restore device-tier defaults |
 
@@ -531,12 +605,9 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | Method | Description |
 |--------|-------------|
 | `constructor()` | Bind keydown/keyup events |
-| `._bindEvents()` | Register event listeners |
 | `.update(delta)` | Process input each frame |
 | `.isJustPressed(keyCode)` | Check if key was pressed this frame (one-shot) |
 | `.dispose()` | Remove event listeners |
-
-**Exposed Keys:** `this.keys` object with booleans for each tracked key.
 
 **Load Order:** First input module. No dependencies on other game modules.
 
@@ -558,8 +629,6 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Properties:** `leftClick`, `rightClick`, `scrollDelta`, `movementX`, `movementY`
 
-**Load Order:** After `keyboard.js`.
-
 ---
 
 ### `js/input/touch.js` — Touch Controls
@@ -571,15 +640,12 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | Method | Description |
 |--------|-------------|
 | `constructor(camera)` | Takes Three.js camera for look rotation |
-| `._bindEvents()` | Register touchstart/touchmove/touchend |
 | `.update(delta)` | Process touch input each frame |
 | `.consumeLookDeltas()` | Return and clear accumulated look deltas |
 | `.checkTap()` | Detect single tap (for break/place) |
 | `.dispose()` | Remove event listeners |
 
 **Properties:** `joystickX`, `joystickY` (-1 to 1), `lookDeltaX`, `lookDeltaY`, `isJumping`, `isBreaking`, `isPlacing`
-
-**Load Order:** After `mouse.js`.
 
 ---
 
@@ -591,15 +657,12 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(renderer, chunkGrid, keyboard, mouse)` | Takes renderer, grid, and input refs |
-| `.update(delta)` | Process break/place actions |
+| `constructor(options)` | Takes `{renderer, chunkManager, mouse, player}` |
+| `.update(delta)` | Process break/place actions each frame |
 | `._breakBlock()` | Remove block at crosshair target |
 | `._placeBlock()` | Add block adjacent to targeted face |
-| `._isBreaking()` | Check if currently holding break button |
-| `._isPlacing()` | Check if currently holding place button |
-| `._updateBreakUI()` | Update break progress indicator |
 
-**Load Order:** Last input module. Depends on `renderer/`, `world/chunkGrid.js`.
+**Load Order:** Last input module. Depends on renderer and world modules.
 
 ---
 
@@ -614,16 +677,11 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | `constructor(options)` | Options: `{position, velocity, height, speed, jumpForce}` |
 | `.setCreativeMode(enabled)` | Toggle gravity off and fly mode on |
 | `.toggleFlyMode()` | Switch between walking and flying |
-| `.update(delta)` | Physics update: gravity, movement, collision |
+| `.update(delta, inputState, chunkWorld)` | Physics update with collision against chunk data |
 | `._moveWithCollision(dx, dy, dz)` | Move with AABB collision against chunks |
-| `._checkCollision(x, y, z, chunkGrid)` | Check if position is solid |
-| `._isSolid(blockId)` | Check if block type is solid |
 | `.getEyePosition()` | Return camera-relative eye position |
-| `.respawn(position)` | Reset to spawn point |
 
-**Properties:** `position` `{x,y,z}`, `velocity` `{x,y,z}`, `onGround`, `isFlying`, `height`, `radius`
-
-**Load Order:** After `chunkData.js`, `inventory.js`. Used by nearly all game systems.
+**Properties:** `position {x,y,z}`, `velocity {x,y,z}`, `onGround`, `isFlying`, `height`, `radius`, `yaw`, `pitch`
 
 ---
 
@@ -639,14 +697,8 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | `.init()` | Load characters from DB |
 | `.canCreateMore()` | Check if under MAX_CHARACTERS (3) |
 | `.createCharacter(name, color)` | Create and save character |
-| `.updateCharacter(id, updates)` | Update name/color |
 | `.deleteCharacter(id)` | Remove character |
-| `.getCharacter(id)` / `.getAllCharacters()` | Lookup |
 | `.selectCharacter(id)` | Mark as selected |
-| `.setInventory(id, inventory)` | Set character's inventory data |
-| `.serialize()` / `.deserialize(data)` | Save/restore state |
-
-**Constants:** `MAX_CHARACTERS = 3`, `DEFAULT_COLOR = '#4CAF50'`, `CHARACTER_COLORS` array
 
 **Note:** Browser uses `BrowserCharacterManager` in `main.js` instead. This class is for server-side tests.
 
@@ -660,19 +712,10 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(persistence)` | Takes PersistenceManager instance |
-| `.init()` | Load worlds from DB |
-| `.canCreateMore()` | Check if under MAX_WORLDS (3) |
 | `.createWorld(name, seed)` | Create and save world with biome map |
-| `.updateWorld(id, updates)` | Update name |
 | `.deleteWorld(id)` | Remove world |
-| `.getWorld(id)` / `.getAllWorlds()` | Lookup |
 | `.selectWorld(id)` | Mark as selected |
 | `.getQuestProgress(worldId)` / `.setQuestProgress(worldId, data)` | Quest save/load |
-| `.addChunkReference(worldId, cx, cz)` | Track loaded chunks for world |
-| `.serialize()` / `.deserialize(data)` | Save/restore state |
-
-**Constants:** `MAX_WORLDS = 3`, `BIOME_NAMES` array
 
 **Note:** Browser uses `BrowserWorldManager` in `main.js` instead. This class is for server-side tests.
 
@@ -684,33 +727,15 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `Boss`, `BossManager`
 
-**Boss Methods:**
 | Method | Description |
 |--------|-------------|
 | `.getHealthPercent()` | Current HP as 0-1 ratio |
-| `.getAvailableAttacks()` | Attacks available in current phase |
 | `.takeDamage(amount)` | Apply damage, check phase transitions |
-| `.die()` | Boss death handler |
-| `.checkPhaseTransition()` | Check if health threshold crossed |
 | `.transitionToPhase(newPhase)` | Switch to next phase with effects |
 | `.executeAttack(attackName)` | Execute specific attack pattern |
-| `._spawnMinions()` | Spawn minion entities |
-| `._applyShield()` | Activate shield effect |
 | `.update(delta)` | AI update based on current behavior (idle/patrol/aggro) |
-| `.reset()` | Reset boss to initial state |
 
-**BossManager Methods:**
-| Method | Description |
-|--------|-------------|
-| `constructor(scene)` | Takes Three.js scene reference |
-| `.spawnBoss(bossId, position)` | Spawn boss with given ID |
-| `.removeBoss(bossId)` | Despawn boss |
-| `.getActiveBosses()` | Return all active bosses |
-| `.update(delta)` | Update all boss AIs |
-
-**Helper Functions:** `getBossDefinition(bossId)`, `getAllBossIds()`
-
-**Load Order:** After `player.js`. Used by `damageSystem.js`.
+**BossManager Methods:** `spawnBoss(bossId, position)`, `removeBoss(bossId)`, `getActiveBosses()`, `update(delta)`
 
 ---
 
@@ -720,27 +745,14 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `QuestMarker`, `QuestMarkerManager`
 
-**QuestMarker Methods:**
 | Method | Description |
 |--------|-------------|
 | `.createMesh()` | Create marker visual (floating icon) |
 | `.updateVisuals()` | Update color based on quest state |
 | `.interact()` | Trigger quest interaction |
-| `.reset()` | Reset marker to inactive |
 | `.setActive(bool)` | Toggle visibility |
-| `.dispose()` | Remove from scene |
 
-**QuestMarkerManager Methods:**
-| Method | Description |
-|--------|-------------|
-| `constructor(scene)` | Takes Three.js scene reference |
-| `.setQuestSystem(questSystem)` | Link to quest system for state |
-| `.createAllMarkers()` | Create markers for all quests |
-| `.update(delta)` | Update marker visuals + particles |
-| `.getInteractableMarkers()` | Return markers within player range |
-| `.getClosestMarker(playerPos)` | Find nearest visible marker |
-
-**Load Order:** After `player.js`, `questSystem.js`.
+**QuestMarkerManager:** `createAllMarkers()`, `update(delta)`, `getInteractableMarkers(playerPos)`, `getClosestMarker(playerPos)`
 
 ---
 
@@ -753,25 +765,14 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 | Method | Description |
 |--------|-------------|
 | `constructor(slotCount)` | Default 36 slots (27 storage + 9 hotbar) |
-| `.slotIndex(row, col)` | Convert grid position to slot index |
-| `.slotPosition(index)` | Convert index to `{row, col}` |
-| `.isHotbarSlot(index)` | Check if slot is in hotbar (0-8) |
 | `.getSlot(index)` | Return slot data `{typeId, count, name}` or null |
 | `.setSlot(index, typeId, count)` | Set item in slot |
-| `.clearSlot(index)` | Empty a slot |
-| `.getSelectedItem()` | Get currently selected hotbar item |
-| `.getSelectedTypeId()` | Get type ID of selected item |
-| `.selectHotbarSlot(slotNum)` | Select hotbar slot 0-8 |
-| `.cycleSelection(direction)` | Cycle forward/backward in hotbar |
-| `.selectByNumber(key)` | Select by number key (1-9) |
 | `.addItem(typeId, count)` | Add item with auto-stack |
-| `.addToSlot(index, typeId, count)` | Force-add to specific slot |
 | `.removeItem(typeId, count)` | Remove items with unstack |
-| `.removeFromSlot(index, count)` | Remove from specific slot |
+| `.selectHotbarSlot(slotNum)` | Select hotbar slot 0-8 |
+| `.getSelectedItem()` | Get currently selected hotbar item |
 
 **Constants:** `ITEM_CATEGORIES` (blocks, ores, food, quest), `MAX_STACKS` per item type, `NAMED_ITEMS` display names
-
-**Load Order:** Before `player.js`, `crafting.js`.
 
 ---
 
@@ -783,20 +784,10 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(inventory)` | Takes Inventory reference |
 | `.discoverRecipe(recipeId)` | Unlock a recipe |
 | `.isRecipeDiscovered(recipeId)` | Check if recipe is known |
-| `.getAvailableRecipes()` | Return discovered recipes |
-| `.findMatchingRecipe(inputSlots)` | Match inventory slots to recipe |
 | `.canCraft(recipeId)` | Check if player has materials |
 | `.craft(recipeId)` | Consume materials, produce result |
-| `._hasInInventory(typeId, count)` | Check inventory for item |
-| `._removeFromInventory(typeId, count)` | Remove items |
-| `._addToInventory(typeId, count)` | Add crafted item |
-| `.getRecipeInfo(recipeId)` | Return recipe details |
-| `.getAllRecipes()` | Return full recipe registry |
-
-**Load Order:** After `inventory.js`.
 
 ---
 
@@ -808,23 +799,12 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(player)` | Takes Player reference |
 | `.update(delta)` | Deplete meters, check death |
-| `._depleteMeter(name, rate)` | Reduce meter value over time |
 | `.takeDamage(amount, source)` | Apply damage to health |
-| `._onDeath()` | Death handler — trigger respawn |
 | `.respawn()` | Reset meters, move player to spawn |
-| `.setSpawnPoint(x, y, z)` | Set custom spawn |
-| `.getSpawnPoint()` | Get current spawn position |
 | `.eatFood(foodId)` | Consume food item, restore hunger |
-| `.startEating(foodId)` | Begin eating animation |
-| `.cancelEating()` | Cancel mid-eat |
-| `.isValidFood(typeId)` | Check if block type is edible |
-| `.getAvailableFoods()` | Return all food items |
 
-**Constants:** `DAMAGE_SOURCES`, `DEFAULT_METERS` (health/hunger/thirst/sleep/stamina), `STAMINA_COSTS`, `STAMINA_REGEN`, `RESTORATION` values, `FOOD_ITEMS`, `EATING` durations, `DRINKING` config, `BED` config, `BED_COLORS`
-
-**Load Order:** After `player.js`, `spawnManager.js`.
+**Constants:** `DAMAGE_SOURCES`, `DEFAULT_METERS` (health/hunger/thirst/sleep/stamina), `STAMINA_COSTS/REGEN`, `FOOD_ITEMS`, `EATING` durations, `BED` config
 
 ---
 
@@ -836,24 +816,12 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(player, survival)` | Takes Player and SurvivalSystem refs |
-| `.linkSurvivalSystem(survival)` | Set/update survival reference |
 | `.update(delta)` | Check all damage sources each frame |
 | `._checkEnvironmentalDamage()` | Lava, toxic slime, corrupt stone proximity |
-| `._applyPoisonStack()` | Apply poison DoT |
-| `._updateFallTracking()` | Track fall distance for impact damage |
 | `.calculateFallDamage(fallDistance)` | Calculate damage from fall |
-| `.spawnBoss(bossId, position)` | Trigger boss spawn event |
-| `.removeBoss(bossId)` | Despawn boss |
-| `.getActiveBosses()` | Return active boss list |
 | `.damageBoss(bossId, amount)` | Deal damage to boss |
-| `.serialize()` | Save damage state |
 
 **Class:** `DamageFlashEffect` — Screen flash on damage taken.
-
-**Helper Functions:** `getBlockDamageSource(blockId)`, `isDamagingBlock(blockId)`, `getEnvironmentalDamageRate()`, `calculateBossAttackDamage()`
-
-**Load Order:** After `survival.js`, `boss.js`.
 
 ---
 
@@ -865,29 +833,14 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor(worldManager)` | Takes WorldManager reference |
-| `._initQuestStates()` | Initialize all quests to not-started |
-| `._rebuildChain()` | Reconstruct quest dependency graph |
-| `.getQuest(questId)` | Get specific quest data |
-| `.getAllQuests()` | Return full quest registry |
 | `.getCurrentQuest()` | Get active quest or null |
 | `.getNextObjective()` | Get next objective for current quest |
-| `.getProgress(questId)` | Get completion progress |
 | `.startQuest(questId)` | Begin a quest |
 | `.addProgress(questId, amount)` | Add progress toward objective |
 | `._checkCompletion()` | Check if current objective is complete |
-| `._completeQuest(questId)` | Mark quest done, grant rewards |
 | `.isGameComplete()` | Check if all quests finished |
-| `.getCompletedCount()` | Number of completed quests |
-| `.getCompletionPercentage()` | Overall progress 0-100 |
-| `.serialize()` / `.deserialize(data)` | Save/restore state |
-| `.reset()` | Reset all quests to initial state |
-| `.getMarkerPosition(questId)` | Get world position for quest marker |
-| `.getQuestsByDungeon(dungeonId)` | Group quests by dungeon area |
 
 **Constants:** `QUEST_TYPES`, `REWARD_TYPES`, `QUEST_STATES` (not_started, in_progress, completed), `QUEST_REGISTRY`
-
-**Load Order:** After `inventory.js`. Used by `questMarker.js`.
 
 ---
 
@@ -899,24 +852,12 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor()` | Creates AudioContext |
 | `.init()` | Initialize audio (must be called after user gesture) |
-| `.setMasterVolume(v)` | 0-1 master volume |
-| `.setSfxVolume(v)` | 0-1 SFX-specific volume |
 | `.playBlockBreak(blockId)` | Play break sound based on material |
 | `.playBlockPlace(blockId)` | Play place sound |
 | `.playFootstep(surface)` | Footstep based on biome surface |
-| `.playJump()` | Jump sound effect |
-| `.playLand()` | Landing thud |
-| `.playDamage()` | Hurt sound |
-| `.playUiClick()` / `.playUiHover()` | Menu sounds |
-| `.playEating()` / `.playDrinking()` | Consumption sounds |
+| `.playJump()` / `.playLand()` | Jump/landing sounds |
 | `.stopAll()` | Stop all active sounds |
-| `.dispose()` | Close AudioContext |
-
-**Helper Functions:** `getMaterialParams(blockId)`, `getFootstepParams(surface)`, `generateNoiseBuffer(length)`
-
-**Load Order:** No game dependencies. Used by `interaction.js` for break/place sounds.
 
 ---
 
@@ -928,23 +869,12 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 | Method | Description |
 |--------|-------------|
-| `constructor()` | Creates AudioContext |
 | `.init()` | Initialize audio system |
-| `.setMasterVolume(v)` | 0-1 master volume |
-| `.setTimeOfDay(fraction)` | 0-1 day fraction for volume adjustment |
 | `.setBiome(biomeName)` | Switch ambient to biome-specific config |
 | `.update(delta)` | Update music layers each frame |
-| `.getCurrentBiome()` | Return active biome name |
 | `.getEffectiveVolume()` | Current volume after day/night modifier |
-| `.getStateSummary()` | Debug state object |
-| `.stopAll()` | Stop all ambient layers |
-| `.dispose()` | Close AudioContext |
-
-**Helper Functions:** `getNoteFrequency(note)`, `calculateChordFrequencies()`, `getBiomeAmbientConfig(biome)`, `calculateDayNightVolume(fraction)`
 
 **Sound Layer Types:** Atmospheric drone, crackle, whispers, birds, wind — each biome enables different combinations.
-
-**Load Order:** No game dependencies. Used by main.js to set biome based on player position.
 
 ---
 
@@ -954,48 +884,16 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `MessageQueue`, `WSConnection`, `MultiplayerClient`
 
-**MessageQueue:**
 | Method | Description |
 |--------|-------------|
-| `.enqueue(msg)` | Add message (drops oldest if full) |
-| `.dequeue()` | Remove and return first message |
-| `.peek()` | View first message without removing |
-| `.clear()` | Empty queue |
-
-**WSConnection:**
-| Method | Description |
-|--------|-------------|
-| `constructor({url, wsFactory})` | WebSocket URL + factory function |
-| `.connect()` | Open connection with heartbeat |
-| `.disconnect()` | Graceful close with LEAVE message |
-| `.dispose()` | Hard close, no reconnect |
-| `.send(msg)` | Send or queue if disconnected |
-| `.on(eventType, callback)` | Register event handler |
-| `.off(eventType, callback)` | Remove handler |
-
-**MultiplayerClient (High-Level API):**
-| Method | Description |
-|--------|-------------|
-| `constructor({host, matchmakingPort})` | Server host + port |
 | `.connectMatchmaking()` | Connect to matchmaking relay |
-| `.onMatchmaking(eventType, callback)` | Matchmaking event handler |
-| `.onGame(eventType, callback)` | Game session event handler |
-| `.on(eventType, callback)` | Generic — auto-routes to matchmaking or game |
 | `.browseSessions()` | Request session list from relay |
 | `.hostSession(name, seed, mode)` | Create new session |
 | `.joinSession(sessionId)` | Join existing session |
-| `.joinGame(character, position, rotation)` | Enter game with player data |
-| `.sendMove(position, rotation)` | Send movement update |
 | `.breakBlock(x, y, z)` | Send block break |
 | `.placeBlock(x, y, z, blockType)` | Send block place |
-| `.sendInventory(inventory)` | Send inventory sync |
-| `.leaveSession()` | Leave current session (alias for disconnect) |
-| `.disconnect()` | Close all connections |
-| `.dispose()` | Release all resources |
 
 **Message Types:** `JOIN`, `LEAVE`, `MOVE`, `BREAK_BLOCK`, `PLACE_BLOCK`, `INVENTORY_UPDATE`, `QUEST_UPDATE`, `HEARTBEAT`, `HOST`, `BROWSE`, `WELCOME`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_MOVE`, `BLOCK_BREAK`, `BLOCK_PLACE`, `INVENTORY_SYNC`, `CHUNK_DATA`, `HOST_CREATED`, `SESSION_LIST`, `JOIN_ACCEPTED`, `JOIN_REJECTED`, `LEFT_LOBBY`, `ERROR`
-
-**Load Order:** Required by `main.js` SessionManager.
 
 ---
 
@@ -1005,25 +903,12 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `RemotePlayerState`, `RateLimiter`, `HostManager`
 
-**HostManager Methods:**
 | Method | Description |
 |--------|-------------|
-| `constructor(client)` | Takes MultiplayerClient reference |
 | `.startSession(config)` | Begin hosting with session config |
 | `.endSession()` | Shut down session |
-| `.dispose()` | Clean up all state |
 | `._handlePlayerJoined(data)` | Process player join |
-| `._handlePlayerLeft(data)` | Process player leave |
-| `._handlePlayerMove(data)` | Validate + broadcast movement |
 | `._handleRemoteBlockBreak(data)` | Validate + broadcast block break |
-| `._handleRemoteBlockPlace(data)` | Validate + broadcast block place |
-| `._handleInventorySync(data)` | Process inventory update |
-| `.requestInventorySync()` | Request full inventory from client |
-| `.handleQuestUpdate(data)` | Process quest progress |
-
-**Helper Functions:** `validateBlockBreak()`, `validateBlockPlace()`, `validateMove()`, `validateInventory()`, `validateQuestUpdate()`
-
-**Load Order:** Server-side only. Depends on `multiplayer/client.js`.
 
 ---
 
@@ -1033,21 +918,13 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `PingTracker`, `RemotePlayerState`, `PlayerSyncManager`
 
-**PlayerSyncManager Methods:**
 | Method | Description |
 |--------|-------------|
-| `constructor(renderer)` | Takes VoxelRenderer reference |
 | `.addPlayer(playerId, data)` | Create remote player mesh |
-| `.removePlayer(playerId)` | Remove remote player mesh |
 | `.processServerUpdate(data)` | Apply server position update |
 | `.update(delta)` | Interpolate all remote players |
-| `.getPlayer(playerId)` | Get remote player state |
-| `.getActivePlayers()` | Return all tracked players |
-| `.setGameMode(mode)` | Update visual based on game mode |
 
-**Helper Functions:** `buildVoxelCharacter(color)` — Create voxel mesh from character color, `shadeColor()`, `distanceBetween()`, `normalizeAngle()`, `isInRenderDistance()`
-
-**Load Order:** After `player.js`. Used by host/client for remote player visuals.
+**Helper Functions:** `buildVoxelCharacter(color)` — Create voxel mesh from character color.
 
 ---
 
@@ -1057,21 +934,11 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `ChunkCompressor`, `ChunkStreamEntry`, `ChunkStreamer`
 
-**ChunkStreamer Methods:**
 | Method | Description |
 |--------|-------------|
-| `constructor(chunkGrid)` | Takes ChunkGrid reference |
 | `.updatePlayerPosition(playerId, x, z)` | Track player position for LOD |
 | `.calculateChunkNeeds(playerId)` | Determine which chunks player needs |
 | `.loadChunk(playerId, cx, cz)` | Send chunk data to player |
-| `.unloadChunk(playerId, cx, cz)` | Tell player to unload chunk |
-| `.buildStreamQueue()` | Build priority queue of chunks to stream |
-| `.tick(delta)` | Process streaming queue each frame |
-| `.start()` | Begin periodic streaming |
-| `.stop()` | Stop streaming |
-| `.dispose()` | Clean up all state |
-
-**Load Order:** After `chunkGrid.js`. Used by host to stream world data.
 
 ---
 
@@ -1081,28 +948,10 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `InventoryValidator`, `InventorySync`
 
-**InventorySync Methods:**
 | Method | Description |
 |--------|-------------|
 | `.startPeriodicSync(interval)` | Begin periodic diff sync |
-| `.stopPeriodicSync()` | Stop syncing |
 | `.applyRemoteSync(data)` | Apply host's inventory update |
-| `.getRemoteInventory(playerId)` | Get last known remote inventory |
-| `.createSavePayload()` | Create save request for host |
-| `.restoreFromSave(data)` | Restore from host save |
-| `.dispose()` | Clean up sync state |
-
-**InventoryValidator Methods:**
-| Method | Description |
-|--------|-------------|
-| `.registerPlayer(playerId, inventory)` | Track player inventory |
-| `.validateBlockBreak(playerId, slot)` | Check if break is valid |
-| `.validateBlockPlace(playerId, slot)` | Check if place is valid |
-| `.processInventoryUpdate(playerId, data)` | Apply and validate update |
-
-**Helper Functions:** `getItemCategory()`, `getMaxStackSize()`, `isValidTypeId()`, `computeInventoryDiff()`, `applyInventoryDiff()`, `serializeInventory()`, `deserializeInventory()`
-
-**Load Order:** After `inventory.js`. Used by host/client.
 
 ---
 
@@ -1112,24 +961,11 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `PlayerListState`, `PlayerListHUD`
 
-**PlayerListHUD Methods:**
 | Method | Description |
 |--------|-------------|
-| `.show()` | Display player list |
-| `.hide()` | Hide player list |
-| `.toggleCollapse()` | Expand/collapse list |
+| `.show()` / `.hide()` | Display/hide player list |
 | `.updatePlayers(players)` | Refresh player data |
-| `.addPlayer(playerData)` | Add single player entry |
-| `.removePlayer(playerId)` | Remove player entry |
-| `.getPlayerCount()` | Number of players shown |
-| `.getPlayers()` | Return all displayed players |
-| `.clear()` | Clear list |
-| `._render()` | Re-render DOM |
-| `.destroy()` | Clean up DOM elements |
-
-**Helper Functions:** `escapeHtml()`, `getHealthColor(percent)`, `isMobileViewport()`
-
-**Load Order:** No game dependencies. Used by `main.js` for lobby + in-game HUD.
+| `.addPlayer(playerData)` / `.removePlayer(playerId)` | Manage entries |
 
 ---
 
@@ -1139,33 +975,20 @@ Each biome has: `{name, temperature, humidity, surfaceBlock, subsurfaceBlock, wa
 
 **Classes:** `DoubleTapDetector`, `BlockPalette`, `Game`
 
-**Game Methods:**
 | Method | Description |
 |--------|-------------|
-| `constructor()` | Initialize with survival mode default |
 | `.start(mode)` | Start game loop in specified mode |
 | `.stop()` | Stop game loop |
 | `.setMode(mode)` | Switch between 'survival' and 'creative' |
-| `.isCreative()` | Check if creative mode active |
-| `.isSurvival()` | Check if survival mode active |
 | `.canPlaceBlock(blockId, inventory)` | Mode-dependent block placement check |
-| `.update(timestamp)` | Main game loop tick (requestAnimationFrame) |
 
-**Properties:** `running`, `mode`, `delta`, `player`, `blockPalette`, `onModeChange`
-
-**Constants:** `Game.MODES = {SURVIVAL: 'survival', CREATIVE: 'creative'}`
-
-**Global:** `window.CuubzGame`, `window.CuubzDoubleTapDetector`, `window.CuubzBlockPalette`
-
-**Load Order:** After all systems. Used by `main.js` to start game after world selection.
+**Creative Mode Features:** Unlimited blocks, no gravity, fly mode (double-tap space), block palette selector.
 
 ---
 
 ### `js/main.js` — Browser Entry Point
 
-**Purpose:** Menu system, screen management, character/world CRUD (browser), session manager, multiplayer UI wiring.
-
-**Classes:** `BrowserCharacterManager`, `BrowserWorldManager`, `SessionManager`
+**Purpose:** Menu system, screen management, character/world CRUD (browser), session manager, game initialization.
 
 **Screen Flow:**
 ```
@@ -1174,34 +997,13 @@ mainMenu → characterScreen → worldScreen → modeScreen → loadingScreen �
 settings    createCharModal   createWorld   lobbyScreen (multiplayer)
 ```
 
-**BrowserCharacterManager Methods:** Same API as `entities/characterManager.js` but runs in browser with IndexedDB.
+**BrowserCharacterManager / BrowserWorldManager:** Same API as server-side versions but runs in browser with IndexedDB.
 
-**BrowserWorldManager Methods:** Same API as `entities/worldManager.js` but runs in browser with IndexedDB.
+**SessionManager:** Manages multiplayer client, wires matchmaking events to UI callbacks.
 
-**SessionManager Methods:**
-| Method | Description |
-|--------|-------------|
-| `constructor()` | Initialize multiplayer state |
-| `.init(serverUrl)` | Create MultiplayerClient, wire events |
-| `._wireClientEvents()` | Connect client events to UI callbacks |
-| `.browseSessions()` | Request session list |
-| `.startHosting()` | Validate form, create session |
-| `.joinSession(sessionId)` | Join existing session |
-| `.leaveSession()` | Disconnect and reset state |
+**startGame(mode):** The main game initialization function. Creates VoxelRenderer → TextureAtlas → ChunkManager → Player → BlockInteraction → starts renderLoop.
 
-**Global Functions (inside IIFE):** `showScreen()`, `renderCharacterSlots()`, `renderWorldSlots()`, `initMenuNavigation()`, `detectMobile()`, `initSessionUI()`, `escapeHtml()`, `openCreateModal()`, `openEditModal()`, `closeCharModal()`, `openDeleteModal()`, `closeDeleteModal()`, `showCharError()`, `hideCharError()`
-
-**Global Variables:** `characterManager` (BrowserCharacterManager), `worldManager` (BrowserWorldManager), `sessionManager` (SessionManager)
-
-**Initialization:**
-1. DOMContentLoaded fires `init()`
-2. Creates PersistenceManager → initializes IndexedDB
-3. Creates BrowserCharacterManager → loads characters
-4. Creates BrowserWorldManager → loads worlds
-5. Calls `initMenuNavigation()` → wires button handlers
-6. Shows main menu screen
-
-**Load Order:** MUST be last — it depends on all other modules.
+**renderLoop (in startGame):** Each frame updates: keyboard input, mouse pointer lock, player physics with collision, block interaction, camera follow, chunk manager for LOD, periodic save, and renders the scene. Also includes a debug raycasting tooltip showing hovered block ID/name.
 
 ---
 
@@ -1226,7 +1028,8 @@ Phase 3: World Generation
   └── js/world/worldGenerator.js     ← Depends on ALL above world modules
 
 Phase 4: Renderer
-  ├── js/renderer/chunkMeshBuilder.js    ← Depends on chunkData.js
+  ├── js/renderer/textureAtlas.js    ← New! Dynamic atlas from textures/ manifest
+  ├── js/renderer/chunkMeshBuilder.js    ← Depends on chunkData.js, textureAtlas.js
   ├── js/renderer/chunkManager.js        ← Depends on chunkData.js, chunkMeshBuilder.js
   ├── js/renderer/voxelRenderer.js       ← Depends on chunkData.js, chunkManager.js
   ├── js/renderer/crosshair.js           ← Depends on voxelRenderer.js
@@ -1305,7 +1108,8 @@ Game session host. Manages:
 | `BLOCK_TYPES` | chunkData.js | Object (31 types) | Block type ID registry |
 | `BLOCK_PROPERTIES` | chunkData.js | Object | Per-block solid/transparent/hardness/damage |
 | `CHUNK_WIDTH/DEPTH/HEIGHT` | chunkData.js | 16/16/96 | Chunk dimensions |
-| `SEA_LEVEL/MIN_Y/MAX_Y` | chunkData.js | 0/-32/64 | World height bounds |
+| `MIN_Y/MAX_Y` | chunkData.js | 0/96 | World height bounds (indices) |
+| `SEA_LEVEL` | chunkData.js | 32 | Water surface level |
 | `BIOMES/BIOME_LIST` | biomeSystem.js | 8 biomes | Biome definitions |
 | `MODES` | game.js | `{SURVIVAL, CREATIVE}` | Game mode constants |
 | `MAX_CHARACTERS` | main.js | 3 | Browser character limit |
@@ -1323,7 +1127,7 @@ Game session host. Manages:
 - **Test Runner:** `test/run_tests.sh` — runs all test files with Node.js
 - **Framework:** Custom assertion framework in `test/test_framework.js`
 - **Environment:** jsdom for DOM simulation, mocked WebSocket connections
-- **Test Count:** ~65 test files covering world gen, player physics, multiplayer sync, inventory, crafting, survival, quests, audio, rendering
+- **Test Count:** ~58 test files covering world gen, player physics, multiplayer sync, inventory, crafting, survival, quests, audio, rendering
 
 Run with:
 ```bash
@@ -1338,13 +1142,73 @@ cd test && bash run_tests.sh
 bash sync.sh  # rsync to game server at dadmin@10.0.30.160:/var/www/html
 ```
 
-The game is served as static files — no build step required. All JS runs in the browser via script tags.
+The game is served as static files — no build step required. All JS runs in the browser via script tags. Server-side multiplayer requires running `server/index.js` with Node.js (ws dependency).
+
+---
+
+## Quest Storyline
+
+A complete 25-quest storyline document exists at `js/systems/questStoryline.md`:
+
+**Theme:** Five ancient elemental seals are failing, corruption spreads from beneath the world. As the last Seal Bearer, restore balance by defeating corrupted guardians across four dungeons and sealing the corruption forever.
+
+| Act | Quests | Theme | Dungeon/Boss | Biomes |
+|-----|--------|-------|-------------|--------|
+| **Act 1: Awakening** | Q01–Q06 | Survival & Preparation | None | Plains, Forest, Mountains |
+| **Act 2: The First Seal** | Q07–Q12 | Discovery & Corruption | Forest Warden | Corrupt, Mountains |
+| **Act 3: Fire and Ash** | Q13–Q17 | Descent into Danger | Lava Titan | Lava |
+| **Act 4: Frozen Truth** | Q18–Q21 | Revelation & Resolve | Frost Serpent | Tundra |
+| **Act 5: The Final Seal** | Q22–Q25 | Confrontation & Resolution | Corruption Overlord + Final Seal | Corrupt (deep) |
+
+---
+
+## What Actually Works (Wired in Game Loop)
+
+The following systems are instantiated and actively updated each frame in `startGame()` → `renderLoop()`:
+
+| System | Status | Details |
+|--------|--------|---------|
+| **Menu system** | ✅ | Main → Play Solo → Character Create → World Create → Mode Select |
+| **Three.js renderer** | ✅ | WebGL canvas, scene, camera, raycasting |
+| **Texture atlas** | ✅ | Dynamic build from `textures/manifest.json`, UV mapping per block type |
+| **Chunk generation** | ✅ | Full pipeline: noise → biomes → caves → ores → features |
+| **Chunk loading/unloading** | ✅ | Async queue, player-position-based LOD, neighbor linking |
+| **Player physics** | ✅ | Gravity, movement, AABB collision against chunk data |
+| **Keyboard controls** | ✅ | WASD, space (jump), shift (sprint) |
+| **Mouse look** | ✅ | Pointer lock, yaw/pitch rotation |
+| **Block interaction** | ✅ | Break/place via raycast from crosshair center |
+| **Touch controls** | ✅ | Virtual joystick + swipe-to-look on mobile devices |
+| **Periodic save** | ✅ | IndexedDB auto-save every 30 seconds |
+| **Creative mode** | ✅ | Unlimited blocks, fly mode (double-tap space), block palette |
+
+---
+
+## What Does NOT Work (Code Exists but Not Wired)
+
+The following systems have complete code files but are **NOT instantiated or updated in the game loop**:
+
+| System | File(s) | Gap |
+|--------|---------|-----|
+| **Day/night cycle** | skybox.js | Skybox not instantiated, no time-of-day updates |
+| **Biome particles/fog** | biomeEffects.js | Particle systems not created |
+| **Performance optimizer** | performanceOptimizer.js | FPS monitoring not active |
+| **Crosshair wireframe** | crosshair.js | Highlight mesh not shown (debug tooltip exists instead) |
+| **Inventory HUD** | inventory.js | Hotbar slots not populated, no item display |
+| **Crafting UI** | crafting.js | No recipe discovery or crafting interface |
+| **Survival meters** | survival.js | Health/hunger/thirst/sleep/stamina not updated in HUD |
+| **Damage system** | damageSystem.js | Environmental/fall/boss damage not calculated |
+| **Quest system** | questSystem.js | Quest chain not started, no objectives tracked |
+| **Boss entities** | boss.js | Bosses never spawned or AI-updated |
+| **Quest markers** | questMarker.js | Visual markers not placed in world |
+| **Sound effects** | sfx.js | AudioContext never created (needs user gesture) |
+| **Ambient music** | ambient.js | Biome-specific audio layers not initialized |
+| **Multiplayer in-game** | client.js, host.js, playerSync.js, chunkStreamer.js, inventorySync.js, playerListHUD.js | Only menu UI exists; no game session connection or state sync |
 
 ---
 
 ## Known Issues & TODOs
 
-- Game loop in `game.js` has all system updates commented out — main.js handles the actual update cycle
-- `BlockPalette` uses `require()` which fails in browser (falls back to hardcoded block list)
+- `game.js` update loop has system updates commented out — the actual update cycle is in `main.js`'s `renderLoop()`
+- `BlockPalette` uses try/catch fallback for BLOCK_TYPES (works when loaded as script tag)
 - Multiplayer requires running server (`server/index.js`) with matchmaking relay on port 8765
-- No texture atlas — each block type loads individual PNG textures
+- ~100 "NaN bounding sphere" console warnings from empty chunk geometries — cosmetic only

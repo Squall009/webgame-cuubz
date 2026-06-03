@@ -37,7 +37,7 @@ class CaveGenerator {
         const wx = chunk.worldX + lx;
         const wz = chunk.worldZ + lz;
         
-        for (let y = -30; y < 5; y++) { // Only carve underground caves
+        for (let y = MIN_Y + 1; y < SEA_LEVEL + 5; y++) { // Only carve underground caves
           const block = chunk.getBlock(lx, y, lz);
           
           // Don't carve bedrock or air that's already exposed to surface
@@ -109,7 +109,7 @@ class CaveGenerator {
     // Find first cave block and do flood fill
     for (let lx = 0; lx < CHUNK_WIDTH; lx++) {
       for (let lz = 0; lz < CHUNK_DEPTH; lz++) {
-        for (let y = -30; y < 5; y++) {
+        for (let y = MIN_Y + 1; y < SEA_LEVEL + 5; y++) {
           if (chunk.getBlock(lx, y, lz) === BLOCK_TYPES.AIR) {
             // Found cave space — check neighbors for connectivity
             return this._floodFill(chunkX, chunkZ, lx, y, lz, grid);
@@ -289,7 +289,7 @@ class CaveGenerator {
         const wz = chunk.worldZ + lz;
 
         // Scan underground region only
-        for (let y = MIN_Y + 1; y < 5; y++) {
+        for (let y = MIN_Y + 1; y < SEA_LEVEL + 5; y++) {
           const currentBlock = chunk.getBlock(lx, y, lz);
           
           // Only consider cave air spaces

@@ -210,10 +210,13 @@ class ChunkManager {
       chunkData = this.generatorFn(cx, cz);
 
       // Apply cave generation (separate from terrain to avoid double-carving with different seeds)
+      // DISABLED: World generation now handles caves internally; CaveGenerator is no longer needed.
+      /*
       if (typeof CaveGenerator !== 'undefined') {
         const caveGen = new CaveGenerator(this._caveSeed || 42);
         caveGen.applyCaves(chunkData);
       }
+      */
 
       console.log(`[ChunkManager] Generated NEW chunk ${key} (not from storage)`);
     }

@@ -39,6 +39,11 @@ class Player {
     this.inWater = false;
     this.isSprinting = false;
 
+    // Double-jump → fly mode detection (survival mode)
+    this.jumpCount = 0;       // consecutive jump presses
+    this.jumpTimer = 0;        // ms since last jump press
+    this.doubleJumpThreshold = 750; // max ms between jumps to count as double-tap (increased from 250ms for usability)
+
     // Step-up height for smooth stair climbing
     this.stepHeight = 0.5;
 
@@ -120,10 +125,38 @@ class Player {
     this.velocity.x = dx;
     this.velocity.z = dz;
 
-    // Jump (survival only)
-    if (this.gravityEnabled && inputState.jump && this.onGround) {
-      this.velocity.y = this.jumpVelocity;
-      this.onGround = false;
+    // Jump (survival only) — single jump on ground, double-jump triggers flying mode
+    if (this.gravityEnabled && inputState.jump) {
+      const now = performance.now();
+      
+      if (this.onGround) {
+        // First jump from ground — reset counter
+        this.velocity.y = this.jumpVelocity;
+        this.onGround = false;
+        this.jumpCount = 1;
+        this.jumpTimer = now;
+      } else if (this.jumpCount === 0 || (now - this.jumpTimer) > this.doubleJumpThreshold * 3) {
+        // Too much time since last jump — treat as fresh single jump attempt mid-air (ignored)
+        // This handles: player jumps, lands, then tries to jump again without ground contact flag resetting
+      } else if (this.jumpCount === 1 && (now - this.jumpTimer) <= this.doubleJumpThreshold) {
+        // Double-jump detected! Activate flying mode.
+        console.log('[Cuubz] 🚀 DOUBLE-JUMP → FLY MODE ACTIVATED! Press Space to go up, Shift/S to go down.');
+        this.gravityEnabled = false;
+        this.flyMode = true;
+        this.velocity.y = this.jumpVelocity * 0.8; // upward boost on activation
+        this.jumpCount = 2;
+        this.jumpTimer = now;
+      } else if (this.jumpCount === 1) {
+        // Second jump press but too slow — treat as mid-air jump attempt (ignored in survival)
+      } else {
+        // Already double-jumped or too slow — ignore extra jump presses
+      }
+    }
+
+    // Reset jump counter when landing
+    if (this.onGround) {
+      this.jumpCount = 0;
+      this.jumpTimer = 0;
     }
 
     this._moveAndCollide(deltaTime, world);

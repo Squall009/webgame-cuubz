@@ -142,7 +142,7 @@ class FeaturePlacer {
           const ny = leafStart + dy;
           const nz = lz + dz;
           
-          if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16) continue;
+          if (ny < MIN_Y || ny >= MAX_Y) continue; // FIX: removed X/Z guard — chunk.setBlock handles it; full sphere now placed
           
           const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
           if (dist <= leafRadius) {

@@ -15,6 +15,7 @@ class KeyboardInput {
     this.jump = false;
     this.sprint = false;
     this.interact = false;
+    this.flyToggle = false;  // Press F to toggle fly mode off in survival
     
     // Key press events (for single-press actions)
     this.justPressed = {};
@@ -53,6 +54,10 @@ class KeyboardInput {
       case 'Space': this.jump = true; e.preventDefault(); break;
       case 'ShiftLeft': case 'ShiftRight': this.sprint = true; break;
       case 'KeyE': this.interact = true; break;
+      case 'KeyF': 
+        this.flyToggle = true; 
+        this._pendingJustPressed = 'KeyF';
+        break;
     }
   }
 
@@ -68,6 +73,9 @@ class KeyboardInput {
       case 'Space': this.jump = false; break;
       case 'ShiftLeft': case 'ShiftRight': this.sprint = false; break;
       case 'KeyE': this.interact = false; break;
+      case 'KeyF': 
+        this.flyToggle = false; 
+        break;
     }
   }
 
@@ -77,13 +85,26 @@ class KeyboardInput {
   update() {
     if (this._disposed) return;
     this.justPressed = {};
+    // Consume _pendingJustPressed — keys pressed this frame that haven't been read yet
+    this._pendingJustPressed = null;
   }
 
   /**
-   * Check if a key was just pressed this frame
+   * Check if a key was just pressed this frame (before update() clears it).
+   * Returns true only once per press.
    */
   isJustPressed(code) {
     return !!this.justPressed[code];
+  }
+
+  /**
+   * Get the single-press flag for KeyF and clear it immediately.
+   * Used for one-shot actions like toggling fly mode.
+   */
+  consumeFlyToggle() {
+    const wasPressed = this._pendingJustPressed === 'KeyF';
+    this._pendingJustPressed = null;
+    return wasPressed;
   }
 
   /**
