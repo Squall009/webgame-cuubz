@@ -227,10 +227,41 @@ class ChunkManager {
     // Build geometry using ChunkMeshBuilder
     try {
       const meshBuilder = new ChunkMeshBuilder();
-      const meshData = meshBuilder.buildMeshData(chunkData, this.textureAtlas);
+      
+      // Create cross-chunk neighbor lookup for proper fluid slope blending at boundaries
+      const neighborLookup = (nx, ny, nz) => {
+        const nChunkX = Math.floor(nx / 16);
+        const nChunkZ = Math.floor(nz / 16);
+        const nKey = `${nChunkX},${nChunkZ}`;
+        const nEntry = this.loadedChunks.get(nKey);
+        if (nEntry && nEntry.data) {
+          const nlx = ((nx % 16) + 16) % 16;
+          const nlz = ((nz % 16) + 16) % 16;
+          return nEntry.data.getBlock(nlx, ny, nlz);
+        }
+        // Chunk not loaded - return air (safe default for face culling)
+        return BLOCK_TYPES.AIR || 0;
+      };
+      
+      const waterLevelLookup = (nx, ny, nz) => {
+        const nChunkX = Math.floor(nx / 16);
+        const nChunkZ = Math.floor(nz / 16);
+        const nKey = `${nChunkX},${nChunkZ}`;
+        const nEntry = this.loadedChunks.get(nKey);
+        if (nEntry && nEntry.data && typeof nEntry.data.getWaterLevel === 'function') {
+          const nlx = ((nx % 16) + 16) % 16;
+          const nlz = ((nz % 16) + 16) % 16;
+          return nEntry.data.getWaterLevel(nlx, ny, nlz);
+        }
+        return 0;
+      };
+      
+      const meshData = meshBuilder.buildMeshData(chunkData, this.textureAtlas, neighborLookup, waterLevelLookup);
 
-      // Skip empty chunks (all air)
-      if (meshData.indices.length === 0) {
+      // Skip truly empty chunks — check solid + cutout + transparent geometry
+      if (meshData.indices.length === 0 &&
+          (!meshData.cutoutIndices || meshData.cutoutIndices.length === 0) &&
+          (!meshData.transparentIndices || meshData.transparentIndices.length === 0)) {
         _log(`[ChunkManager] Skipped empty chunk ${key}`);
         this.loadedChunks.set(key, { data: chunkData, mesh: null, built: true });
         return;
@@ -244,6 +275,7 @@ class ChunkManager {
       }
 
       let solidMesh = null;
+      let cutoutMesh = null;
       let transMesh = null;
 
       // Create materials with texture atlas map if available
@@ -264,20 +296,41 @@ class ChunkManager {
         solidMesh.userData.chunkData = chunkData;
       }
 
+      if (geoResult.cutoutGeometry) {
+        // Cutout material for leaves, flowers, torches (alpha test with MSAA)
+        const cutoutMaterial = new THREE.MeshLambertMaterial({
+          map: texMap,
+          color: 0xffffff,
+          transparent: true,
+          alphaToCoverage: true,  // Uses texture alpha for coverage testing — crisp edges
+          depthWrite: true,        // Write depth so cutouts occlude properly
+          fog: true,
+          side: THREE.DoubleSide
+        });
+
+        cutoutMesh = new THREE.Mesh(geoResult.cutoutGeometry, cutoutMaterial);
+        cutoutMesh.position.set(cx * 16, 0, cz * 16);
+
+        // Store block data on cutout mesh for hover raycasting
+        cutoutMesh.userData.chunkKey = key;
+        cutoutMesh.userData.blockIdToName = this.textureAtlas ? this.textureAtlas.idToName : {};
+        cutoutMesh.userData.chunkData = chunkData;
+      }
+
       if (geoResult.transparentGeometry) {
+        // Transparent material for fluids, ice, toxic slime (opacity blending)
         const transMaterial = new THREE.MeshLambertMaterial({
           map: texMap,
           color: 0xffffff,
           transparent: true,
           opacity: 0.6,
           depthWrite: false,
-          fog: true
+          fog: true,
+          side: THREE.DoubleSide
         });
 
         transMesh = new THREE.Mesh(geoResult.transparentGeometry, transMaterial);
         transMesh.position.set(cx * 16, 0, cz * 16);
-
-        // Store block data on transparent mesh for hover raycasting
         transMesh.userData.chunkKey = key;
         transMesh.userData.blockIdToName = this.textureAtlas ? this.textureAtlas.idToName : {};
         transMesh.userData.chunkData = chunkData;
@@ -286,6 +339,7 @@ class ChunkManager {
       // Add meshes to renderer's chunk group
       if (this.renderer.chunkGroup) {
         if (solidMesh) this.renderer.chunkGroup.add(solidMesh);
+        if (geoResult.cutoutGeometry && cutoutMesh) this.renderer.chunkGroup.add(cutoutMesh);
         if (transMesh) this.renderer.chunkGroup.add(transMesh);
       }
 
@@ -293,7 +347,21 @@ class ChunkManager {
       const transFaceCount = geoResult.transparentGeometry ? geoResult.transparentGeometry.index.count / 3 : 0;
       _log(`[ChunkManager] Built chunk ${key}: ${faceCount} solid + ${transFaceCount} transparent faces`);
 
-      this.loadedChunks.set(key, { data: chunkData, mesh: solidMesh, transMesh, built: !!(solidMesh || transMesh), dirty: !fromStorage });
+      this.loadedChunks.set(key, { data: chunkData, mesh: solidMesh, transMesh, cutoutMesh, built: !!(solidMesh || transMesh || cutoutMesh), dirty: !fromStorage });
+
+      // Rebuild adjacent loaded chunks — they may have built with stale neighbor=air data,
+      // causing incorrect face culling at transparent block boundaries (e.g. water edges).
+      const neighbors = [
+        [cx - 1, cz], [cx + 1, cz], [cx, cz - 1], [cx, cz + 1]
+      ];
+      for (const [ncx, ncz] of neighbors) {
+        const nKey = `${ncx},${ncz}`;
+        const nEntry = this.loadedChunks.get(nKey);
+        if (nEntry && nEntry.data && (nEntry.mesh || nEntry.transMesh || nEntry.cutoutMesh)) {
+          _log(`[ChunkManager] Rebuilding adjacent chunk ${nKey} after new neighbor built`);
+          this.rebuildChunkMesh(ncx, ncz);
+        }
+      }
 
       // Queue newly generated chunks for saving
       if (!fromStorage && this.persistence && this.worldId) {
@@ -321,6 +389,16 @@ class ChunkManager {
         // Dispose geometry and material to free GPU memory
         if (entry.mesh.geometry) entry.mesh.geometry.dispose();
         if (entry.mesh.material) entry.mesh.material.dispose();
+      }
+
+      // Remove cutout mesh from scene graph
+      if (entry.cutoutMesh) {
+        if (this.renderer.chunkGroup) {
+          this.renderer.chunkGroup.remove(entry.cutoutMesh);
+        }
+
+        if (entry.cutoutMesh.geometry) entry.cutoutMesh.geometry.dispose();
+        if (entry.cutoutMesh.material) entry.cutoutMesh.material.dispose();
       }
 
       // Remove transparent mesh from scene graph
@@ -409,13 +487,49 @@ class ChunkManager {
       if (entry.transMesh.geometry) entry.transMesh.geometry.dispose();
       if (entry.transMesh.material) entry.transMesh.material.dispose();
     }
+    if (entry.cutoutMesh) {
+      if (this.renderer.chunkGroup) {
+        this.renderer.chunkGroup.remove(entry.cutoutMesh);
+      }
+      if (entry.cutoutMesh.geometry) entry.cutoutMesh.geometry.dispose();
+      if (entry.cutoutMesh.material) entry.cutoutMesh.material.dispose();
+    }
 
-    // Rebuild geometry
+    // Rebuild geometry with cross-chunk lookups
     const meshBuilder = new ChunkMeshBuilder();
-    const meshData = meshBuilder.buildMeshData(entry.data, this.textureAtlas);
 
-    if (meshData.indices.length === 0 && (!meshData.transparentIndices || meshData.transparentIndices.length === 0)) {
+    // Create cross-chunk neighbor lookup for proper face culling at boundaries
+    const rebuildNeighborLookup = (nx, ny, nz) => {
+      const nChunkX = Math.floor(nx / 16);
+      const nChunkZ = Math.floor(nz / 16);
+      const nKey = `${nChunkX},${nChunkZ}`;
+      const nEntry = this.loadedChunks.get(nKey);
+      if (nEntry && nEntry.data) {
+        const nlx = ((nx % 16) + 16) % 16;
+        const nlz = ((nz % 16) + 16) % 16;
+        return nEntry.data.getBlock(nlx, ny, nlz);
+      }
+      return BLOCK_TYPES.AIR || 0;
+    };
+
+    const rebuildWaterLevelLookup = (nx, ny, nz) => {
+      const nChunkX = Math.floor(nx / 16);
+      const nChunkZ = Math.floor(nz / 16);
+      const nKey = `${nChunkX},${nChunkZ}`;
+      const nEntry = this.loadedChunks.get(nKey);
+      if (nEntry && nEntry.data && typeof nEntry.data.getWaterLevel === 'function') {
+        const nlx = ((nx % 16) + 16) % 16;
+        const nlz = ((nz % 16) + 16) % 16;
+        return nEntry.data.getWaterLevel(nlx, ny, nlz);
+      }
+      return 0;
+    };
+
+    const meshData = meshBuilder.buildMeshData(entry.data, this.textureAtlas, rebuildNeighborLookup, rebuildWaterLevelLookup);
+
+    if (meshData.indices.length === 0 && (!meshData.cutoutIndices || meshData.cutoutIndices.length === 0) && (!meshData.transparentIndices || meshData.transparentIndices.length === 0)) {
       entry.mesh = null;
+      entry.cutoutMesh = null;
       entry.transMesh = null;
       return;
     }
@@ -423,11 +537,13 @@ class ChunkManager {
     const geoResult = meshBuilder.buildThreeGeometry(meshData, entry.data);
     if (!geoResult) {
       entry.mesh = null;
+      entry.cutoutMesh = null;
       entry.transMesh = null;
       return;
     }
 
     let solidMesh = null;
+    let cutoutMesh = null;
     let transMesh = null;
 
     // Create materials with texture atlas map if available
@@ -444,6 +560,23 @@ class ChunkManager {
       solidMesh.userData.chunkKey = key;
       solidMesh.userData.blockIdToName = this.textureAtlas ? this.textureAtlas.idToName : {};
       solidMesh.userData.chunkData = entry.data;
+    }
+
+    if (geoResult.cutoutGeometry) {
+      const cutoutMaterial = new THREE.MeshLambertMaterial({
+        map: texMap,
+        color: 0xffffff,
+        transparent: true,
+        alphaToCoverage: true,
+        depthWrite: true,
+        fog: true,
+        side: THREE.DoubleSide
+      });
+      cutoutMesh = new THREE.Mesh(geoResult.cutoutGeometry, cutoutMaterial);
+      cutoutMesh.position.set(cx * 16, 0, cz * 16);
+      cutoutMesh.userData.chunkKey = key;
+      cutoutMesh.userData.blockIdToName = this.textureAtlas ? this.textureAtlas.idToName : {};
+      cutoutMesh.userData.chunkData = entry.data;
     }
 
     if (geoResult.transparentGeometry) {
@@ -464,16 +597,19 @@ class ChunkManager {
 
     if (this.renderer.chunkGroup) {
       if (solidMesh) this.renderer.chunkGroup.add(solidMesh);
+      if (cutoutMesh) this.renderer.chunkGroup.add(cutoutMesh);
       if (transMesh) this.renderer.chunkGroup.add(transMesh);
     }
 
     const faceCount = geoResult.solidGeometry ? geoResult.solidGeometry.index.count / 3 : 0;
+    const cutoutFaceCount = geoResult.cutoutGeometry ? geoResult.cutoutGeometry.index.count / 3 : 0;
     const transFaceCount = geoResult.transparentGeometry ? geoResult.transparentGeometry.index.count / 3 : 0;
-    _log(`[ChunkManager] Rebuilt chunk ${key}: ${faceCount} solid + ${transFaceCount} transparent faces`);
+    _log(`[ChunkManager] Rebuilt chunk ${key}: ${faceCount} solid + ${cutoutFaceCount} cutout + ${transFaceCount} transparent faces`);
 
     entry.mesh = solidMesh;
+    entry.cutoutMesh = cutoutMesh;
     entry.transMesh = transMesh;
-    entry.built = !!(solidMesh || transMesh);
+    entry.built = !!(solidMesh || cutoutMesh || transMesh);
   }
 
   /**

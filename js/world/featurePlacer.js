@@ -1,8 +1,11 @@
 /**
  * Cuubz — Feature Placer
- * Trees, cacti, flowers, quest markers, dungeons in appropriate biomes.
+ * Cacti, flowers, quest markers, dungeons in appropriate biomes.
  * Uses deterministic hash-based placement (NOT perlin noise) for uniform distribution.
- * Includes biome visual polish: flower variety, tree density variation, glowstone in caves.
+ * Includes biome visual polish: flower variety, glowstone in caves.
+ *
+ * NOTE: Tree spawning is handled exclusively by WorldGenerator._spawnTree().
+ * Do NOT add tree placement here — see worldGenerator.js as the single source of truth.
  */
 
 // Use globals from chunkData.js: BLOCK_TYPES, MIN_Y, MAX_Y
@@ -15,24 +18,21 @@ class FeaturePlacer {
     
     // Feature density per biome (chance per block column)
     this.featureDensity = {
-      plains:   { trees: 0.02, flowers: 0.05, cacti: 0 },
-      forest:   { trees: 0.08, flowers: 0.03, cacti: 0 },
-      desert:   { trees: 0, flowers: 0, cacti: 0.04 },
-      tundra:   { trees: 0.01, flowers: 0, cacti: 0 },
-      mountains:{ trees: 0.005, flowers: 0, cacti: 0 },
-      ocean:    { trees: 0, flowers: 0, cacti: 0, coral: 0.02 },
-      lava:     { trees: 0, flowers: 0, cacti: 0, lavaPool: 0.03 },
-      corrupt:  { trees: 0, flowers: 0, cacti: 0, toxicPool: 0.02, crystals: 0.01 },
+      plains:   { flowers: 0.05, cacti: 0 },
+      forest:   { flowers: 0.03, cacti: 0 },
+      desert:   { flowers: 0, cacti: 0.04 },
+      tundra:   { flowers: 0, cacti: 0 },
+      mountains:{ flowers: 0, cacti: 0 },
+      ocean:    { flowers: 0, cacti: 0, coral: 0.02 },
+      lava:     { flowers: 0, cacti: 0, lavaPool: 0.03 },
+      corrupt:  { flowers: 0, cacti: 0, toxicPool: 0.02, crystals: 0.01 },
     };
-
-    // Flower types and their colors for variety in Plains biomes
     this.flowerTypes = [
       { type: BLOCK_TYPES.RED_FLOWER, name: 'red', color: '#cc3333' },
       { type: BLOCK_TYPES.YELLOW_FLOWER, name: 'yellow', color: '#cccc33' },
     ];
 
-    // Forest density variation range (noise-based multiplier)
-    this.forestDensityVariation = { min: 0.5, max: 1.5 };
+    // Quest marker positions cache
   }
 
   /**
@@ -55,15 +55,10 @@ class FeaturePlacer {
         
         // Use hash for uniform random placement (NOT perlin — perlin is spatially smooth)
         const featureRoll = this.noise.hash(wx, wz); // Uniform [0, 1)
-        
-        // Calculate effective tree density with noise-based variation for forests
-        const effectiveTreeDensity = this._getEffectiveTreeDensity(biome.id, wx, wz, density.trees);
-        
-        if (featureRoll < effectiveTreeDensity && biome.id !== 'ocean' && biome.id !== 'lava' && biome.id !== 'corrupt') {
-          this._placeTree(chunk, lx, surfaceY, lz, biome.id);
-        } else if (featureRoll < effectiveTreeDensity + density.flowers) {
+
+        if (featureRoll < density.flowers) {
           this._placeFlower(chunk, lx, surfaceY, lz, wx, wz);
-        } else if (density.cacti && featureRoll < effectiveTreeDensity + density.flowers + density.cacti) {
+        } else if (density.cacti && featureRoll < density.flowers + density.cacti) {
           this._placeCactus(chunk, lx, surfaceY, lz);
         } else if (density.coral && featureRoll < density.coral) {
           this._placeCoral(chunk, lx, surfaceY, lz);
@@ -79,22 +74,6 @@ class FeaturePlacer {
   }
 
   /**
-   * Get effective tree density with noise-based variation for forests
-   * For forest biomes, uses perlin noise to create natural clustering
-   */
-  _getEffectiveTreeDensity(biomeId, wx, wz, baseDensity) {
-    if (biomeId !== 'forest') return baseDensity;
-    
-    // Use low-frequency noise for density variation (creates clusters)
-    const noiseVal = this.noise.perlin2(wx * 0.01, wz * 0.01); // [-1, 1]
-    const normalized = (noiseVal + 1) / 2; // [0, 1]
-    const variation = this.forestDensityVariation.min + 
-                      normalized * (this.forestDensityVariation.max - this.forestDensityVariation.min);
-    
-    return baseDensity * variation;
-  }
-
-  /**
    * Find the surface Y at a position in the chunk
    */
   _findSurface(chunk, lx, lz) {
@@ -106,64 +85,6 @@ class FeaturePlacer {
       }
     }
     return null;
-  }
-
-  /**
-   * Place a tree at the given position
-   * Forest trees are taller with wider canopies than plains trees
-   */
-  _placeTree(chunk, lx, surfaceY, lz, biomeId) {
-    // Use seeded PRNG for deterministic trunk height and apple placement
-    const rng = this.noise.createPRNG(lx * 1000 + lz);
-    
-    let trunkHeight, leafRadius;
-    if (biomeId === 'forest') {
-      // Forest trees: taller (5-7 blocks), wider canopy (radius 2-3)
-      trunkHeight = 5 + Math.floor(rng() * 3); // 5-7 blocks tall
-      leafRadius = 2 + Math.floor(rng() * 2); // radius 2-3
-    } else {
-      // Plains/mountain trees: shorter (4-5 blocks), standard canopy
-      trunkHeight = 4 + Math.floor(rng() * 2); // 4-5 blocks tall
-      leafRadius = 2;
-    }
-    
-    // Trunk
-    for (let y = 0; y < trunkHeight; y++) {
-      chunk.setBlock(lx, surfaceY + y, lz, BLOCK_TYPES.WOOD_LOG);
-    }
-    
-    // Leaves — sphere-like canopy
-    const leafStart = surfaceY + trunkHeight - 2;
-    
-    for (let dx = -leafRadius; dx <= leafRadius; dx++) {
-      for (let dy = -1; dy <= 2; dy++) {
-        for (let dz = -leafRadius; dz <= leafRadius; dz++) {
-          const nx = lx + dx;
-          const ny = leafStart + dy;
-          const nz = lz + dz;
-          
-          if (ny < MIN_Y || ny >= MAX_Y) continue; // FIX: removed X/Z guard — chunk.setBlock handles it; full sphere now placed
-          
-          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-          if (dist <= leafRadius) {
-            const existing = chunk.getBlock(nx, ny, nz);
-            if (existing === BLOCK_TYPES.AIR) {
-              chunk.setBlock(nx, ny, nz, BLOCK_TYPES.LEAVES);
-            }
-          }
-        }
-      }
-    }
-    
-    // Place apples on some trees (30% chance, deterministic)
-    if (rng() < 0.3) {
-      const appleY = leafStart + 1;
-      const appleX = lx + (rng() > 0.5 ? 1 : -1);
-      const appleZ = lz;
-      if (appleX >= 0 && appleX < 16) {
-        chunk.setBlock(appleX, appleY, appleZ, BLOCK_TYPES.APPLE);
-      }
-    }
   }
 
   /**

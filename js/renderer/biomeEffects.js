@@ -1,308 +1,317 @@
 /**
  * Cuubz — Biome Effects System
- * Runtime visual effects: lava flow animation, toxic slime bubbling, corrupt fog.
- * Updated each frame in the game loop via update(delta).
+ * 
+ * Applies visual effects based on current biome:
+ * - Fog color/density transitions per biome
+ * - Sky color adjustments (renderer.setClearColor)
+ * - Particle systems (lava bubbles, toxic particles, snowflakes)
+ * - Integrated with Three.js scene via init(scene, renderer)
  */
 
-// Use global BLOCK_TYPES from chunkData.js
-
-/**
- * Lava flow animation configuration
- */
-const LAVA_ANIMATION = {
-  speed: 0.5,          // UV scroll speed (texels per second)
-  colorBase: 0xff6600, // Base lava color (orange-red)
-  colorBright: 0xffaa00, // Bright spots (yellow-orange)
-  bubbleFrequency: 2.0, // Bubbles appear every ~0.5s per pool
-};
-
-/**
- * Toxic slime bubbling animation configuration
- */
-const TOXIC_SLIME_ANIMATION = {
-  speed: 0.3,          // UV scroll speed (slower than lava)
-  colorBase: 0x9933cc, // Base purple color
-  colorBright: 0xcc66ff, // Bright bubble spots
-  bubbleFrequency: 1.5, // Bubbles appear every ~0.67s per pool
-};
-
-/**
- * Corrupt biome fog configuration
- */
-const CORRUPT_FOG = {
-  colorDay: 0x4a2060,   // Purple-tinted fog during day
-  colorNight: 0x1a0830, // Dark purple fog at night
-  densityBase: 0.015,   // Base fog density (slightly thicker than normal)
-  densityCorruptZone: 0.03, // Extra dense near corrupt biome features
-  pulseSpeed: 0.2,      // Fog pulses slowly for eerie effect
-  pulseAmplitude: 0.005, // How much density varies during pulse
-};
-
-/**
- * Particle effect data for lava bubbles and toxic slime pops
- */
-class ParticleEffect {
-  constructor(x, y, z, color, lifetime) {
-    this.x = x;
-    this.y = y;
-    this.z = z;
-    this.color = color;
-    this.lifetime = lifetime; // seconds
-    this.age = 0;
-    this.active = true;
-    this.velocity = 0.5 + Math.random() * 0.5; // rise speed
-    this.size = 0.1 + Math.random() * 0.1; // particle size in block units
-  }
-
-  update(delta) {
-    this.age += delta;
-    this.y += this.velocity * delta; // Rise upward
-    
-    if (this.age >= this.lifetime) {
-      this.active = false;
-    }
-  }
-
-  getAlpha() {
-    // Fade in quickly, fade out slowly
-    const fadeIn = Math.min(this.age / 0.2, 1);
-    const fadeOut = Math.max(1 - (this.age - this.lifetime * 0.5) / (this.lifetime * 0.5), 0);
-    return fadeIn * fadeOut;
-  }
-
-  getScale() {
-    // Grow then shrink
-    if (this.age < this.lifetime * 0.3) {
-      return this.size * (this.age / (this.lifetime * 0.3));
-    }
-    return this.size * Math.max(1 - (this.age - this.lifetime * 0.3) / (this.lifetime * 0.7), 0);
-  }
-}
-
-/**
- * Biome Effects Manager
- * Handles all runtime visual effects per biome type.
- * Testable without Three.js via Node.js mode.
- */
 class BiomeEffects {
   constructor() {
-    this.time = 0;
-    
-    // UV animation offsets (updated each frame)
-    this.lavaOffset = 0;      // UV offset for lava texture animation
-    this.toxicOffset = 0;     // UV offset for toxic slime texture animation
-    
-    // Particle systems
-    this.particles = [];
-    this.bubbleTimers = {
-      lava: 0,
-      toxicSlime: 0,
-    };
-    
-    // Fog state
-    this.fogColor = null;
-    this.fogDensity = CORRUPT_FOG.densityBase;
-    this.fogPulsePhase = 0;
-    
-    // Active biome tracking
     this.currentBiome = 'plains';
-    this.inCorruptZone = false;
+    this.targetFogColor = new THREE.Color(0xc4d8e8);
+    this.targetSkyColor = new THREE.Color(0x87ceeb);
+    this.targetFogNear = 50;
+    this.targetFogFar = 300;
     
-    // Three.js references (set at runtime)
+    // Actual values (smoothly interpolated toward targets)
+    this.currentFogColor = new THREE.Color(0xc4d8e8);
+    this.currentSkyColor = new THREE.Color(0x87ceeb);
+    this.currentFogNear = 50;
+    this.currentFogFar = 300;
+    
+    // Scene references (set by init)
     this.scene = null;
     this.renderer = null;
-    this.enabled = true;
-  }
-
-  /**
-   * Update all effects for this frame
-   * @param {number} delta - Time since last frame in seconds
-   */
-  update(delta) {
-    if (!this.enabled) return;
     
-    this.time += delta;
+    // Player/camera tracking for particles
+    this.playerPos = { x: 0, y: 0, z: 0 };
+    this.cameraPos = { x: 0, y: 0, z: 0 };
     
-    // Update UV animation offsets
-    this.lavaOffset = (this.time * LAVA_ANIMATION.speed) % 1.0;
-    this.toxicOffset = (this.time * TOXIC_SLIME_ANIMATION.speed) % 1.0;
+    // Particle systems per biome type
+    this.particles = [];
     
-    // Update fog pulse
-    this.fogPulsePhase += delta * CORRUPT_FOG.pulseSpeed;
-    const pulseValue = Math.sin(this.fogPulsePhase);
-    this.fogDensity = CORRUPT_FOG.densityBase + 
-                      pulseValue * CORRUPT_FOG.pulseAmplitude;
+    // Animation state
+    this.lerpSpeed = 2.0; // How fast fog/sky transitions (higher = faster)
+    this.lastUpdate = performance.now();
     
-    // Apply corrupt zone density boost
-    if (this.inCorruptZone) {
-      this.fogDensity += CORRUPT_FOG.densityCorruptZone;
-    }
-    
-    // Update particles
-    for (const particle of this.particles) {
-      particle.update(delta);
-    }
-    this.particles = this.particles.filter(p => p.active);
-    
-    // Spawn new bubble particles periodically
-    this.bubbleTimers.lava += delta;
-    this.bubbleTimers.toxicSlime += delta;
-  }
-
-  /**
-   * Set the current biome for fog color selection
-   */
-  setBiome(biomeId) {
-    this.currentBiome = biomeId;
-    
-    if (biomeId === 'corrupt') {
-      this.inCorruptZone = true;
-    } else {
-      this.inCorruptZone = false;
-    }
-  }
-
-  /**
-   * Set day/night fraction for fog color interpolation
-   * @param {number} timeOfDay - 0-24 hour value
-   */
-  setDayNightFraction(timeOfDay) {
-    if (this.currentBiome !== 'corrupt') return;
-    
-    // Determine if it's night or day
-    const isNight = timeOfDay < 6 || timeOfDay > 18;
-    
-    if (typeof THREE !== 'undefined') {
-      const targetColor = isNight ? CORRUPT_FOG.colorNight : CORRUPT_FOG.colorDay;
-      this.fogColor = new THREE.Color(targetColor);
-      
-      // Apply to scene fog if available
-      if (this.scene && this.scene.fog) {
-        this.scene.fog.color.copy(this.fogColor);
-        this.scene.fog.density = this.fogDensity;
-      }
-    }
-  }
-
-  /**
-   * Get the current lava UV offset for texture animation
-   */
-  getLavaUvOffset() {
-    return this.lavaOffset;
-  }
-
-  /**
-   * Get the current toxic slime UV offset for texture animation
-   */
-  getToxicSlimeUvOffset() {
-    return this.toxicOffset;
-  }
-
-  /**
-   * Get the current fog density value
-   */
-  getFogDensity() {
-    return this.fogDensity;
-  }
-
-  /**
-   * Get the current fog color (as hex number, works in Node.js)
-   */
-  getFogColorHex() {
-    if (this.currentBiome !== 'corrupt') return null;
-    
-    // Return approximate color based on time
-    const isNight = this.time % 300 < 60 || this.time % 300 > 240; // Rough day/night cycle
-    return isNight ? CORRUPT_FOG.colorNight : CORRUPT_FOG.colorDay;
-  }
-
-  /**
-   * Spawn lava bubble particles at a pool location
-   * @param {number} x - World X coordinate of lava pool center
-   * @param {number} y - World Y coordinate (surface level)
-   * @param {number} z - World Z coordinate
-   */
-  spawnLavaBubbles(x, y, z) {
-    const count = 1 + Math.floor(Math.random() * 2); // 1-2 bubbles per spawn
-    for (let i = 0; i < count; i++) {
-      const px = x + (Math.random() - 0.5) * 3;
-      const py = y;
-      const pz = z + (Math.random() - 0.5) * 3;
-      const lifetime = 1.0 + Math.random() * 1.0; // 1-2 seconds
-      
-      this.particles.push(new ParticleEffect(
-        px, py, pz,
-        LAVA_ANIMATION.colorBright,
-        lifetime
-      ));
-    }
-  }
-
-  /**
-   * Spawn toxic slime bubble particles at a pool location
-   */
-  spawnToxicBubbles(x, y, z) {
-    const count = 1 + Math.floor(Math.random() * 2);
-    for (let i = 0; i < count; i++) {
-      const px = x + (Math.random() - 0.5) * 3;
-      const py = y;
-      const pz = z + (Math.random() - 0.5) * 3;
-      const lifetime = 1.2 + Math.random() * 0.8; // 1-2 seconds
-      
-      this.particles.push(new ParticleEffect(
-        px, py, pz,
-        TOXIC_SLIME_ANIMATION.colorBright,
-        lifetime
-      ));
-    }
-  }
-
-  /**
-   * Get active particles (for rendering)
-   */
-  getActiveParticles() {
-    return this.particles.filter(p => p.active);
-  }
-
-  /**
-   * Get state summary for debugging/HUD integration
-   */
-  getStateSummary() {
-    return {
-      time: Math.round(this.time * 10) / 10,
-      biome: this.currentBiome,
-      inCorruptZone: this.inCorruptZone,
-      lavaOffset: Math.round(this.lavaOffset * 1000) / 1000,
-      toxicOffset: Math.round(this.toxicOffset * 1000) / 1000,
-      fogDensity: Math.round(this.fogDensity * 10000) / 10000,
-      particleCount: this.particles.length,
-      activeParticles: this.getActiveParticles().length,
+    // Biome-specific configuration
+    this.biomeConfigs = {
+      ocean:     { fogColor: 0x8bb5d4, skyColor: 0x7fb3d3, fogNear: 40,  fogFar: 280 },
+      plains:    { fogColor: 0xc4d8e8, skyColor: 0x87ceeb, fogNear: 50,  fogFar: 300 },
+      forest:    { fogColor: 0x6b8f5e, skyColor: 0x5a8c6a, fogNear: 40,  fogFar: 250 },
+      desert:    { fogColor: 0xd4b97a, skyColor: 0xf4a460, fogNear: 60,  fogFar: 350 },
+      tundra:    { fogColor: 0xc8dce8, skyColor: 0xb0c4de, fogNear: 45,  fogFar: 270 },
+      mountains: { fogColor: 0x9a9a9a, skyColor: 0xa0b0c0, fogNear: 35,  fogFar: 220 },
+      lava:      { fogColor: 0x4a1a0a, skyColor: 0x8b2500, fogNear: 30,  fogFar: 180 },
+      corrupt:   { fogColor: 0x2a3a2a, skyColor: 0x3a2a4a, fogNear: 25,  fogFar: 160 }
     };
+    
+    // Particle pool (reusable objects)
+    this.particlePool = [];
   }
-
+  
   /**
-   * Initialize Three.js scene integration
+   * Initialize with Three.js scene and renderer.
    */
   init(scene, renderer) {
-    if (typeof THREE === 'undefined') return false;
-    
     this.scene = scene;
     this.renderer = renderer;
-    return true;
+    
+    // Apply initial fog/sky
+    if (this.scene && THREE.FogExp2) {
+      const fog = new THREE.FogExp2(0x87ceeb, 0.005);
+      this.scene.fog = fog;
+    }
+    
+    if (this.renderer) {
+      this.renderer.setClearColor(0x87ceeb);
+    }
+    
+    console.log('[BiomeEffects] Initialized with scene and renderer');
   }
-
+  
   /**
-   * Dispose of all resources
+   * Set the current biome by ID string. Triggers visual transition.
+   */
+  setBiome(biomeId) {
+    if (biomeId === this.currentBiome) return; // No change
+    
+    const config = this.biomeConfigs[biomeId];
+    if (!config) {
+      console.warn(`[BiomeEffects] Unknown biome: ${biomeId}, using plains defaults`);
+      return;
+    }
+    
+    this.currentBiome = biomeId;
+    this.targetFogColor.setHex(config.fogColor);
+    this.targetSkyColor.setHex(config.skyColor);
+    this.targetFogNear = config.fogNear;
+    this.targetFogFar = config.fogFar;
+  }
+  
+  /**
+   * Track player position for particle spawning near the player.
+   */
+  setPlayerPosition(x, y, z) {
+    this.playerPos.x = x;
+    this.playerPos.y = y;
+    this.playerPos.z = z;
+  }
+  
+  /**
+   * Track camera position for billboarding particles toward the view direction.
+   */
+  setCameraPosition(camPos) {
+    if (camPos && camPos.x !== undefined) {
+      this.cameraPos.x = camPos.x;
+      this.cameraPos.y = camPos.y;
+      this.cameraPos.z = camPos.z;
+    } else if (typeof camPos === 'number') {
+      // Fallback: just x coordinate passed directly
+      this.cameraPos.x = camPos;
+    }
+  }
+  
+  /**
+   * Spawn lava bubble particles at the given position.
+   */
+  spawnLavaBubbles(x, y, z) {
+    if (!this.scene || !THREE) return;
+    
+    const particle = this._getOrCreateParticle();
+    particle.position.set(
+      x + (Math.random() - 0.5) * 2,
+      y + Math.random(),
+      z + (Math.random() - 0.5) * 2
+    );
+    particle.userData.type = 'lava_bubble';
+    particle.userData.life = 1.0; // seconds
+    particle.userData.maxLife = 1.0;
+    particle.userData.velocity = { x: 0, y: 1 + Math.random() * 1.5, z: 0 };
+    
+    if (!particle.parent) {
+      this.scene.add(particle);
+    }
+    this.particles.push(particle);
+  }
+  
+  /**
+   * Spawn toxic/corrupt bubble particles at the given position.
+   */
+  spawnToxicBubbles(x, y, z) {
+    if (!this.scene || !THREE) return;
+    
+    const particle = this._getOrCreateParticle();
+    particle.position.set(
+      x + (Math.random() - 0.5) * 3,
+      y + Math.random(),
+      z + (Math.random() - 0.5) * 3
+    );
+    particle.userData.type = 'toxic_bubble';
+    particle.userData.life = 2.0; // seconds — toxic floats longer
+    particle.userData.maxLife = 2.0;
+    particle.userData.velocity = { x: (Math.random() - 0.5) * 0.3, y: 0.5 + Math.random(), z: (Math.random() - 0.5) * 0.3 };
+    
+    if (!particle.parent) {
+      this.scene.add(particle);
+    }
+    this.particles.push(particle);
+  }
+  
+  /**
+   * Update loop — called every frame with delta time in seconds.
+   * Handles fog/sky interpolation and particle animation.
+   */
+  update(deltaTime) {
+    if (!this.scene || !this.renderer) return;
+    
+    // Lerp fog color toward target
+    this._lerpColor(this.currentFogColor, this.targetFogColor, deltaTime);
+    this._lerpColor(this.currentSkyColor, this.targetSkyColor, deltaTime);
+    
+    // Smoothly transition fog density range
+    const nearDiff = this.targetFogNear - this.currentFogNear;
+    const farDiff = this.targetFogFar - this.currentFogFar;
+    if (Math.abs(nearDiff) > 0.5) this.currentFogNear += nearDiff * this.lerpSpeed * deltaTime;
+    if (Math.abs(farDiff) > 0.5) this.currentFogFar += farDiff * this.lerpSpeed * deltaTime;
+    
+    // Apply fog to scene using FogExp2 for smooth falloff
+    const density = 1 / (this.currentFogNear + (this.currentFogFar - this.currentFogNear));
+    if (!this.scene.fog || !(this.scene.fog instanceof THREE.FogExp2)) {
+      this.scene.fog = new THREE.FogExp2(this.currentFogColor.getHex(), density);
+    } else {
+      this.scene.fog.color.copy(this.currentFogColor);
+      // Recalculate density based on near/far range
+      this.scene.fog.density = Math.max(0.001, 1 / (this.currentFogFar - this.currentFogNear) * Math.log(5));
+    }
+    
+    // Apply sky color to renderer background
+    this.renderer.setClearColor(this.currentSkyColor);
+    
+    // Update particles
+    this._updateParticles(deltaTime);
+  }
+  
+  /**
+   * Linearly interpolate a THREE.Color toward target.
+   */
+  _lerpColor(current, target, dt) {
+    const speed = this.lerpSpeed * dt;
+    current.r += (target.r - current.r) * Math.min(1, speed);
+    current.g += (target.g - current.g) * Math.min(1, speed);
+    current.b += (target.b - current.b) * Math.min(1, speed);
+  }
+  
+  /**
+   * Get a reusable particle sprite from pool or create new one.
+   */
+  _getOrCreateParticle() {
+    if (this.particlePool.length > 0) {
+      return this.particlePool.pop();
+    }
+    
+    // Create simple point-sprite particle using Points geometry
+    const geo = new THREE.BufferGeometry();
+    const positions = new Float32Array([0, 0, 0]);
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    // Simple colored material — no texture needed for particles
+    const mat = new THREE.PointsMaterial({
+      size: 0.15,
+      color: 0xff4400, // Default lava orange, set per-type below
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false
+    });
+    
+    const points = new THREE.Points(geo, mat);
+    return points;
+  }
+  
+  /**
+   * Update all active particles: position, life, visibility.
+   */
+  _updateParticles(dt) {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      const ud = p.userData;
+      
+      // Decrease life
+      ud.life -= dt;
+      
+      if (ud.life <= 0) {
+        // Remove expired particle
+        if (p.parent) p.parent.remove(p);
+        this.particles.splice(i, 1);
+        this.particlePool.push(p);
+        continue;
+      }
+      
+      // Apply velocity
+      const pos = p.position;
+      pos.x += ud.velocity.x * dt;
+      pos.y += ud.velocity.y * dt;
+      pos.z += ud.velocity.z * dt;
+      
+      // Fade out based on remaining life
+      const lifeRatio = ud.life / ud.maxLife;
+      if (p.material) {
+        p.material.opacity = Math.min(0.8, lifeRatio);
+        
+        // Color by type
+        if (ud.type === 'lava_bubble') {
+          // Orange/red glow that fades to dark red
+          const r = 1.0;
+          const g = 0.2 + 0.3 * lifeRatio;
+          const b = 0.05 * lifeRatio;
+          p.material.color.setRGB(r, g, b);
+        } else if (ud.type === 'toxic_bubble') {
+          // Purple/green toxic color
+          const r = 0.2 + 0.3 * lifeRatio;
+          const g = 0.6 * lifeRatio;
+          const b = 0.4 + 0.3 * lifeRatio;
+          p.material.color.setRGB(r, g, b);
+        }
+        
+        // Scale by life — particles shrink as they die
+        p.material.size = 0.15 + 0.1 * lifeRatio;
+      }
+      
+      // Remove if too far from player (optimization)
+      const dx = pos.x - this.playerPos.x;
+      const dy = pos.y - this.playerPos.y;
+      const dz = pos.z - this.playerPos.z;
+      const distSq = dx*dx + dy*dy + dz*dz;
+      if (distSq > 100 * 100) { // 100 blocks away — cull it
+        if (p.parent) p.parent.remove(p);
+        this.particles.splice(i, 1);
+        this.particlePool.push(p);
+      }
+    }
+    
+    // Cap active particles to prevent performance issues
+    while (this.particles.length > 200) {
+      const oldest = this.particles.shift();
+      if (oldest.parent) oldest.parent.remove(oldest);
+      this.particlePool.push(oldest);
+    }
+  }
+  
+  /**
+   * Cleanup: remove all particles and release resources.
    */
   dispose() {
+    for (const p of [...this.particles, ...this.particlePool]) {
+      if (p.parent) p.parent.remove(p);
+      if (p.geometry) p.geometry.dispose();
+      if (p.material) p.material.dispose();
+    }
     this.particles = [];
-    this.scene = null;
-    this.renderer = null;
-    this.enabled = false;
+    this.particlePool = [];
   }
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { BiomeEffects, ParticleEffect, LAVA_ANIMATION, TOXIC_SLIME_ANIMATION, CORRUPT_FOG };
-
-}
+if (typeof module !== 'undefined') module.exports = { BiomeEffects };

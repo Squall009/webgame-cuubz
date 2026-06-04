@@ -1536,6 +1536,10 @@
         });
         chunkManager.update(0, 0, performance.now());
 
+        // Initialize Water Flow System (after ChunkManager is created)
+        // DISABLED: water flow system needs overhaul
+        // const waterFlowSystem = new WaterFlowSystem(worldManager, chunkManager);
+
         // Wait for initial chunks to finish building, then link neighbors and rebuild meshes
         function waitForChunksAndLink() {
           if (chunkManager.building) {
@@ -1564,9 +1568,14 @@
           let debugCandidates = 0, debugRejectedByWater = 0, debugRejectedByAdjacent = 0, debugAccepted = 0;
 
           function isColumnClear(entry, lx, lz, fromY, toY) {
-            // Check that all blocks from 'fromY' up to 'toY' are AIR (no water or solid blocks)
+            // Check that all blocks from 'fromY' up to 'toY' are AIR (no solid blocks, no water)
             for (let y = fromY; y <= toY; y++) {
-              if (entry.data.getBlock(lx, y, lz) !== BLOCK_TYPES.AIR) return false;
+              const block = entry.data.getBlock(lx, y, lz);
+              if (block !== BLOCK_TYPES.AIR && block !== BLOCK_TYPES.WATER) {
+                // Allow water if it's below the fromY, but not above
+                if (block === BLOCK_TYPES.WATER && y < fromY) continue;
+                return false; // Found solid block or water at/above spawn height
+              }
             }
             return true;
           }
@@ -1617,17 +1626,24 @@
                   if ((block === BLOCK_TYPES.GRASS || block === BLOCK_TYPES.DIRT) && BLOCK_PROPERTIES[block]?.solid) {
                     debugCandidates++;
 
-                    // Must be above sea level (or fallback if nothing else found)
-                    if (y <= 28 && bestSpawnY !== MIN_Y) continue;
+                    // Must be above sea level (or a valid fallback if no high ground is found)
+                    const SEA_LEVEL = 32;
+                    if (y <= SEA_LEVEL) {
+                      // If we already have a spawn above sea level, ignore candidates below it
+                      if (bestSpawnY > SEA_LEVEL) continue;
+                      // If this is the first candidate, or higher than current best below sea level, take it
+                      if (y <= SEA_LEVEL && y < bestSpawnY) continue; // Only pick lowest available if forced below sea level
+                    }
 
                     // Check column from ground up to y+4 is clear AIR — enough for player headroom (no water/leaves blocking)
+                    // This also implies no water at the spawn point itself
                     const colClear = isColumnClear(entry, lx, lz, y + 1, y + 4);
                     if (!colClear) {
                       debugRejectedByWater++;
                       continue;
                     }
 
-                    // Check adjacent columns are clear so player doesn't spawn in a wall
+                    // Check adjacent columns are clear so player doesn't spawn in a wall or next to a cliff
                     const adjClear = isAdjacentClear(entry, lx, lz, y + 1, cx, cz);
                     if (!adjClear) {
                       debugRejectedByAdjacent++;
@@ -1650,9 +1666,10 @@
             }
           }
 
+          const SEA_LEVEL = 32;
           console.log(`[Cuubz] Spawn search: ${debugCandidates} grass/dirt candidates, ${debugAccepted} accepted, ${debugRejectedByWater} rejected (column not clear), ${debugRejectedByAdjacent} rejected (adjacent blocked)`);
-          if (bestSpawnY === MIN_Y) {
-            console.warn(`[Cuubz] WARNING: No valid dry spawn found! Falling back to Y=${MIN_Y + 1.625 + 2}`);
+          if (bestSpawnY === MIN_Y || bestSpawnY <= SEA_LEVEL) {
+            console.warn(`[Cuubz] WARNING: No suitable surface spawn found above sea level! Falling back to highest safe point (Y=${bestSpawnY + 1.625 + 2}).`);
           } else {
             console.log(`[Cuubz] Spawn selected at world (${bestSpawnX}, ${bestSpawnY}, ${bestSpawnZ})`);
           }
@@ -1672,7 +1689,55 @@
 
           console.log(`[Cuubz] Player placed at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})`);
           
-          _log(`[Cuubz] Player spawned at (${player.position.x}, ${player.position.y}, ${player.position.z}) on dry ground`);
+          player.linkWorld(worldManager);
+
+          // Start water flow system after player and world are set up
+          // DISABLED: water flow system needs overhaul
+          // waterFlowSystem.start();
+
+          // Initialize Biome Effects System (wire up visual effects per biome)
+          const biomeEffects = new BiomeEffects();
+          if (renderer.scene && renderer.renderer) {
+            biomeEffects.init(renderer.scene, renderer.renderer);
+            console.log('[Cuubz] Biome Effects initialized with scene integration');
+          } else {
+            // If Three.js not ready yet, initialize on next frame when available
+            setTimeout(() => {
+              if (renderer.scene && renderer.renderer) {
+                biomeEffects.init(renderer.scene, renderer.renderer);
+                console.log('[Cuubz] Biome Effects initialized (delayed)');
+              }
+            }, 100);
+          }
+
+          // Initialize water levels + queue initial water blocks around player for flow simulation
+          // DISABLED: water flow system needs overhaul — entire block commented out
+          /*
+          const playerChunkX = Math.floor(player.position.x / 16);
+          const playerChunkZ = Math.floor(player.position.z / 16);
+
+          for (let x = playerChunkX - waterFlowSystem.flowRadiusChunks; x <= playerChunkX + waterFlowSystem.flowRadiusChunks; x++) {
+            for (let z = playerChunkZ - waterFlowSystem.flowRadiusChunks; z <= playerChunkZ + waterFlowSystem.flowRadiusChunks; z++) {
+              // First initialize water levels for this chunk
+              waterFlowSystem.initializeChunkWaterLevels(x, z);
+
+              const chunkKey = `${x},${z}`;
+              const chunkEntry = chunkManager.loadedChunks.get(chunkKey);
+              if (chunkEntry && chunkEntry.data) {
+                for (let lx = 0; lx < 16; lx++) {
+                  for (let lz = 0; lz < 16; lz++) {
+                    for (let ly = MIN_Y; ly < MAX_Y; ly++) {
+                      if (chunkEntry.data.getBlock(lx, ly, lz) === BLOCK_TYPES.WATER) {
+                        waterFlowSystem.queueBlockForFlow(x * 16 + lx, ly, z * 16 + lz);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          */
+          // console.log(`[Cuubz] Water flow system initialized and initial water blocks queued.`);
 
           // Handle mouse movement for camera rotation (pointer lock) — must be after player exists
           document.addEventListener('mousemove', (e) => {
@@ -1820,6 +1885,40 @@
               // Update camera to follow player at eye level
               const camPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
               renderer.updateCamera(camPos, player.yaw, player.pitch);
+
+              // Update Biome Effects (fog, sky color, UV animation offsets, particles)
+              if (biomeEffects && game.worldGen && game.chunkManager) {
+                // Determine current biome from world generator at player position
+                const wx = Math.floor(player.position.x);
+                const wz = Math.floor(player.position.z);
+                const biomeData = game.worldGen.getBiomeAtWorldPos(wx, wz);
+
+                if (biomeData) {
+                  biomeEffects.setBiome(biomeData.id);
+                  
+                  // Set player/camera positions for particle spawning & billboarding
+                  biomeEffects.setPlayerPosition(player.position.x, player.position.y, player.position.z);
+                  biomeEffects.setCameraPosition(camPos);
+
+                  // Spawn bubble particles in lava/toxic biomes
+                  if (biomeData.id === 'lava' && Math.random() < 0.02) {
+                    biomeEffects.spawnLavaBubbles(
+                      player.position.x + (Math.random() - 0.5) * 40,
+                      player.position.y - 2,
+                      player.position.z + (Math.random() - 0.5) * 40
+                    );
+                  } else if (biomeData.id === 'corrupt' && Math.random() < 0.015) {
+                    biomeEffects.spawnToxicBubbles(
+                      player.position.x + (Math.random() - 0.5) * 40,
+                      player.position.y - 2,
+                      player.position.z + (Math.random() - 0.5) * 40
+                    );
+                  }
+                }
+
+                // Update animation timers & particles
+                biomeEffects.update(game.delta);
+              }
 
               // Render scene
               renderer.render();

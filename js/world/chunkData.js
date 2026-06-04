@@ -31,6 +31,11 @@ const MIN_Y = 0;
 const MAX_Y = 96;
 const SEA_LEVEL = 32;
 
+// Water level constants (Minecraft-style: 8 levels for fluids)
+const WATER_LEVEL_SOURCE = 8; // Source water (ocean, lake, river source) — full height, flat surface
+const WATER_LEVEL_FLOWING_MIN = 1;
+const WATER_LEVEL_FLOWING_MAX = 7;
+
 class Chunk {
   constructor(chunkX, chunkZ) {
     this.chunkX = chunkX;
@@ -38,6 +43,9 @@ class Chunk {
     this.worldX = chunkX * CHUNK_WIDTH;
     this.worldZ = chunkZ * CHUNK_DEPTH;
     this.blocks = new Uint8Array(CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT);
+    // Water level metadata: stored alongside blocks. 0 = no water/not fluid, 1-8 = water/lava level.
+    // Level 8 = source (full block height). Levels 1-7 = flowing (partial height for sloped rendering).
+    this.waterLevels = new Uint8Array(CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT);
     this.neighbors = { positiveX: null, negativeX: null, positiveZ: null, negativeZ: null };
     this.dirty = false;
   }
@@ -61,23 +69,80 @@ class Chunk {
     const idx = this._localIndex(x, y, z);
     if (this.blocks[idx] !== type) {
       this.blocks[idx] = type;
+      // Set default water level for fluid blocks
+      if ((type === BLOCK_TYPES.WATER || type === BLOCK_TYPES.LAVA)) {
+        this.waterLevels[idx] = WATER_LEVEL_SOURCE;
+      } else {
+        this.waterLevels[idx] = 0;
+      }
       this.dirty = true;
     }
   }
 
+  /** Get the water level at a position. Returns 0 for non-fluid blocks or out of bounds. */
+  getWaterLevel(x, y, z) {
+    if (y < 0 || y >= CHUNK_HEIGHT) return 0;
+    // Cross-chunk lookup for water levels
+    if (x < 0 && this.neighbors.negativeX) return this.neighbors.negativeX.getWaterLevel(CHUNK_WIDTH + x, y, z);
+    if (x >= CHUNK_WIDTH && this.neighbors.positiveX) return this.neighbors.positiveX.getWaterLevel(x - CHUNK_WIDTH, y, z);
+    if (z < 0 && this.neighbors.negativeZ) return this.neighbors.negativeZ.getWaterLevel(x, y, CHUNK_DEPTH + z);
+    if (z >= CHUNK_DEPTH && this.neighbors.positiveZ) return this.neighbors.positiveZ.getWaterLevel(x, y, z - CHUNK_DEPTH);
+    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH) return 0;
+    const blockType = this.blocks[this._localIndex(x, y, z)];
+    if (blockType !== BLOCK_TYPES.WATER && blockType !== BLOCK_TYPES.LAVA) return 0;
+    return this.waterLevels[this._localIndex(x, y, z)];
+  }
+
+  /** Set the water level at a position. Only valid for WATER or LAVA blocks. */
+  setWaterLevel(x, y, z, level) {
+    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < 0 || y >= CHUNK_HEIGHT) return;
+    const idx = this._localIndex(x, y, z);
+    const blockType = this.blocks[idx];
+    if (blockType !== BLOCK_TYPES.WATER && blockType !== BLOCK_TYPES.LAVA) return;
+    // Clamp level to valid range
+    const clampedLevel = Math.max(0, Math.min(WATER_LEVEL_SOURCE, level));
+    if (this.waterLevels[idx] !== clampedLevel) {
+      this.waterLevels[idx] = clampedLevel;
+      this.dirty = true;
+    }
+  }
+
+  /** Check if a water block is a source (level 8) vs flowing. */
+  isWaterSource(x, y, z) {
+    return this.getWaterLevel(x, y, z) === WATER_LEVEL_SOURCE;
+  }
+
   serialize() {
     const indices = [], types = [];
+    const waterLevelIndices = [], waterLevelValues = [];
     for (let i = 0; i < this.blocks.length; i++) {
       if (this.blocks[i] !== BLOCK_TYPES.AIR) {
         indices.push(i); types.push(this.blocks[i]);
       }
+      // Only serialize non-zero, non-source water levels to save space
+      if (this.waterLevels[i] > 0 && this.waterLevels[i] < WATER_LEVEL_SOURCE) {
+        waterLevelIndices.push(i); waterLevelValues.push(this.waterLevels[i]);
+      }
     }
-    return { chunkX: this.chunkX, chunkZ: this.chunkZ, indices, types, dirty: this.dirty };
+    return { chunkX: this.chunkX, chunkZ: this.chunkZ, indices, types, dirty: this.dirty,
+             waterLevelIndices, waterLevelValues };
   }
 
   static deserialize(data) {
     const chunk = new Chunk(data.chunkX, data.chunkZ);
     for (let i = 0; i < data.indices.length; i++) chunk.blocks[data.indices[i]] = data.types[i];
+    // Restore default source levels for fluid blocks
+    for (let i = 0; i < chunk.blocks.length; i++) {
+      if ((chunk.blocks[i] === BLOCK_TYPES.WATER || chunk.blocks[i] === BLOCK_TYPES.LAVA)) {
+        chunk.waterLevels[i] = WATER_LEVEL_SOURCE;
+      }
+    }
+    // Override with saved flowing levels
+    if (data.waterLevelIndices) {
+      for (let i = 0; i < data.waterLevelIndices.length; i++) {
+        chunk.waterLevels[data.waterLevelIndices[i]] = data.waterLevelValues[i];
+      }
+    }
     chunk.dirty = data.dirty;
     return chunk;
   }

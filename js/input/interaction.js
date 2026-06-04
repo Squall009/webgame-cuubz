@@ -195,14 +195,24 @@ class BlockInteraction {
       if (entry.transMesh.material) entry.transMesh.material.dispose();
     }
 
+    // Remove old cutout mesh (leaves, flowers, torches) — was missing causing orphaned meshes
+    if (entry.cutoutMesh) {
+      if (this.renderer.chunkGroup) {
+        this.renderer.chunkGroup.remove(entry.cutoutMesh);
+      }
+      if (entry.cutoutMesh.geometry) entry.cutoutMesh.geometry.dispose();
+      if (entry.cutoutMesh.material) entry.cutoutMesh.material.dispose();
+    }
+
     // Rebuild meshes
     const chunkData = entry.data;
     const meshBuilder = new ChunkMeshBuilder();
     const meshData = meshBuilder.buildMeshData(chunkData, this.chunkManager.textureAtlas);
     let solidMesh = null;
+    let cutoutMesh = null;
     let transMesh = null;
 
-    if (meshData.indices.length > 0 || (meshData.transparentIndices && meshData.transparentIndices.length > 0)) {
+    if (meshData.indices.length > 0 || (meshData.cutoutIndices && meshData.cutoutIndices.length > 0) || (meshData.transparentIndices && meshData.transparentIndices.length > 0)) {
       const geoResult = meshBuilder.buildThreeGeometry(meshData, chunkData);
 
       // Solid mesh
@@ -227,6 +237,24 @@ class BlockInteraction {
         }
       }
 
+      // Cutout mesh (leaves, flowers, torches)
+      if (geoResult.cutoutGeometry) {
+        const cutoutMaterial = new THREE.MeshLambertMaterial({
+          map: this.chunkManager.textureAtlas ? this.chunkManager.textureAtlas.getTexture() : null,
+          transparent: true,
+          alphaToCoverage: true,
+          depthWrite: true,
+          fog: true,
+          side: THREE.DoubleSide
+        });
+
+        cutoutMesh = new THREE.Mesh(geoResult.cutoutGeometry, cutoutMaterial);
+        cutoutMesh.position.set(cx * 16, 0, cz * 16);
+        if (this.renderer.chunkGroup) {
+          this.renderer.chunkGroup.add(cutoutMesh);
+        }
+      }
+
       // Transparent mesh
       if (geoResult.transparentGeometry) {
         const transMaterial = new THREE.MeshLambertMaterial({
@@ -247,8 +275,9 @@ class BlockInteraction {
 
     // Update entry
     entry.mesh = solidMesh;
+    entry.cutoutMesh = cutoutMesh;
     entry.transMesh = transMesh;
-    entry.built = !!(solidMesh || transMesh);
+    entry.built = !!(solidMesh || cutoutMesh || transMesh);
   }
 
   /**

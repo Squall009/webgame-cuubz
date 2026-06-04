@@ -49,6 +49,17 @@ class Player {
 
     // Inventory reference (set by game.js)
     this.inventory = null;
+
+    // World manager reference (set via linkWorld)
+    this.worldManager = null;
+  }
+
+  /**
+   * Link the world manager so player methods can access block data without
+   * being passed it every frame. Called once during game initialization.
+   */
+  linkWorld(worldManager) {
+    this.worldManager = worldManager;
   }
 
   setCreativeMode(creative) {

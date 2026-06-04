@@ -246,9 +246,9 @@ class TextureAtlas {
     this.totalTiles = slotIndex;
     const minGridSize = Math.ceil(Math.sqrt(this.totalTiles));
     this.gridW = minGridSize;
-    this.gridH = Math.ceil(this.totalTiles / minGridSize);
+    this.gridH = minGridSize; // Always square grid to keep horizontal and vertical UV ratios equal
 
-    console.log(`[TextureAtlas] ${this.maxBlockId + 1} block IDs, ${this.totalTiles} total tiles in ${minGridSize}x${Math.ceil(this.totalTiles / minGridSize)} grid`);
+    console.log(`[TextureAtlas] ${this.maxBlockId + 1} block IDs, ${this.totalTiles} total tiles in a square ${this.gridW}x${this.gridH} grid`);
 
     // Step 4: Load all textures and build canvas
     this.canvas = document.createElement('canvas');
@@ -311,6 +311,7 @@ class TextureAtlas {
       this.threeTexture.magFilter = THREE.NearestFilter;
       this.threeTexture.minFilter = THREE.NearestFilter;
       this.threeTexture.generateMipmaps = false;
+      this.threeTexture.premultiplyAlpha = false;  // Preserve raw alpha for cutout rendering
     }
 
     this.loaded = true;
@@ -426,6 +427,7 @@ class TextureAtlas {
       this.threeTexture.magFilter = THREE.NearestFilter;
       this.threeTexture.minFilter = THREE.NearestFilter;
       this.threeTexture.generateMipmaps = false;
+      this.threeTexture.premultiplyAlpha = false;  // Preserve raw alpha for cutout rendering
     }
     return this.threeTexture;
   }

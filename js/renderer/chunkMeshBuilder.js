@@ -15,17 +15,27 @@ class ChunkMeshBuilder {
       { dir: [-1,0, 0],  vertices: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], uvCoords: [[0,0],[1,0],[1,1],[0,1]], name: 'left' },
     ];
 
-    // Transparent block type IDs (for face culling) — matches BLOCK_PROPERTIES in chunkData.js
-    this.transparentIds = new Set([0, 6, 8, 15, 17, 24, 26, 27, 28, 29]);
+    // Block type IDs that use cutout rendering (alpha test) — leaves, flowers, torches
+    // These have binary alpha textures and should discard transparent pixels instead of blending.
+    this.cutoutIds = new Set([8, 27, 28, 29]); // LEAVES, RED_FLOWER, YELLOW_FLOWER, CAVE_TORCH
+
+    // Block type IDs that use blended transparency — fluids + ice (partial alpha, opacity blend)
+    this.transparentIds = new Set([6, 10, 17]); // WATER, ICE, TOXIC_SLIME
+
+    // Combined set for face culling (any block that isn't fully solid/opaque)
+    // Includes cutout blocks + transparent blocks + AIR (air is non-solid for culling purposes)
+    this.nonSolidIds = new Set([...this.cutoutIds, ...this.transparentIds, 0]); // LEAVES, FLOWERS, TORCH, WATER, ICE, SLIME, AIR
   }
 
   /**
    * Build merged geometry from chunk data (separate solid + transparent)
    * @param {Chunk} chunk - Chunk data structure
    * @param {TextureAtlas} atlas - Optional texture atlas for UV mapping
+   * @param {Function} neighborLookup - Cross-chunk block lookup: (worldX, worldY, worldZ) => blockType
+   * @param {Function} waterLevelLookup - Cross-chunk water level lookup: (worldX, worldY, worldZ) => level
    * @returns {Object} Geometry data: positions, normals, uvs, indices, transparentPositions, etc.
    */
-  buildMeshData(chunk, atlas) {
+  buildMeshData(chunk, atlas, neighborLookup = null, waterLevelLookup = null) {
     // Solid geometry arrays
     const positions = [];
     const normals = [];
@@ -40,6 +50,13 @@ class ChunkMeshBuilder {
     const transparentIndices = [];
     let transparentVertexIndex = 0;
 
+    // Cutout geometry arrays — alpha-tested rendering (leaves, flowers, torches)
+    const cutoutPositions = [];
+    const cutoutNormals = [];
+    const cutoutUvs = [];
+    const cutoutIndices = [];
+    let cutoutVertexIndex = 0;
+
     // Calculate chunk dimensions from block data
     const totalBlocks = chunk.blocks.length;
     const chunkHeight = CHUNK_HEIGHT; // Y: 0-95
@@ -53,11 +70,17 @@ class ChunkMeshBuilder {
 
           if (blockType === 0) continue; // Skip air
 
+          const isCutout = this.cutoutIds.has(blockType);
           const isSelfTransparent = this.transparentIds.has(blockType);
 
-          // Determine target arrays based on transparency
+          // Determine target arrays based on material type: solid / cutout / transparent
           let posArr, normArr, uvArr, idxArr;
-          if (isSelfTransparent) {
+          if (isCutout) {
+            posArr = cutoutPositions;
+            normArr = cutoutNormals;
+            uvArr = cutoutUvs;
+            idxArr = cutoutIndices;
+          } else if (isSelfTransparent) {
             posArr = transparentPositions;
             normArr = transparentNormals;
             uvArr = transparentUvs;
@@ -69,62 +92,122 @@ class ChunkMeshBuilder {
             idxArr = indices;
           }
 
-          // Check each face for exposure (face culling)
-          for (const face of this.faceNormals) {
-            const nx = x + face.dir[0];
-            const ny = y + face.dir[1];
-            const nz = z + face.dir[2];
+          // DISABLED: fluid block / water level logic (tied to WaterFlowSystem)
+          // All water/ice/lava/toxic_slime now use standard transparent face culling below.
+          /*
+          const hasWaterLevels = typeof chunk.getWaterLevel === 'function';
+          const fluidBlockType = (blockType === BLOCK_TYPES.WATER || blockType === BLOCK_TYPES.LAVA);
+          const waterLevel = hasWaterLevels && fluidBlockType ? chunk.getWaterLevel(x, y, z) : 0;
+          const isSourceFluid = (waterLevel >= 8); // Level 8 = source (ocean/lake - flat surface)
 
-            const neighborBlock = chunk.getBlock(nx, ny, nz);
-            const isNeighborTransparent = this.transparentIds.has(neighborBlock);
-            if (!isSelfTransparent && neighborBlock !== 0 && !isNeighborTransparent) {
-              continue; // Face is hidden — skip it
+          if (fluidBlockType && hasWaterLevels && !isSourceFluid) {
+            this._buildFlowingFluidFace(x, y, z, blockType, waterLevel, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup, waterLevelLookup);
+          } else if (fluidBlockType && hasWaterLevels && isSourceFluid) {
+            this._buildSourceFluidFace(x, y, z, blockType, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup);
+          } */
+
+          // Standard solid/transparent/cutout block rendering — all blocks use this path now
+            // Check each face for exposure (face culling)
+            for (const face of this.faceNormals) {
+              const nx = x + face.dir[0];
+              const ny = y + face.dir[1];
+              const nz = z + face.dir[2];
+
+              let neighborBlock;
+              if (nx >= 0 && nx < chunkX && ny >= MIN_Y && ny < MAX_Y && nz >= 0 && nz < chunkZ) {
+                // Neighbor is within this chunk — fast local lookup
+                neighborBlock = chunk.getBlock(nx, ny, nz);
+              } else {
+                // Neighbor is outside chunk bounds — use cross-chunk lookup or default to air
+                if (neighborLookup) {
+                  const worldX = chunk.chunkX * 16 + x;
+                  const worldZ = chunk.chunkZ * 16 + z;
+                  neighborBlock = neighborLookup(worldX + face.dir[0], ny, worldZ + face.dir[2]);
+                } else {
+                  // No cross-chunk data available — draw the face to be safe
+                  neighborBlock = BLOCK_TYPES.AIR;
+                }
+              }
+
+              const isNeighborTransparent = this.nonSolidIds.has(neighborBlock);
+              // Culling logic:
+              // - Solid block: cull if neighbor is also solid (not air, not cutout, not transparent).
+              // - Cutout block: cull only if neighbor is the SAME cutout block type.
+              //   (leaves need to show through each other's alpha gaps)
+              // - Transparent block: cull only if neighbor is the SAME transparent block type.
+              if (isCutout || isSelfTransparent) {
+                if (neighborBlock === blockType) {
+                  continue; // Same-type non-solid blocks next to each other: cull face
+                }
+              } else { // Current block is solid
+                if (neighborBlock !== BLOCK_TYPES.AIR && !isNeighborTransparent) {
+                  continue; // Solid block next to solid block: cull face
+                }
+              }
+
+              // Get UV offset/scale from atlas using numeric block ID (dynamic, no hardcoded mapping)
+              let uvU, uvV, uvSize;
+              if (atlas && atlas.loaded) {
+                const faceUV = atlas.getFaceUV(blockType, face.name);
+                uvU = faceUV.u || 0;
+                uvV = faceUV.v || 0;
+                uvSize = faceUV.size || (1.0 / 16);
+              } else {
+                // Fallback: simple 0-1 UV per face
+                uvU = 0;
+                uvV = 0;
+                uvSize = 1;
+              }
+
+              // Read the CURRENT vertex index for this face (live counter, not a snapshot)
+              let currentVIdx;
+              if (isCutout) {
+                currentVIdx = cutoutVertexIndex;
+              } else if (isSelfTransparent) {
+                currentVIdx = transparentVertexIndex;
+              } else {
+                currentVIdx = vertexIndex;
+              }
+
+              // Add quad vertices with proper UVs
+              for (let i = 0; i < 4; i++) {
+                const vertex = face.vertices[i];
+                posArr.push(x + vertex[0], y + vertex[1], z + vertex[2]);
+                normArr.push(face.dir[0], face.dir[1], face.dir[2]);
+
+                // Apply atlas UV mapping
+                const localUV = face.uvCoords[i];
+                uvArr.push(uvU + localUV[0] * uvSize, uvV + localUV[1] * uvSize);
+              }
+
+              // Add triangle indices using the live counter value for this face
+              idxArr.push(currentVIdx, currentVIdx + 1, currentVIdx + 2);
+              idxArr.push(currentVIdx, currentVIdx + 2, currentVIdx + 3);
+
+              if (isCutout) {
+                cutoutVertexIndex += 4;
+              } else if (isSelfTransparent) {
+                transparentVertexIndex += 4;
+              } else {
+                vertexIndex += 4;
+              }
+
+              // Sanity check: catch index drift early during development
+              const targetArr = isCutout ? cutoutPositions : (isSelfTransparent ? transparentPositions : positions);
+              if ((currentVIdx + 4) * 3 !== targetArr.length) {
+                console.warn('[ChunkMeshBuilder] Vertex index drift detected!', {
+                  currentVIdx, expected: targetArr.length / 3, isCutout, isSelfTransparent,
+                  blockType, x, y, z
+                });
+              }
             }
-
-            // Get UV offset/scale from atlas using numeric block ID (dynamic, no hardcoded mapping)
-            let uvU, uvV, uvSize;
-            if (atlas && atlas.loaded) {
-              const faceUV = atlas.getFaceUV(blockType, face.name);
-              uvU = faceUV.u || 0;
-              uvV = faceUV.v || 0;
-              uvSize = faceUV.size || (1.0 / 16);
-            } else {
-              // Fallback: simple 0-1 UV per face
-              uvU = 0;
-              uvV = 0;
-              uvSize = 1;
-            }
-
-            // Read the CURRENT vertex index for this face (live counter, not a snapshot)
-            const currentVIdx = isSelfTransparent ? transparentVertexIndex : vertexIndex;
-
-            // Add quad vertices with proper UVs
-            for (let i = 0; i < 4; i++) {
-              const vertex = face.vertices[i];
-              posArr.push(x + vertex[0], y + vertex[1], z + vertex[2]);
-              normArr.push(face.dir[0], face.dir[1], face.dir[2]);
-
-              // Apply atlas UV mapping
-              const localUV = face.uvCoords[i];
-              uvArr.push(uvU + localUV[0] * uvSize, uvV + localUV[1] * uvSize);
-            }
-
-            // Add triangle indices using the live counter value for this face
-            idxArr.push(currentVIdx, currentVIdx + 1, currentVIdx + 2);
-            idxArr.push(currentVIdx, currentVIdx + 2, currentVIdx + 3);
-
-            if (isSelfTransparent) {
-              transparentVertexIndex += 4;
-            } else {
-              vertexIndex += 4;
-            }
-          }
         }
       }
     }
 
-    // Return both solid and transparent geometry data
+    // Return all three geometry streams
     const totalSolidFaces = indices.length / 6;
+    const totalCutoutFaces = cutoutIndices.length / 6;
     const totalTransFaces = transparentIndices.length / 6;
 
     // Debug: count block types in this chunk
@@ -141,13 +224,275 @@ class ChunkMeshBuilder {
     }
 
     console.log(`[MeshBuilder] Chunk ${chunk.chunkX},${chunk.chunkZ}: ${Object.keys(blockTypeCounts).length} block types, ` +
-      `${totalSolidFaces} solid faces, ${totalTransFaces} transparent faces. Types:`, blockTypeCounts);
+      `${totalSolidFaces} solid faces, ${totalCutoutFaces} cutout faces, ${totalTransFaces} transparent faces. Types:`, blockTypeCounts);
 
-    return { 
+    return {
       positions, normals, uvs, indices,
+      cutoutPositions, cutoutNormals, cutoutUvs, cutoutIndices,
       transparentPositions, transparentNormals, transparentUvs, transparentIndices
     };
   }
+
+  /**
+   * Render source fluid (level 8) - flat surface like ocean/lake.
+   * Only renders top face and side faces where adjacent to non-fluid blocks.
+   /**
+    * Render source (level-8) fluid as a flat surface.
+    * Only renders top face + side faces at the edges of connected fluid bodies.
+    */
+   _buildSourceFluidFace(x, y, z, blockType, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup = null) {
+     const getUV = (faceName) => {
+       if (atlas && atlas.loaded) {
+         const f = atlas.getFaceUV(blockType, faceName);
+         return { u: f.u || 0, v: f.v || 0, size: f.size || (1.0 / 16) };
+       }
+       return { u: 0, v: 0, size: 1 };
+     };
+
+     // Track vertex index for this block's faces (posArr accumulates across all blocks in chunk)
+     let vIdx = 0;
+     const addQuad = (verts, normal, faceName) => {
+       const uvInfo = getUV(faceName);
+       for (let i = 0; i < 4; i++) {
+         posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
+         normArr.push(normal[0], normal[1], normal[2]);
+         const uvCoords = this.faceNormals.find(f => f.name === faceName)?.uvCoords || [[0,0],[1,0],[1,1],[0,1]];
+         uvArr.push(uvInfo.u + uvCoords[i][0] * uvInfo.size, uvInfo.v + uvCoords[i][1] * uvInfo.size);
+       }
+       idxArr.push(vIdx, vIdx+1, vIdx+2, vIdx, vIdx+2, vIdx+3);
+       vIdx += 4;
+     };
+
+     // Helper to query neighbor blocks (cross-chunk aware)
+     const queryBlock = (nx, ny, nz) => {
+       if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && ny >= MIN_Y && ny < MAX_Y) {
+         return chunk.getBlock(nx, ny, nz);
+       }
+       // Out of local chunk bounds — use cross-chunk lookup or default to air
+       if (neighborLookup) {
+         const worldX = chunk.chunkX * 16 + x;
+         const worldZ = chunk.chunkZ * 16 + z;
+         return neighborLookup(worldX + nx - x, ny, worldZ + nz - z);
+       }
+       return BLOCK_TYPES.AIR || 0;
+     };
+
+     // TOP face: only if air above (visible surface) — do NOT draw when another water block is on top
+     {
+       const above = queryBlock(x, y + 1, z);
+       if (above === BLOCK_TYPES.AIR || above === 0) {
+         addQuad([[0,1,1],[1,1,1],[1,1,0],[0,1,0]], [0, 1, 0], 'top');
+       }
+     }
+
+     // SIDE faces: only if neighbor is NOT the same fluid type (edge of body)
+     const sides = [
+       { dir: [0, 0, 1], faceName: 'front', verts: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], normal: [0, 0, 1] },
+       { dir: [0, 0,-1], faceName: 'back',  verts: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], normal: [0, 0,-1] },
+       { dir: [1, 0, 0], faceName: 'right', verts: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], normal: [1, 0, 0] },
+       { dir: [-1,0, 0], faceName: 'left',  verts: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], normal: [-1,0, 0] },
+     ];
+
+     for (const side of sides) {
+       const nx = x + side.dir[0];
+       const nz = z + side.dir[2];
+       const neighborBlock = queryBlock(nx, y, nz);
+       // Only render if neighbor is NOT the same fluid type — this creates the "edge" effect
+       if (neighborBlock !== blockType) {
+         addQuad(side.verts, side.normal, side.faceName);
+       }
+     }
+   }
+
+   /**
+    * Render flowing fluid with sloped geometry based on water level and neighbors.
+    * Level 1-7: partial height creates slope effect against terrain.
+    * Top always at full height (y+1), sides blend down to neighbor levels or ground.
+    * UVs are interpolated vertically so texture scales proportionally with height.
+    */
+   _buildFlowingFluidFace(x, y, z, blockType, waterLevel, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup = null, waterLevelLookup = null) {
+     const getUV = (faceName) => {
+       if (atlas && atlas.loaded) {
+         const f = atlas.getFaceUV(blockType, faceName);
+         return { u: f.u || 0, v: f.v || 0, size: f.size || (1.0 / 16) };
+       }
+       return { u: 0, v: 0, size: 1 };
+     };
+
+     // Track vertex indices for this block's faces (posArr accumulates across all blocks in chunk)
+     let vIdx = 0;
+
+     // Add a single triangle with per-vertex UVs for proper interpolation on slopes
+     const addTriUV = (v0, uv0, v1, uv1, v2, uv2, normal) => {
+       posArr.push(x + v0[0], y + v0[1], z + v0[2]);
+       normArr.push(normal[0], normal[1], normal[2]);
+       uvArr.push(uv0[0], uv0[1]);
+
+       posArr.push(x + v1[0], y + v1[1], z + v1[2]);
+       normArr.push(normal[0], normal[1], normal[2]);
+       uvArr.push(uv1[0], uv1[1]);
+
+       posArr.push(x + v2[0], y + v2[1], z + v2[2]);
+       normArr.push(normal[0], normal[1], normal[2]);
+       uvArr.push(uv2[0], uv2[1]);
+
+       idxArr.push(vIdx, vIdx+1, vIdx+2);
+       vIdx += 3;
+     };
+
+     // Add a quad split into two triangles with per-vertex UVs for slopes
+     const addQuadUV = (v0, uv0, v1, uv1, v2, uv2, v3, uv3, normal) => {
+       addTriUV(v0, uv0, v1, uv1, v2, uv2, normal);
+       addTriUV(v0, uv0, v2, uv2, v3, uv3, normal);
+     };
+
+     // Helper: get effective fluid level for a neighbor (cross-chunk aware)
+     const getNeighborLevel = (nx, ny, nz) => {
+       // Try local chunk first
+       if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && ny >= MIN_Y && ny < MAX_Y) {
+         const nb = chunk.getBlock(nx, ny, nz);
+         if ((nb === BLOCK_TYPES.WATER || nb === BLOCK_TYPES.LAVA) && typeof chunk.getWaterLevel === 'function') {
+           return Math.max(1, chunk.getWaterLevel(nx, ny, nz));
+         }
+       }
+       // Try cross-chunk lookup
+       if (waterLevelLookup) {
+         const worldX = chunk.chunkX * 16 + x;
+         const worldZ = chunk.chunkZ * 16 + z;
+         return Math.max(0, waterLevelLookup(worldX + nx - x, ny, worldZ + nz - z));
+       }
+       return 0; // Not fluid or lookup unavailable
+     };
+
+     // Helper: query neighbor block (cross-chunk aware)
+     const queryBlock = (nx, ny, nz) => {
+       if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && ny >= MIN_Y && ny < MAX_Y) {
+         return chunk.getBlock(nx, ny, nz);
+       }
+       if (neighborLookup) {
+         const worldX = chunk.chunkX * 16 + x;
+         const worldZ = chunk.chunkZ * 16 + z;
+         return neighborLookup(worldX + nx - x, ny, worldZ + nz - z);
+       }
+       return BLOCK_TYPES.AIR || 0;
+     };
+
+     // Convert water level (1-7) to height fraction
+     const thisHeight = Math.max(0.125, waterLevel / 8);
+
+     // Base UV info for side faces
+     const sideUVInfo = getUV('front'); // Use 'front' as default for all sides
+     const topUVInfo = getUV('top');
+
+     // TOP face: always at full block height — only if air above (visible surface)
+     {
+       const above = queryBlock(x, y + 1, z);
+       if (above === BLOCK_TYPES.AIR || above === 0) {
+         addQuadUV(
+           [0, 1, 1], [topUVInfo.u, topUVInfo.v],
+           [1, 1, 1], [topUVInfo.u + topUVInfo.size, topUVInfo.v],
+           [1, 1, 0], [topUVInfo.u + topUVInfo.size, topUVInfo.v + topUVInfo.size],
+           [0, 1, 0], [topUVInfo.u, topUVInfo.v + topUVInfo.size],
+           [0, 1, 0]
+         );
+       }
+     }
+
+     // SIDE faces: sloped based on neighbor fluid levels vs this level
+     const sides = [
+       { dir: [0, 0, 1], faceName: 'front', axis: 'z', sign: 1 },
+       { dir: [0, 0,-1], faceName: 'back',  axis: 'z', sign: -1 },
+       { dir: [1, 0, 0], faceName: 'right', axis: 'x', sign: 1 },
+       { dir: [-1,0, 0], faceName: 'left',  axis: 'x', sign: -1 },
+     ];
+
+     for (const side of sides) {
+       const nx = x + side.dir[0];
+       const nz = z + side.dir[2];
+       const neighborBlock = queryBlock(nx, y, nz);
+
+       // Skip if solid block next to us — don't render into terrain
+       if (neighborBlock !== BLOCK_TYPES.AIR && !this.nonSolidIds.has(neighborBlock)) {
+         continue;
+       }
+
+       const neighborLevel = getNeighborLevel(nx, y, nz);
+
+       if (neighborLevel === 0) {
+         // Neighbor is air/solid: render side face from bottom to this water height
+         const h = thisHeight;
+         const uvH = sideUVInfo.v + h * sideUVInfo.size; // UV scales with height
+        
+         let v0, uv0, v1, uv1, v2, uv2, v3, uv3;
+         if (side.axis === 'z' && side.sign > 0) {
+           v0=[0,0,1]; uv0=[sideUVInfo.u, sideUVInfo.v];
+           v1=[1,0,1]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
+           v2=[1,h,1]; uv2=[sideUVInfo.u + sideUVInfo.size, uvH];
+           v3=[0,h,1]; uv3=[sideUVInfo.u, uvH];
+         } else if (side.axis === 'z' && side.sign < 0) {
+           v0=[1,0,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
+           v1=[0,0,0]; uv1=[sideUVInfo.u, sideUVInfo.v];
+           v2=[0,h,0]; uv2=[sideUVInfo.u, uvH];
+           v3=[1,h,0]; uv3=[sideUVInfo.u + sideUVInfo.size, uvH];
+         } else if (side.axis === 'x' && side.sign > 0) {
+           v0=[1,0,1]; uv0=[sideUVInfo.u, sideUVInfo.v];
+           v1=[1,0,0]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
+           v2=[1,h,0]; uv2=[sideUVInfo.u + sideUVInfo.size, uvH];
+           v3=[1,h,1]; uv3=[sideUVInfo.u, uvH];
+         } else {
+           v0=[0,0,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
+           v1=[0,0,1]; uv1=[sideUVInfo.u, sideUVInfo.v];
+           v2=[0,h,1]; uv2=[sideUVInfo.u, uvH];
+           v3=[0,h,0]; uv3=[sideUVInfo.u + sideUVInfo.size, uvH];
+         }
+         addQuadUV(v0,uv0,v1,uv1,v2,uv2,v3,uv3, side.dir);
+
+       } else if (neighborLevel < waterLevel) {
+         // Neighbor has lower level: render sloped face from neighbor height to this height
+         const nHeight = Math.max(0.125, neighborLevel / 8);
+         const h = thisHeight;
+        
+         let v0, uv0, v1, uv1, v2, uv2, v3, uv3;
+         if (side.axis === 'z' && side.sign > 0) {
+           v0=[0,nHeight,1]; uv0=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v1=[1,nHeight,1]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v2=[1,h,1];     uv2=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
+           v3=[0,h,1];     uv3=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
+         } else if (side.axis === 'z' && side.sign < 0) {
+           v0=[1,nHeight,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v1=[0,nHeight,0]; uv1=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v2=[0,h,0];     uv2=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
+           v3=[1,h,0];     uv3=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
+         } else if (side.axis === 'x' && side.sign > 0) {
+           v0=[1,nHeight,1]; uv0=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v1=[1,nHeight,0]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v2=[1,h,0];     uv2=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
+           v3=[1,h,1];     uv3=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
+         } else {
+           v0=[0,nHeight,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v1=[0,nHeight,1]; uv1=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
+           v2=[0,h,1];     uv2=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
+           v3=[0,h,0];     uv3=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
+         }
+         addQuadUV(v0,uv0,v1,uv1,v2,uv2,v3,uv3, side.dir);
+       }
+       // If neighbor level >= this level: don't render (neighbor covers us)
+     }
+
+     // BOTTOM face: only if there's air below (waterfall edge / exposed bottom)
+     {
+       const below = queryBlock(x, y - 1, z);
+       if (below === BLOCK_TYPES.AIR || this.nonSolidIds.has(below)) {
+         addQuadUV(
+           [0,0,0], [sideUVInfo.u, sideUVInfo.v],
+           [1,0,0], [sideUVInfo.u + sideUVInfo.size, sideUVInfo.v],
+           [1,0,1], [sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + sideUVInfo.size],
+           [0,0,1], [sideUVInfo.u, sideUVInfo.v + sideUVInfo.size],
+           [0,-1, 0]
+         );
+       }
+     }
+   }
 
   /**
    * Check if a block type is transparent (for face culling)
@@ -163,7 +508,7 @@ class ChunkMeshBuilder {
     if (typeof THREE === 'undefined') return null;
 
     // Skip empty chunks (all air) — no geometry to build
-    if (meshData.indices.length === 0 && (!meshData.transparentIndices || meshData.transparentIndices.length === 0)) {
+    if (meshData.indices.length === 0 && (!meshData.cutoutIndices || meshData.cutoutIndices.length === 0) && (!meshData.transparentIndices || meshData.transparentIndices.length === 0)) {
       return null;
     }
 
@@ -179,7 +524,17 @@ class ChunkMeshBuilder {
       result.solidGeometry = geometry;
     }
 
-    // Build transparent geometry (water, lava, leaves) separately
+    // Build cutout geometry (leaves, flowers, torches) — alpha-tested rendering
+    if (meshData.cutoutIndices && meshData.cutoutIndices.length > 0) {
+      const cutoutGeometry = new THREE.BufferGeometry();
+      cutoutGeometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.cutoutPositions, 3));
+      cutoutGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.cutoutNormals, 3));
+      cutoutGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.cutoutUvs, 2));
+      cutoutGeometry.setIndex(meshData.cutoutIndices);
+      result.cutoutGeometry = cutoutGeometry;
+    }
+
+    // Build transparent geometry (water, ice, toxic slime) — opacity blending
     if (meshData.transparentIndices && meshData.transparentIndices.length > 0) {
       const transGeometry = new THREE.BufferGeometry();
       transGeometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.transparentPositions, 3));

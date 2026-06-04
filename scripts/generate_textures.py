@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """
-Cuubz Texture Generator
-=======================
+Cuubz Texture Generator (with Alpha Channel Support)
+=====================================================
 Generates all 32x32 PNG textures for the Cuubz voxel game using procedural
-noise and patterns. No external assets required — everything is generated
-algorithmically.
+noise and patterns. All textures are RGBA — solid blocks have full alpha=255,
+cutout materials (leaves, flowers, items) use proper alpha masks where colored
+pixels are opaque (255) and everything else is transparent (0).
+
+Material types:
+  - SOLID: Full opacity everywhere (bedrock, dirt, stone, ores, etc.)
+  - TRANSPARENT: Partial alpha for translucent rendering (water, ice, toxic_slime)
+  - CUTOUT: Binary alpha mask — colored parts opaque, rest fully transparent
+            (leaves, flowers, torches, items, corrupt_cry)
 
 Usage:
     python3 scripts/generate_textures.py [--output textures/]
-
-Textures generated (26 total):
-    - Terrain blocks: grass_top, grass_side, dirt, stone, sand, gravel, snow, ice
-    - Water & lava: water, lava
-    - Wood/plants: wood_log, leaves, apple
-    - Building: planks, bedrock, obsidian, blackstone, bed
-    - Ores: coal_ore, iron_ore, gold_ore, diamond_ore
-    - Corrupt biome: corrupt_stone, toxic_slime, corrupt_cry
-    - Items: quest_key
 
 Author: Cuubz Autonomous Builder
 Date: 2026-05-23
@@ -119,8 +117,8 @@ def add_noise(color, amount=15):
     return (r, g, b)
 
 def noise_image(width, height, base_color, variation=20, noise_scale=8.0, seed=42):
-    """Generate a 32x32 image with smooth noise on a base color."""
-    img = Image.new("RGB", (width, height))
+    """Generate a 32x32 image with smooth noise on a base color (RGBA)."""
+    img = Image.new("RGBA", (width, height))
     n = PerlinNoise(seed)
     pixels = []
     for y in range(height):
@@ -134,22 +132,24 @@ def noise_image(width, height, base_color, variation=20, noise_scale=8.0, seed=4
             r = clamp_color(base_color[0] + offset)
             g = clamp_color(base_color[1] + offset)
             b = clamp_color(base_color[2] + offset)
-            row.append((r, g, b))
+            row.append((r, g, b, 255))
         pixels.extend(row)
     img.putdata(pixels)
     return img
 
 def speckle_image(width, height, base_color, speckle_color, density=0.15, seed=42):
-    """Add random speckles/dots to a base color image."""
+    """Add random speckles/dots to a base color image (RGBA)."""
     random.seed(seed)
-    img = Image.new("RGB", (width, height), base_color)
+    img = Image.new("RGBA", (width, height), (*base_color, 255))
     pixels = img.load()
     for y in range(height):
         for x in range(width):
             if random.random() < density:
-                pixels[x, y] = add_noise(speckle_color, 10)
+                c = add_noise(speckle_color, 10)
+                pixels[x, y] = (c[0], c[1], c[2], 255)
             else:
-                pixels[x, y] = add_noise(base_color, 8)
+                c = add_noise(base_color, 8)
+                pixels[x, y] = (c[0], c[1], c[2], 255)
     return img
 
 
@@ -158,10 +158,10 @@ def speckle_image(width, height, base_color, speckle_color, density=0.15, seed=4
 # ============================================================================
 
 def gen_grass_top(seed=100):
-    """Green noise with lighter patches — grass block top face."""
+    """Green noise with lighter patches — grass block top face (SOLID)."""
     random.seed(seed)
     base = (76, 153, 49)       # Minecraft-like grass green
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
@@ -171,14 +171,14 @@ def gen_grass_top(seed=100):
             r = clamp_color(76 + green_offset * 0.3)
             g = clamp_color(153 + green_offset)
             b = clamp_color(49 + green_offset * 0.2)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_grass_side(seed=101):
-    """Dirt base with green top stripe — grass block side face."""
+    """Dirt base with green top stripe — grass block side face (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n_dirt = PerlinNoise(seed)
     n_grass = PerlinNoise(seed + 1000)
     for y in range(32):
@@ -199,14 +199,14 @@ def gen_grass_side(seed=101):
             r += random.randint(-5, 5)
             g += random.randint(-5, 5)
             b += random.randint(-5, 5)
-            img.putpixel((x, y), (clamp_color(r), clamp_color(g), clamp_color(b)))
+            img.putpixel((x, y), (clamp_color(r), clamp_color(g), clamp_color(b), 255))
     return img
 
 
 def gen_dirt(seed=102):
-    """Brown noise with darker speckles."""
+    """Brown noise with darker speckles (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
@@ -214,14 +214,14 @@ def gen_dirt(seed=102):
             r = clamp_color(134 + (nv - 0.5) * 40)
             g = clamp_color(96 + (nv - 0.5) * 35)
             b = clamp_color(67 + (nv - 0.5) * 25)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_stone(seed=103):
-    """Gray noise with subtle crack patterns."""
+    """Gray noise with subtle crack patterns (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     n_crack = PerlinNoise(seed + 500)
     for y in range(32):
@@ -232,14 +232,14 @@ def gen_stone(seed=103):
             cn = n_crack.noise2d(x / 3.0, y / 3.0)
             if abs(cn - 0.5) < 0.04:
                 base_val = clamp_color(base_val - 30)
-            img.putpixel((x, y), (base_val, base_val, clamp_color(base_val + 2)))
+            img.putpixel((x, y), (base_val, base_val, clamp_color(base_val + 2), 255))
     return img
 
 
 def gen_sand(seed=104):
-    """Yellow noise with grain variation."""
+    """Yellow noise with grain variation (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
@@ -252,14 +252,14 @@ def gen_sand(seed=104):
                 r -= 15
                 g -= 15
                 b -= 10
-            img.putpixel((x, y), (clamp_color(r), clamp_color(g), clamp_color(b)))
+            img.putpixel((x, y), (clamp_color(r), clamp_color(g), clamp_color(b), 255))
     return img
 
 
 def gen_gravel(seed=105):
-    """Mixed gray/brown small squares (pebble-like)."""
+    """Mixed gray/brown small squares (pebble-like) (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     # Pebble colors: range of grays and browns
     pebble_colors = [
         (100, 100, 100), (120, 115, 110), (80, 75, 70),
@@ -278,7 +278,7 @@ def gen_gravel(seed=105):
             r = clamp_color(color[0] + random.randint(-8, 8))
             g = clamp_color(color[1] + random.randint(-8, 8))
             b = clamp_color(color[2] + random.randint(-8, 8))
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
@@ -301,9 +301,9 @@ def gen_water(seed=106):
 
 
 def gen_wood_log(seed=107):
-    """Brown rings/circles — vertical grain pattern."""
+    """Brown rings/circles — vertical grain pattern (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     cx, cy = 16, 16
     n = PerlinNoise(seed)
     for y in range(32):
@@ -319,12 +319,12 @@ def gen_wood_log(seed=107):
             r = clamp_color(90 + val * 60)
             g = clamp_color(65 + val * 45)
             b = clamp_color(35 + val * 25)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_leaves(seed=108):
-    """Green noise with darker spots — leafy texture."""
+    """Green leaf texture with cutout alpha — colored parts opaque, rest transparent (CUTOUT)."""
     random.seed(seed)
     img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
@@ -341,21 +341,21 @@ def gen_leaves(seed=108):
                 r = clamp_color(50 + nv * 30)
                 g = clamp_color(130 + nv * 50)
                 b = clamp_color(30 + nv * 20)
-            a = clamp_color(180 + nv * 50)
-            img.putpixel((x, y), (r, g, b, a))
+            # Binary cutout alpha: full tile is opaque (leaf block fills entire face)
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_snow(seed=109):
-    """White/light gray minimal noise."""
+    """White/light gray minimal noise (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
             nv = n.noise2d(x / 10.0, y / 10.0)
             val = clamp_color(230 + (nv - 0.5) * 25)
-            img.putpixel((x, y), (val, val, clamp_color(val + 3)))
+            img.putpixel((x, y), (val, val, clamp_color(val + 3), 255))
     return img
 
 
@@ -376,9 +376,9 @@ def gen_ice(seed=110):
 
 
 def gen_bedrock(seed=111):
-    """Dark gray/black heavy noise."""
+    """Dark gray/black heavy noise (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     n2 = PerlinNoise(seed + 500)
     for y in range(32):
@@ -386,14 +386,14 @@ def gen_bedrock(seed=111):
             nv1 = n.octave_noise2d(x / 4.0, y / 4.0, octaves=4, persistence=0.5)
             nv2 = n2.noise2d(x / 2.0, y / 2.0)
             val = clamp_color(40 + nv1 * 50 + nv2 * 20)
-            img.putpixel((x, y), (val, val, clamp_color(val + 2)))
+            img.putpixel((x, y), (val, val, clamp_color(val + 2), 255))
     return img
 
 
 def gen_planks(seed=112):
-    """Wood grain horizontal lines."""
+    """Wood grain horizontal lines (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
@@ -410,14 +410,14 @@ def gen_planks(seed=112):
             r = clamp_color(base_r + (nv - 0.5) * 30)
             g = clamp_color(base_g + (nv - 0.5) * 25)
             b = clamp_color(base_b + (nv - 0.5) * 15)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_obsidian(seed=113):
-    """Very dark purple-black glossy."""
+    """Very dark purple-black glossy (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
@@ -426,27 +426,27 @@ def gen_obsidian(seed=113):
             r = clamp_color(15 + nv * 20)
             g = clamp_color(8 + nv * 10)
             b = clamp_color(30 + nv * 40)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_blackstone(seed=114):
-    """Dark gray with subtle texture."""
+    """Dark gray with subtle texture (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
             nv = n.octave_noise2d(x / 5.0, y / 5.0, octaves=3, persistence=0.5)
             val = clamp_color(60 + (nv - 0.5) * 30)
-            img.putpixel((x, y), (val, val, clamp_color(val + 1)))
+            img.putpixel((x, y), (val, val, clamp_color(val + 1), 255))
     return img
 
 
 def gen_lava(seed=115):
-    """Orange/red flow pattern."""
+    """Orange/red flow pattern (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
@@ -455,14 +455,14 @@ def gen_lava(seed=115):
             r = clamp_color(200 + nv * 55)
             g = clamp_color(80 + nv * 100)
             b = clamp_color(10 + nv * 30)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_corrupt_stone(seed=116):
-    """Dark purple crystalline."""
+    """Dark purple crystalline (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     n_crystal = PerlinNoise(seed + 500)
     for y in range(32):
@@ -473,7 +473,7 @@ def gen_corrupt_stone(seed=116):
             r = clamp_color(40 + nv * 30 + crystal * 40)
             g = clamp_color(20 + nv * 15 + crystal * 10)
             b = clamp_color(60 + nv * 40 + crystal * 50)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
@@ -495,7 +495,7 @@ def gen_toxic_slime(seed=117):
 
 
 def gen_coal_ore(seed=118):
-    """Stone base with black ore spots."""
+    """Stone base with black ore spots (SOLID)."""
     random.seed(seed)
     stone_img = gen_stone(seed)
     n = PerlinNoise(seed + 500)
@@ -507,12 +507,13 @@ def gen_coal_ore(seed=118):
             if nv > 0.65 and random.random() < 0.7:
                 pixels[x, y] = (clamp_color(30 + random.randint(-10, 10)),
                                 clamp_color(28 + random.randint(-10, 10)),
-                                clamp_color(28 + random.randint(-10, 10)))
+                                clamp_color(28 + random.randint(-10, 10)),
+                                255)
     return stone_img
 
 
 def gen_iron_ore(seed=119):
-    """Stone base with light gray/tan ore spots."""
+    """Stone base with light gray/tan ore spots (SOLID)."""
     random.seed(seed)
     stone_img = gen_stone(seed)
     n = PerlinNoise(seed + 500)
@@ -523,12 +524,13 @@ def gen_iron_ore(seed=119):
             if nv > 0.65 and random.random() < 0.7:
                 pixels[x, y] = (clamp_color(180 + random.randint(-15, 15)),
                                 clamp_color(160 + random.randint(-15, 15)),
-                                clamp_color(140 + random.randint(-15, 15)))
+                                clamp_color(140 + random.randint(-15, 15)),
+                                255)
     return stone_img
 
 
 def gen_gold_ore(seed=120):
-    """Stone base with yellow ore spots."""
+    """Stone base with yellow ore spots (SOLID)."""
     random.seed(seed)
     stone_img = gen_stone(seed)
     n = PerlinNoise(seed + 500)
@@ -539,12 +541,13 @@ def gen_gold_ore(seed=120):
             if nv > 0.65 and random.random() < 0.7:
                 pixels[x, y] = (clamp_color(220 + random.randint(-10, 10)),
                                 clamp_color(195 + random.randint(-10, 10)),
-                                clamp_color(40 + random.randint(-10, 10)))
+                                clamp_color(40 + random.randint(-10, 10)),
+                                255)
     return stone_img
 
 
 def gen_diamond_ore(seed=121):
-    """Stone base with cyan ore spots."""
+    """Stone base with cyan ore spots (SOLID)."""
     random.seed(seed)
     stone_img = gen_stone(seed)
     n = PerlinNoise(seed + 500)
@@ -555,12 +558,13 @@ def gen_diamond_ore(seed=121):
             if nv > 0.65 and random.random() < 0.7:
                 pixels[x, y] = (clamp_color(50 + random.randint(-10, 10)),
                                 clamp_color(200 + random.randint(-10, 10)),
-                                clamp_color(210 + random.randint(-10, 10)))
+                                clamp_color(210 + random.randint(-10, 10)),
+                                255)
     return stone_img
 
 
 def gen_corrupt_cry(seed=122):
-    """Glowing purple crystal — quest item."""
+    """Glowing purple crystal — quest item (CUTOUT)."""
     random.seed(seed)
     img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
@@ -578,7 +582,8 @@ def gen_corrupt_cry(seed=122):
                 r = clamp_color(150 + nv * 60 + glow * 80)
                 g = clamp_color(30 + nv * 20 + glow * 20)
                 b = clamp_color(200 + nv * 40 + glow * 55)
-                a = clamp_color(200 + glow * 55)
+                # Binary cutout: opaque where crystal exists
+                a = 255
             else:
                 # Transparent background
                 r, g, b, a = 0, 0, 0, 0
@@ -587,7 +592,7 @@ def gen_corrupt_cry(seed=122):
 
 
 def gen_apple(seed=123):
-    """Red round fruit icon."""
+    """Red round fruit icon (CUTOUT)."""
     random.seed(seed)
     img = Image.new("RGBA", (32, 32))
     draw = ImageDraw.Draw(img)
@@ -605,7 +610,7 @@ def gen_apple(seed=123):
 
 
 def gen_quest_key(seed=124):
-    """Golden key icon."""
+    """Golden key icon (CUTOUT)."""
     random.seed(seed)
     img = Image.new("RGBA", (32, 32))
     draw = ImageDraw.Draw(img)
@@ -627,9 +632,9 @@ def gen_quest_key(seed=124):
 
 
 def gen_bed(seed=125):
-    """Colored bed block texture — red bed with white pillow."""
+    """Colored bed block texture — red bed with white pillow (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     for y in range(32):
         for x in range(32):
@@ -644,12 +649,12 @@ def gen_bed(seed=125):
                 r = clamp_color(180 + (nv - 0.5) * 30)
                 g = clamp_color(40 + (nv - 0.5) * 20)
                 b = clamp_color(40 + (nv - 0.5) * 20)
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     return img
 
 
 def gen_red_flower(seed=126):
-    """Red flower — small decorative block for plains biomes."""
+    """Red flower — small decorative block for plains biomes (CUTOUT)."""
     random.seed(seed)
     img = Image.new("RGBA", (32, 32))
     draw = ImageDraw.Draw(img)
@@ -674,7 +679,7 @@ def gen_red_flower(seed=126):
 
 
 def gen_yellow_flower(seed=127):
-    """Yellow flower — small decorative block for plains biomes."""
+    """Yellow flower — small decorative block for plains biomes (CUTOUT)."""
     random.seed(seed)
     img = Image.new("RGBA", (32, 32))
     draw = ImageDraw.Draw(img)
@@ -699,7 +704,7 @@ def gen_yellow_flower(seed=127):
 
 
 def gen_cave_torch(seed=128):
-    """Cave torch — player placeable light source for caves."""
+    """Cave torch — player placeable light source for caves (CUTOUT)."""
     random.seed(seed)
     img = Image.new("RGBA", (32, 32))
     draw = ImageDraw.Draw(img)
@@ -714,21 +719,19 @@ def gen_cave_torch(seed=128):
     # Inner flame: brighter yellow core
     inner_flame = [(15, 9), (17, 9), (16, 4)]
     draw.polygon(inner_flame, fill=(255, 240, 100))
-    
-    # Glow halo: semi-transparent warm glow around flame
+
+    # Outer glow: solid warm orange ring around flame (binary cutout)
     for r in range(8, 14):
-        alpha = max(0, int(40 * (1 - (r - 8) / 6)))
-        if alpha > 0:
-            draw.ellipse([16 - r, 5 - r + 2, 16 + r, 5 + r + 2],
-                        outline=(255, 160, 40, alpha))
-    
+        draw.ellipse([16 - r, 5 - r + 2, 16 + r, 5 + r + 2],
+                    outline=(255, 160, 40))
+
     return img
 
 
 def gen_glowstone(seed=129):
-    """Glowstone — emissive light source block found in caves."""
+    """Glowing yellow light source block found in caves (SOLID)."""
     random.seed(seed)
-    img = Image.new("RGB", (32, 32))
+    img = Image.new("RGBA", (32, 32))
     n = PerlinNoise(seed)
     
     for y in range(32):
@@ -748,7 +751,7 @@ def gen_glowstone(seed=129):
                 g = clamp_color(g - 25)
                 b = clamp_color(b - 20)
             
-            img.putpixel((x, y), (r, g, b))
+            img.putpixel((x, y), (r, g, b, 255))
     
     return img
 
@@ -756,38 +759,44 @@ def gen_glowstone(seed=129):
 # ============================================================================
 # Texture Registry — maps filename → generator function
 # ============================================================================
+# Material types (for shader assignment):
+#   SOLID   — Full alpha (255), drawn with solid shader. Opaque blocks.
+#   CUTOUT  — Binary alpha (0 or 255), drawn with cutout shader. Discards transparent pixels.
+#             Used for leaves, flowers, items, torches.
+#   TRANSPARENT — Partial alpha blending, drawn with transparency shader.
+#                 Used for water, ice, toxic slime.
 
 TEXTURE_GENERATORS = {
-    "grass_top.png": gen_grass_top,
-    "grass_side.png": gen_grass_side,
-    "dirt.png": gen_dirt,
-    "stone.png": gen_stone,
-    "sand.png": gen_sand,
-    "gravel.png": gen_gravel,
-    "water.png": gen_water,
-    "wood_log.png": gen_wood_log,
-    "leaves.png": gen_leaves,
-    "snow.png": gen_snow,
-    "ice.png": gen_ice,
-    "bedrock.png": gen_bedrock,
-    "planks.png": gen_planks,
-    "obsidian.png": gen_obsidian,
-    "blackstone.png": gen_blackstone,
-    "lava.png": gen_lava,
-    "corrupt_stone.png": gen_corrupt_stone,
-    "toxic_slime.png": gen_toxic_slime,
-    "coal_ore.png": gen_coal_ore,
-    "iron_ore.png": gen_iron_ore,
-    "gold_ore.png": gen_gold_ore,
-    "diamond_ore.png": gen_diamond_ore,
-    "corrupt_cry.png": gen_corrupt_cry,
-    "apple.png": gen_apple,
-    "quest_key.png": gen_quest_key,
-    "bed.png": gen_bed,
-    "red_flower.png": gen_red_flower,
-    "yellow_flower.png": gen_yellow_flower,
-    "cave_torch.png": gen_cave_torch,
-    "glowstone.png": gen_glowstone,
+    "grass_top.png": gen_grass_top,      # SOLID
+    "grass_side.png": gen_grass_side,    # SOLID
+    "dirt.png": gen_dirt,                # SOLID
+    "stone.png": gen_stone,              # SOLID
+    "sand.png": gen_sand,                # SOLID
+    "gravel.png": gen_gravel,            # SOLID
+    "water.png": gen_water,              # TRANSPARENT (partial alpha)
+    "wood_log.png": gen_wood_log,        # SOLID
+    "leaves.png": gen_leaves,            # CUTOUT (binary alpha — full tile opaque)
+    "snow.png": gen_snow,                # SOLID
+    "ice.png": gen_ice,                  # TRANSPARENT (partial alpha)
+    "bedrock.png": gen_bedrock,          # SOLID
+    "planks.png": gen_planks,            # SOLID
+    "obsidian.png": gen_obsidian,        # SOLID
+    "blackstone.png": gen_blackstone,    # SOLID
+    "lava.png": gen_lava,                # SOLID
+    "corrupt_stone.png": gen_corrupt_stone,  # SOLID
+    "toxic_slime.png": gen_toxic_slime,  # TRANSPARENT (partial alpha)
+    "coal_ore.png": gen_coal_ore,        # SOLID
+    "iron_ore.png": gen_iron_ore,        # SOLID
+    "gold_ore.png": gen_gold_ore,        # SOLID
+    "diamond_ore.png": gen_diamond_ore,  # SOLID
+    "corrupt_cry.png": gen_corrupt_cry,  # CUTOUT (crystal shape on transparent bg)
+    "apple.png": gen_apple,              # CUTOUT (round fruit on transparent bg)
+    "quest_key.png": gen_quest_key,      # CUTOUT (key icon on transparent bg)
+    "bed.png": gen_bed,                  # SOLID
+    "red_flower.png": gen_red_flower,    # CUTOUT (flower shape on transparent bg)
+    "yellow_flower.png": gen_yellow_flower,  # CUTOUT (flower shape on transparent bg)
+    "cave_torch.png": gen_cave_torch,    # CUTOUT (torch shape on transparent bg)
+    "glowstone.png": gen_glowstone,      # SOLID
 }
 
 
