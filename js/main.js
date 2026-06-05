@@ -531,7 +531,19 @@
       const index = this.worlds.findIndex(w => w.id === id);
       if (index === -1) return { success: false, error: 'World not found' };
 
+      // Remove world metadata from PersistenceManager
       await this.persistence.deleteWorld(id);
+
+      // Clean up all chunk data and manifest from IndexedDB to prevent orphaned storage.
+      // ChunkStore uses the world ID as its namespace key, so we create a temporary instance.
+      try {
+        const store = new ChunkStore(id);
+        await store.deleteWorld();
+        store.close();
+      } catch (err) {
+        // Silently ignore chunk store cleanup errors on world deletion.
+      }
+
       this.worlds.splice(index, 1);
       if (this.selectedId === id) this.selectedId = null;
       return { success: true };
@@ -1215,7 +1227,13 @@
      * Start hosting a new session.
      * Validates form inputs and creates the session on the server.
      */
-    async startHosting() {
+    /**
+     * Start hosting a multiplayer session.
+     * @param {Object} [options] — Optional configuration
+     * @param {Function} [options.onBlockBreakValidated] — Called when remote player breaks block (host marks chunk dirty)
+     * @param {Function} [options.onBlockPlaceValidated] — Called when remote player places block (host marks chunk dirty)
+     */
+    async startHosting(options = {}) {
       const nameInput = document.getElementById('host-session-name');
       const worldSelect = document.getElementById('host-world-select');
       const modeSelect = document.getElementById('host-mode-select');
@@ -1272,6 +1290,35 @@
         updateConnectionStatus('connected');
         _log(`[SessionManager] Simulated hosting: ${name} (offline)`);
       }
+
+      // Wire up block validation callbacks for host persistence to IndexedDB.
+      // These fire when remote players break/place blocks — the host validates via relay,
+      // then marks chunks dirty so they get flushed to ChunkStore on next interval.
+      if (this.client) {
+        const { onBlockBreakValidated, onBlockPlaceValidated } = options;
+
+        if (onBlockBreakValidated) {
+          this.client.onGame('BLOCK_BREAK', (data) => {
+            try {
+              onBlockBreakValidated(data);
+            } catch (err) {
+              console.error('[SessionManager] Error in BLOCK_BREAK handler:', err.message);
+            }
+          });
+        }
+
+        if (onBlockPlaceValidated) {
+          this.client.onGame('BLOCK_PLACE', (data) => {
+            try {
+              onBlockPlaceValidated(data);
+            } catch (err) {
+              console.error('[SessionManager] Error in BLOCK_PLACE handler:', err.message);
+            }
+          });
+        }
+
+        _log('[SessionManager] Host block validation callbacks wired');
+      }
     }
 
     /**
@@ -1309,6 +1356,71 @@
       this.players = [];
       updateConnectionStatus('disconnected');
       hidePlayerList();
+    }
+
+    /**
+     * Register host-side block validation callbacks after game session starts.
+     * Called from startGame() when chunkManager and dirtyFlush are available.
+     * @param {Function} onBlockBreakValidated — (data: {x, y, z, chunkX, chunkZ}) => void
+     * @param {Function} onBlockPlaceValidated — (data: {x, y, z, blockType, chunkX, chunkZ}) => void
+     */
+    registerHostCallbacks(onBlockBreakValidated, onBlockPlaceValidated) {
+      if (!this.client || !this.hostingSessionId) return;
+
+      if (onBlockBreakValidated) {
+        this.client.onGame('BLOCK_BREAK', (data) => {
+          try {
+            onBlockBreakValidated(data);
+          } catch (err) {
+            console.error('[SessionManager] Error in BLOCK_BREAK handler:', err.message);
+          }
+        });
+      }
+
+      if (onBlockPlaceValidated) {
+        this.client.onGame('BLOCK_PLACE', (data) => {
+          try {
+            onBlockPlaceValidated(data);
+          } catch (err) {
+            console.error('[SessionManager] Error in BLOCK_PLACE handler:', err.message);
+          }
+        });
+      }
+
+      _log('[SessionManager] Host callbacks registered for IndexedDB persistence');
+    }
+
+    /**
+     * Register client-side block delta callbacks after game session starts.
+     * Called from startGame() when joining a session (not hosting).
+     * Applies remote deltas visually without persisting to IndexedDB — only the host persists.
+     * @param {Function} onBlockBreak — (data: {x, y, z, chunkX, chunkZ}) => void
+     * @param {Function} onBlockPlace — (data: {x, y, z, blockType, chunkX, chunkZ}) => void
+     */
+    registerClientCallbacks(onBlockBreak, onBlockPlace) {
+      if (!this.client || !this.currentSessionId || this.hostingSessionId) return;
+
+      if (onBlockBreak) {
+        this.client.onGame('BLOCK_BREAK', (data) => {
+          try {
+            onBlockBreak(data);
+          } catch (err) {
+            console.error('[SessionManager] Error in client BLOCK_BREAK handler:', err.message);
+          }
+        });
+      }
+
+      if (onBlockPlace) {
+        this.client.onGame('BLOCK_PLACE', (data) => {
+          try {
+            onBlockPlace(data);
+          } catch (err) {
+            console.error('[SessionManager] Error in client BLOCK_PLACE handler:', err.message);
+          }
+        });
+      }
+
+      _log('[SessionManager] Client delta callbacks registered (visual only, no persistence)');
     }
 
     /** Dispose and clean up */
@@ -1520,21 +1632,96 @@
           }
 
           // atlasOverlay stays hidden — remove this line to show debug overlay during gameplay
-          console.log(`[Cuubz] Texture atlas built: ${textureAtlas.totalTiles} tiles in ${textureAtlas.gridW}x${textureAtlas.gridH} grid`);
+// Texture atlas built — no log
         }
 
-        // Initialize Chunk Manager with texture atlas
+        // Initialize Chunk Manager with texture atlas + new IndexedDB storage system
         loadingStatus.textContent = 'Loading chunks...';
         if (loadingProgress) loadingProgress.style.width = '85%';
+
+        // Create IndexedDB-backed chunk store (opens lazily on first use)
+        const worldName = currentWorld.id;
+        const chunkStore = new ChunkStore(worldName);
+
+        // Load or create world manifest
+        let manifest = await chunkStore.loadManifest();
+        if (!manifest) {
+          manifest = {
+            worldName: currentWorld.name,
+            seed: currentWorld.seed,
+            createdAt: Date.now(),
+            lastPlayed: Date.now(),
+            playerCount: 1,
+            spawnPoint: { x: 0, y: 32, z: 0 },
+            generatedChunks: [],
+          };
+          await chunkStore.saveManifest(manifest);
+          _log(`[Cuubz] Created new world manifest for "${worldName}"`);
+        } else {
+          // Update last played time
+          manifest.lastPlayed = Date.now();
+          await chunkStore.saveManifest(manifest);
+          _log(`[Cuubz] Loaded existing world manifest (${manifest.generatedChunks.length} chunks saved)`);
+        }
+
+        // Create dirty flush manager (periodic auto-save)
+        const dirtyFlush = new DirtyFlushManager(chunkStore, {
+          flushInterval: 5000, // Flush every 5 seconds
+        });
+        dirtyFlush.start();
 
         // Load initial chunks around spawn via update (renderDistance 8 = ~17x17 chunk area)
         const chunkManager = new ChunkManager(renderer, worldGen.generateChunk.bind(worldGen), {
           textureAtlas: textureAtlas,
           renderDistance: 8,
-          persistence: characterManager ? characterManager.storage : null,
-          worldId: currentWorld.id,
+          // New storage system
+          chunkStore: chunkStore,
+          dirtyFlush: dirtyFlush,
         });
         chunkManager.update(0, 0, performance.now());
+
+        // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
+        // When hosting a session, remote player block changes arrive via MultiplayerClient game events.
+        // These callbacks apply the change locally and mark chunks dirty for ChunkStore flush.
+        if (sessionManager && sessionManager.hostingSessionId) {
+// Host callbacks wired — no log
+
+          const applyRemoteBlockChange = (data, newBlockType) => {
+            try {
+              // Apply the block change locally through ChunkManager.
+              // This already handles marking chunks dirty for IndexedDB flush internally.
+              chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType);
+
+// Remote block change applied — no log
+            } catch (err) {
+              console.error('[Cuubz] Error applying remote block change:', err.message, '\n', err.stack);
+            }
+          };
+
+          // Register callbacks with SessionManager's game event handlers
+          sessionManager.registerHostCallbacks(
+            (data) => applyRemoteBlockChange(data, 0),  // BLOCK_BREAK → AIR
+            (data) => applyRemoteBlockChange(data, data.blockType || 1)  // BLOCK_PLACE → blockType
+          );
+        } else if (sessionManager && sessionManager.currentSessionId) {
+          // Client-side: Joiner applies remote deltas visually without persisting to IndexedDB.
+          // Only the host owns storage writes — joiners just update their local meshes.
+// Client callbacks wired — no log
+
+          const applyRemoteDelta = (data, newBlockType) => {
+            try {
+              chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType, { persist: false });
+// Client delta applied — no log
+            } catch (err) {
+              console.error('[Cuubz] Error applying client delta:', err.message, '\n', err.stack);
+            }
+          };
+
+          sessionManager.registerClientCallbacks(
+            (data) => applyRemoteDelta(data, 0),  // BLOCK_BREAK → AIR
+            (data) => applyRemoteDelta(data, data.blockType || 1)  // BLOCK_PLACE → blockType
+          );
+        }
 
         // Initialize Water Flow System (after ChunkManager is created)
         // DISABLED: water flow system needs overhaul
@@ -1560,7 +1747,7 @@
             }
           }
 
-          console.log(`[Cuubz] Linked neighbors and rebuilt ${rebuiltCount} chunk meshes`);
+// Neighbors linked — no log
 
           // Calculate spawn position — search all loaded chunks for dry plains surface (GRASS/DIRT)
           // Must have: ground block above sea level, no water directly above it, adjacent columns clear
@@ -1667,11 +1854,11 @@
           }
 
           const SEA_LEVEL = 32;
-          console.log(`[Cuubz] Spawn search: ${debugCandidates} grass/dirt candidates, ${debugAccepted} accepted, ${debugRejectedByWater} rejected (column not clear), ${debugRejectedByAdjacent} rejected (adjacent blocked)`);
+// Spawn search debug — no log on success
           if (bestSpawnY === MIN_Y || bestSpawnY <= SEA_LEVEL) {
             console.warn(`[Cuubz] WARNING: No suitable surface spawn found above sea level! Falling back to highest safe point (Y=${bestSpawnY + 1.625 + 2}).`);
           } else {
-            console.log(`[Cuubz] Spawn selected at world (${bestSpawnX}, ${bestSpawnY}, ${bestSpawnZ})`);
+// Spawn selected — no log
           }
 
           const spawnHeight = bestSpawnY + 1.625 + 2; // +2 units so player drops onto surface cleanly
@@ -1687,7 +1874,7 @@
           player.position.z = bestSpawnZ + 0.5;
           player.pitch = -Math.PI / 8; // Sync with initial camera pitch
 
-          console.log(`[Cuubz] Player placed at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})`);
+          // Player placed — position logged only on error
           
           player.linkWorld(worldManager);
 
@@ -1699,13 +1886,13 @@
           const biomeEffects = new BiomeEffects();
           if (renderer.scene && renderer.renderer) {
             biomeEffects.init(renderer.scene, renderer.renderer);
-            console.log('[Cuubz] Biome Effects initialized with scene integration');
+// Biome Effects initialized — no log
           } else {
             // If Three.js not ready yet, initialize on next frame when available
             setTimeout(() => {
               if (renderer.scene && renderer.renderer) {
                 biomeEffects.init(renderer.scene, renderer.renderer);
-                console.log('[Cuubz] Biome Effects initialized (delayed)');
+// Biome Effects initialized — no log
               }
             }, 100);
           }
@@ -1863,10 +2050,7 @@
                 if (flyIndicator) flyIndicator.classList.add('hidden');
               }
               
-              // Debug: log player state every 60 frames
-              if (game.frameCount % 60 === 0) {
-                console.log(`[Player] pos=(${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}) vel=(${player.velocity.x.toFixed(2)}, ${player.velocity.y.toFixed(2)}, ${player.velocity.z.toFixed(2)}) onGround=${player.onGround}`);
-              }
+              // Debug: log player state every 60 frames (disabled — too verbose)
 
               // Update block interaction (break/place)
               if (blockInteraction) {
@@ -1982,11 +2166,6 @@
               // Update chunk manager for player position
               if (game.chunkManager) {
                 game.chunkManager.update(player.position.x, player.position.z, performance.now());
-              }
-
-              // Periodic save dirty chunks to localStorage
-              if (game.persistence) {
-                game.persistence.periodicSave();
               }
 
               requestAnimationFrame(renderLoop);

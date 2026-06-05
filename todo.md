@@ -1,260 +1,464 @@
-# Cuubz — Implementation TODO
+# Cuubz — Chunk Storage Fix & Rewrite Plan
 
-> **Vision:** A web-based Minecraft-style voxel game with full multiplayer (up to 4 players), dynamic infinite chunked world, procedural texture/audio generation, persistent character & world saves, survival mechanics, and a story-driven quest system with 25 quests, dungeons, and 4 bosses.
-
-> **Current State:** ✅ Phase 0 Complete — All core systems wired together and functional. Menu flow works through to game start. Three.js renders gradient skybox + terrain with texture atlas. WASD/mouse/touch controls working (WASD direction fix deployed). Player physics with gravity/collision active. Chunk loading/unloading functional. Block interaction and survival meters remain unwired (Phase 3).
-
----
-
-## What Actually Works (Verified in Browser)
-
-- ✅ Menu system: Main → Play Solo → Character Create → World Create → Mode Select
-- ✅ Three.js initializes and renders WebGL canvas
-- ✅ Gradient skybox (shader-based, deep blue → light horizon)
-- ✅ Flat brown terrain renders (chunk meshes exist but single color 0x8B7355)
-- ✅ Time-of-day HUD ("12:00 Noon")
-- ✅ Crosshair centered on screen
-- ✅ Characters/Worlds saved to IndexedDB via PersistenceManager
-
-## What Does NOT Work Despite Existing Code
-
-The following systems have code files but are **NOT integrated into the running game**:
-
-| System | File Exists | Wired Up? | Gap |
-|--------|------------|-----------|-----|
-| Camera controls (WASD/mouse) | keyboard.js, mouse.js | ✅ Yes | **FIXED:** WASD backwards - negated moveZ/sideZ to match Three.js camera direction |
-| Touch controls | touch.js | ✅ Yes | Instantiated in game loop |
-| Player physics (gravity/collision) | player.js has velocity/gravity | ✅ Yes | Render loop calls `player.update(delta)` each frame |
-| Texture atlas | 30 PNG textures exist in `textures/` | ✅ Yes | ChunkMeshBuilder outputs UV mapping; material uses texture atlas |
-| Biome colors/block types | BLOCK_TYPES defined, biomeSystem.js exists | ✅ Yes | Different biomes show different surface textures via atlas |
-| Chunk persistence to localStorage | chunkData.js has serialization | ✅ Yes | Chunks saved on modification, loaded from storage first |
-| Chunk updates on player move | ChunkManager.update() exists | ✅ Yes | Called each frame, builds 3 chunks/frame, unloads distant chunks |
-| Block interaction (break/place) | interaction.js exists | ❌ No | Not wired to mouse/touch events in game loop |
-| Survival meters | survival.js exists | ❌ No | Not instantiated, HUD not updated |
+> **Status:** Draft — awaiting review before implementation.
+> **Trigger:** Chunks are being SAVED to IndexedDB but never LOADED back on reload, causing infinite regeneration loops.
+> **Based on:** User storage architecture spec (chunked files, IndexedDB, RLE binary format, server-authoritative multiplayer sync).
 
 ---
 
-## Critical Architecture Requirements (From User)
+## Root Cause Analysis
 
-### Persistence — localStorage, NOT IndexedDB
+### Primary Bug: Manifest / Storage Disconnect
 
-User explicitly wants **localStorage** (not IndexedDB) with this structure:
+Chunks are regenerated from seed every page load instead of being loaded from IndexedDB. Console shows `SAVED 37 chunk(s)` but never `LOADED`.
+
+**Flow breakdown:**
 
 ```
-localStorage/
-  worldSlot0/
-    world.conf          { seed, name, storyProgress, spawnPoint }
-    chunk-0-0.bin       { blocks[], chests[] }
-    chunk-1-0.bin
-    chunk--1-0.bin
-    ...
-  worldSlot1/
-    ...
-  worldSlot2/
-    ...
-  scratchSpace/         # For joining multiplayer — temporary chunks
-    chunk-0-0.bin
-    ...
+Initial generation (first visit):
+  _buildChunk(cx, cz)
+    → isChunkGenerated("9,-9") → false (new world)
+    → generatorFn(9, -9) creates Chunk instance
+    → addGeneratedChunk("9,-9") adds key to manifest.generatedChunks ✅
+    → markDirty("9,-9", chunkData) queues for flush
+
+5 seconds later:
+  dirtyFlush.flush()
+    → encode chunk → saveChunks([{key: "9,-9", data: ArrayBuffer}]) ✅
+    → Binary saved to IndexedDB, but manifest NOT updated here
+
+Page reload:
+  _buildChunk(cx, cz)
+    → isChunkGenerated("9,-9") reads manifest...
 ```
 
-**Rules:**
-- World changes saved to host's localStorage ONLY
-- Multiplayer clients get chunks streamed, NOT saved permanently (use scratchSpace)
-- Host validates all block changes, updates chunk, saves to localStorage, streams incremental update to other players
-- Chest blocks store inventory contents within their chunk file
+**Why `isChunkGenerated()` returns false despite chunks being saved:**
 
-### Texture Atlas — No Flat Colors
+The most likely culprits (in order of probability):
 
-- All 30 generated textures must be loaded into a **virtual texture atlas** (single large texture with UV coordinates)
-- Each voxel face gets mapped to the correct texture via block ID → UV lookup
-- Goal: fewer draw calls, better performance
-- ChunkMeshBuilder must output UV coordinates per-face based on block type and face direction
+1. **Race condition in concurrent manifest writes**: When `_processQueue` builds 3 chunks per frame, each calls `addGeneratedChunk()` which does read-modify-write on the manifest. If IndexedDB transactions interleave incorrectly, earlier chunk keys can be lost when later saves overwrite them.
 
----
+2. **`addGeneratedChunk` save failure silently ignored** (line 218-222 of chunkManager.js): The `catch` block swallows all errors including manifest write failures. If the save fails, the key is never added to `generatedChunks`.
 
-## Phase 0: Fix Integration Gaps (IMMEDIATE PRIORITY)
+3. **Decode validation too aggressive**: Loaded chunks that pass magic number check but have `heightRange < 3` get silently purged via `removeGeneratedChunk()`, removing them from both storage AND manifest. On next reload they regenerate and repeat the cycle.
 
-These are blocking — nothing else matters until the game is actually playable.
+4. **World name mismatch in IndexedDB queries**: `loadManifest()` uses `store.get(this.worldName)` where `worldName = currentWorld.id`. If the id changes between sessions (e.g., regenerated on each start), chunks are saved under one world key but looked up under another.
 
-### 0.1 Wire Up Camera Controls
-- [x] Create input handler in `startGame()` that captures WASD/arrow keys
-- [x] Wire pointer lock for mouse look (desktop)
-- [x] Wire touch joystick + swipe-to-look (mobile)
-- [x] Update player position from input each frame
-- [x] **Verify:** Press W/S/A/D → camera moves, mouse drag → camera rotates
+### Secondary Issues
 
-### 0.2 Wire Up Player Physics
-- [x] Call `player.update(delta)` in render loop with gravity + collision
-- [x] Wire AABB collision against chunk block data
-- [x] Implement ground detection so player doesn't fall through world
-- [x] **Verify:** Player stands on terrain, doesn't fall through
-
-### 0.3 Implement Texture Atlas
-- [x] Load all 30 PNG textures into THREE.js TextureLoader
-- [x] Build texture atlas: combine into single large canvas (e.g., 512×512 grid)
-- [x] Create blockType → UV mapping table (each face direction gets correct UVs)
-- [x] Update ChunkMeshBuilder to output per-face UV coordinates based on block type
-- [x] Update chunk material to use texture atlas instead of flat color
-- [x] **Verify:** Terrain shows grass, dirt, stone, water, sand in different areas
-
-### 0.4 Fix Chunk Build Speed
-- [x] ChunkManager builds 1 chunk per frame via setTimeout — way too slow
-- [x] Batch build: build N chunks per frame (configurable) or use Web Workers
-- [x] **Verify:** Full render distance loads within 5 seconds of game start
-
-### 0.5 Wire Chunk Updates on Player Movement
-- [x] Call `chunkManager.update(player.x, player.z)` each frame
-- [x] Ensure new chunks load as player moves, old chunks unload
-- [x] **Verify:** Walk in one direction → new terrain appears, old terrain fades out
-
-### 0.6 Known Issues from Code Audit (issues.md)
-> Reviewed issues.md — most are already addressed or false alarms:
-> - ISSUE-02 (CommonJS require): **False alarm** — all `module.exports` guarded with `typeof module !== 'undefined'`
-> - ISSUE-03 (missing scripts): **Fixed** — all 40+ scripts loaded in index.html
-> - ISSUE-01, 11 (engine not wired, fake loading bar): Covered in Phase 0 above
-
-- [x] ISSUE-09: Hotbar slot 1 has `active` class instead of slot 0 → fix default selection
-- [x] ISSUE-13: `character.lastPlayed` set in memory but never persisted via `persistence.saveCharacter()`
-- [x] ISSUE-04: Three.js comment says "r160" but loads "r134" — align version (low priority, r134 works)
+| Issue | File | Impact |
+|-------|------|--------|
+| Flush doesn't update manifest | `dirtyFlushManager.js` | Chunks can be in IndexedDB but not tracked by manifest |
+| No world isolation for chunk keys | `chunkStore.js` | Multiple worlds would collide on same "cx,cz" keys |
+| Aggressive error suppression | All storage files | Masks real bugs, impossible to diagnose failures |
+| Double `markDirty` call in `_buildChunk` | `chunkManager.js` lines 227 + 375 | Redundant (Map overwrite), not harmful but wasteful |
 
 ---
 
-## Phase 1: localStorage Persistence System
+## Architecture: Current vs. Target
 
-### 1.1 World Configuration File
-- [ ] Create `WorldPersistence` class with localStorage backend
-- [ ] Save format: `worldSlot{N}/world.conf` — JSON with seed, name, storyProgress, spawnPoint, createdAt
-- [ ] Load format: read on game start, populate world manager
-- [ ] 3 world slots max (0, 1, 2)
+### Current Problems
 
-### 1.2 Chunk Serialization to localStorage
-- [ ] Serialize chunk block data to compact binary format
-- [ ] Save format: `worldSlot{N}/chunk-{x}-{z}.bin`
-- [ ] Include chest data in chunk file: `{ blocks[], chests: [{pos, items}] }`
-- [ ] Load chunks from localStorage instead of regenerating (unless first time)
-- [ ] Auto-save on chunk modification (dirty flag → save to localStorage)
+```
+_buildChunk()                    dirtyFlush.flush()
+     │                                    │
+     ├──► addGeneratedChunk(key) ──► manifest.save()   ← Only path that updates manifest
+     ├──► markDirty(key, chunkData)                     │
+     │                                                  ▼
+     │                                         store.saveChunks(entries)  ← Binary saved, manifest NOT updated
+     │
+Reload:
+     ▼
+isChunkGenerated(key) → reads manifest → key may be missing → regenerate from seed ❌
+```
 
-### 1.3 Multiplayer Scratch Space
-- [ ] Separate `scratchSpace/` prefix in localStorage for joining players
-- [ ] Stream chunks from host → client stores in scratchSpace only
-- [ ] Clear scratchSpace when leaving a multiplayer session
-- [ ] Host-only validation: only host saves to their worldSlot, clients read from scratchSpace
+### Target Architecture
 
-### 1.4 Chunk Update Streaming (Multiplayer)
-- [ ] Host detects block change → marks chunk dirty → saves to localStorage
-- [ ] Host sends incremental update packet: `{ chunkX, chunkZ, changes: [{x,y,z,oldType,newType}] }`
-- [ ] Client applies incremental update to scratchSpace chunk
-- [ ] **Verify:** Host breaks block → other players see it update
+```
+_buildChunk()                    dirtyFlush.flush()
+     │                                    │
+     ├──► markDirty(key, chunkData)       │
+     │                                    ▼
+     │                          store.saveChunks(entries)
+     │                          + batchAddGeneratedKeys(keys)  ← Manifest updated on flush ✅
+     │
+Reload:
+     ▼
+isChunkGenerated(key) → reads manifest → key present → load from IndexedDB ✅
+```
 
----
-
-## Phase 2: Texture Atlas & Visual Polish
-
-### 2.1 Build Texture Atlas
-- [ ] Combine all 30 textures into single atlas texture (e.g., 512×512)
-- [ ] UV mapping table: blockType × faceDirection → UV coords in atlas
-- [ ] Load atlas at game start, pass to renderer
-
-### 2.2 Wire Atlas to ChunkMeshBuilder
-- [ ] `buildMeshData()` outputs per-face UVs based on block type
-- [ ] Handle multi-textured blocks (grass_top vs grass_side)
-- [ ] Transparent blocks: water, leaves, lava get proper alpha handling
-
-### 2.3 Biome Visual Variety
-- [ ] Different biomes show different surface textures (sand in desert, snow in tundra, etc.)
-- [ ] Water renders as semi-transparent with animated UV offset
-- [ ] Lava renders with animated glow effect
-- [ ] **Verify:** Walk through different biomes → terrain texture changes
+**Key change:** The dirty flush must update the manifest's `generatedChunks` list atomically with the binary save. This ensures that any chunk in IndexedDB is tracked by the manifest, and vice versa.
 
 ---
 
-## Phase 3: Block Interaction & Gameplay
+## Implementation Plan
 
-### 3.1 Block Breaking/Placing
-- [ ] Wire raycast from crosshair center to detect target block + face
-- [ ] Left click (desktop) / tap (mobile) → break block with animation
-- [ ] Right click (desktop) / long-press (mobile) → place block from hotbar
-- [ ] Host validates, saves chunk update, streams to other players
+### Phase 1: Fix Manifest Consistency (CRITICAL)
 
-### 3.2 Inventory System
-- [ ] Hotbar UI with selected slot indicator
-- [ ] Break block → item added to inventory
-- [ ] Place block → item consumed from inventory
-- [ ] Chest interaction: open/close chest UI showing contents
+**Problem:** Chunks saved to IndexedDB via flush are not reflected in `manifest.generatedChunks`, causing reloads to regenerate from seed instead of loading persisted data.
 
-### 3.3 Survival Meters
-- [ ] Wire survival.js into game loop
-- [ ] Update HUD meters each frame (health, hunger, thirst, sleep, stamina)
-- [ ] Deplete over time, restore via food/water/beds
+#### 1.1 Add batch manifest update to ChunkStore
+
+**File:** `js/world/chunkStore.js`
+**Change:** New method that atomically adds multiple keys to the manifest's generated list.
+
+```javascript
+/**
+ * Batch-add chunk keys to manifest.generatedChunks in a single transaction.
+ * Called by DirtyFlushManager after saving chunks to IndexedDB.
+ */
+async batchAddGeneratedChunks(chunkKeys) {
+  await this._open();
+
+  let manifest = await this.loadManifest();
+  if (!manifest) {
+    manifest = {
+      worldName: this.worldName,
+      seed: '',
+      createdAt: Date.now(),
+      lastPlayed: Date.now(),
+      playerCount: 1,
+      spawnPoint: { x: 0, y: 64, z: 0 },
+      generatedChunks: []
+    };
+  }
+
+  if (!manifest.generatedChunks) manifest.generatedChunks = [];
+
+  let added = 0;
+  for (const key of chunkKeys) {
+    if (!manifest.generatedChunks.includes(key)) {
+      manifest.generatedChunks.push(key);
+      added++;
+    }
+  }
+
+  manifest.lastPlayed = Date.now();
+  await this.saveManifest(manifest);
+  return added;
+}
+```
+
+#### 1.2 Update DirtyFlushManager.flush() to update manifest
+
+**File:** `js/world/dirtyFlushManager.js`
+**Change:** After saving chunks, call `batchAddGeneratedChunks` with the flushed keys.
+
+```javascript
+async flush() {
+  // ... existing encode logic ...
+
+  try {
+    await this.store.saveChunks(entries);
+
+    // Update manifest to track all saved chunk keys
+    const flushedKeys = entries.map(e => e.key);
+    await this.store.batchAddGeneratedChunks(flushedKeys);
+
+    // Clear dirty tracking...
+    // ... existing cleanup logic ...
+  } catch (err) {
+    // ... error handling ...
+  }
+}
+```
+
+Also update `_syncFlush()` (beforeunload handler) to do the same manifest update after synchronous IndexedDB writes.
+
+#### 1.3 Remove redundant `addGeneratedChunk` from `_buildChunk` generation path
+
+**File:** `js/renderer/chunkManager.js`
+**Change:** Since flush now handles manifest updates, remove the separate `addGeneratedChunk()` call in the generation path to avoid duplicate work and race conditions. The chunk is already marked dirty — it will be picked up by flush.
+
+**Before (lines 217-228):**
+```javascript
+if (!chunkData && this.generatorFn) {
+  chunkData = this.generatorFn(cx, cz);
+
+  if (this.chunkStore) {
+    try {
+      await this.chunkStore.addGeneratedChunk(key);  // REMOVE THIS
+    } catch (e) { /* silent */ }
+  }
+
+  if (this.dirtyFlush) {
+    this.dirtyFlush.markDirty(key, chunkData);
+  }
+}
+```
+
+**After:**
+```javascript
+if (!chunkData && this.generatorFn) {
+  chunkData = this.generatorFn(cx, cz);
+
+  // Mark dirty — flush will save binary AND update manifest atomically
+  if (this.dirtyFlush) {
+    this.dirtyFlush.markDirty(key, chunkData);
+  }
+}
+```
+
+#### 1.4 Remove second redundant `markDirty` call in `_buildChunk`
+
+**File:** `js/renderer/chunkManager.js` ~line 375
+**Change:** The code at the end of `_buildChunk` calls `markDirty` again for newly generated chunks, but this was already called earlier. Remove to avoid confusion:
+
+```javascript
+// REMOVE this block (~lines 374-376):
+if (!fromStorage && this.dirtyFlush) {
+  this.dirtyFlush.markDirty(key, chunkData);
+}
+```
 
 ---
 
-## Phase 4: Multiplayer Integration & Architecture Fixes
+### Phase 2: Add World Isolation (HIGH)
 
-### 4.1 Fix Reverse Proxy Session Routing (BLOCKING MULTIPLAYER)
-> **From AI analysis:** Server returns raw port number (8766, 8767...) in JOIN_ACCEPTED. Client tries to open `wss://relay.cuubz.thehomelabguy.com:8766` — reverse proxy won't forward that port. Needs path-based routing instead.
+**Problem:** Chunk keys like `"9,-9"` are global across all worlds. Two different worlds would collide on the same coordinates.
 
-- [ ] **Server change:** Route game sessions by path (`/session/{id}`) instead of raw port
-- [ ] **Nginx config:** Add location block to forward `/session/*` paths to relay server
-- [ ] **Client change:** Parse session ID from JOIN_ACCEPTED, construct URL as `wss://relay.domain.com/session/{id}`
-- [ ] **Verify:** Join session through reverse proxy without port exposure
+#### 2.1 Namespace chunk keys by world
 
-### 4.2 WebSocket Client Configuration Fixes
-> **From AI analysis (Bugs 1-3):** These were fixed in bugs.md but need verification in running game:
+**File:** `js/world/chunkStore.js`
+**Change:** Prefix all chunk keys with the world name to ensure isolation.
 
-- [x] Bug 1: MultiplayerClient now accepts `{ url }` config (verified in code line 597)
-- [x] Bug 2: getRelayUrl() uses generic `location.origin` subdomain handling (verified in code)
-- [x] Bug 3: _getProtocol() uses stored protocol from parsed URL first (verified via `_explicitProtocol`)
-- [ ] **Verify in browser:** Navigate to deployed game, check console for clean WebSocket connection (no `wss://undefined:8765` errors)
+```javascript
+// Internal key transformation
+_chunkKey(key) {
+  return `${this.worldName}:${key}`;  // e.g., "myworld:9,-9"
+}
 
-### 4.3 Host/Client Architecture
-- [ ] Host game loop runs authoritative simulation
-- [ ] Client sends input → host validates → broadcasts state
-- [ ] Player positions synced every N frames
-- [ ] Block changes validated by host only
+// Update saveChunk, loadChunk, deleteChunk, hasChunk, saveChunks, loadChunks
+// to use _chunkKey() for all IndexedDB operations.
+```
 
-### 4.4 Chunk Streaming to Clients
-- [ ] Server streams initial chunk data to joining client
-- [ ] Incremental updates for block changes
-- [ ] Client stores in scratchSpace, clears on disconnect
+The manifest store already uses `worldName` as its keyPath, so it's already isolated.
+
+#### 2.2 Update DirtyFlushManager to pass through keys correctly
+
+**File:** `js/world/dirtyFlushManager.js`
+**Change:** No changes needed — the flush manager passes raw `"cx,cz"` keys to ChunkStore methods, which handle namespacing internally. The manifest update uses the same raw keys since they're stored in the world-specific manifest.
 
 ---
 
-## Testing Strategy
+### Phase 3: Improve Error Visibility (HIGH)
 
-Every task must be verified in browser via agent-browser:
-1. Navigate to game URL
-2. Run full menu flow to game start
-3. Visual verification via screenshot + vision AI
-4. Console check for JS errors
-5. Only mark `- [x]` when visually confirmed working
+**Problem:** All errors are silently swallowed, making it impossible to diagnose why chunks aren't loading.
+
+#### 3.1 Add diagnostic logging for storage failures
+
+**Files:** `js/world/chunkStore.js`, `js/world/dirtyFlushManager.js`
+**Change:** Re-enable targeted error logging for operations that should never fail in normal operation:
+
+```javascript
+// In ChunkStore.saveChunks():
+} catch (err) {
+  console.error(`[ChunkStore] FAILED to save ${entries.length} chunk(s):`, err.message);
+}
+
+// In DirtyFlushManager.flush():
+} catch (err) {
+  console.error(`[DirtyFlush] FAILED flush:`, err.message);
+}
+```
+
+Keep the existing two signal logs (`LOADED` and `SAVED`) — only add error logs for unexpected failures. This gives us visibility into what's actually going wrong without flooding the console during normal operation.
+
+#### 3.2 Add decode verification log
+
+**File:** `js/renderer/chunkManager.js`
+**Change:** When a chunk fails to load from storage (decode error or flat terrain), log WHY before silently regenerating:
+
+```javascript
+// In _buildChunk, after load attempt fails:
+if (!chunkData && isGenerated) {
+  console.warn(`[ChunkManager] Chunk ${key} in manifest but failed to load — regenerating from seed`);
+}
+```
+
+This single log line would immediately tell us whether the problem is (a) keys missing from manifest, (b) decode failures, or (c) flat terrain detection.
 
 ---
 
-## Progress
+### Phase 4: Fix Race Condition in Concurrent Manifest Writes (MEDIUM)
 
-| Phase | Status |
-|-------|--------|
-| Phase 0: Fix Integration Gaps | ✅ COMPLETE - all items verified and deployed |
-| Phase 1: localStorage Persistence | ⬜ Not Started |
-| Phase 2: Texture Atlas & Visual Polish | ⬜ Not Started |
-| Phase 3: Block Interaction & Gameplay | ⬜ Not Started |
-**Current State (May 27, 2026):** All Phase 0 items complete and deployed. Menu flow works through to game start. Three.js renders skybox + terrain with texture atlas. WASD/mouse/touch controls wired up and verified working. Player physics with gravity/collision active. Chunk loading/unloading functional. Known issues: NaN console warnings (cosmetic only).
+**Problem:** When multiple chunks build simultaneously, each calls operations that read-modify-write the manifest, potentially losing earlier writes.
 
-### Phase 0 Fixes Applied (May 27, 2026)
+#### 4.1 Batch manifest updates instead of per-chunk writes
 
-- [x] 0.1 Camera Controls - WASD/mouse/touch wired up in startGame()
-- [x] 0.2 Player Physics - gravity/collision/ground detection working
-- [x] 0.3 Texture Atlas - 30 PNGs loaded, UV mapping per block type
-- [x] 0.4 Chunk Build Speed - batch 3 chunks/frame instead of 1
-- [x] 0.5 Chunk Updates on Movement - boundary-crossing trigger
-- [x] 0.6a ISSUE-09: Hotbar slot 0 already correct in HTML
-- [x] 0.6b ISSUE-13: lastPlayed persisted via characterManager.saveCharacter()
-- [x] 0.6c ISSUE-04: Three.js local copy already in place (r134)
-- [x] Chunk unloading memory leak - mesh now stored in loadedChunks map
-- [x] WASD backwards fix - negated moveZ/sideZ to match Three.js camera direction
-- [x] Camera pitch fix - changed from -Math.PI/8 to +Math.PI/8 (positive looks DOWN)
+**Strategy:** Instead of calling `addGeneratedChunk()` for each chunk individually during generation, accumulate keys and batch-update once per frame cycle.
 
-### Known Issues (Non-Breaking)
+**Option A (simple):** Since Phase 1 moves manifest updates to the flush path, this race condition is largely eliminated — chunks are tracked when they're flushed, not when they're generated.
 
-- ~100 "NaN bounding sphere" console warnings from empty chunk geometries - cosmetic only
+**Option B (belt-and-suspenders):** Add a `_pendingKeys` Set to ChunkStore that accumulates keys from `addGeneratedChunk()` calls and batch-commits them on the next manifest save:
+
+```javascript
+class ChunkStore {
+  constructor(worldName) {
+    this.worldName = worldName;
+    this._db = null;
+    this._ready = null;
+    this._pendingKeys = new Set();  // Accumulate keys between saves
+  }
+
+  async addGeneratedChunk(chunkKey) {
+    await this._open();
+    this._pendingKeys.add(chunkKey);
+    await this._flushPendingKeys();
+  }
+
+  async _flushPendingKeys() {
+    if (this._pendingKeys.size === 0) return;
+
+    const keys = [...this._pendingKeys];
+    this._pendingKeys.clear();
+
+    let manifest = await this.loadManifest();
+    // ... update and save manifest with all pending keys atomically
+  }
+}
+```
+
+**Recommendation:** Implement Option A first (Phase 1 handles it). Only add Option B if we see evidence of race conditions after Phase 1.
+
+---
+
+### Phase 5: Verify Codec Round-Trip Integrity (MEDIUM)
+
+**Problem:** If encode/decode produces different data, loaded chunks could fail validation even though they were saved correctly.
+
+#### 5.1 Add round-trip test
+
+Create a simple test script that generates a chunk, encodes it, decodes it, and compares:
+
+```javascript
+// Test in browser console:
+const testChunk = new Chunk(9, -9);
+// Fill with some non-zero blocks...
+for (let x = 0; x < 16; x++) {
+  for (let z = 0; z < 16; z++) {
+    const h = Math.floor(Math.sin(x * 0.3) * 10 + 40); // Terrain height
+    for (let y = 0; y <= h; y++) {
+      testChunk.setBlock(x, y, z, y === h ? 1 : 2); // grass on top, dirt below
+    }
+  }
+}
+
+// Round-trip test
+const encoded = ChunkBinaryCodec.encode(testChunk);
+console.log(`Encoded size: ${encoded.byteLength} bytes`);
+
+const decoded = ChunkBinaryCodec.decode(encoded);
+let match = true;
+for (let i = 0; i < testChunk.blocks.length; i++) {
+  if (decoded.blocks[i] !== testChunk.blocks[i]) {
+    console.error(`Mismatch at index ${i}: expected ${testChunk.blocks[i]}, got ${decoded.blocks[i]}`);
+    match = false;
+    break;
+  }
+}
+console.log(match ? '✅ Round-trip OK' : '❌ Round-trip FAILED');
+```
+
+#### 5.2 Verify magic number endianness consistency
+
+Current code uses little-endian (`true` flag) on both encode (line 73 of codec) and decode (line 113). This is correct for x86 systems but should be verified explicitly:
+
+- Encode: `view.setUint32(offset, CHUNK_MAGIC, true);` // little-endian ✅
+- Decode: `const magic = view.getUint32(0, true);` // little-endian ✅
+
+Both match — no change needed.
+
+---
+
+### Phase 6: Graceful Shutdown Reliability (LOW)
+
+**Current state:** `_syncFlush()` writes dirty chunks to IndexedDB synchronously during `beforeunload`/`pagehide`. Works in Chrome/Firefox but not guaranteed.
+
+#### 6.1 Add manifest update to sync flush
+
+**File:** `js/world/dirtyFlushManager.js`
+**Change:** The synchronous flush path should also update the manifest's generated list. Since we can't use async IndexedDB operations reliably during beforeunload, add a simple in-memory flag that gets persisted on next normal load:
+
+```javascript
+_syncFlush() {
+  // ... existing encode + save logic ...
+
+  // Also write keys to localStorage as a fallback for manifest update
+  const keys = entries.map(e => e.key).join('|');
+  localStorage.setItem(`cuubz:${this.store.worldName}:pendingKeys`, keys);
+}
+```
+
+Then in `main.js` during startup, check and merge these pending keys into the manifest.
+
+---
+
+## Execution Order
+
+```
+Phase 1: Fix manifest consistency (flush updates generatedChunks)     ~30 min
+      ↓
+Phase 2: Add world isolation to chunk keys                            ~15 min
+      ↓
+Phase 3: Improve error visibility for diagnosis                       ~10 min
+      ↓
+Phase 4: Race condition fix (if needed after Phase 1)                 ~15 min
+      ↓
+Phase 5: Verify codec round-trip integrity                             ~10 min
+      ↓
+Phase 6: Graceful shutdown reliability                                 ~20 min
+```
+
+**Total estimated work:** Phases 1-3 = ~55 minutes / ~80 lines of changes across 4 files.
+
+---
+
+## Files Modified
+
+| File | Phase | Change Type | Lines Affected |
+|------|-------|-------------|----------------|
+| `js/world/chunkStore.js` | 1, 2, 3 | Add batchAddGeneratedChunks(), namespace keys, error logging | ~40 lines added/modified |
+| `js/world/dirtyFlushManager.js` | 1, 3, 6 | Call batchAddGeneratedChunks in flush(), error logging, sync manifest update | ~20 lines added/modified |
+| `js/renderer/chunkManager.js` | 1, 3 | Remove redundant addGeneratedChunk/markDirty calls, add diagnostic log | ~5 lines removed, ~2 added |
+| `js/main.js` | 6 | Merge pending keys from localStorage on startup | ~10 lines added |
+
+---
+
+## Verification Checklist (After Implementation)
+
+- [ ] **Primary test:** Save chunks → reload page → see `[ChunkManager] LOADED ...` for all previously saved chunks, NOT regenerated
+- [ ] Console shows `LOADED` messages with byte sizes and height ranges on every page reload after first visit
+- [ ] Console shows `SAVED` messages only when new chunks are generated or existing ones modified (not on every load)
+- [ ] World deletion cleans up all chunk data AND manifest entries in IndexedDB
+- [ ] Multiple worlds don't collide on same chunk coordinates
+- [ ] Codec round-trip test passes (encode → decode produces identical block data)
+- [ ] No `console.error` messages during normal operation
+
+---
+
+## Risk Assessment
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Existing chunks in IndexedDB use non-namespaced keys | MEDIUM | Add migration step: on first load after Phase 2, copy existing chunks from old key format to new namespaced format |
+| Manifest update fails silently during flush | LOW | Error logging (Phase 3) catches this. Chunks still save — only tracking is lost |
+| Breaking change to chunkStore API | LOW | Internal method changes only; public API surface remains the same for callers |
+
+---
+
+## Notes on Current Implementation vs Spec
+
+What's working:
+- ✅ Per-chunk storage (IndexedDB keyed by coordinates)
+- ✅ RLE binary encoding with compact header
+- ✅ Dirty flush on 5s interval
+- ✅ Graceful shutdown handlers
+- ✅ World manifest schema matches spec
+- ✅ Multiplayer host callbacks wired
+
+What needs fixing:
+- ❌ Manifest not updated during flush → reload regenerates everything
+- ❌ No world isolation for chunk keys
+- ❌ Error suppression masks real bugs
+- ⚠️ Race condition in concurrent manifest writes (mitigated by Phase 1)

@@ -293,10 +293,7 @@ class Player {
   }
 
   _debugLog() {
-    if (typeof CuubzLogger !== 'undefined' && CuubzLogger.DEBUG) {
-      console.log(`[Player] pos=(${this.position.x.toFixed(2)}, ${this.position.y.toFixed(2)}, ${this.position.z.toFixed(2)}) ` +
-        `vel=(${this.velocity.x.toFixed(2)}, ${this.velocity.y.toFixed(2)}, ${this.velocity.z.toFixed(2)}) onGround=${this.onGround}`);
-    }
+    // Disabled — too verbose for normal gameplay
   }
 
   _checkInWater(world) {

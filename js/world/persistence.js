@@ -1,22 +1,16 @@
 /**
- * Cuubz — localStorage Persistence System
- * Characters + worlds stored in localStorage with slot-based structure:
+ * Cuubz — localStorage Persistence System (Characters + World Configs only)
+ * Chunk storage has been moved to IndexedDB via ChunkStore/ChunkBinaryCodec.
  *
  *   cuubz:characters              → JSON array of character objects
  *   cuubz:worldSlot:{N}:conf      → World config for slot N (0, 1, 2)
- *   cuubz:worldSlot:{N}:chunk-{x}-{z} → Chunk data for slot N
- *   cuubz:scratchSpace:chunk-{x}-{z}  → Temporary chunks for multiplayer clients
  *   cuubz:slotMap                 → JSON map of worldId → slot number
  */
 
 const MAX_WORLD_SLOTS = 3;
-const SAVE_INTERVAL = 30000; // 30 seconds
 
 class PersistenceManager {
-  constructor() {
-    this.dirtyChunks = new Map(); // "cx,cz" → chunkData (per-world, managed by caller)
-    this.lastSaveTime = Date.now();
-  }
+  constructor() {}
 
   // ============================================================
   // Key helpers
@@ -32,14 +26,6 @@ class PersistenceManager {
 
   _worldConfKey(slot) {
     return `cuubz:worldSlot:${slot}:conf`;
-  }
-
-  _chunkKey(slot, cx, cz) {
-    return `cuubz:worldSlot:${slot}:chunk-${cx}-${cz}`;
-  }
-
-  _scratchChunkKey(cx, cz) {
-    return `cuubz:scratchSpace:chunk-${cx}-${cz}`;
   }
 
   // ============================================================
@@ -135,14 +121,6 @@ class PersistenceManager {
   clearSlot(slot) {
     // Remove config
     localStorage.removeItem(this._worldConfKey(slot));
-
-    // Remove all chunks in this slot
-    const prefix = `cuubz:worldSlot:${slot}:chunk-`;
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(prefix)) {
-        localStorage.removeItem(key);
-      }
-    }
   }
 
   // ============================================================
@@ -228,157 +206,6 @@ class PersistenceManager {
       return JSON.parse(localStorage.getItem(this._worldConfKey(slot)));
     } catch {
       return null;
-    }
-  }
-
-  // ============================================================
-  // Chunks (world slot storage)
-  // ============================================================
-
-  /**
-   * Save a chunk for a world to localStorage.
-   * @param {string} worldId - World ID
-   * @param {number} cx - Chunk X
-   * @param {number} cz - Chunk Z
-   * @param {object} chunkData - Chunk block data (serializable object)
-   */
-  async saveChunk(worldId, cx, cz, chunkData) {
-    const slot = this._getSlotForWorld(worldId);
-    if (slot < 0) return;
-
-    // Serialize: use JSON for simplicity. For large worlds, consider compression.
-    const serialized = JSON.stringify(chunkData);
-    localStorage.setItem(this._chunkKey(slot, cx, cz), serialized);
-  }
-
-  /**
-   * Load a chunk from localStorage. Returns null if not found.
-   */
-  async loadChunk(worldId, cx, cz) {
-    const slot = this._getSlotForWorld(worldId);
-    if (slot < 0) return null;
-
-    const raw = localStorage.getItem(this._chunkKey(slot, cx, cz));
-    if (!raw) return null;
-
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Synchronous chunk loading (for use in synchronous code paths).
-   */
-  loadChunkSync(worldId, cx, cz) {
-    const slot = this._getSlotForWorld(worldId);
-    if (slot < 0) return null;
-
-    const raw = localStorage.getItem(this._chunkKey(slot, cx, cz));
-    if (!raw) return null;
-
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * List all saved chunks for a world.
-   */
-  async listChunks(worldId) {
-    const slot = this._getSlotForWorld(worldId);
-    if (slot < 0) return [];
-
-    const prefix = `cuubz:worldSlot:${slot}:chunk-`;
-    const chunks = [];
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(prefix)) {
-        // Extract cx,cz from key format "cuubz:worldSlot:N:chunk-{x}-{z}"
-        const match = key.match(/chunk-(.+?)-(.+)$/);
-        if (match) {
-          chunks.push({ cx: Number(match[1]), cz: Number(match[2]) });
-        }
-      }
-    }
-    return chunks;
-  }
-
-  // ============================================================
-  // Scratch Space (multiplayer temp storage)
-  // ============================================================
-
-  /**
-   * Save a chunk to scratch space (multiplayer client temporary storage).
-   */
-  async saveScratchChunk(cx, cz, chunkData) {
-    const serialized = JSON.stringify(chunkData);
-    localStorage.setItem(this._scratchChunkKey(cx, cz), serialized);
-  }
-
-  /**
-   * Load a chunk from scratch space.
-   */
-  async loadScratchChunk(cx, cz) {
-    const raw = localStorage.getItem(this._scratchChunkKey(cx, cz));
-    if (!raw) return null;
-
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Clear all scratch space chunks (called when leaving multiplayer session).
-   */
-  async clearScratchSpace() {
-    const prefix = 'cuubz:scratchSpace:';
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(prefix)) {
-        localStorage.removeItem(key);
-      }
-    }
-  }
-
-  // ============================================================
-  // Dirty chunk tracking (for auto-save)
-  // ============================================================
-
-  /**
-   * Queue a dirty chunk for saving.
-   */
-  queueChunk(worldId, cx, cz, chunkData) {
-    const key = `${worldId}:${cx},${cz}`;
-    this.dirtyChunks.set(key, { worldId, cx, cz, data: chunkData });
-  }
-
-  /**
-   * Flush all dirty chunks to localStorage.
-   */
-  async flushDirtyChunks() {
-    if (this.dirtyChunks.size === 0) return;
-
-    for (const [key, chunk] of this.dirtyChunks) {
-      await this.saveChunk(chunk.worldId, chunk.cx, chunk.cz, chunk.data);
-    }
-
-    this.dirtyChunks.clear();
-    _log(`[Persistence] Flushed ${this.dirtyChunks.size} dirty chunks`);
-  }
-
-  /**
-   * Periodic save check (call from game loop).
-   */
-  periodicSave() {
-    const now = Date.now();
-    if (now - this.lastSaveTime >= SAVE_INTERVAL) {
-      this.flushDirtyChunks().then(() => {
-        this.lastSaveTime = now;
-      });
     }
   }
 

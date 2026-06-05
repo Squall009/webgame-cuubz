@@ -10,7 +10,10 @@ class ChunkManager {
     this.renderer = renderer;
     this.generatorFn = generatorFn;
     this.textureAtlas = options.textureAtlas || null;
-    this.persistence = options.persistence || null; // PersistenceManager for localStorage
+
+    // New storage system (IndexedDB + binary codec)
+    this.chunkStore = options.chunkStore || null;       // ChunkStore instance
+    this.dirtyFlush = options.dirtyFlush || null;        // DirtyFlushManager instance
 
     // Cave generation seed (for consistent cave placement across sessions)
     this._caveSeed = options.caveSeed || 42;
@@ -32,9 +35,6 @@ class ChunkManager {
     // Force initial chunk load on startup (start far away so first update triggers)
     this.lastPlayerX = -32;
     this.lastPlayerZ = -32;
-
-    // World ID for persistence lookups
-    this.worldId = options.worldId || null;
 
     // Performance optimizer integration
     this.performanceOptimizer = options.performanceOptimizer || null;
@@ -153,72 +153,86 @@ class ChunkManager {
 
   /**
    * Build a single chunk's mesh with texture atlas support.
-   * Checks localStorage for saved data first, falls back to generator.
+   * Uses IndexedDB for saved chunks (async), falls back to generator.
    */
-  _buildChunk(cx, cz) {
+  async _buildChunk(cx, cz) {
     const key = `${cx},${cz}`;
 
     let chunkData = null;
     let fromStorage = false;
 
-    // Try loading from localStorage first
-    if (this.persistence && this.worldId) {
+    // Try loading from IndexedDB first (new storage system)
+    if (this.chunkStore) {
       try {
-        chunkData = this.persistence.loadChunkSync(this.worldId, cx, cz);
-        if (chunkData) {
-          fromStorage = true;
-          _log(`[ChunkManager] Loaded chunk ${key} from localStorage`);
-        }
-      } catch (e) {
-        console.warn(`[ChunkManager] Failed to load chunk ${key} from storage:`, e.message);
-      }
-    }
+        // Check both manifest AND actual storage presence.
+        // Manifest may list chunks that were never flushed to disk.
+        const isGenerated = await this.chunkStore.isChunkGenerated(key);
+        const hasBinary   = await this.chunkStore.hasChunk(key);
 
-    // Check loaded chunks for flat/corrupt terrain
-    if (chunkData) {
-      // Sanity check: detect flat/corrupt terrain by checking height variation
-      let minHeight = Infinity, maxHeight = -Infinity;
-      let surfaceCount = 0;
-      for (let x = 0; x < 16; x++) {
-        for (let z = 0; z < 16; z++) {
-          // Scan from top down to find the highest non-air block in this column
-          for (let y = MAX_Y; y >= MIN_Y; y--) {
-            if (chunkData.getBlock(x, y, z) !== 0) {
-              if (y < minHeight) minHeight = y;
-              if (y > maxHeight) maxHeight = y;
-              surfaceCount++;
-              break;
+        if (isGenerated && !hasBinary) {
+          console.warn(`[ChunkManager] Chunk ${key} in manifest but missing from storage — removing stale entry`);
+          try { await this.chunkStore.removeGeneratedChunk(key); } catch (_) {}
+        }
+
+        if (hasBinary) {
+          const binaryData = await this.chunkStore.loadChunk(key);
+          if (binaryData) {
+            chunkData = ChunkBinaryCodec.decode(binaryData);
+            fromStorage = true;
+            console.log(`[ChunkManager] Loaded chunk ${key} from IndexedDB (${binaryData.byteLength} bytes)`);
+
+            // Sanity check: detect flat/corrupt terrain by checking height variation
+            let minHeight = Infinity, maxHeight = -Infinity;
+            let surfaceCount = 0;
+            for (let x = 0; x < 16; x++) {
+              for (let z = 0; z < 16; z++) {
+                for (let y = MAX_Y; y >= MIN_Y; y--) {
+                  if (chunkData.getBlock(x, y, z) !== 0) {
+                    if (y < minHeight) minHeight = y;
+                    if (y > maxHeight) maxHeight = y;
+                    surfaceCount++;
+                    break;
+                  }
+                }
+              }
+            }
+
+            const heightRange = maxHeight - minHeight;
+
+            if (heightRange < 3) {
+              // Silently remove corrupt data and regenerate — no log on corruption cleanup.
+              try { await this.chunkStore.removeGeneratedChunk(key); } catch (_) {}
+              chunkData = null;
+              fromStorage = false;
+            } else {
+              console.log(`[ChunkManager] LOADED ${key} from IndexedDB (${binaryData.byteLength} bytes, height range ${heightRange})`);
             }
           }
         }
-      }
-
-      const heightRange = maxHeight - minHeight;
-      console.log(`[ChunkManager] Chunk ${key} from storage: ${surfaceCount} non-air blocks, height range ${minHeight}-${maxHeight} (range=${heightRange})`);
-
-      // If terrain is suspiciously flat (less than 3 block height variation), regenerate
-      if (heightRange < 3) {
-        console.warn(`[ChunkManager] Chunk ${key} appears FLAT (range=${heightRange}), regenerating...`);
-        chunkData = null; // Force regeneration below
-      } else {
-        console.log(`[ChunkManager] Chunk ${key} has valid terrain variation (${heightRange} blocks)`);
+      } catch (e) {
+        // Silently remove corrupt chunk data from storage/manifest.
+        try { await this.chunkStore.removeGeneratedChunk(key); } catch (_) {}
       }
     }
 
     // Generate if not in storage or was flat/corrupt
     if (!chunkData && this.generatorFn) {
+      console.log(`[ChunkManager] Generating chunk ${key} (not in IndexedDB)`);
       chunkData = this.generatorFn(cx, cz);
 
-      // Apply cave generation (separate from terrain to avoid double-carving with different seeds)
-      // DISABLED: World generation now handles caves internally; CaveGenerator is no longer needed.
-      /*
-      if (typeof CaveGenerator !== 'undefined') {
-        const caveGen = new CaveGenerator(this._caveSeed || 42);
-        caveGen.applyCaves(chunkData);
+      // Add to manifest as generated
+      if (this.chunkStore) {
+        try {
+          await this.chunkStore.addGeneratedChunk(key);
+        } catch (e) {
+          // Silently ignore manifest errors.
+        }
       }
-      */
 
-      console.log(`[ChunkManager] Generated NEW chunk ${key} (not from storage)`);
+      // Mark as dirty for persistence on next flush
+      if (this.dirtyFlush) {
+        this.dirtyFlush.markDirty(key, chunkData);
+      }
     }
 
     // Skip chunks that failed to load and couldn't be regenerated
@@ -262,7 +276,7 @@ class ChunkManager {
       if (meshData.indices.length === 0 &&
           (!meshData.cutoutIndices || meshData.cutoutIndices.length === 0) &&
           (!meshData.transparentIndices || meshData.transparentIndices.length === 0)) {
-        _log(`[ChunkManager] Skipped empty chunk ${key}`);
+// Skipped empty chunk — no log
         this.loadedChunks.set(key, { data: chunkData, mesh: null, built: true });
         return;
       }
@@ -345,7 +359,7 @@ class ChunkManager {
 
       const faceCount = geoResult.solidGeometry ? geoResult.solidGeometry.index.count / 3 : 0;
       const transFaceCount = geoResult.transparentGeometry ? geoResult.transparentGeometry.index.count / 3 : 0;
-      _log(`[ChunkManager] Built chunk ${key}: ${faceCount} solid + ${transFaceCount} transparent faces`);
+// Chunk mesh built — no log on success
 
       this.loadedChunks.set(key, { data: chunkData, mesh: solidMesh, transMesh, cutoutMesh, built: !!(solidMesh || transMesh || cutoutMesh), dirty: !fromStorage });
 
@@ -358,17 +372,17 @@ class ChunkManager {
         const nKey = `${ncx},${ncz}`;
         const nEntry = this.loadedChunks.get(nKey);
         if (nEntry && nEntry.data && (nEntry.mesh || nEntry.transMesh || nEntry.cutoutMesh)) {
-          _log(`[ChunkManager] Rebuilding adjacent chunk ${nKey} after new neighbor built`);
+// Rebuilding adjacent chunk — no log
           this.rebuildChunkMesh(ncx, ncz);
         }
       }
 
-      // Queue newly generated chunks for saving
-      if (!fromStorage && this.persistence && this.worldId) {
-        this.persistence.queueChunk(this.worldId, cx, cz, chunkData);
+      // Queue newly generated chunks for saving (new system)
+      if (!fromStorage && this.dirtyFlush) {
+        this.dirtyFlush.markDirty(key, chunkData);
       }
     } catch (err) {
-      console.error(`[ChunkManager] Failed to build chunk ${key}:`, err);
+      // Silently skip failed chunks — they'll regenerate next frame.
       this.loadedChunks.set(key, { data: chunkData, mesh: null, built: false });
     }
   }
@@ -411,7 +425,7 @@ class ChunkManager {
         if (entry.transMesh.material) entry.transMesh.material.dispose();
       }
 
-      _log(`[ChunkManager] Unloaded chunk ${key}`);
+// Chunk unloaded — no log
     }
 
     this.loadedChunks.delete(key);
@@ -461,7 +475,7 @@ class ChunkManager {
       }
     }
 
-    console.log(`[ChunkManager] Linked neighbors for ${this.loadedChunks.size} chunks`);
+// Neighbors linked — no log
   }
 
   /**
@@ -604,7 +618,7 @@ class ChunkManager {
     const faceCount = geoResult.solidGeometry ? geoResult.solidGeometry.index.count / 3 : 0;
     const cutoutFaceCount = geoResult.cutoutGeometry ? geoResult.cutoutGeometry.index.count / 3 : 0;
     const transFaceCount = geoResult.transparentGeometry ? geoResult.transparentGeometry.index.count / 3 : 0;
-    _log(`[ChunkManager] Rebuilt chunk ${key}: ${faceCount} solid + ${cutoutFaceCount} cutout + ${transFaceCount} transparent faces`);
+// Chunk mesh rebuilt — no log on success
 
     entry.mesh = solidMesh;
     entry.cutoutMesh = cutoutMesh;
@@ -628,11 +642,48 @@ class ChunkManager {
     const entry = this.loadedChunks.get(key);
     if (entry && entry.data) {
       entry.dirty = true;
-      // Queue for saving
-      if (this.persistence && this.worldId) {
-        this.persistence.queueChunk(this.worldId, cx, cz, entry.data);
+      // Queue for IndexedDB flush (new system)
+      if (this.dirtyFlush) {
+        this.dirtyFlush.markDirty(key, entry.data);
       }
     }
+  }
+
+  /**
+   * Apply a block change from a remote player (multiplayer delta).
+   * Applies the change to the in-memory chunk data, marks dirty, and rebuilds meshes.
+   * @param {number} x - World X coordinate
+   * @param {number} y - World Y coordinate
+   * @param {number} z - World Z coordinate
+   * @param {number} blockType - New block type (0 = AIR)
+   * @param {Object} [options] — Optional configuration
+   * @param {boolean} [options.persist=true] — Mark chunk dirty for IndexedDB flush (false for joiner clients)
+   */
+  applyBlockChange(x, y, z, blockType, options = {}) {
+    const cx = Math.floor(x / 16);
+    const cz = Math.floor(z / 16);
+
+    // Get or request chunk data
+    let chunkData = this.getChunkData(cx, cz);
+    if (!chunkData) {
+      // Chunk not loaded yet — silently ignore, it will load on next frame.
+      // Request the chunk to be generated/loaded (don't await)
+      this._requestChunk(cx, cz);
+      return;
+    }
+
+    // Apply block change
+    chunkData.setBlock(x, y, z, blockType);
+
+    // Mark dirty for IndexedDB flush only if persist is true (host mode)
+    if (options.persist !== false) {
+      this.markChunkDirty(cx, cz);
+    }
+
+    // Rebuild mesh
+    this.rebuildChunkMesh(cx, cz);
+
+// Remote block change applied — no log
   }
 
   /**

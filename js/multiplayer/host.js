@@ -733,6 +733,8 @@ class HostManager {
         y: data.y,
         z: data.z,
         blockType: 0, // AIR
+        chunkX: Math.floor(data.x / 16),
+        chunkZ: Math.floor(data.z / 16),
         validatedBy: 'host',
       });
     }
@@ -740,7 +742,12 @@ class HostManager {
     // Callback (always fires regardless of connection state)
     if (this.onBlockBreakValidated) {
       try {
-        this.onBlockBreakValidated({ playerId, x: data.x, y: data.y, z: data.z });
+        this.onBlockBreakValidated({ 
+          playerId, 
+          x: data.x, y: data.y, z: data.z,
+          chunkX: Math.floor(data.x / 16),
+          chunkZ: Math.floor(data.z / 16),
+        });
       } catch (err) {
         console.error('[HostManager] Error in onBlockBreakValidated:', err.message);
       }
@@ -805,6 +812,8 @@ class HostManager {
         y: data.y,
         z: data.z,
         blockType: data.blockType,
+        chunkX: Math.floor(data.x / 16),
+        chunkZ: Math.floor(data.z / 16),
         validatedBy: 'host',
       });
     }
@@ -818,6 +827,8 @@ class HostManager {
           y: data.y,
           z: data.z,
           blockType: data.blockType,
+          chunkX: Math.floor(data.x / 16),
+          chunkZ: Math.floor(data.z / 16),
         });
       } catch (err) {
         console.error('[HostManager] Error in onBlockPlaceValidated:', err.message);
