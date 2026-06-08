@@ -269,6 +269,30 @@
     <button id="btn-close-inventory" class="overlay-close">✕</button>
   </div>
 
+  <!-- Debug Stats Overlay (top-left, always visible in-game) -->
+  <div id="debug-stats" class="hidden">
+    <div id="stats-fps"></div>
+    <div id="stats-chunks"></div>
+    <div id="stats-dirty"></div>
+    <div id="stats-manifest"></div>
+  </div>
+
+  <!-- Pause Menu (Escape key) -->
+  <div id="pause-menu" class="overlay hidden">
+    <h2>Paused</h2>
+    <div class="settings-group">
+      <label for="setting-tick-interval">Chunk Tick Interval (ms): <span id="tick-val">500</span></label>
+      <input type="range" id="setting-tick-interval" min="100" max="2000" step="50" value="500">
+
+      <label for="setting-chunks-per-tick">Chunks Per Tick: <span id="chunks-val">3</span></label>
+      <input type="range" id="setting-chunks-per-tick" min="1" max="10" step="1" value="3">
+
+      <label for="setting-render-distance">Render Distance (chunks): <span id="distance-val">8</span></label>
+      <input type="range" id="setting-render-distance" min="2" max="16" step="1" value="8">
+    </div>
+    <button id="btn-resume-game" class="menu-btn primary">Resume</button>
+  </div>
+
   <!-- Mobile Touch Controls -->
   <div id="touch-controls" class="hidden">
     <!-- Left Virtual Joystick -->

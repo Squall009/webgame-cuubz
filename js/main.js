@@ -1680,6 +1680,9 @@
         });
         chunkManager.update(0, 0, performance.now());
 
+        // Start periodic chunk update timer — ensures orphaned chunks are unloaded regardless of player position
+        chunkManager.startTickTimer();
+
         // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
         // When hosting a session, remote player block changes arrive via MultiplayerClient game events.
         // These callbacks apply the change locally and mark chunks dirty for ChunkStore flush.
@@ -2168,8 +2171,14 @@
                 game.chunkManager.update(player.position.x, player.position.z, performance.now());
               }
 
+              // ─── Debug Stats Overlay Update ──────────────
+              updateDebugStats(game);
+
               requestAnimationFrame(renderLoop);
             }
+
+            // ─── Wire up Pause Menu & Settings ────────────
+            setupPauseMenu(game);
 
             game.lastTime = performance.now();
             requestAnimationFrame(renderLoop);
@@ -2186,6 +2195,145 @@
         _log('[Cuubz] Game init error:', err.stack);
       }
     }, 200);
+  }
+
+  // ============================================================
+  // Debug Stats Overlay & Pause Menu
+  // ============================================================
+
+  /**
+   * FPS tracking state — shared across frames for rolling average.
+   */
+  let _fpsFrames = 0;
+  let _fpsLastTime = performance.now();
+  let _currentFps = 0;
+
+  function updateDebugStats(game) {
+    const statsEl = document.getElementById('debug-stats');
+    if (!statsEl || !game.chunkManager) return;
+
+    // FPS calculation (rolling over ~1 second window)
+    _fpsFrames++;
+    const now = performance.now();
+    if (now - _fpsLastTime >= 1000) {
+      _currentFps = Math.round(_fpsFrames * 1000 / (now - _fpsLastTime));
+      _fpsFrames = 0;
+      _fpsLastTime = now;
+    }
+
+    // Count active chunks (with mesh rendered) and dirty count
+    let activeChunks = 0, dirtyCount = 0;
+    for (const [, entry] of game.chunkManager.loadedChunks) {
+      if (entry.mesh || entry.transMesh || entry.cutoutMesh) activeChunks++;
+      if (entry.dirty) dirtyCount++;
+    }
+
+    // Update DOM elements
+    const fpsEl = document.getElementById('stats-fps');
+    const chunksEl = document.getElementById('stats-chunks');
+    const dirtyEl = document.getElementById('stats-dirty');
+    const manifestEl = document.getElementById('stats-manifest');
+
+    if (fpsEl) fpsEl.textContent = `FPS: ${_currentFps}`;
+    if (chunksEl) chunksEl.textContent = `Chunks: ${activeChunks} / ${game.chunkManager.loadedChunks.size}`;
+    if (dirtyEl) dirtyEl.textContent = `Dirty: ${dirtyCount}`;
+    if (manifestEl && game.chunkManager.stats) {
+      manifestEl.textContent = `Manifest writes: ${game.chunkManager.stats.manifestWrites || 0}`;
+    }
+  }
+
+  function setupPauseMenu(game) {
+    const pauseMenu = document.getElementById('pause-menu');
+    const resumeBtn = document.getElementById('btn-resume-game');
+    const debugStats = document.getElementById('debug-stats');
+
+    // Settings sliders
+    const tickSlider = document.getElementById('setting-tick-interval');
+    const chunksSlider = document.getElementById('setting-chunks-per-tick');
+    const distanceSlider = document.getElementById('setting-render-distance');
+
+    // Value displays
+    const tickVal = document.getElementById('tick-val');
+    const chunksVal = document.getElementById('chunks-val');
+    const distanceVal = document.getElementById('distance-val');
+
+    if (!pauseMenu || !resumeBtn) return;
+
+    // Show debug stats overlay when game starts
+    if (debugStats) {
+      debugStats.classList.remove('hidden');
+    }
+
+    // Toggle pause on Escape key
+    document.addEventListener('keydown', function onPause(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        const isPaused = !pauseMenu.classList.contains('hidden');
+
+        if (!isPaused) {
+          // Pause game
+          game.running = false;
+          pauseMenu.classList.remove('hidden');
+          document.exitPointerLock();
+          // Stop chunk tick timer while paused
+          if (game.chunkManager) game.chunkManager.stopTickTimer();
+        } else {
+          // Resume game
+          resumeGame();
+        }
+      }
+    });
+
+    function resumeGame() {
+      game.running = true;
+      pauseMenu.classList.add('hidden');
+      canvas.requestPointerLock();
+      // Restart chunk tick timer
+      if (game.chunkManager) game.chunkManager.startTickTimer();
+    }
+
+    resumeBtn.addEventListener('click', resumeGame);
+
+    // Settings: Chunk Tick Interval
+    if (tickSlider && tickVal) {
+      tickSlider.value = game.chunkManager.tickIntervalMs;
+      tickVal.textContent = tickSlider.value;
+      tickSlider.addEventListener('input', () => {
+        const val = parseInt(tickSlider.value);
+        tickVal.textContent = val;
+        if (game.chunkManager) {
+          game.chunkManager.stopTickTimer();
+          game.chunkManager.tickIntervalMs = val;
+          if (game.running) game.chunkManager.startTickTimer();
+        }
+      });
+    }
+
+    // Settings: Chunks Per Tick
+    if (chunksSlider && chunksVal) {
+      chunksSlider.value = game.chunkManager.chunksPerTick;
+      chunksVal.textContent = chunksSlider.value;
+      chunksSlider.addEventListener('input', () => {
+        const val = parseInt(chunksSlider.value);
+        chunksVal.textContent = val;
+        if (game.chunkManager) {
+          game.chunkManager.chunksPerTick = val;
+        }
+      });
+    }
+
+    // Settings: Render Distance
+    if (distanceSlider && distanceVal) {
+      distanceSlider.value = game.chunkManager.renderDistance;
+      distanceVal.textContent = distanceSlider.value;
+      distanceSlider.addEventListener('input', () => {
+        const val = parseInt(distanceSlider.value);
+        distanceVal.textContent = val;
+        if (game.chunkManager) {
+          game.chunkManager.setRenderDistance(val);
+        }
+      });
+    }
   }
 
   // ============================================================

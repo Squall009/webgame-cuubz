@@ -25,8 +25,8 @@ class ChunkManager {
       this.renderDistance = options.renderDistance || 4;
     }
 
-    // Loaded chunk meshes
-    this.loadedChunks = new Map(); // "cx,cz" → { mesh, data, dirty }
+    // Loaded chunk meshes — key "cx,cz" → { data, mesh, transMesh, cutoutMesh, dirty, built }
+    this.loadedChunks = new Map();
 
     // Build queue for async chunk building
     this.buildQueue = [];
@@ -51,6 +51,20 @@ class ChunkManager {
     // Store setTimeout ID for cleanup on dispose
     this._buildTimeoutId = null;
 
+    // ─── Chunk tick configuration (configurable via pause menu) ───
+    this.tickIntervalMs = options.tickIntervalMs || 500;   // How often to run chunk update check
+    this.chunksPerTick = options.chunksPerTick || 3;        // Max chunks to build per tick batch
+
+    // Tick timer for periodic updates (fixes orphaning: always unloads regardless of player position)
+    this._tickTimerId = null;
+
+    // Stats tracking
+    this.stats = {
+      manifestWrites: 0,
+      chunksGenerated: 0,
+      chunksLoadedFromDisk: 0,
+    };
+
     // Wire up performance optimizer callbacks if present
     if (this.performanceOptimizer) {
       const self = this;
@@ -66,6 +80,7 @@ class ChunkManager {
 
   /**
    * Update chunk loading based on player position.
+   * Called periodically via tick AND on chunk boundary crossing.
    */
   update(playerX, playerZ, currentTime) {
     // Check performance-based render distance adjustment
@@ -74,20 +89,14 @@ class ChunkManager {
       this.lowQualityMode = this.performanceOptimizer.getLowQualityMode();
     }
 
-    // Only rebuild when player crosses chunk boundary
     const playerChunkX = Math.floor(playerX / 16);
     const playerChunkZ = Math.floor(playerZ / 16);
-    const lastChunkX = Math.floor(this.lastPlayerX / 16);
-    const lastChunkZ = Math.floor(this.lastPlayerZ / 16);
 
-    if (playerChunkX === lastChunkX && playerChunkZ === lastChunkZ) {
-      return; // Still in same chunk — no update needed
-    }
-
+    // Update position tracking regardless — needed for periodic unload checks
     this.lastPlayerX = playerX;
     this.lastPlayerZ = playerZ;
 
-    // Determine which chunks should be loaded
+    // Determine which chunks should be loaded based on current render distance
     const neededChunks = new Set();
 
     for (let dx = -this.renderDistance; dx <= this.renderDistance; dx++) {
@@ -98,7 +107,7 @@ class ChunkManager {
       }
     }
 
-    // Unload distant chunks
+    // Unload distant chunks — always run, not just on boundary crossing
     for (const [key] of this.loadedChunks) {
       if (!neededChunks.has(key)) {
         this._unloadChunk(key);
@@ -111,6 +120,32 @@ class ChunkManager {
         const [cx, cz] = key.split(',').map(Number);
         this._queueBuild(cx, cz);
       }
+    }
+  }
+
+  /**
+   * Start periodic tick timer for chunk updates.
+   * Ensures orphaned chunks are unloaded even when player stays in same chunk area.
+   */
+  startTickTimer() {
+    if (this._disposed || this._tickTimerId !== null) return;
+    const self = this;
+    const tick = () => {
+      if (self._disposed) return;
+      // Run update with current player position to unload/orphan check
+      self.update(self.lastPlayerX, self.lastPlayerZ, performance.now());
+      self._tickTimerId = setTimeout(tick, self.tickIntervalMs);
+    };
+    this._tickTimerId = setTimeout(tick, this.tickIntervalMs);
+  }
+
+  /**
+   * Stop periodic tick timer.
+   */
+  stopTickTimer() {
+    if (this._tickTimerId !== null) {
+      clearTimeout(this._tickTimerId);
+      this._tickTimerId = null;
     }
   }
 
@@ -128,7 +163,7 @@ class ChunkManager {
   }
 
   /**
-   * Process build queue asynchronously (one chunk per frame to avoid stutter)
+   * Process build queue asynchronously (batch chunks per tick to avoid stutter)
    */
   _processQueue() {
     if (this._disposed) return;
@@ -140,8 +175,8 @@ class ChunkManager {
 
     this.building = true;
 
-    // Batch build up to 3 chunks per frame to reduce stutter
-    const batchSize = Math.min(3, this.buildQueue.length);
+    // Batch build up to chunksPerTick per frame to reduce stutter
+    const batchSize = Math.min(this.chunksPerTick, this.buildQueue.length);
     for (let i = 0; i < batchSize; i++) {
       const { cx, cz } = this.buildQueue.shift();
       this._buildChunk(cx, cz);
@@ -179,6 +214,7 @@ class ChunkManager {
           if (binaryData) {
             chunkData = ChunkBinaryCodec.decode(binaryData);
             fromStorage = true;
+            this.stats.chunksLoadedFromDisk++;
             console.log(`[ChunkManager] Loaded chunk ${key} from IndexedDB (${binaryData.byteLength} bytes)`);
 
             // Sanity check: detect flat/corrupt terrain by checking height variation
@@ -224,10 +260,13 @@ class ChunkManager {
       if (this.chunkStore) {
         try {
           await this.chunkStore.addGeneratedChunk(key);
+          this.stats.manifestWrites++;
         } catch (e) {
           // Silently ignore manifest errors.
         }
       }
+
+      this.stats.chunksGenerated++;
 
       // Mark as dirty for persistence on next flush
       if (this.dirtyFlush) {
@@ -715,6 +754,9 @@ class ChunkManager {
       clearTimeout(this._buildTimeoutId);
       this._buildTimeoutId = null;
     }
+
+    // Stop periodic tick timer
+    this.stopTickTimer();
 
     this.buildQueue = [];
     this.building = false;

@@ -17,7 +17,8 @@ class NoiseGenerator {
     for (let i = 0; i < 256; i++) p[i] = i;
     
     // Fisher-Yates shuffle with proper LCG (non-zero additive constant)
-    let s = seed || 1; // Ensure s is never 0
+    let s = (seed === undefined || seed === null || seed === '') ? 1 : Number(seed);
+    if (!Number.isFinite(s)) s = 1; // NaN/coercion safety net
     for (let i = 255; i > 0; i--) {
       s = (s * 16807 + 12345) % 2147483647;
       const j = ((s % (i + 1)) + (i + 1)) % (i + 1); // Handle negative modulo

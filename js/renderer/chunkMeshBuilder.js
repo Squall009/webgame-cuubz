@@ -234,8 +234,6 @@ class ChunkMeshBuilder {
   }
 
   /**
-   * Render source fluid (level 8) - flat surface like ocean/lake.
-   * Only renders top face and side faces where adjacent to non-fluid blocks.
    /**
     * Render source (level-8) fluid as a flat surface.
     * Only renders top face + side faces at the edges of connected fluid bodies.
@@ -249,8 +247,8 @@ class ChunkMeshBuilder {
        return { u: 0, v: 0, size: 1 };
      };
 
-     // Track vertex index for this block's faces (posArr accumulates across all blocks in chunk)
-     let vIdx = 0;
+     // Start vertex index from current array length — each block appends to shared arrays
+     let vIdx = posArr.length / 3;
      const addQuad = (verts, normal, faceName) => {
        const uvInfo = getUV(faceName);
        for (let i = 0; i < 4; i++) {
@@ -319,8 +317,8 @@ class ChunkMeshBuilder {
        return { u: 0, v: 0, size: 1 };
      };
 
-     // Track vertex indices for this block's faces (posArr accumulates across all blocks in chunk)
-     let vIdx = 0;
+     // Start vertex index from current array length — each block appends to shared arrays
+     let vIdx = posArr.length / 3;
 
      // Add a single triangle with per-vertex UVs for proper interpolation on slopes
      const addTriUV = (v0, uv0, v1, uv1, v2, uv2, normal) => {
