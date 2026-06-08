@@ -1564,6 +1564,11 @@
 
         const worldGen = new WorldGenerator(currentWorld.seed);
 
+        // Initialize worker pool for multi-threaded chunk generation.
+        loadingStatus.textContent = 'Initializing workers...';
+        if (loadingProgress) loadingProgress.style.width = '55%';
+        await worldGen.init('js/world/workerGeneration.js');
+
         // Initialize Texture Atlas (async)
         loadingStatus.textContent = 'Loading textures...';
         if (loadingProgress) loadingProgress.style.width = '60%';
@@ -1652,7 +1657,7 @@
             createdAt: Date.now(),
             lastPlayed: Date.now(),
             playerCount: 1,
-            spawnPoint: { x: 0, y: 32, z: 0 },
+            spawnPoint: { x: 0, y: 68, z: 0 },
             generatedChunks: [],
           };
           await chunkStore.saveManifest(manifest);
@@ -1810,14 +1815,14 @@
             // Scan this chunk's columns from top down for plains surface blocks
             for (let lx = 0; lx < 16; lx++) {
               for (let lz = 0; lz < 16; lz++) {
-                for (let y = MAX_Y - 1; y >= MIN_Y; y--) {
+                for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
                   const block = entry.data.getBlock(lx, y, lz);
                   // Plains surface blocks: GRASS and DIRT are solid ground
                   if ((block === BLOCK_TYPES.GRASS || block === BLOCK_TYPES.DIRT) && BLOCK_PROPERTIES[block]?.solid) {
                     debugCandidates++;
 
                     // Must be above sea level (or a valid fallback if no high ground is found)
-                    const SEA_LEVEL = 32;
+                    const SEA_LEVEL = 64;
                     if (y <= SEA_LEVEL) {
                       // If we already have a spawn above sea level, ignore candidates below it
                       if (bestSpawnY > SEA_LEVEL) continue;
@@ -1856,7 +1861,7 @@
             }
           }
 
-          const SEA_LEVEL = 32;
+          const SEA_LEVEL = 64;
 // Spawn search debug — no log on success
           if (bestSpawnY === MIN_Y || bestSpawnY <= SEA_LEVEL) {
             console.warn(`[Cuubz] WARNING: No suitable surface spawn found above sea level! Falling back to highest safe point (Y=${bestSpawnY + 1.625 + 2}).`);

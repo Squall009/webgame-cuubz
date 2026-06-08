@@ -323,26 +323,28 @@
   <!-- Utilities -->
   <script src="js/util/logger.js?v=20260601-4"></script>
 
-  <!-- World Generation -->
-  <script src="js/world/noise.js?v=20260601-4"></script>
-  <script src="js/world/chunkData.js?v=20260601-4"></script>
-  <script src="js/world/biomeSystem.js?v=20260601-4"></script>
-  <script src="js/world/caveGenerator.js?v=20260601-4"></script>
+  <!-- World Generation (VoxelGen Overhaul) -->
+  <script src="js/world/noise.js?v=vgen-1"></script>
+  <script src="js/world/chunkData.js?v=vgen-1"></script>
+  <script src="js/world/biomeSystem.js?v=vgen-1"></script>
+  <!-- Worker-side generation code (loaded for fetch-based Blob URL creation) -->
+  <script src="js/world/workerGeneration.js?v=vgen-1"></script>
+  <script src="js/world/workerPool.js?v=vgen-1"></script>
   <script src="js/world/featurePlacer.js?v=20260601-4"></script>
-  <script src="js/world/oreGenerator.js?v=20260601-4"></script>
+  <!-- REMOVED: caveGenerator.js, oreGenerator.js — now in workerGeneration.js -->
   <script src="js/world/chunkGrid.js?v=20260601-4"></script>
   <!-- New chunked storage system (IndexedDB + binary codec) -->
   <script src="js/world/chunkBinaryCodec.js?v=20260604-1"></script>
   <script src="js/world/chunkStore.js?v=20260604-1"></script>
   <script src="js/world/dirtyFlushManager.js?v=20260604-1"></script>
   <script src="js/world/persistence.js?v=20260601-4"></script>
-  <script src="js/world/worldGenerator.js?v=20260601-4"></script>
+  <script src="js/world/worldGenerator.js?v=vgen-1"></script>
   <script src="js/world/spawnManager.js?v=20260601-4"></script>
 
   <!-- Renderer -->
   <script src="js/renderer/textureAtlas.js?v=20260601-6"></script>
   <script src="js/renderer/chunkMeshBuilder.js?v=20260603-1"></script>
-  <script src="js/renderer/chunkManager.js?v=20260603-1"></script>
+  <script src="js/renderer/chunkManager.js?v=vgen-1"></script>
   <script src="js/renderer/voxelRenderer.js?v=20260601-4"></script>
   <script src="js/renderer/crosshair.js?v=20260601-4"></script>
   <script src="js/renderer/skybox.js?v=20260601-4"></script>

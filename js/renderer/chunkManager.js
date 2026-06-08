@@ -254,7 +254,15 @@ class ChunkManager {
     // Generate if not in storage or was flat/corrupt
     if (!chunkData && this.generatorFn) {
       console.log(`[ChunkManager] Generating chunk ${key} (not in IndexedDB)`);
-      chunkData = this.generatorFn(cx, cz);
+
+      // generatorFn may be async (worker dispatch) or sync — handle both.
+      const genResult = this.generatorFn(cx, cz);
+      chunkData = genResult && typeof genResult.then === 'function' ? await genResult : genResult;
+
+      if (!chunkData) {
+        console.warn(`[ChunkManager] Generation returned null for ${key}`);
+        return;
+      }
 
       // Add to manifest as generated
       if (this.chunkStore) {

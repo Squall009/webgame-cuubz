@@ -1,6 +1,11 @@
 /**
- * Cuubz — Chunk Data & Constants
- * Bounds: 16x16x96 | Sea Level: 32 | Bedrock: 0
+ * Cuubz — Chunk Data & Constants (VoxelGen Overhaul)
+ * Bounds: 16x256x16 | Sea Level: 64 | Bedrock: 0
+ * Generation logic matches voxelgen.html source of truth.
+ *
+ * NOTE: BLOCK_TYPES IDs are kept at original Cuubz values to maintain compatibility
+ * with texture atlas filenames (e.g., "1_0-grass_top.png"). VoxelGen's internal block
+ * IDs are translated via VOXELGEN_TO_CUUBZ in workerGeneration.js.
  */
 
 const BLOCK_TYPES = {
@@ -12,27 +17,55 @@ const BLOCK_TYPES = {
 };
 
 const BLOCK_PROPERTIES = {
-  [BLOCK_TYPES.AIR]: { solid: false, transparent: true, gravity: false },
-  [BLOCK_TYPES.GRASS]: { solid: true, transparent: false, hardness: 0.6 },
-  [BLOCK_TYPES.DIRT]: { solid: true, transparent: false, hardness: 0.5 },
-  [BLOCK_TYPES.STONE]: { solid: true, transparent: false, hardness: 3.0 },
-  [BLOCK_TYPES.SAND]: { solid: true, transparent: false, hardness: 0.5 },
-  [BLOCK_TYPES.WATER]: { solid: false, transparent: true, fluid: true },
-  [BLOCK_TYPES.LAVA]: { solid: false, transparent: false, fluid: true, damage: 4 },
-  [BLOCK_TYPES.BEDROCK]: { solid: true, transparent: false, hardness: -1 },
-  [BLOCK_TYPES.LEAVES]: { solid: false, transparent: true, hardness: 0.2 },
-  [BLOCK_TYPES.SNOW]: { solid: true, transparent: false, hardness: 0.3 }
+  [BLOCK_TYPES.AIR]:       { solid: false, transparent: true, gravity: false },
+  [BLOCK_TYPES.GRASS]:     { solid: true, transparent: false, hardness: 0.6 },
+  [BLOCK_TYPES.DIRT]:      { solid: true, transparent: false, hardness: 0.5 },
+  [BLOCK_TYPES.STONE]:     { solid: true, transparent: false, hardness: 3.0 },
+  [BLOCK_TYPES.SAND]:      { solid: true, transparent: false, hardness: 0.5 },
+  [BLOCK_TYPES.GRAVEL]:    { solid: true, transparent: false, hardness: 0.6 },
+  [BLOCK_TYPES.WATER]:     { solid: false, transparent: true, fluid: true },
+  [BLOCK_TYPES.LAVA]:      { solid: false, transparent: false, fluid: true, damage: 4 },
+  [BLOCK_TYPES.BEDROCK]:   { solid: true, transparent: false, hardness: -1 },
+  [BLOCK_TYPES.LEAVES]:    { solid: false, transparent: true, hardness: 0.2 },
+  [BLOCK_TYPES.SNOW]:      { solid: true, transparent: false, hardness: 0.3 },
+  [BLOCK_TYPES.ICE]:       { solid: true, transparent: true, hardness: 0.5 }
 };
+
+// VoxelGen internal block IDs → Cuubz BLOCK_TYPES mapping.
+// Used by workerGeneration.js to translate generated blocks to our texture-compatible IDs.
+const VOXELGEN_TO_CUUBZ = [
+  // vg:AIR(0)      -> cu:AIR(0)
+  // vg:BEDROCK(1)   -> cu:BEDROCK(11)
+  // vg:STONE(2)     -> cu:STONE(3)
+  // vg:DIRT(3)      -> cu:DIRT(2)
+  // vg:GRASS(4)     -> cu:GRASS(1)
+  // vg:SAND(5)      -> cu:SAND(4)
+  // vg:GRAVEL(6)    -> cu:GRAVEL(5)
+  // vg:WATER(7)     -> cu:WATER(6)
+  // vg:COAL_ORE(8)   -> cu:COAL_ORE(18)
+  // vg:IRON_ORE(9)   -> cu:IRON_ORE(19)
+  // vg:GOLD_ORE(10)  -> cu:GOLD_ORE(20)
+  // vg:DIAMOND_ORE(11)->cu:DIAMOND_ORE(21)
+  // vg:CAVE_AIR(12)  -> cu:AIR(0) — cave air = regular air for rendering
+  // vg:SNOW(13)      -> cu:SNOW(9)
+  // vg:SNOW_STONE(14)->cu:STONE(3) — no separate snowy stone texture, use stone
+  // vg:LAVA(15)      -> cu:LAVA(15)
+  // vg:TERRACOTTA(16)->cu:CORRUPT_STONE(16) — closest visual match
+  // vg:RED_SAND(17)  -> cu:SAND(4) — use sand texture (red tint TBD)
+  // vg:ICE(18)       -> cu:ICE(10)
+  // vg:CLAY(19)      -> cu:DIRT(2) — clay ≈ dirt visually
+  0, 11, 3, 2, 1, 4, 5, 6, 18, 19, 20, 21, 0, 9, 3, 15, 16, 4, 10, 2
+];
 
 const CHUNK_WIDTH = 16;
 const CHUNK_DEPTH = 16;
-const CHUNK_HEIGHT = 96; 
+const CHUNK_HEIGHT = 256;
 const MIN_Y = 0;
-const MAX_Y = 96;
-const SEA_LEVEL = 32;
+const MAX_Y = 256;
+const SEA_LEVEL = 64;
 
-// Water level constants (Minecraft-style: 8 levels for fluids)
-const WATER_LEVEL_SOURCE = 8; // Source water (ocean, lake, river source) — full height, flat surface
+// Water level constants (Minecraft-style: 8 levels for fluids).
+const WATER_LEVEL_SOURCE = 8;
 const WATER_LEVEL_FLOWING_MIN = 1;
 const WATER_LEVEL_FLOWING_MAX = 7;
 
@@ -43,8 +76,7 @@ class Chunk {
     this.worldX = chunkX * CHUNK_WIDTH;
     this.worldZ = chunkZ * CHUNK_DEPTH;
     this.blocks = new Uint8Array(CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT);
-    // Water level metadata: stored alongside blocks. 0 = no water/not fluid, 1-8 = water/lava level.
-    // Level 8 = source (full block height). Levels 1-7 = flowing (partial height for sloped rendering).
+    // Water level metadata: 0 = no water/not fluid, 1-8 = water/lava level.
     this.waterLevels = new Uint8Array(CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT);
     this.neighbors = { positiveX: null, negativeX: null, positiveZ: null, negativeZ: null };
     this.dirty = false;
@@ -69,7 +101,6 @@ class Chunk {
     const idx = this._localIndex(x, y, z);
     if (this.blocks[idx] !== type) {
       this.blocks[idx] = type;
-      // Set default water level for fluid blocks
       if ((type === BLOCK_TYPES.WATER || type === BLOCK_TYPES.LAVA)) {
         this.waterLevels[idx] = WATER_LEVEL_SOURCE;
       } else {
@@ -79,10 +110,8 @@ class Chunk {
     }
   }
 
-  /** Get the water level at a position. Returns 0 for non-fluid blocks or out of bounds. */
   getWaterLevel(x, y, z) {
     if (y < 0 || y >= CHUNK_HEIGHT) return 0;
-    // Cross-chunk lookup for water levels
     if (x < 0 && this.neighbors.negativeX) return this.neighbors.negativeX.getWaterLevel(CHUNK_WIDTH + x, y, z);
     if (x >= CHUNK_WIDTH && this.neighbors.positiveX) return this.neighbors.positiveX.getWaterLevel(x - CHUNK_WIDTH, y, z);
     if (z < 0 && this.neighbors.negativeZ) return this.neighbors.negativeZ.getWaterLevel(x, y, CHUNK_DEPTH + z);
@@ -93,13 +122,11 @@ class Chunk {
     return this.waterLevels[this._localIndex(x, y, z)];
   }
 
-  /** Set the water level at a position. Only valid for WATER or LAVA blocks. */
   setWaterLevel(x, y, z, level) {
     if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < 0 || y >= CHUNK_HEIGHT) return;
     const idx = this._localIndex(x, y, z);
     const blockType = this.blocks[idx];
     if (blockType !== BLOCK_TYPES.WATER && blockType !== BLOCK_TYPES.LAVA) return;
-    // Clamp level to valid range
     const clampedLevel = Math.max(0, Math.min(WATER_LEVEL_SOURCE, level));
     if (this.waterLevels[idx] !== clampedLevel) {
       this.waterLevels[idx] = clampedLevel;
@@ -107,7 +134,6 @@ class Chunk {
     }
   }
 
-  /** Check if a water block is a source (level 8) vs flowing. */
   isWaterSource(x, y, z) {
     return this.getWaterLevel(x, y, z) === WATER_LEVEL_SOURCE;
   }
@@ -117,9 +143,9 @@ class Chunk {
     const waterLevelIndices = [], waterLevelValues = [];
     for (let i = 0; i < this.blocks.length; i++) {
       if (this.blocks[i] !== BLOCK_TYPES.AIR) {
+        // Include CAVE_AIR in serialization so cave data persists.
         indices.push(i); types.push(this.blocks[i]);
       }
-      // Only serialize non-zero, non-source water levels to save space
       if (this.waterLevels[i] > 0 && this.waterLevels[i] < WATER_LEVEL_SOURCE) {
         waterLevelIndices.push(i); waterLevelValues.push(this.waterLevels[i]);
       }
@@ -131,21 +157,19 @@ class Chunk {
   static deserialize(data) {
     const chunk = new Chunk(data.chunkX, data.chunkZ);
     for (let i = 0; i < data.indices.length; i++) chunk.blocks[data.indices[i]] = data.types[i];
-    // Restore default source levels for fluid blocks
     for (let i = 0; i < chunk.blocks.length; i++) {
       if ((chunk.blocks[i] === BLOCK_TYPES.WATER || chunk.blocks[i] === BLOCK_TYPES.LAVA)) {
         chunk.waterLevels[i] = WATER_LEVEL_SOURCE;
       }
     }
-    // Override with saved flowing levels
     if (data.waterLevelIndices) {
-      for (let i = 0; i < data.waterLevelIndices.length; i++) {
-        chunk.waterLevels[data.waterLevelIndices[i]] = data.waterLevelValues[i];
-      }
+      for (let i = 0; i < data.waterLevelIndices.length; i++) chunk.waterLevels[data.waterLevelIndices[i]] = data.waterLevelValues[i];
     }
     chunk.dirty = data.dirty;
     return chunk;
   }
 }
 
-if (typeof module !== 'undefined') module.exports = { Chunk, BLOCK_TYPES, BLOCK_PROPERTIES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, MIN_Y, MAX_Y, SEA_LEVEL };
+if (typeof module !== 'undefined') {
+  module.exports = { Chunk, BLOCK_TYPES, BLOCK_PROPERTIES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, MIN_Y, MAX_Y, SEA_LEVEL, VOXELGEN_TO_CUUBZ };
+}

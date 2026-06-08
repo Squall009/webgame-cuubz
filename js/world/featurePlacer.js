@@ -16,14 +16,18 @@ class FeaturePlacer {
     this.seed = seed;
     this.noise = new NoiseGenerator(seed);
     
-    // Feature density per biome (chance per block column)
+    // Feature density per biome — keys match biome name (case-insensitive lookup).
     this.featureDensity = {
       plains:   { flowers: 0.05, cacti: 0 },
       forest:   { flowers: 0.03, cacti: 0 },
       desert:   { flowers: 0, cacti: 0.04 },
       tundra:   { flowers: 0, cacti: 0 },
       mountains:{ flowers: 0, cacti: 0 },
+      'frozen peaks': { flowers: 0, cacti: 0 },
+      badlands: { flowers: 0, cacti: 0.02 },
+      beach:    { flowers: 0, cacti: 0 },
       ocean:    { flowers: 0, cacti: 0, coral: 0.02 },
+      'deep ocean': { flowers: 0, cacti: 0 },
       lava:     { flowers: 0, cacti: 0, lavaPool: 0.03 },
       corrupt:  { flowers: 0, cacti: 0, toxicPool: 0.02, crystals: 0.01 },
     };
@@ -48,9 +52,10 @@ class FeaturePlacer {
         const surfaceY = this._findSurface(chunk, lx, lz);
         if (surfaceY === null) continue;
         
-        // Get biome for this position
-        const biome = biomeAt ? biomeAt(wx, wz) : { id: 'plains' };
-        const density = this.featureDensity[biome.id];
+        // Get biome for this position — supports old {id:'plains'} and VoxelGen {name:'Plains'}.
+        const biome = biomeAt ? biomeAt(wx, wz) : { name: 'Plains', id: 'plains' };
+        const biomeKey = biome.id || (biome.name ? biome.name.toLowerCase().replace(/\s+/g, '') : '');
+        const density = this.featureDensity[biomeKey];
         if (!density) continue;
         
         // Use hash for uniform random placement (NOT perlin — perlin is spatially smooth)

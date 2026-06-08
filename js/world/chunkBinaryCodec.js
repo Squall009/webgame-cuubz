@@ -8,7 +8,7 @@
  *     version:      Uint8  (1)
  *     chunkX:       Int16
  *     chunkZ:       Int16
- *     height:       Uint8  (96)
+ *     height:       Uint16 (256)
  *     flags:        Uint8  (bitfield)
  *     blockRunCount: Uint32
  *     reserved:     4 bytes
@@ -74,8 +74,8 @@ class ChunkBinaryCodec {
     view.setUint8(offset, CHUNK_VERSION); offset += 1;
     view.setInt16(offset, chunk.chunkX, true); offset += 2;
     view.setInt16(offset, chunk.chunkZ, true); offset += 2;
-    view.setUint8(offset, 96); // height = CHUNK_HEIGHT (hardcoded for now)
-    offset += 1;
+    view.setUint16(offset, CHUNK_HEIGHT, true); // height = Uint16 (supports up to 65535)
+    offset += 2;
     view.setUint8(offset, flags); offset += 1;
     view.setUint32(offset, blockRuns.length / 2, true); offset += 4; // run count
     offset += 4; // reserved
@@ -123,7 +123,7 @@ class ChunkBinaryCodec {
     let offset = 5;
     const chunkX = view.getInt16(offset, true); offset += 2;
     const chunkZ = view.getInt16(offset, true); offset += 2;
-    const height = view.getUint8(offset); offset += 1;
+    const height = view.getUint16(offset, true); offset += 2; // Uint16 for CHUNK_HEIGHT=256
     const flags = view.getUint8(offset); offset += 1;
     const blockRunCount = view.getUint32(offset, true); offset += 4;
     offset += 4; // skip reserved

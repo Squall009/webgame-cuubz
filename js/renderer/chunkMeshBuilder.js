@@ -59,7 +59,7 @@ class ChunkMeshBuilder {
 
     // Calculate chunk dimensions from block data
     const totalBlocks = chunk.blocks.length;
-    const chunkHeight = CHUNK_HEIGHT; // Y: 0-95
+    const chunkHeight = CHUNK_HEIGHT; // Y: 0-255 (VoxelGen overhaul)
     const chunkZ = CHUNK_DEPTH;
     const chunkX = CHUNK_WIDTH;
 

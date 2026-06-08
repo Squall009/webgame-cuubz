@@ -18,8 +18,8 @@ const MAX_WORLDS = 3;
 // MIN_NAME_LENGTH and MAX_NAME_LENGTH defined in characterManager.js — use globals
 const DEFAULT_SEED = 42;
 const BIOME_NAMES = [
-  'Plains', 'Forest', 'Desert', 'Tundra',
-  'Mountains', 'Ocean', 'Lava', 'Corrupt'
+  'Deep Ocean', 'Ocean', 'Beach', 'Plains', 'Forest', 'Badlands',
+  'Tundra', 'Desert', 'Mountains', 'Frozen Peaks'
 ];
 
 // ============================================================

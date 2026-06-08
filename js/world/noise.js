@@ -1,223 +1,184 @@
 /**
- * Cuubz — Noise Functions
- * Perlin/Simplex noise with seed support for terrain, biome, and cave generation.
+ * Cuubz — Noise Functions (VoxelGen Overhaul)
+ * Ported from voxelgen.html — the source of truth for all generation algorithms.
+ * 
+ * Architecture: each call to createPerlin() gets its own independent permutation table.
+ * No shared state between instances. Use createSharedPerlin(seed) to get all 9 named
+ * instances at once (continentalness, erosion, temperature, humidity, detail, cave1, cave2, river, jitter).
  */
 
-class NoiseGenerator {
-  constructor(seed = 0) {
-    this.seed = seed;
-    this.perm = this._buildPermutation(seed);
-  }
+// ── Mulberry32 PRNG ────────────────────────────────────────────────
+function mulberry32(seed) {
+  let s = seed | 0;
+  return function () {
+    s |= 0;
+    s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
 
-  /**
-   * Build permutation table from seed
-   */
-  _buildPermutation(seed) {
-    const p = [];
-    for (let i = 0; i < 256; i++) p[i] = i;
-    
-    // Fisher-Yates shuffle with proper LCG (non-zero additive constant)
-    let s = (seed === undefined || seed === null || seed === '') ? 1 : Number(seed);
-    if (!Number.isFinite(s)) s = 1; // NaN/coercion safety net
-    for (let i = 255; i > 0; i--) {
-      s = (s * 16807 + 12345) % 2147483647;
-      const j = ((s % (i + 1)) + (i + 1)) % (i + 1); // Handle negative modulo
-      [p[i], p[j]] = [p[j], p[i]];
-    }
-    
-    // Double for seamless wrapping
-    const perm = new Array(512);
-    for (let i = 0; i < 512; i++) {
-      perm[i] = p[i & 255];
-    }
-    return perm;
+// ── String → uint32 hash (FNV-1a) ─────────────────────────────────
+function hashString(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
   }
+  return h >>> 0;
+}
 
-  /**
-   * Fade function for smooth interpolation
-   */
-  _fade(t) {
-    return t * t * t * (t * (t * 6 - 15) + 10);
+// ── Perlin noise factory (returns independent instance) ────────────
+function createPerlin(seed) {
+  const rng = mulberry32(seed);
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [p[i], p[j]] = [p[j], p[i]];
   }
+  const perm = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
 
-  /**
-   * Linear interpolation
-   */
-  _lerp(a, b, t) {
-    return a + t * (b - a);
-  }
-
-  /**
-   * Gradient function for Perlin noise
-   */
-  _grad(hash, x, y, z) {
-    const h = hash & 15;
+  function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+  function lerp(a, b, t) { return a + t * (b - a); }
+  function grad3(h, x, y, z) {
+    h &= 15;
     const u = h < 8 ? x : y;
     const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
     return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
   }
 
-  /**
-   * 3D Perlin noise — returns value between -1 and 1
-   */
-  perlin3(x, y, z) {
-    const X = Math.floor(x) & 255;
-    const Y = Math.floor(y) & 255;
-    const Z = Math.floor(z) & 255;
-    
-    x -= Math.floor(x);
-    y -= Math.floor(y);
-    z -= Math.floor(z);
-    
-    const u = this._fade(x);
-    const v = this._fade(y);
-    const w = this._fade(z);
-    
-    const p = this.perm;
-    
-    const A = p[X] + Y;
-    const AA = p[A] + Z;
-    const AB = p[A + 1] + Z;
-    const B = p[X + 1] + Y;
-    const BA = p[B] + Z;
-    const BB = p[B + 1] + Z;
-    
-    return this._lerp(
-      this._lerp(
-        this._lerp(this._grad(p[AA], x, y, z), this._grad(p[BA], x - 1, y, z), u),
-        this._lerp(this._grad(p[AB], x, y - 1, z), this._grad(p[BB], x - 1, y - 1, z), u),
-        v
-      ),
-      this._lerp(
-        this._lerp(this._grad(p[AA + 1], x, y, z - 1), this._grad(p[BA + 1], x - 1, y, z - 1), u),
-        this._lerp(this._grad(p[AB + 1], x, y - 1, z - 1), this._grad(p[BB + 1], x - 1, y - 1, z - 1), u),
-        v
-      ),
-      w
-    );
+  function noise2(x, y) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+    x -= Math.floor(x); y -= Math.floor(y);
+    const u = fade(x), v = fade(y);
+    const a = perm[X] + Y, aa = perm[a], ab = perm[a + 1];
+    const b = perm[X + 1] + Y, ba = perm[b], bb = perm[b + 1];
+    return lerp(lerp(grad3(perm[aa], x, y, 0), grad3(perm[ba], x - 1, y, 0), u),
+                lerp(grad3(perm[ab], x, y - 1, 0), grad3(perm[bb], x - 1, y - 1, 0), u), v);
   }
 
-  /**
-   * 2D Perlin noise — returns value between -1 and 1
-   */
-  perlin2(x, y) {
-    return this.perlin3(x, y, 0);
+  function noise3(x, y, z) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+    const u = fade(x), v = fade(y), w = fade(z);
+    const A = perm[X] + Y, AA = perm[A] + Z, AB = perm[A + 1] + Z;
+    const B = perm[X + 1] + Y, BA = perm[B] + Z, BB = perm[B + 1] + Z;
+    return lerp(lerp(lerp(grad3(perm[AA], x, y, z), grad3(perm[BA], x - 1, y, z), u),
+                     lerp(grad3(perm[AB], x, y - 1, z), grad3(perm[BB], x - 1, y - 1, z), u), v),
+                lerp(lerp(grad3(perm[AA + 1], x, y, z - 1), grad3(perm[BA + 1], x - 1, y, z - 1), u),
+                     lerp(grad3(perm[AB + 1], x, y - 1, z - 1), grad3(perm[BB + 1], x - 1, y - 1, z - 1), u), v), w);
   }
 
-  /**
-   * Multi-octave noise for terrain detail
-   * @param {number} x 
-   * @param {number} y 
-   * @param {number} octaves - Number of noise layers (default: 4)
-   * @param {number} persistence - Amplitude reduction per octave (default: 0.5)
-   * @returns {number} Normalized value between -1 and 1
-   */
-  octaveNoise2(x, y, octaves = 4, persistence = 0.5) {
-    let total = 0;
-    let amplitude = 1;
-    let frequency = 1;
-    let maxAmplitude = 0;
+  return { noise2, noise3 };
+}
 
-    for (let i = 0; i < octaves; i++) {
-      total += this.perlin2(x * frequency, y * frequency) * amplitude;
-      maxAmplitude += amplitude;
-      amplitude *= persistence;
-      frequency *= 2;
+// ── FBM (Fractal Brownian Motion) — 2D multi-octave ───────────────
+function fbm2(perlin, x, y, octaves, persistence, lacunarity) {
+  let val = 0, amp = 1, freq = 1, maxV = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += perlin.noise2(x * freq, y * freq) * amp;
+    maxV += amp;
+    amp *= persistence;
+    freq *= lacunarity;
+  }
+  return val / maxV;
+}
+
+// ── Spline interpolation through control points ────────────────────
+function applySpline(val, points) {
+  if (val <= points[0][0]) return points[0][1];
+  if (val >= points[points.length - 1][0]) return points[points.length - 1][1];
+  for (let i = 0; i < points.length - 1; i++) {
+    if (val < points[i + 1][0]) {
+      const t = (val - points[i][0]) / (points[i + 1][0] - points[i][0]);
+      return points[i][1] + (points[i + 1][1] - points[i][1]) * t;
     }
-
-    return total / maxAmplitude;
-  }
-
-  /**
-   * Multi-octave 3D noise
-   */
-  octaveNoise3(x, y, z, octaves = 4, persistence = 0.5) {
-    let total = 0;
-    let amplitude = 1;
-    let frequency = 1;
-    let maxAmplitude = 0;
-
-    for (let i = 0; i < octaves; i++) {
-      total += this.perlin3(x * frequency, y * frequency, z * frequency) * amplitude;
-      maxAmplitude += amplitude;
-      amplitude *= persistence;
-      frequency *= 2;
-    }
-
-    return total / maxAmplitude;
-  }
-
-  /**
-   * Ridge noise — creates mountain ridges and cave systems
-   * Inverts and takes absolute value of noise to create ridge-like patterns
-   */
-  ridgeNoise(x, y, z, octaves = 4, persistence = 0.5) {
-    let total = 0;
-    let amplitude = 1;
-    let frequency = 1;
-    let maxAmplitude = 0;
-
-    for (let i = 0; i < octaves; i++) {
-      let value = this.perlin3(x * frequency, y * frequency, z * frequency);
-      value = Math.abs(value);
-      value = 1 - value; // Invert to create ridges
-      value = value * value; // Sharpen ridges
-      
-      total += value * amplitude;
-      maxAmplitude += amplitude;
-      amplitude *= persistence;
-      frequency *= 2;
-    }
-
-    return total / maxAmplitude;
-  }
-
-  /**
-   * Get normalized noise value (0 to 1)
-   */
-  normalized(x, y, z) {
-    return (this.perlin3(x, y, z) + 1) / 2;
-  }
-
-  /**
-   * Deterministic hash function — produces uniformly distributed value in [0, 1]
-   * from integer coordinates. Unlike perlin2 (which is spatially smooth), this
-   * gives uncorrelated values for nearby positions — suitable for random placement
-   * decisions (trees, ores, features).
-   *
-   * Uses a multiplicative hash combined with the instance seed for determinism.
-   * @param {number} x - Integer coordinate
-   * @param {number} y - Integer coordinate
-   * @returns {number} Value in [0, 1) uniformly distributed
-   */
-  hash(x, y) {
-    // MurmurHash3-style finalizer for integer pair + seed
-    let h = ((x | 0) * 374761393 + (y | 0) * 668265263 + (this.seed | 0)) | 0;
-    // Finalizer mix
-    h = ((h ^ (h >>> 13)) * 1274126177) | 0;
-    h = ((h ^ (h >>> 16)) >>> 0); // Unsigned 32-bit
-    return h / 4294967296; // Normalize to [0, 1)
-  }
-
-  /**
-   * Seeded pseudo-random number generator instance.
-   * Returns a PRNG function that produces deterministic values in [0, 1)
-   * for a given sub-seed. Use this instead of Math.random() for reproducible
-   * procedural content (tree heights, apple placement, etc.).
-   * @param {number} subSeed - Integer to derive PRNG state from
-   * @returns {function} Function that returns next value in [0, 1)
-   */
-  createPRNG(subSeed) {
-    let s = ((subSeed || 0) * 16807 + this.seed + 12345) % 2147483647;
-    if (s <= 0) s += 2147483646;
-    return () => {
-      s = (s * 16807) % 2147483647;
-      return s / 2147483647;
-    };
   }
 }
 
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = NoiseGenerator;
+// ── Create all named Perlin instances for a world seed ─────────────
+function createSharedPerlin(seed) {
+  const sInt = hashString(String(seed));
+  return {
+    cont:   createPerlin(sInt ^ 0x1111),
+    eros:   createPerlin(sInt ^ 0x2222),
+    temp:   createPerlin(sInt ^ 0x3333),
+    hum:    createPerlin(sInt ^ 0x4444),
+    det:    createPerlin(sInt ^ 0x5555),
+    c1:     createPerlin(sInt ^ 0x6666),
+    c2:     createPerlin(sInt ^ 0x7777),
+    river:  createPerlin(sInt ^ 0x8888),
+    jitter: createPerlin(sInt ^ 0xBBBB)
+  };
+}
 
+// ── Deterministic hash for feature placement (non-spatial) ─────────
+function hash(x, y, seed = 0) {
+  let h = ((x | 0) * 374761393 + (y | 0) * 668265263 + (seed | 0)) | 0;
+  h = ((h ^ (h >>> 13)) * 1274126177) | 0;
+  h = ((h ^ (h >>> 16)) >>> 0);
+  return h / 4294967296;
+}
+
+// ── Seeded PRNG for decoration placement ───────────────────────────
+function createPRNG(subSeed, seed = 0) {
+  let s = ((subSeed || 0) * 16807 + seed + 12345) % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return function () {
+    s = (s * 16807) % 2147483647;
+    return s / 2147483647;
+  };
+}
+
+// ── Backwards-compatible NoiseGenerator class ──────────────────────
+// Used by featurePlacer.js and any code that still references the old API.
+class NoiseGenerator {
+  constructor(seed = 0) {
+    this.seed = typeof seed === 'string' ? hashString(seed) : (Number(seed) || 0);
+    this._perlin = createPerlin(this.seed ^ 0xAAAA);
+  }
+
+  perlin2(x, y) { return this._perlin.noise2(x, y); }
+  perlin3(x, y, z) { return this._perlin.noise3(x, y, z); }
+
+  octaveNoise2(x, y, octaves = 4, persistence = 0.5) {
+    let total = 0, amplitude = 1, frequency = 1, maxAmplitude = 0;
+    for (let i = 0; i < octaves; i++) {
+      total += this.perlin2(x * frequency, y * frequency) * amplitude;
+      maxAmplitude += amplitude; amplitude *= persistence; frequency *= 2;
+    }
+    return total / maxAmplitude;
+  }
+
+  octaveNoise3(x, y, z, octaves = 4, persistence = 0.5) {
+    let total = 0, amplitude = 1, frequency = 1, maxAmplitude = 0;
+    for (let i = 0; i < octaves; i++) {
+      total += this.perlin3(x * frequency, y * frequency, z * frequency) * amplitude;
+      maxAmplitude += amplitude; amplitude *= persistence; frequency *= 2;
+    }
+    return total / maxAmplitude;
+  }
+
+  ridgeNoise(x, y, z, octaves = 4, persistence = 0.5) {
+    let total = 0, amplitude = 1, frequency = 1, maxAmplitude = 0;
+    for (let i = 0; i < octaves; i++) {
+      let value = this.perlin3(x * frequency, y * frequency, z * frequency);
+      value = Math.abs(value); value = 1 - value; value = value * value;
+      total += value * amplitude; maxAmplitude += amplitude;
+      amplitude *= persistence; frequency *= 2;
+    }
+    return total / maxAmplitude;
+  }
+
+  normalized(x, y, z) { return (this.perlin3(x, y, z) + 1) / 2; }
+
+  hash(x, y) { return hash(x, y, this.seed); }
+  createPRNG(subSeed) { return createPRNG(subSeed, this.seed); }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { mulberry32, hashString, createPerlin, fbm2, applySpline, createSharedPerlin, hash, createPRNG, NoiseGenerator };
 }
