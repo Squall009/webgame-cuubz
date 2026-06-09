@@ -1,31 +1,45 @@
 /**
- * Cuubz — Chunk Binary Codec
+ * Cuubz — Chunk Binary Codec (v2)
  * Encodes/decodes Chunk instances to/from compact ArrayBuffer using RLE compression.
+ * Includes FNV-1a checksum in header for writeback verification.
  *
  * Binary layout:
  *   [HEADER - 20 bytes]
  *     magic:        Uint32 (0x43555542 "CUUB")
- *     version:      Uint8  (1)
+ *     version:      Uint8  (2 — v1 had no checksum)
  *     chunkX:       Int16
  *     chunkZ:       Int16
  *     height:       Uint16 (256)
  *     flags:        Uint8  (bitfield)
  *     blockRunCount: Uint32
- *     reserved:     4 bytes
+ *     checksum:     Uint32 (FNV-1a hash of data portion after header — v2 only)
  *   [BLOCK DATA - variable]
  *     Each run: [blockID: Uint16, count: Uint16]
  *   [WATER LEVELS - variable, if flags & HAS_WATER_LEVELS]
  *     waterRunCount: Uint32
  *     Each run: [level: Uint8, count: Uint16]
- *   [INVENTORIES - variable, if flags & HAS_INVENTORIES]
- *     inventoryCount: Uint16
- *     Per inventory: { localX: Uint8, localY: Int16, localZ: Uint8, slotCount: Uint8 }
- *       Per slot: { itemID: Uint16, count: Uint16 }
  */
 
 const CHUNK_MAGIC = 0x43555542; // "CUUB"
-const CHUNK_VERSION = 1;
+const CHUNK_VERSION = 2;       // v2: checksum in reserved header field
 const HEADER_SIZE = 20;
+
+/**
+ * FNV-1a 32-bit hash — fast, good distribution for binary data verification.
+ * @param {Uint8Array|ArrayBuffer} data - Data to hash
+ * @returns {number} 32-bit unsigned hash
+ */
+function computeChecksum(data) {
+  const arr = data instanceof Uint8Array ? data : new Uint8Array(data);
+  let hash = 0x811c9dc5; // FNV offset basis
+
+  for (let i = 0; i < arr.length; i++) {
+    hash ^= arr[i];
+    hash = (hash * 0x01000193) >>> 0; // FNV prime, unsigned 32-bit multiply
+  }
+
+  return hash;
+}
 
 // Flag bits
 const CHUNK_FLAG_DIRTY = 0x01;
@@ -98,6 +112,10 @@ class ChunkBinaryCodec {
       }
     }
 
+    // === COMPUTE & WRITE CHECKSUM (over data portion after header) ===
+    const checksum = computeChecksum(new Uint8Array(buffer, HEADER_SIZE));
+    view.setUint32(16, checksum, true); // reserved field → checksum at offset 16-19
+
     return buffer;
   }
 
@@ -105,6 +123,7 @@ class ChunkBinaryCodec {
    * Decode a binary ArrayBuffer back into a Chunk instance.
    * @param {ArrayBuffer} buffer - Binary chunk data
    * @returns {Chunk} Reconstructed chunk
+   * @throws {Error} If checksum verification fails (v2+ format)
    */
   static decode(buffer) {
     const view = new DataView(buffer);
@@ -126,7 +145,13 @@ class ChunkBinaryCodec {
     const height = view.getUint16(offset, true); offset += 2; // Uint16 for CHUNK_HEIGHT=256
     const flags = view.getUint8(offset); offset += 1;
     const blockRunCount = view.getUint32(offset, true); offset += 4;
-    offset += 4; // skip reserved
+
+    // Read checksum (v2+ only — v1 reserved field is garbage/zero)
+    let storedChecksum = null;
+    if (version >= 2) {
+      storedChecksum = view.getUint32(16, true);
+    }
+    offset += 4; // skip reserved/checksum
 
     const totalBlocks = 16 * 16 * height;
 
@@ -152,6 +177,17 @@ class ChunkBinaryCodec {
         for (let j = 0; j < count && waterIdx < totalBlocks; j++) {
           waterLevels[waterIdx++] = level;
         }
+      }
+    }
+
+    // === VERIFY CHECKSUM (v2+) ===
+    if (version >= 2 && storedChecksum !== null) {
+      const computedChecksum = computeChecksum(new Uint8Array(buffer, HEADER_SIZE));
+      if (computedChecksum !== storedChecksum) {
+        throw new Error(
+          `Chunk checksum mismatch: stored=0x${storedChecksum.toString(16)}, ` +
+          `computed=0x${computedChecksum.toString(16)} — data corrupted in storage`
+        );
       }
     }
 
@@ -255,6 +291,13 @@ ChunkBinaryCodec.FLAGS = {
   HAS_INVENTORIES: CHUNK_FLAG_HAS_INVENTORIES,
   HAS_WATER_LEVELS: CHUNK_FLAG_HAS_WATER_LEVELS
 };
+
+/**
+ * Compute FNV-1a checksum over binary data.
+ * @param {Uint8Array|ArrayBuffer} data - Data to hash
+ * @returns {number} 32-bit unsigned checksum
+ */
+ChunkBinaryCodec.computeChecksum = computeChecksum;
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = ChunkBinaryCodec;
