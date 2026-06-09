@@ -469,20 +469,35 @@
   }
 
   // ── Worker message handler (only active in Web Worker context) ──────
-  if (typeof globalScope !== 'undefined' && typeof globalScope.onmessage === 'function') {
+  if (typeof globalScope !== 'undefined' && typeof globalScope.postMessage === 'function' && !globalScope.document) {
+    // We're inside a Web Worker — register message handler.
     globalScope.onmessage = function (e) {
       var msg = e.data;
-      if (msg.type === 'work') {
-        var result = generateChunk(msg.chunkX, msg.chunkZ, msg.seed, msg.params);
-        globalScope.postMessage({
-          type: 'result',
-          cx: result.cx,
-          cz: result.cz,
-          chunkBytes: result.chunkBytes,
-          biomeNames: result.biomeNames,
-          surfaceMap: result.surfaceMap
-        }, [result.chunkBytes, result.surfaceMap]);
+      try {
+        if (msg.type === 'work') {
+          var result = generateChunk(msg.chunkX, msg.chunkZ, msg.seed, msg.params);
+          globalScope.postMessage({
+            type: 'result',
+            cx: result.cx,
+            cz: result.cz,
+            chunkBytes: result.chunkBytes,
+            biomeNames: result.biomeNames,
+            surfaceMap: result.surfaceMap
+          }, [result.chunkBytes, result.surfaceMap]);
+        }
+      } catch (err) {
+        globalScope.postMessage({ type: 'error', error: err.message, stack: err.stack });
       }
+    };
+
+    // Report uncaught errors back to main thread.
+    globalScope.onerror = function (e) {
+      globalScope.postMessage({
+        type: 'error',
+        error: e.filename + ':' + e.lineno + ' — ' + e.message,
+        stack: ''
+      });
+      return true; // Prevent default error handling.
     };
   }
 

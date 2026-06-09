@@ -24,25 +24,51 @@ class WorkerPool {
    * Dispatch a chunk generation task. Returns a Promise that resolves with the worker result.
    */
   dispatch(chunkX, chunkZ, seed, params) {
-    return new Promise((resolve) => {
-      const w = this.idleWorkers.pop();
+    var self = this;
+    return new Promise(function (resolve, reject) {
+      var w = self.idleWorkers.pop();
       if (!w) {
         // Queue and retry on next tick (shouldn't happen — pool >= pending tasks).
-        setTimeout(() => {
-          this.dispatch(chunkX, chunkZ, seed, params).then(resolve);
+        setTimeout(function () {
+          self.dispatch(chunkX, chunkZ, seed, params).then(resolve).catch(reject);
         }, 0);
         return;
       }
 
-      const handler = (e) => {
+      var handler = function (e) {
         w.removeEventListener('message', handler);
-        this.idleWorkers.push(w);
-        resolve(e.data);
+        w.removeEventListener('error', errorHandler);
+        clearTimeout(timeoutId);
+        self.idleWorkers.push(w);
+
+        if (e.data && e.data.type === 'error') {
+          reject(new Error('[Worker] Chunk [' + chunkX + ',' + chunkZ + '] error: ' + (e.data.error || 'unknown')));
+        } else {
+          resolve(e.data);
+        }
       };
+
+      var errorHandler = function (e) {
+        w.removeEventListener('message', handler);
+        w.removeEventListener('error', errorHandler);
+        clearTimeout(timeoutId);
+        self.idleWorkers.push(w);
+        reject(new Error('[Worker] Chunk [' + chunkX + ',' + chunkZ + '] fatal: ' + e.message));
+      };
+
+      // Safety timeout — generation should never take >10s per chunk.
+      var timeoutId = setTimeout(function () {
+        w.removeEventListener('message', handler);
+        w.removeEventListener('error', errorHandler);
+        self.idleWorkers.push(w);
+        reject(new Error('[Worker] Chunk [' + chunkX + ',' + chunkZ + '] timeout after 10s'));
+      }, 10000);
+
       w.addEventListener('message', handler);
+      w.addEventListener('error', errorHandler);
 
       // Send work payload. Note: params.baseChunkX/baseChunkZ must be set by caller.
-      w.postMessage({ type: 'work', chunkX, chunkZ, seed, params });
+      w.postMessage({ type: 'work', chunkX: chunkX, chunkZ: chunkZ, seed: seed, params: params });
     });
   }
 
