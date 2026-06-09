@@ -689,33 +689,43 @@ class Inventory {
 // ============================================================
 
 const _INLINE_BLOCK_PROPERTIES = {
-  0:  { solid: false, transparent: true, hardness: 0, damage: 0, drop: null },
-  1:  { solid: true, transparent: false, hardness: 0.6, damage: 0, drop: 2 }, // GRASS → DIRT
-  2:  { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },
-  3:  { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: null },
-  4:  { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },
-  5:  { solid: true, transparent: false, hardness: 0.6, damage: 0, drop: null },
-  6:  { solid: false, transparent: true, hardness: 0, damage: 0, drop: null, drinkable: true },
-  7:  { solid: true, transparent: false, hardness: 2.0, damage: 0, drop: null, craftable: true },
-  8:  { solid: false, transparent: true, hardness: 0.2, damage: 0, drop: null },
-  9:  { solid: true, transparent: false, hardness: 0.3, damage: 0, drop: null },
-  10: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, slippery: true },
-  11: { solid: true, transparent: false, hardness: -1, damage: 0, drop: null }, // BEDROCK unbreakable
-  12: { solid: true, transparent: false, hardness: 2.0, damage: 0, drop: null, craftable: true },
-  13: { solid: true, transparent: false, hardness: 50.0, damage: 0, drop: null },
-  14: { solid: true, transparent: false, hardness: 4.0, damage: 0, drop: null },
-  15: { solid: false, transparent: true, hardness: 0, damage: 4, drop: null, animated: true },
-  16: { solid: true, transparent: false, hardness: 3.5, damage: 0, drop: null },
-  17: { solid: false, transparent: true, hardness: 0, damage: 2, drop: null, animated: true },
-  18: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'coal', mineable: true },
-  19: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'iron_ore', mineable: true },
-  20: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'gold_ore', mineable: true },
-  21: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'diamond', mineable: true },
-  22: { solid: true, transparent: false, hardness: 2.0, damage: 0, drop: 'corrupt_crystal', questItem: true },
-  23: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, placeable: true },
-  24: { solid: false, transparent: true, hardness: 0, damage: 0, drop: 'apple', foodItem: true },
-  25: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, questItem: true },
-  26: { solid: false, transparent: true, hardness: -1, damage: 0, drop: null }, // BOSS_SPAWN invisible
+  // ── VoxelGen terrain blocks (IDs 0-19) ──────────────────────
+  0:  { solid: false, transparent: true, hardness: 0, damage: 0, drop: null },                                          // AIR
+  1:  { solid: true, transparent: false, hardness: -1, damage: 0, drop: null },                                          // BEDROCK unbreakable
+  2:  { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: null },                                         // STONE
+  3:  { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                         // DIRT
+  4:  { solid: true, transparent: false, hardness: 0.6, damage: 0, drop: 3 },                                            // GRASS → drops DIRT(3)
+  5:  { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                         // SAND
+  6:  { solid: true, transparent: false, hardness: 0.6, damage: 0, drop: null },                                         // GRAVEL
+  7:  { solid: false, transparent: true, hardness: 0, damage: 0, drop: null, drinkable: true },                          // WATER
+  8:  { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'coal', mineable: true },                       // COAL_ORE
+  9:  { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'iron_ore', mineable: true },                   // IRON_ORE
+  10: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'gold_ore', mineable: true },                   // GOLD_ORE
+  11: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'diamond', mineable: true },                    // DIAMOND_ORE
+  12: { solid: false, transparent: true, hardness: 0, damage: 0, drop: null },                                            // CAVE_AIR (invisible)
+  13: { solid: true, transparent: false, hardness: 0.3, damage: 0, drop: null },                                          // SNOW
+  14: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: null },                                          // SNOW_STONE
+  15: { solid: false, transparent: true, hardness: 0, damage: 4, drop: null, animated: true },                           // LAVA
+  16: { solid: true, transparent: false, hardness: 3.5, damage: 0, drop: null },                                          // TERRACOTTA
+  17: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                          // RED_SAND
+  18: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, slippery: true },                          // ICE
+  19: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                          // CLAY
+
+  // ── Cuubz-specific decorations & features (IDs 32+) ─────────
+  32: { solid: true, transparent: false, hardness: 2.0, damage: 0, drop: null, craftable: true },                        // WOOD_LOG
+  33: { solid: false, transparent: true, hardness: 0.2, damage: 0, drop: null },                                          // LEAVES
+  34: { solid: true, transparent: false, hardness: 1.5, damage: 0, drop: null, craftable: true },                         // PLANKS
+  35: { solid: true, transparent: false, hardness: 50.0, damage: 0, drop: null },                                         // OBSIDIAN (effectively unbreakable)
+  36: { solid: true, transparent: false, hardness: 4.0, damage: 0, drop: null },                                          // BLACKSTONE
+  37: { solid: false, transparent: true, hardness: 0, damage: 2, drop: null, animated: true },                            // TOXIC_SLIME
+  38: { solid: true, transparent: false, hardness: 2.0, damage: 0, drop: 'corrupt_crystal', questItem: true },            // CORRUPT_CRYSTAL
+  39: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, placeable: true },                         // BED
+  40: { solid: false, transparent: true, hardness: 0, damage: 0, drop: 'apple', foodItem: true },                         // APPLE (food)
+  41: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, questItem: true },                         // QUEST_KEY
+  42: { solid: false, transparent: true, hardness: 0.1, damage: 0, drop: null },                                          // RED_FLOWER
+  43: { solid: false, transparent: true, hardness: 0.1, damage: 0, drop: null },                                          // YELLOW_FLOWER
+  44: { solid: false, transparent: true, hardness: 0.2, damage: 0, drop: null },                                          // CAVE_TORCH
+  45: { solid: true, transparent: false, hardness: 1.0, damage: 0, drop: null }                                           // GLOWSTONE
 };
 
 if (typeof module !== 'undefined' && module.exports) {

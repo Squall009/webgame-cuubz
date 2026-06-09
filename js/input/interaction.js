@@ -28,7 +28,7 @@ class BlockInteraction {
     this.breakingBlock = null; // { blockPos, faceNormal }
 
     // Block types that can be broken/placed
-    this.unbreakableBlocks = new Set([11]); // BEDROCK is unbreakable (id=11)
+    this.unbreakableBlocks = new Set([BLOCK_TYPES.BEDROCK, 35]); // BEDROCK(1) + OBSIDIAN(35) unbreakable
 
     // Selected block type for placing (from hotbar)
     this.selectedBlockType = 3; // Default: STONE
