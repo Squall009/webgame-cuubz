@@ -57,10 +57,6 @@
 
 ## Remaining ⚠️
 
-### Phase 6: Cleanup — Feature Placer Compatibility
-
-- [ ] **6.5** Verify featurePlacer.js works with new biomes (uses biome names like 'lava', 'corrupt' which don't exist anymore; needs 'badlands', 'frozen_peaks')
-
 ### Phase 7: Testing & Validation
 
 - [ ] **7.1** Visual comparison test — generate world with known seed, compare to VoxelGen output
@@ -69,8 +65,7 @@
 
 ### Post-overhaul: Cuubz-specific features (future)
 
-- [ ] Add `badlands` biome to featurePlacer density map (currently has lava/corrupt but not badlands)
-- [ ] Consider adding VoxelGen biomes (frozen_peaks) to featurePlacer density map
+- [ ] Consider adding more variety to Badlands feature density (currently only cacti)
 - [ ] Tree spawning — currently handled by WorldGenerator._spawnTree() in inline fallback; needs worker integration
 
 ---
@@ -81,6 +76,8 @@
 - **`5303e1a`** — Block ID alignment: removed VOXELGEN_TO_CUUBZ map, renamed textures, added new block types
 - **`81829fb`** — Compatibility fixes: aligned hardcoded IDs in chunkMeshBuilder.js, interaction.js; deleted dead code files (caveGenerator.js, oreGenerator.js)
 - **`c4b0644`** — Rebuilt inventory.js _INLINE_BLOCK_PROPERTIES with VoxelGen-aligned block IDs
+- **`7c98213`** — Cleaned up featurePlacer.js: fixed biome key lookup (spaces→no spaces), removed dead lava/corrupt biomes & placement methods
+- **`18b6893`** — Completed inventory.js alignment: getDisplayName() + maxStack() use VoxelGen IDs, all hardcoded numeric references eliminated
 
 ---
 
