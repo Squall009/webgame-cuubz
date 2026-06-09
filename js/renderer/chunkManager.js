@@ -28,9 +28,11 @@ class ChunkManager {
     // Loaded chunk meshes — key "cx,cz" → { data, mesh, transMesh, cutoutMesh, dirty, built }
     this.loadedChunks = new Map();
 
-    // Build queue for async chunk building
+    // Build queue — chunks waiting to be generated/built.
     this.buildQueue = [];
     this.building = false;
+    // Track pending in-flight builds so we never re-queue the same chunk.
+    this._pendingBuilds = new Set();
 
     // Force initial chunk load on startup (start far away so first update triggers)
     this.lastPlayerX = -32;
@@ -155,7 +157,12 @@ class ChunkManager {
   _queueBuild(cx, cz) {
     if (this._disposed) return;
 
+    const key = `${cx},${cz}`;
+    // Skip if already loaded or pending build.
+    if (this.loadedChunks.has(key) || this._pendingBuilds.has(key)) return;
+
     this.buildQueue.push({ cx, cz });
+    this._pendingBuilds.add(key);
 
     if (!this.building) {
       this._processQueue();
@@ -183,7 +190,13 @@ class ChunkManager {
     const buildPromises = [];
     for (let i = 0; i < batchSize; i++) {
       const { cx, cz } = this.buildQueue.shift();
-      buildPromises.push(this._buildChunk(cx, cz));
+      const key = `${cx},${cz}`;
+      // Remove from pending immediately since we're about to process it.
+      this._pendingBuilds.delete(key);
+
+      buildPromises.push(this._buildChunk(cx, cz).catch(e => {
+        console.error('[ChunkManager] Build error for', key + ':', e);
+      }));
     }
 
     // Wait for all batches to complete before scheduling next frame.
@@ -779,6 +792,7 @@ class ChunkManager {
 
     this.buildQueue = [];
     this.building = false;
+    this._pendingBuilds.clear();
 
     for (const [key] of this.loadedChunks) {
       this._unloadChunk(key);
