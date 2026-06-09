@@ -129,7 +129,7 @@ class Inventory {
     }
     // Block items — check if it's a special single-stack block
     // Quest keys, corrupt crystals are single stack
-    if (typeId === 22 || typeId === 25 || typeId === 26) return 1; // Corrupt Crystal, Quest Key, Boss Spawn
+    if (typeId === BLOCK_TYPES.CORRUPT_CRYSTAL || typeId === BLOCK_TYPES.QUEST_KEY) return 1; // Corrupt Crystal(38), Quest Key(41)
     return MAX_STACKS[ITEM_CATEGORIES.BLOCK];
   }
 
@@ -141,14 +141,17 @@ class Inventory {
       const named = NAMED_ITEMS[typeId];
       return named ? named.name : typeId;
     }
-    // Block names lookup
+    // Block names lookup (VoxelGen-aligned IDs)
     const blockNames = {
-      0: 'Air', 1: 'Grass', 2: 'Dirt', 3: 'Stone', 4: 'Sand',
-      5: 'Gravel', 6: 'Water', 7: 'Wood Log', 8: 'Leaves', 9: 'Snow',
-      10: 'Ice', 11: 'Bedrock', 12: 'Planks', 13: 'Obsidian', 14: 'Blackstone',
-      15: 'Lava', 16: 'Corrupt Stone', 17: 'Toxic Slime', 18: 'Coal Ore',
-      19: 'Iron Ore', 20: 'Gold Ore', 21: 'Diamond Ore', 22: 'Corrupt Crystal',
-      23: 'Bed', 24: 'Apple', 25: 'Quest Key', 26: 'Boss Spawn',
+      0: 'Air', 1: 'Bedrock', 2: 'Stone', 3: 'Dirt', 4: 'Grass',
+      5: 'Sand', 6: 'Gravel', 7: 'Water', 8: 'Coal Ore', 9: 'Iron Ore',
+      10: 'Gold Ore', 11: 'Diamond Ore', 12: 'Cave Air', 13: 'Snow',
+      14: 'Snow Stone', 15: 'Lava', 16: 'Terracotta', 17: 'Red Sand',
+      18: 'Ice', 19: 'Clay',
+      // Cuubz decorations (32+)
+      32: 'Wood Log', 33: 'Leaves', 34: 'Planks', 35: 'Obsidian',
+      36: 'Blackstone', 37: 'Toxic Slime', 38: 'Corrupt Crystal',
+      39: 'Bed', 40: 'Apple', 41: 'Quest Key',
     };
     return blockNames[typeId] || `Block ${typeId}`;
   }
