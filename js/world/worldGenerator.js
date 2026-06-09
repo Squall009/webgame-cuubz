@@ -46,10 +46,13 @@ class WorldGenerator {
   async init(workerScriptPath = 'js/world/workerGeneration.js') {
     if (!this.workerPool) {
       try {
+        console.log('[WorldGenerator] Initializing worker pool from:', workerScriptPath);
         this.workerPool = await createWorkerPool(workerScriptPath);
+        console.log('[WorldGenerator] Worker pool initialized successfully with',
+                    this.workerPool.workers.length, 'workers');
       } catch (e) {
-        // Fallback: if fetch fails, we'll handle it in generateChunk.
-        console.warn('[WorldGenerator] Worker pool init failed:', e.message);
+        // Fallback: if fetch fails, we'll handle it in generateChunk via inline generation.
+        console.warn('[WorldGenerator] Worker pool init failed — will use single-threaded inline fallback:', e.message);
       }
     }
   }
@@ -134,11 +137,48 @@ class WorldGenerator {
 
   /**
    * Inline fallback — runs generation on main thread when workers fail.
+   * Uses _voxelgenGenerateChunk exposed by workerGeneration.js script tag.
    */
   _generateInline(cx, cz) {
-    // For now, throw a clear error if inline isn't available.
-    // In the future we could port workerGeneration.js to run synchronously here.
-    throw new Error('[WorldGenerator] Workers unavailable and no inline fallback implemented.');
+    // Check if the inline generation function is available (script loaded via <script> tag).
+    const genFn = typeof window !== 'undefined' ? window._voxelgenGenerateChunk : null;
+
+    if (!genFn) {
+      throw new Error('[WorldGenerator] Workers unavailable and no inline fallback implemented.');
+    }
+
+    console.warn('[WorldGenerator] Using single-threaded inline generation for chunk', cx, cz);
+
+    const genParams = Object.assign({}, this.params, {
+      baseChunkX: cx,
+      baseChunkZ: cz
+    });
+
+    try {
+      const result = genFn(cx, cz, this.seed, genParams);
+
+      // Reconstruct Chunk from result.
+      const chunk = new Chunk(cx, cz);
+      chunk.blocks = new Uint8Array(result.chunkBytes);
+
+      // Store biome data and surface map for feature placement later.
+      chunk.biomeMap = Array.isArray(result.biomeNames) ? result.biomeNames.map(entry => {
+        const key = entry.name.toUpperCase().replace(/\s+/g, '_');
+        let b = BIOME_DEFS[key] || BIOME_DEFS.PLAINS;
+        if (entry.frozenWater) b = Object.assign({}, b, { frozenWater: true });
+        return b;
+      }) : [];
+
+      chunk.surfaceMap = new Int32Array(result.surfaceMap);
+
+      // Report progress.
+      if (this.onChunkGenerated) this.onChunkGenerated(cx, cz);
+
+      return chunk;
+    } catch (e) {
+      this.onError(`[WorldGenerator] Inline generation error for chunk [${cx},${cz}]:`, e);
+      throw e;
+    }
   }
 
   /**

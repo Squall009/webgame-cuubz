@@ -453,24 +453,35 @@ function generateChunk(chunkX, chunkZ, seed, params) {
   // ── Phase 3: Ore placement ───────────────────────────────────────
   placeOres(chunk, rngOre);
 
-  // VoxelGen block IDs now directly match Cuubz BLOCK_TYPES — no translation needed.
-  // CAVE_AIR (12) is treated as AIR by the renderer (size=0 UV → transparent).
-
-  // Send result back to main thread with transferable buffers.
-  self.postMessage({
-    type: 'result',
+  // Return result (used by both worker and inline fallback).
+  return {
     cx: chunkX - params.baseChunkX,
     cz: chunkZ - params.baseChunkZ,
-    chunkBytes: chunk.buffer,       // ArrayBuffer — transferred (zero-copy)
+    chunkBytes: chunk.buffer,       // ArrayBuffer — transferred by worker
     biomeNames: biomeNames,         // plain objects — cloned by structured clone
-    surfaceMap: surfaceMap.buffer   // ArrayBuffer — transferred
-  }, [chunk.buffer, surfaceMap.buffer]);
+    surfaceMap: surfaceMap.buffer   // ArrayBuffer — transferred by worker
+  };
 }
 
-// ── Worker message handler ──────────────────────────────────────────
-self.onmessage = function (e) {
-  const msg = e.data;
-  if (msg.type === 'work') {
-    generateChunk(msg.chunkX, msg.chunkZ, msg.seed, msg.params);
-  }
-};
+// ── Worker message handler (only active in Web Worker context) ──────
+if (typeof self !== 'undefined' && typeof self.onmessage !== 'undefined') {
+  self.onmessage = function (e) {
+    const msg = e.data;
+    if (msg.type === 'work') {
+      const result = generateChunk(msg.chunkX, msg.chunkZ, msg.seed, msg.params);
+      self.postMessage({
+        type: 'result',
+        cx: result.cx,
+        cz: result.cz,
+        chunkBytes: result.chunkBytes,
+        biomeNames: result.biomeNames,
+        surfaceMap: result.surfaceMap
+      }, [result.chunkBytes, result.surfaceMap]);
+    }
+  };
+}
+
+// Expose for inline fallback (main thread).
+if (typeof window !== 'undefined') {
+  window._voxelgenGenerateChunk = generateChunk;
+}
