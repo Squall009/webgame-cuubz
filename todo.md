@@ -38,6 +38,7 @@
 ### Phase 6: Cleanup & Compatibility ✅ (partial)
 
 - [x] **6.1** Update Script Load Order in `index.html` — add workerGeneration/workerPool, remove caveGenerator/oreGenerator
+- [x] **6.2** Delete dead code files from disk (`caveGenerator.js`, `oreGenerator.js`) — committed `81829fb`
 - [x] **6.3** Update Chunk Binary Codec — already handles Uint16 height + larger chunks via RLE
 - [x] **6.4** IndexedDB/Persistence — no changes needed (binary encoding/decoding is chunk-size agnostic)
 
@@ -56,10 +57,9 @@
 
 ## Remaining ⚠️
 
-### Phase 6: Cleanup — Dead Code & Feature Placer
+### Phase 6: Cleanup — Feature Placer Compatibility
 
-- [ ] **6.1** Delete `caveGenerator.js` and `oreGenerator.js` files from disk (removed from index.html but still exist as dead code)
-- [ ] **6.2** Verify featurePlacer.js works with new block IDs (uses BLOCK_TYPES constants which are now updated — should be fine, verify visually)
+- [ ] **6.5** Verify featurePlacer.js works with new biomes (uses biome names like 'lava', 'corrupt' which don't exist anymore; needs 'badlands', 'frozen_peaks')
 
 ### Phase 7: Testing & Validation
 
@@ -75,13 +75,28 @@
 
 ---
 
+## Completed Compatibility Fixes (this session)
+
+- **`b287569`** — Phase 1 Core Infrastructure committed & synced to server
+- **`5303e1a`** — Block ID alignment: removed VOXELGEN_TO_CUUBZ map, renamed textures, added new block types
+- **`81829fb`** — Compatibility fixes: aligned hardcoded IDs in chunkMeshBuilder.js, interaction.js; deleted dead code files (caveGenerator.js, oreGenerator.js)
+- **`c4b0644`** — Rebuilt inventory.js _INLINE_BLOCK_PROPERTIES with VoxelGen-aligned block IDs
+
+---
+
 ## Implementation Order
 
-1. ~~Phase 1~~ ✅ Foundation complete
-2. ~~Phase 2~~ ✅ Biomes done
-3. ~~Phase 3~~ ✅ Terrain pipeline in workers
-4. ~~Phase 4~~ ✅ Caves + ores integrated
-5. ~~Phase 5~~ ✅ Multi-threaded integration wired up
-6. ~~Block ID Alignment~~ ✅ Translation removed, textures renamed
-7. **Now:** Delete dead code files + verify feature placer
-8. **Next:** Testing & visual validation
+1. ~~Phase 0~~ ✅ Block ID alignment + texture renaming complete
+2. ~~Phase 1~~ ✅ Foundation complete (noise, workers, constants)
+3. ~~Phase 2~~ ✅ Biomes done (selectBiome + sampleBiomeParams)
+4. ~~Phase 3~~ ✅ Terrain pipeline in workers (mountains, plateaus, rivers)
+5. ~~Phase 4~~ ✅ Caves + ores integrated into worker
+6. ~~Phase 5~~ ✅ Multi-threaded integration wired up (chunkManager → workers)
+7. ~~Block ID Alignment~~ ✅ All hardcoded IDs replaced with BLOCK_TYPES constants
+8. **Now:** FeaturePlacer biome compatibility fix
+9. **Next:** Visual testing & validation
+
+### What still needs attention:
+- **featurePlacer.js** — uses old biome names ('lava', 'corrupt') that don't exist in VoxelGen biomes anymore
+- **Tree spawning** — currently only works via inline fallback; needs proper worker integration
+- **Visual testing** — generate world with known seed, compare to expected output
