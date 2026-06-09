@@ -57,36 +57,65 @@
 
 ## Remaining ⚠️
 
-### Phase 8: Initial World Loading System 🔴 PRIORITY
+### Phase 8: IndexedDB Writeback Verification & Regeneration Fix 🔴 PRIORITY #1
+
+**Why first:** Every other phase depends on reliable persistence. If we can't trust what's in IndexedDB, 
+nothing else works correctly — initial world loading, streaming, block changes, all of it.
+
+#### 8.1 Chunk-Level Checksums
+- [ ] Implement `computeChecksum(buffer)` function for chunk data verification (FNV-1a or similar fast hash)
+- [ ] Update `ChunkBinaryCodec.encode()` to include checksum in header: `[checksum(4 bytes)][heightMap][rleData]`
+- [ ] Store checksum alongside binary data in IndexedDB entry
+
+#### 8.2 Writeback Verification in DirtyFlushManager
+- [ ] After every write to IndexedDB → immediately read back and compare checksums
+- [ ] Retry logic: up to 3 attempts with exponential backoff on verification failure
+- [ ] Only mark chunk as "generated" in manifest AFTER successful write + verify cycle
+- [ ] If all retries fail → log error, keep dirty flag for next flush attempt
+
+#### 8.3 Remove Aggressive Regeneration from _buildChunk()
+- [ ] Current logic: regenerates if manifest disagrees with IndexedDB OR height range < 3
+- [ ] New logic: trust cached data if checksum matches → only regenerate on true corruption
+- [ ] True corruption detection criteria:
+  - Checksum mismatch (data integrity failure)
+  - Flat terrain AND no valid checksum in storage (genuinely corrupt/empty entry)
+  - Missing data after retry attempts
+
+#### 8.4 Manifest Synchronization
+- [ ] Add `generatedChunks` list to world manifest with chunk keys + checksums
+- [ ] On load: verify manifest entries match actual IndexedDB content via checksum lookup
+- [ ] Repair logic: if manifest lists chunk but IndexedDB is missing → regenerate that specific chunk only
+
+### Phase 9: Initial World Loading System 🔴 PRIORITY #2
 
 **Goal:** Generate full world area, persist it completely, THEN start rendering. Player sees stable terrain immediately.
 
-#### 8.1 Bulk Voxel Generation (First-Time World Creation)
+#### 9.1 Bulk Voxel Generation (First-Time World Creation)
 - [ ] Implement `generateInitialWorld(seed, size=128)` — dispatches ALL chunks in a 128×128 grid to worker pool
   - Workers generate voxels for entire area with no geometry building yet
   - Progress tracking: `chunksGenerated / totalChunks` → drives loading screen progress bar
-- [ ] Each generated chunk immediately writes to IndexedDB with checksum verification
+- [ ] Each generated chunk immediately writes to IndexedDB with checksum verification (Phase 8)
 - [ ] After ALL chunks are persisted → manifest updated with complete chunk list
 - [ ] Only THEN proceed to Phase 2 (mesh building)
 
-#### 8.2 Bulk Mesh Building (Post-Voxel Persistence)
+#### 9.2 Bulk Mesh Building (Post-Voxel Persistence)
 - [ ] Dispatch cached voxel buffers from IndexedDB to mesh worker queue for geometry creation
   - Progress tracking: `chunksMeshed / totalChunks` → second progress bar phase
 - [ ] Build 8×8 grid around spawn point first (renderDistance=4), then expand outward
 - [ ] Loading screen shows "Building chunk meshes..." during this phase
 
-#### 8.3 World Reload from Cache
+#### 9.3 World Reload from Cache
 - [ ] On world load: check manifest for existing chunks → skip generation entirely if complete
 - [ ] Progress bar phases:
-  - Phase 1: "Loading world data..." (IndexedDB reads)
+  - Phase 1: "Loading world data..." (IndexedDB reads with checksum validation)
   - Phase 2: "Building meshes..." (runtime geometry creation)
 - [ ] Player enters game only after initial 8×8 grid is fully rendered
 
-### Phase 9: Loading Screen UI 🔴 PRIORITY
+### Phase 10: Loading Screen UI 🔴 PRIORITY #3
 
 **Goal:** Dedicated loading screen with progress feedback during world initialization.
 
-#### 9.1 Loading Screen Component
+#### 10.1 Loading Screen Component
 - [ ] Create `js/ui/loadingScreen.js` — full-screen overlay with:
   - Game logo/branding centered
   - Progress bar with percentage counter
@@ -94,22 +123,22 @@
   - Estimated time remaining (optional)
 - [ ] Hide loading screen only when initial render area is fully built and player can spawn
 
-#### 9.2 Integration Points
+#### 10.2 Integration Points
 - [ ] Hook into `main.js` init sequence — show before texture atlas build, hide after chunk meshes ready
 - [ ] Progress updates from worker pool dispatch counts + IndexedDB write completions
 - [ ] Fallback timeout: if loading takes >30s, allow early entry with partial world (stream remaining chunks)
 
-### Phase 10: Chunk Streaming & Load/Unload System 🟡 HIGH PRIORITY
+### Phase 11: Chunk Streaming & Load/Unload System 🟡 HIGH PRIORITY
 
 **Current problem:** Too many chunks accumulate because queue backlog + single-threaded mesh building
 causes the system to never catch up when player moves around. Chunks unload but rebuild creates more work.
 
-#### 10.1 Fixed Render Distance (Stability First)
+#### 11.1 Fixed Render Distance (Stability First)
 - [ ] Hard cap render distance at **8×8 grid** (renderDistance=4) until performance is stable
 - [ ] Remove dynamic render distance adjustment during initial stabilization phase
 - [ ] Log: `[ChunkManager] Active chunks: X / Max: 64` for monitoring
 
-#### 10.2 Aggressive Unloading with Priority Queue
+#### 11.2 Aggressive Unloading with Priority Queue
 - [ ] Implement unload priority system:
   - **Immediate unload:** Chunks outside renderDistance+buffer radius
   - **Delayed unload:** Chunks in buffer zone (keep for smooth transitions)
@@ -117,7 +146,7 @@ causes the system to never catch up when player moves around. Chunks unload but 
 - [ ] Unload happens BEFORE queueing new chunks — never allow queue to grow beyond capacity
 - [ ] Max concurrent builds: `renderDistance² × 2` (current + incoming ring only)
 
-#### 10.3 Queue Backlog Prevention
+#### 11.3 Queue Backlog Prevention
 - [ ] `_processQueue()` caps batch size based on available frames:
   - If queue depth > threshold → reduce chunksPerTick to let renderer catch up
   - If queue empty and player stationary → increase chunksPerTick for faster streaming
@@ -154,23 +183,6 @@ Storage priority: world manifest, quest progress, voxels, item storage, players,
 **Expected gain:** Dramatically smoother chunk streaming when walking/teleporting.
 Runtime mesh building from cached voxels is fast enough with workers. Saves massive storage space.
 
-### IndexedDB Persistence: Bulletproof Writeback Verification 🔒
-
-**Current issue:** Chunk load checks both manifest AND IndexedDB, regenerates if they disagree.
-This defeats the purpose of persistence — chunks should only regenerate on true corruption.
-
-**Target lifecycle (per chunk):**
-1. **First generation:** Generate → write to IndexedDB → VERIFY readback matches → add to manifest
-   (If write or verify fails → retry up to 3x → mark as corrupt if still failing)
-2. **Block changes:** Mark dirty → queue voxel delta → write update → VERIFY → dispatch mesh worker → remove from dirty
-3. **Reload from cache:** Check manifest entry exists → load from IndexedDB → validate height range (not flat/corrupt) → build mesh
-4. **Regeneration ONLY on true corruption:** Flat terrain, missing data after retries, or readback mismatch
-
-**Required fixes:**
-- Implement actual writeback verification in DirtyFlushManager (write → read back → compare MD5/checksum)
-- Remove aggressive regeneration on manifest/IndexedDB disagreement — use retry logic instead
-- Add chunk-level checksum to IndexedDB entry for instant corruption detection
-
 ---
 
 ## Completed Compatibility Fixes (this session)
@@ -189,19 +201,28 @@ This defeats the purpose of persistence — chunks should only regenerate on tru
 
 ## Implementation Order (Priority Queue)
 
-### 🔴 Immediate Priority — Stability Foundation
-1. ~~Phase 0~~ ✅ Block ID alignment + texture renaming complete
-2. ~~Phase 1-6~~ ✅ Core generation overhaul complete  
-3. **Phase 8:** Initial world loading system (bulk voxel gen → IndexedDB → mesh build)
-4. **Phase 9:** Loading screen UI with progress feedback
-5. **Phase 10:** Chunk streaming fixes + 8×8 render distance cap
+### 🔴 Phase 8: IndexedDB Writeback Verification & Regeneration Fix (START HERE)
+1. Implement `computeChecksum()` function for chunk data verification
+2. Update `ChunkBinaryCodec.encode()` to include checksum in header
+3. Add writeback verification + retry logic to DirtyFlushManager  
+4. Remove aggressive regeneration from `_buildChunk()` — trust cached data if checksum matches
+5. Manifest synchronization with chunk-level checksum tracking
 
-### 🟡 Medium Priority — Persistence Hardening
-6. Bulletproof IndexedDB writeback verification in DirtyFlushManager
-7. Remove aggressive regeneration logic from `_buildChunk()`
-8. Add chunk-level checksums for instant corruption detection
+### 🔴 Phase 9: Initial World Loading System (After Phase 8)
+6. Implement `generateInitialWorld(seed, size=128)` for bulk voxel generation  
+7. Bulk mesh building phase after all voxels are persisted
+8. World reload from cache flow — skip generation if manifest is complete
 
-### 🟢 Future — Performance Optimization  
-9. Worker-based mesh building pipeline (after streaming is stable)
-10. Dynamic render distance adjustment based on performance metrics
-11. Visual testing & validation against VoxelGen reference output
+### 🔴 Phase 10: Loading Screen UI (After Phases 8-9)
+9. Create `js/ui/loadingScreen.js` with progress feedback
+10. Integrate into main.js init sequence  
+11. Fallback timeout for early entry option
+
+### 🟡 Phase 11: Chunk Streaming & Load/Unload Fixes (After Phases 8-10)
+12. Hard cap render distance at 8×8 grid until performance is stable
+13. Implement unload priority system + queue backlog prevention  
+14. Frame budget tracking for auto-throttling mesh builds
+
+### 🟢 Future: Worker-based Mesh Building Pipeline (After Stability Achieved)
+15. Move ChunkMeshBuilder to Web Workers alongside voxel generation
+16. Transferable buffer pipeline from worker → main thread scene attachment
