@@ -2146,8 +2146,8 @@
                         // First check the exact hit position
                         let blockId = obj.userData.chunkData.getBlock(localX, localY, localZ);
 
-                        // If that's air, check one block below (hit point is on surface boundary)
-                        if (blockId === 0 && localY > -32) {
+                        // If that's air/cave_air, check one block below (hit point is on surface boundary)
+                        if ((blockId === BLOCK_TYPES.AIR || blockId === BLOCK_TYPES.CAVE_AIR) && localY > -32) {
                           blockId = obj.userData.chunkData.getBlock(localX, localY - 1, localZ);
                         }
 

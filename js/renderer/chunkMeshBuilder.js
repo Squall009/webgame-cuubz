@@ -17,14 +17,23 @@ class ChunkMeshBuilder {
 
     // Block type IDs that use cutout rendering (alpha test) — leaves, flowers, torches
     // These have binary alpha textures and should discard transparent pixels instead of blending.
-    this.cutoutIds = new Set([8, 27, 28, 29]); // LEAVES, RED_FLOWER, YELLOW_FLOWER, CAVE_TORCH
+    this.cutoutIds = new Set([
+      BLOCK_TYPES.LEAVES,        // 33
+      BLOCK_TYPES.RED_FLOWER,    // 42
+      BLOCK_TYPES.YELLOW_FLOWER, // 43
+      BLOCK_TYPES.CAVE_TORCH     // 44
+    ]);
 
     // Block type IDs that use blended transparency — fluids + ice (partial alpha, opacity blend)
-    this.transparentIds = new Set([6, 10, 17]); // WATER, ICE, TOXIC_SLIME
+    this.transparentIds = new Set([
+      BLOCK_TYPES.WATER,         // 7
+      BLOCK_TYPES.ICE,           // 18
+      BLOCK_TYPES.TOXIC_SLIME    // 37
+    ]);
 
     // Combined set for face culling (any block that isn't fully solid/opaque)
-    // Includes cutout blocks + transparent blocks + AIR (air is non-solid for culling purposes)
-    this.nonSolidIds = new Set([...this.cutoutIds, ...this.transparentIds, 0]); // LEAVES, FLOWERS, TORCH, WATER, ICE, SLIME, AIR
+    // Includes cutout blocks + transparent blocks + AIR + CAVE_AIR (both air-like types are non-solid)
+    this.nonSolidIds = new Set([...this.cutoutIds, ...this.transparentIds, BLOCK_TYPES.AIR, BLOCK_TYPES.CAVE_AIR]);
   }
 
   /**
@@ -68,7 +77,7 @@ class ChunkMeshBuilder {
         for (let y = MIN_Y; y < MAX_Y; y++) {
           const blockType = chunk.getBlock(x, y, z);
 
-          if (blockType === 0) continue; // Skip air
+          if (blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) continue; // Skip both air types
 
           const isCutout = this.cutoutIds.has(blockType);
           const isSelfTransparent = this.transparentIds.has(blockType);
@@ -555,7 +564,7 @@ class ChunkMeshBuilder {
       for (let z = 0; z < CHUNK_DEPTH; z++) {
         for (let y = MIN_Y; y < MAX_Y; y++) {
           const blockType = chunk.getBlock(x, y, z);
-          if (blockType === 0) continue;
+          if (blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) continue;
 
           // Count exposed faces (simplified — doesn't check neighbors)
           faces += 6;

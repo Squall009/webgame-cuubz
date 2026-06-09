@@ -103,10 +103,10 @@ class BlockInteraction {
 
     // Get block type at position
     const blockType = chunkData.getBlock(blockPos.x, blockPos.y, blockPos.z);
-    if (blockType === 0 || this.unbreakableBlocks.has(blockType)) return;
+    if ((blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) || this.unbreakableBlocks.has(blockType)) return;
 
     // Break the block (set to AIR)
-    chunkData.setBlock(blockPos.x, blockPos.y, blockPos.z, 0);
+    chunkData.setBlock(blockPos.x, blockPos.y, blockPos.z, BLOCK_TYPES.AIR);
 
     // Mark chunk as dirty for saving
     this.chunkManager.markChunkDirty(chunkX, chunkZ);
