@@ -175,15 +175,26 @@ class ChunkManager {
 
     this.building = true;
 
-    // Batch build up to chunksPerTick per frame to reduce stutter
+    // Batch build up to chunksPerTick per frame to reduce stutter.
+    // When using inline generation (no workers), process only 1 chunk at a time
+    // with longer delay to avoid blocking the main thread.
     const batchSize = Math.min(this.chunksPerTick, this.buildQueue.length);
+
+    const buildPromises = [];
     for (let i = 0; i < batchSize; i++) {
       const { cx, cz } = this.buildQueue.shift();
-      this._buildChunk(cx, cz);
+      buildPromises.push(this._buildChunk(cx, cz));
     }
 
-    // Continue next frame — store timeout ID for cleanup on dispose
-    this._buildTimeoutId = setTimeout(() => this._processQueue(), 16);
+    // Wait for all batches to complete before scheduling next frame.
+    Promise.all(buildPromises).then(() => {
+      if (this._disposed) return;
+      const delay = buildPromises.length === 1 ? 50 : 16; // Longer pause for inline gen
+      this._buildTimeoutId = setTimeout(() => this._processQueue(), delay);
+    }).catch(e => {
+      console.error('[ChunkManager] Build error:', e);
+      this._buildTimeoutId = setTimeout(() => this._processQueue(), 50);
+    });
   }
 
   /**

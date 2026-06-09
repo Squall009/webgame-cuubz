@@ -138,8 +138,9 @@ class WorldGenerator {
   /**
    * Inline fallback — runs generation on main thread when workers fail.
    * Uses _voxelgenGenerateChunk exposed by workerGeneration.js script tag.
+   * Returns a Promise that yields to the event loop so it doesn't block rendering.
    */
-  _generateInline(cx, cz) {
+  async _generateInline(cx, cz) {
     // Check if the inline generation function is available (script loaded via <script> tag).
     const genFn = typeof window !== 'undefined' ? window._voxelgenGenerateChunk : null;
 
@@ -155,6 +156,9 @@ class WorldGenerator {
     });
 
     try {
+      // Yield to event loop before heavy computation — prevents blocking main thread.
+      await new Promise(resolve => setTimeout(resolve, 0));
+
       const result = genFn(cx, cz, this.seed, genParams);
 
       // Reconstruct Chunk from result.
