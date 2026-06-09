@@ -70,10 +70,10 @@ class DirtyFlushManager {
         if (verified) {
           this._dirtyChunks.delete(key);
 
-          // Add to manifest only after successful writeback verification
+          // Add to manifest only after successful writeback verification, with checksum.
           if (this._pendingManifest.has(key)) {
             try {
-              await this.store.addGeneratedChunk(key);
+              await this.store.addVerifiedChunk(key, expectedChecksum);
               this._pendingManifest.delete(key);
             } catch (e) {
               // Manifest write failed — chunk data is saved, just not tracked in manifest.

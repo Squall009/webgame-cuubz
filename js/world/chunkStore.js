@@ -260,6 +260,7 @@ class ChunkStore {
 
   /**
    * Add a chunk key to the manifest's generatedChunks list and save.
+   * Stores checksum alongside key for manifest-level integrity verification.
    * @param {string} chunkKey - "cx,cz" string key
    * @returns {Promise<void>}
    */
@@ -280,9 +281,66 @@ class ChunkStore {
     }
 
     if (!manifest.generatedChunks) manifest.generatedChunks = [];
-    if (!manifest.generatedChunks.includes(chunkKey)) {
-      manifest.generatedChunks.push(chunkKey);
+
+    // Normalize legacy entries (plain strings → objects with checksum)
+    const normalized = manifest.generatedChunks.map(entry => {
+      if (typeof entry === 'string') return { key: entry, checksum: null };
+      return entry;
+    });
+
+    const existingIdx = normalized.findIndex(e => e.key === chunkKey);
+    if (existingIdx >= 0) {
+      // Update existing entry — caller can pass updated checksum
+      normalized[existingIdx] = { key: chunkKey, checksum: null };
+    } else {
+      normalized.push({ key: chunkKey, checksum: null });
     }
+
+    manifest.generatedChunks = normalized;
+    manifest.lastPlayed = Date.now();
+
+    await this.saveManifest(manifest);
+  }
+
+  /**
+   * Add a verified chunk to the manifest with its checksum.
+   * Use this after writeback verification succeeds so we can detect corruption later without loading data.
+   * @param {string} chunkKey - "cx,cz" string key
+   * @param {number} checksum - FNV-1a checksum of stored binary data
+   * @returns {Promise<void>}
+   */
+  async addVerifiedChunk(chunkKey, checksum) {
+    await this._open();
+
+    let manifest = await this.loadManifest();
+    if (!manifest) {
+      manifest = {
+        worldName: this.worldName,
+        seed: '',
+        createdAt: Date.now(),
+        lastPlayed: Date.now(),
+        playerCount: 1,
+        spawnPoint: { x: 0, y: 64, z: 0 },
+        generatedChunks: []
+      };
+    }
+
+    if (!manifest.generatedChunks) manifest.generatedChunks = [];
+
+    // Normalize legacy entries
+    const normalized = manifest.generatedChunks.map(entry => {
+      if (typeof entry === 'string') return { key: entry, checksum: null };
+      return entry;
+    });
+
+    const existingIdx = normalized.findIndex(e => e.key === chunkKey);
+    if (existingIdx >= 0) {
+      normalized[existingIdx] = { key: chunkKey, checksum };
+    } else {
+      normalized.push({ key: chunkKey, checksum });
+    }
+
+    manifest.generatedChunks = normalized;
     manifest.lastPlayed = Date.now();
 
     await this.saveManifest(manifest);
@@ -290,21 +348,48 @@ class ChunkStore {
 
   /**
    * Check if a chunk is in the manifest's generatedChunks list.
+   * Handles both legacy string entries and new {key, checksum} objects.
    * @param {string} chunkKey - "cx,cz" string key
    * @returns {Promise<boolean>}
    */
   async isChunkGenerated(chunkKey) {
     const manifest = await this.loadManifest();
-    return !!(manifest && manifest.generatedChunks && manifest.generatedChunks.includes(chunkKey));
+    if (!manifest || !manifest.generatedChunks) return false;
+
+    for (const entry of manifest.generatedChunks) {
+      const k = typeof entry === 'string' ? entry : entry.key;
+      if (k === chunkKey) return true;
+    }
+    return false;
   }
 
   /**
    * Get the list of all generated chunk keys from the manifest.
+   * Returns plain string array for backward compatibility.
    * @returns {Promise<string[]>} Array of "cx,cz" keys
    */
   async getGeneratedChunks() {
     const manifest = await this.loadManifest();
-    return manifest ? (manifest.generatedChunks || []) : [];
+    if (!manifest || !manifest.generatedChunks) return [];
+
+    return manifest.generatedChunks.map(entry =>
+      typeof entry === 'string' ? entry : entry.key
+    );
+  }
+
+  /**
+   * Get the full generated chunks list with checksums.
+   * @returns {Promise<Array<{key: string, checksum: number|null}>}
+   */
+  async getGeneratedChunksWithChecksums() {
+    const manifest = await this.loadManifest();
+    if (!manifest || !manifest.generatedChunks) return [];
+
+    // Normalize to object format
+    return manifest.generatedChunks.map(entry => {
+      if (typeof entry === 'string') return { key: entry, checksum: null };
+      return { key: entry.key, checksum: entry.checksum ?? null };
+    });
   }
 
   /**
@@ -327,9 +412,13 @@ class ChunkStore {
     let manifest = await this.loadManifest();
     if (!manifest || !manifest.generatedChunks) return;
 
-    const idx = manifest.generatedChunks.indexOf(chunkKey);
-    if (idx !== -1) {
-      manifest.generatedChunks.splice(idx, 1);
+    const newChunks = manifest.generatedChunks.filter(entry => {
+      const k = typeof entry === 'string' ? entry : entry.key;
+      return k !== chunkKey;
+    });
+
+    if (newChunks.length < manifest.generatedChunks.length) {
+      manifest.generatedChunks = newChunks;
       manifest.lastPlayed = Date.now();
       await this.saveManifest(manifest);
     }
