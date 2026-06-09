@@ -8,18 +8,18 @@ const CONT_SPLINE = [
   [-1.0, -1.1], [-0.4, -0.6], [-0.1, -0.1], [0.1, 0.2], [0.25, 0.6], [0.5, 0.85], [1.0, 1.1]
 ];
 
-// Biome definitions — surfaceBlock/subBlock reference Cuubz BLOCK_TYPES (texture-compatible).
+// Biome definitions — surfaceBlock/subBlock match VoxelGen block IDs directly.
 const BIOME_DEFS = {
   DEEP_OCEAN:   { baseY: 32,  amplitude: 9,  surfaceBlock: BLOCK_TYPES.GRAVEL,    subBlock: BLOCK_TYPES.GRAVEL,     color: '#051d3b', name: 'Deep Ocean' },
   OCEAN:        { baseY: 46,  amplitude: 9,  surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.GRAVEL,    color: '#1565C0', name: 'Ocean' },
   BEACH:        { baseY: 64,  amplitude: 3,  surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.SAND,     color: '#d4b483', name: 'Beach' },
   PLAINS:       { baseY: 68,  amplitude: 6,  surfaceBlock: BLOCK_TYPES.GRASS,     subBlock: BLOCK_TYPES.DIRT,     color: '#5a8a3c', name: 'Plains' },
   FOREST:       { baseY: 70,  amplitude: 10, surfaceBlock: BLOCK_TYPES.GRASS,     subBlock: BLOCK_TYPES.DIRT,     color: '#2d6e2d', name: 'Forest' },
-  BADLANDS:     { baseY: 74,  amplitude: 14, surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.CORRUPT_STONE, color: '#b5623e', name: 'Badlands' },
+  BADLANDS:     { baseY: 74,  amplitude: 14, surfaceBlock: BLOCK_TYPES.RED_SAND,  subBlock: BLOCK_TYPES.TERRACOTTA, color: '#b5623e', name: 'Badlands' },
   TUNDRA:       { baseY: 64,  amplitude: 7,  surfaceBlock: BLOCK_TYPES.SNOW,      subBlock: BLOCK_TYPES.DIRT,     color: '#c8dde8', name: 'Tundra' },
-  DESERT:       { baseY: 68,  amplitude: 4,  surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.DIRT,     color: '#d1b247', name: 'Desert' },
+  DESERT:       { baseY: 68,  amplitude: 4,  surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.CLAY,     color: '#d1b247', name: 'Desert' },
   MOUNTAINS:    { baseY: 90,  amplitude: 20, surfaceBlock: BLOCK_TYPES.GRASS,     subBlock: BLOCK_TYPES.STONE,    color: '#607d8b', name: 'Mountains' },
-  FROZEN_PEAKS: { baseY: 100, amplitude: 20, surfaceBlock: BLOCK_TYPES.SNOW,      subBlock: BLOCK_TYPES.STONE,    color: '#e0f7fa', name: 'Frozen Peaks' }
+  FROZEN_PEAKS: { baseY: 100, amplitude: 20, surfaceBlock: BLOCK_TYPES.SNOW,      subBlock: BLOCK_TYPES.SNOW_STONE, color: '#e0f7fa', name: 'Frozen Peaks' }
 };
 
 /**

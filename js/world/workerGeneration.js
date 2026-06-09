@@ -453,36 +453,8 @@ function generateChunk(chunkX, chunkZ, seed, params) {
   // ── Phase 3: Ore placement ───────────────────────────────────────
   placeOres(chunk, rngOre);
 
-  // ── Translate VoxelGen block IDs → Cuubz texture-compatible IDs ──
-  const VOXELGEN_TO_CUUBZ = [
-    // vg:AIR(0)      -> cu:AIR(0)
-    // vg:BEDROCK(1)   -> cu:BEDROCK(11)
-    // vg:STONE(2)     -> cu:STONE(3)
-    // vg:DIRT(3)      -> cu:DIRT(2)
-    // vg:GRASS(4)     -> cu:GRASS(1)
-    // vg:SAND(5)      -> cu:SAND(4)
-    // vg:GRAVEL(6)    -> cu:GRAVEL(5)
-    // vg:WATER(7)     -> cu:WATER(6)
-    // vg:COAL_ORE(8)   -> cu:COAL_ORE(18)
-    // vg:IRON_ORE(9)   -> cu:IRON_ORE(19)
-    // vg:GOLD_ORE(10)  -> cu:GOLD_ORE(20)
-    // vg:DIAMOND_ORE(11)->cu:DIAMOND_ORE(21)
-    // vg:CAVE_AIR(12)  -> cu:AIR(0) — cave air = regular air for rendering
-    // vg:SNOW(13)      -> cu:SNOW(9)
-    // vg:SNOW_STONE(14)->cu:STONE(3) — no separate snowy stone texture, use stone
-    // vg:LAVA(15)      -> cu:LAVA(15)
-    // vg:TERRACOTTA(16)->cu:CORRUPT_STONE(16) — closest visual match
-    // vg:RED_SAND(17)  -> cu:SAND(4) — use sand texture (red tint TBD)
-    // vg:ICE(18)       -> cu:ICE(10)
-    // vg:CLAY(19)      -> cu:DIRT(2) — clay ≈ dirt visually
-    0, 11, 3, 2, 1, 4, 5, 6, 18, 19, 20, 21, 0, 9, 3, 15, 16, 4, 10, 2
-  ];
-
-  for (let i = 0; i < chunk.length; i++) {
-    if (chunk[i] <= 19) {
-      chunk[i] = VOXELGEN_TO_CUUBZ[chunk[i]];
-    }
-  }
+  // VoxelGen block IDs now directly match Cuubz BLOCK_TYPES — no translation needed.
+  // CAVE_AIR (12) is treated as AIR by the renderer (size=0 UV → transparent).
 
   // Send result back to main thread with transferable buffers.
   self.postMessage({

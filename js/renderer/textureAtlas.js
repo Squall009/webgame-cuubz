@@ -119,8 +119,8 @@ class TextureAtlas {
   _scanByBlockRange() {
     const discovered = [];
 
-    // Try each block ID from 0 to 30, side numbers 0-5
-    for (let fileId = 0; fileId <= 30; fileId++) {
+    // Try each block ID from 0 to 50, side numbers 0-5
+    for (let fileId = 0; fileId <= 50; fileId++) {
       let foundAny = false;
       for (let sideNum = 0; sideNum <= 5; sideNum++) {
         // Try common base names — if file exists, add it
@@ -145,37 +145,40 @@ class TextureAtlas {
    * Returns array of candidates to try when scanning.
    */
   _getBaseNames(fileId) {
-    // Map known block IDs to their texture base names
+    // Map known block IDs to their texture base names (VoxelGen + Cuubz IDs).
     const nameMap = {
-      1: ['grass_top', 'grass_side'],
-      2: ['dirt'],
-      3: ['stone'],
-      4: ['sand'],
-      5: ['gravel'],
-      6: ['water'],
-      7: ['wood_log'],
-      8: ['leaves'],
-      9: ['snow'],
-      10: ['ice'],
-      11: ['bedrock'],
-      12: ['planks'],
-      13: ['obsidian'],
-      14: ['blackstone'],
+      1: ['bedrock'],
+      2: ['stone'],
+      3: ['dirt'],
+      4: ['grass_top', 'grass_side'],
+      5: ['sand'],
+      6: ['gravel'],
+      7: ['water'],
+      8: ['coal_ore'],
+      9: ['iron_ore'],
+      10: ['gold_ore'],
+      11: ['diamond_ore'],
+      13: ['snow'],
+      14: ['snow_stone'],
       15: ['lava'],
-      16: ['corrupt_stone'],
-      17: ['toxic_slime'],
-      18: ['coal_ore'],
-      19: ['iron_ore'],
-      20: ['gold_ore'],
-      21: ['diamond_ore'],
-      22: ['corrupt_cry'],
-      23: ['bed'],
-      24: ['apple'],
-      25: ['quest_key'],
-      27: ['red_flower'],
-      28: ['yellow_flower'],
-      29: ['cave_torch'],
-      30: ['glowstone'],
+      16: ['terracotta'],
+      17: ['red_sand'],
+      18: ['ice'],
+      19: ['clay'],
+      32: ['wood_log'],
+      33: ['leaves'],
+      34: ['planks'],
+      35: ['obsidian'],
+      36: ['blackstone'],
+      37: ['toxic_slime'],
+      38: ['corrupt_cry'],
+      39: ['bed'],
+      40: ['apple'],
+      41: ['quest_key'],
+      42: ['red_flower'],
+      43: ['yellow_flower'],
+      44: ['cave_torch'],
+      45: ['glowstone'],
     };
     return nameMap[fileId] || [];
   }

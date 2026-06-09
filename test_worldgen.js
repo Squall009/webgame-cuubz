@@ -1,5 +1,12 @@
-// Mock browser globals
-global.BLOCK_TYPES = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, GRAVEL: 5, WATER: 6, WOOD_LOG: 7, LEAVES: 8, SNOW: 9, ICE: 10, BEDROCK: 11, PLANKS: 12, OBSIDIAN: 13, BLACKSTONE: 14, LAVA: 15, CORRUPT_STONE: 16, TOXIC_SLIME: 17, COAL_ORE: 18, IRON_ORE: 19, GOLD_ORE: 20, DIAMOND_ORE: 21, CORRUPT_CRYSTAL: 22, RED_FLOWER: 27, YELLOW_FLOWER: 28, CAVE_TORCH: 29, GLOWSTONE: 30 };
+// Mock browser globals (VoxelGen-aligned block IDs)
+global.BLOCK_TYPES = { 
+  AIR: 0, BEDROCK: 1, STONE: 2, DIRT: 3, GRASS: 4, SAND: 5, GRAVEL: 6, WATER: 7,
+  COAL_ORE: 8, IRON_ORE: 9, GOLD_ORE: 10, DIAMOND_ORE: 11, CAVE_AIR: 12,
+  SNOW: 13, SNOW_STONE: 14, LAVA: 15, TERRACOTTA: 16, RED_SAND: 17, ICE: 18, CLAY: 19,
+  WOOD_LOG: 32, LEAVES: 33, PLANKS: 34, OBSIDIAN: 35, BLACKSTONE: 36,
+  TOXIC_SLIME: 37, CORRUPT_CRYSTAL: 38, BED: 39, APPLE: 40, QUEST_KEY: 41,
+  RED_FLOWER: 42, YELLOW_FLOWER: 43, CAVE_TORCH: 44, GLOWSTONE: 45 
+};
 global.BLOCK_PROPERTIES = {};
 global.CHUNK_WIDTH = 16; global.CHUNK_DEPTH = 16; global.CHUNK_HEIGHT = 256;
 global.MIN_Y = 0; global.MAX_Y = 256; global.SEA_LEVEL = 64;
@@ -30,7 +37,7 @@ global.sampleBiomeParams = BiomeSysMod.sampleBiomeParams;
 // WorldGenerator is now async — for testing we use the backwards-compatible NoiseGenerator class
 const WorldGenerator = require('./js/world/worldGenerator.js');
 
-console.log('--- Testing VoxelGen Overhaul ---\n');
+console.log('--- Testing VoxelGen Overhaul (Direct Block IDs) ---\n');
 
 // Test 1: Hash function (string → uint32)
 const testHash = hashString('testseed');
@@ -69,12 +76,12 @@ console.log('✓ selectBiome(cont=-0.5):', biome2.name, '(expected: Deep Ocean)'
 const biome3 = selectBiome(0.1, 0, -0.4, 0); // Cold land → Tundra
 console.log('✓ selectBiome(temp=-0.4):', biome3.name, '(expected: Tundra)');
 
-// Test 8: Biome definitions
+// Test 8: Biome definitions (VoxelGen-aligned block IDs)
 const plains = BIOME_DEFS.PLAINS;
-console.log('\n✓ Plains biome:', `baseY=${plains.baseY}, amp=${plains.amplitude}, surface=block${plains.surfaceBlock}`);
+console.log('\n✓ Plains biome:', `baseY=${plains.baseY}, amp=${plains.amplitude}, surface=block${plains.surfaceBlock} (GRASS=4)`);
 
 const mountains = BIOME_DEFS.MOUNTAINS;
-console.log('✓ Mountains biome:', `baseY=${mountains.baseY}, amp=${mountains.amplitude}, surface=block${mountains.surfaceBlock}`);
+console.log('✓ Mountains biome:', `baseY=${mountains.baseY}, amp=${mountains.amplitude}, surface=block${mountains.surfaceBlock} (GRASS=4)`);
 
 // Test 9: Backwards-compatible NoiseGenerator class
 const NG = NoiseGen.NoiseGenerator;
@@ -85,20 +92,20 @@ if (typeof NG === 'function') {
   console.log('⚠ NoiseGenerator class not available');
 }
 
-// Test 10: VOXELGEN_TO_CUUBZ translation map
-const VG = ChunkMod.VOXELGEN_TO_CUUBZ;
-console.log('\n✓ Block ID translations:');
-console.log('  VoxelGen BEDROCK(1) → Cuubz', VG[1], '(expected:', BLOCK_TYPES.BEDROCK, ')');
-console.log('  VoxelGen STONE(2)   → Cuubz', VG[2], '(expected:', BLOCK_TYPES.STONE, ')');
-console.log('  VoxelGen GRASS(4)   → Cuubz', VG[4], '(expected:', BLOCK_TYPES.GRASS, ')');
-console.log('  VoxelGen CAVE_AIR(12)→Cuubz', VG[12], '(expected:', BLOCK_TYPES.AIR, ')');
+// Test 10: Block IDs match VoxelGen directly (no translation)
+console.log('\n✓ Direct block ID alignment:');
+console.log('  BEDROCK:', BLOCK_TYPES.BEDROCK, '(expected: 1)');
+console.log('  STONE:', BLOCK_TYPES.STONE, '(expected: 2)');
+console.log('  GRASS:', BLOCK_TYPES.GRASS, '(expected: 4)');
+console.log('  CAVE_AIR:', BLOCK_TYPES.CAVE_AIR, '(expected: 12)');
+console.log('  TERRACOTTA:', BLOCK_TYPES.TERRACOTTA, '(expected: 16)');
 
 // Test 11: Chunk with new dimensions (16x256x16)
 const testChunk = new ChunkMod.Chunk(0, 0);
 console.log('\n✓ New chunk dimensions:', CHUNK_WIDTH, '*', CHUNK_DEPTH, '*', CHUNK_HEIGHT, '= ', testChunk.blocks.length, 'blocks');
 testChunk.setBlock(8, 70, 8, BLOCK_TYPES.GRASS);
 const blockAt = testChunk.getBlock(8, 70, 8);
-console.log('✓ Block at (8,70,8):', blockAt, '(expected:', BLOCK_TYPES.GRASS, ')');
+console.log('✓ Block at (8,70,8):', blockAt, '(expected:', BLOCK_TYPES.GRASS, '= GRASS)');
 
 // Test 12: Biome sampling with domain warping
 const params = { continentScale: 4000, contScale: 400, tempScale: 2000, humScale: 2000, erosScale: 280 };
