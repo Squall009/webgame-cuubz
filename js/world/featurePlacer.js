@@ -16,20 +16,18 @@ class FeaturePlacer {
     this.seed = seed;
     this.noise = new NoiseGenerator(seed);
     
-    // Feature density per biome — keys match biome name (case-insensitive lookup).
+    // Feature density per biome — keys match biome name lowercased with spaces removed.
     this.featureDensity = {
-      plains:   { flowers: 0.05, cacti: 0 },
-      forest:   { flowers: 0.03, cacti: 0 },
-      desert:   { flowers: 0, cacti: 0.04 },
-      tundra:   { flowers: 0, cacti: 0 },
-      mountains:{ flowers: 0, cacti: 0 },
-      'frozen peaks': { flowers: 0, cacti: 0 },
-      badlands: { flowers: 0, cacti: 0.02 },
-      beach:    { flowers: 0, cacti: 0 },
-      ocean:    { flowers: 0, cacti: 0, coral: 0.02 },
-      'deep ocean': { flowers: 0, cacti: 0 },
-      lava:     { flowers: 0, cacti: 0, lavaPool: 0.03 },
-      corrupt:  { flowers: 0, cacti: 0, toxicPool: 0.02, crystals: 0.01 },
+      plains:     { flowers: 0.05, cacti: 0 },
+      forest:     { flowers: 0.03, cacti: 0 },
+      desert:     { flowers: 0, cacti: 0.04 },
+      tundra:     { flowers: 0, cacti: 0 },
+      mountains:  { flowers: 0, cacti: 0 },
+      frozenpeaks:{ flowers: 0, cacti: 0 },
+      badlands:   { flowers: 0, cacti: 0.02 },
+      beach:      { flowers: 0, cacti: 0 },
+      ocean:      { flowers: 0, cacti: 0, coral: 0.02 },        // Deep Ocean → 'ocean' key via biome.id fallback
+      deepocean:  { flowers: 0, cacti: 0, coral: 0.01 },         // Deep Ocean biome
     };
     this.flowerTypes = [
       { type: BLOCK_TYPES.RED_FLOWER, name: 'red', color: '#cc3333' },
@@ -67,12 +65,6 @@ class FeaturePlacer {
           this._placeCactus(chunk, lx, surfaceY, lz);
         } else if (density.coral && featureRoll < density.coral) {
           this._placeCoral(chunk, lx, surfaceY, lz);
-        } else if (density.lavaPool && featureRoll < density.lavaPool) {
-          this._placeLavaPool(chunk, lx, surfaceY, lz);
-        } else if (density.toxicPool && featureRoll < density.toxicPool) {
-          this._placeToxicPool(chunk, lx, surfaceY, lz);
-        } else if (density.crystals && featureRoll < density.crystals) {
-          this._placeCorruptCrystal(chunk, lx, surfaceY, lz);
         }
       }
     }
@@ -136,59 +128,10 @@ class FeaturePlacer {
   _placeCoral(chunk, lx, surfaceY, lz) {
     const rng = this.noise.createPRNG(lx * 1000 + lz + 888);
     const height = 2 + Math.floor(rng() * 2);
-    
+
     for (let y = 0; y < height; y++) {
       chunk.setBlock(lx, surfaceY - y, lz, BLOCK_TYPES.LEAVES); // Coral placeholder
     }
-  }
-
-  /**
-   * Place a lava pool in lava biome
-   */
-  _placeLavaPool(chunk, lx, surfaceY, lz) {
-    const radius = 2;
-    
-    for (let dx = -radius; dx <= radius; dx++) {
-      for (let dz = -radius; dz <= radius; dz++) {
-        const nx = lx + dx;
-        const nz = lz + dz;
-        
-        if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16) continue;
-        
-        const dist = Math.sqrt(dx*dx + dz*dz);
-        if (dist <= radius) {
-          chunk.setBlock(nx, surfaceY - 1, nz, BLOCK_TYPES.LAVA);
-        }
-      }
-    }
-  }
-
-  /**
-   * Place toxic pool in corrupt biome
-   */
-  _placeToxicPool(chunk, lx, surfaceY, lz) {
-    const radius = 2;
-    
-    for (let dx = -radius; dx <= radius; dx++) {
-      for (let dz = -radius; dz <= radius; dz++) {
-        const nx = lx + dx;
-        const nz = lz + dz;
-        
-        if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16) continue;
-        
-        const dist = Math.sqrt(dx*dx + dz*dz);
-        if (dist <= radius) {
-          chunk.setBlock(nx, surfaceY - 1, nz, BLOCK_TYPES.TOXIC_SLIME);
-        }
-      }
-    }
-  }
-
-  /**
-   * Place corrupt crystal (quest item) in corrupt biome
-   */
-  _placeCorruptCrystal(chunk, lx, surfaceY, lz) {
-    chunk.setBlock(lx, surfaceY, lz, BLOCK_TYPES.CORRUPT_CRYSTAL);
   }
 
   /**
