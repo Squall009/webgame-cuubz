@@ -78,6 +78,7 @@
 - **`c4b0644`** — Rebuilt inventory.js _INLINE_BLOCK_PROPERTIES with VoxelGen-aligned block IDs
 - **`7c98213`** — Cleaned up featurePlacer.js: fixed biome key lookup (spaces→no spaces), removed dead lava/corrupt biomes & placement methods
 - **`18b6893`** — Completed inventory.js alignment: getDisplayName() + maxStack() use VoxelGen IDs, all hardcoded numeric references eliminated
+- **`1c7b170`** — Implemented inline fallback for WorldGenerator + refactored workerGeneration.js to return data instead of postMessage. Workers now wrap the return value; main thread calls it directly when workers fail. Added detailed init logging.
 
 ---
 
