@@ -62,7 +62,6 @@ class ChunkManager {
 
     // Stats tracking
     this.stats = {
-      manifestWrites: 0,
       chunksGenerated: 0,
       chunksLoadedFromDisk: 0,
     };
@@ -212,7 +211,7 @@ class ChunkManager {
 
   /**
    * Build a single chunk's mesh with texture atlas support.
-   * Uses IndexedDB for saved chunks (async), falls back to generator.
+   * Uses IndexedDB for saved chunks (async, with checksum verification), falls back to generator.
    */
   async _buildChunk(cx, cz) {
     const key = `${cx},${cz}`;
@@ -224,60 +223,35 @@ class ChunkManager {
     if (this.chunkStore) {
       try {
         // Check both manifest AND actual storage presence.
-        // Manifest may list chunks that were never flushed to disk.
         const isGenerated = await this.chunkStore.isChunkGenerated(key);
         const hasBinary   = await this.chunkStore.hasChunk(key);
 
+        // Clean up stale manifest entries (chunk listed but data missing).
         if (isGenerated && !hasBinary) {
-          console.warn(`[ChunkManager] Chunk ${key} in manifest but missing from storage — removing stale entry`);
           try { await this.chunkStore.removeGeneratedChunk(key); } catch (_) {}
         }
 
         if (hasBinary) {
           const binaryData = await this.chunkStore.loadChunk(key);
           if (binaryData) {
+            // Decode + checksum verify happens inside ChunkBinaryCodec.decode() for v2+ data.
             chunkData = ChunkBinaryCodec.decode(binaryData);
             fromStorage = true;
             this.stats.chunksLoadedFromDisk++;
-            console.log(`[ChunkManager] Loaded chunk ${key} from IndexedDB (${binaryData.byteLength} bytes)`);
 
-            // Sanity check: detect flat/corrupt terrain by checking height variation
-            let minHeight = Infinity, maxHeight = -Infinity;
-            let surfaceCount = 0;
-            for (let x = 0; x < 16; x++) {
-              for (let z = 0; z < 16; z++) {
-                for (let y = MAX_Y; y >= MIN_Y; y--) {
-                  if (chunkData.getBlock(x, y, z) !== 0) {
-                    if (y < minHeight) minHeight = y;
-                    if (y > maxHeight) maxHeight = y;
-                    surfaceCount++;
-                    break;
-                  }
-                }
-              }
-            }
-
-            const heightRange = maxHeight - minHeight;
-
-            if (heightRange < 3) {
-              // Silently remove corrupt data and regenerate — no log on corruption cleanup.
-              try { await this.chunkStore.removeGeneratedChunk(key); } catch (_) {}
-              chunkData = null;
-              fromStorage = false;
-            } else {
-              console.log(`[ChunkManager] LOADED ${key} from IndexedDB (${binaryData.byteLength} bytes, height range ${heightRange})`);
-            }
+// Loaded chunk from IndexedDB — no log on success
           }
         }
       } catch (e) {
-        // Silently remove corrupt chunk data from storage/manifest.
+        // Decode failed (checksum mismatch, corrupt data, etc.) → treat as missing.
         try { await this.chunkStore.removeGeneratedChunk(key); } catch (_) {}
+        console.warn(`[ChunkManager] Corrupt chunk ${key} removed from storage: ${e.message}`);
       }
     }
 
-    // Generate if not in storage or was flat/corrupt
+    // Generate if not in storage or was corrupt/missing
     if (!chunkData && this.generatorFn) {
-      console.log(`[ChunkManager] Generating chunk ${key} (not in IndexedDB)`);
+// Generating new chunk — no log
 
       // generatorFn may be async (worker dispatch) or sync — handle both.
       const genResult = this.generatorFn(cx, cz);
@@ -288,21 +262,12 @@ class ChunkManager {
         return;
       }
 
-      // Add to manifest as generated
-      if (this.chunkStore) {
-        try {
-          await this.chunkStore.addGeneratedChunk(key);
-          this.stats.manifestWrites++;
-        } catch (e) {
-          // Silently ignore manifest errors.
-        }
-      }
-
       this.stats.chunksGenerated++;
 
-      // Mark as dirty for persistence on next flush
+      // Mark as newly generated — will be persisted and added to manifest AFTER writeback verification.
+      // Do NOT call addGeneratedChunk() here; DirtyFlushManager handles it after verify.
       if (this.dirtyFlush) {
-        this.dirtyFlush.markDirty(key, chunkData);
+        this.dirtyFlush.markNewlyGenerated(key, chunkData);
       }
     }
 
@@ -448,10 +413,6 @@ class ChunkManager {
         }
       }
 
-      // Queue newly generated chunks for saving (new system)
-      if (!fromStorage && this.dirtyFlush) {
-        this.dirtyFlush.markDirty(key, chunkData);
-      }
     } catch (err) {
       // Silently skip failed chunks — they'll regenerate next frame.
       this.loadedChunks.set(key, { data: chunkData, mesh: null, built: false });

@@ -1,6 +1,8 @@
 /**
- * Cuubz — Dirty Flush Manager
+ * Cuubz — Dirty Flush Manager (v2)
  * Tracks dirty chunks and flushes them to IndexedDB in batches on a timer.
+ * After every write, performs immediate readback + checksum verification with retry.
+ * Only marks chunk as "generated" after successful write+verify cycle.
  * Also handles graceful shutdown via beforeunload + sendBeacon/OPFS sync fallback.
  */
 
@@ -20,6 +22,9 @@ class DirtyFlushManager {
     // Set of "cx,cz" keys that are dirty and need flushing
     this._dirtyChunks = new Map(); // key -> Chunk instance (latest in-memory version)
 
+    // Chunks pending manifest addition — only added to generatedChunks AFTER successful writeback verify.
+    this._pendingManifest = new Set();
+
     // Timer for periodic flush
     this._flushTimerId = null;
 
@@ -34,9 +39,122 @@ class DirtyFlushManager {
   }
 
   /**
-   * Mark a chunk as dirty. The latest in-memory Chunk instance is kept for flushing.
+   * Immediately flush all dirty chunks to IndexedDB with writeback verification.
+   * Each chunk is saved, then immediately read back and checksum-verified.
+   * Retries up to 3x with exponential backoff on failure.
+   * Only adds verified chunks to the manifest's generatedChunks list.
+   * @returns {Promise<void>}
+   */
+  async flush() {
+    if (this._dirtyChunks.size === 0) return;
+
+    const keysToFlush = [...this._dirtyChunks.keys()];
+
+    for (const key of keysToFlush) {
+      try {
+        // Resolve lazy getter and encode chunk
+        const getter = this._dirtyChunks.get(key);
+        const chunkData = typeof getter === 'function' ? getter() : getter;
+        if (!chunkData || !chunkData.blocks) {
+          this._dirtyChunks.delete(key);
+          continue;
+        }
+
+        // Encode to binary using ChunkBinaryCodec (includes checksum in header)
+        const data = ChunkBinaryCodec.encode(chunkData);
+        const expectedChecksum = ChunkBinaryCodec.computeChecksum(data);
+
+        // Save + verify with retry
+        const verified = await this._saveAndVerify(key, data, expectedChecksum);
+
+        if (verified) {
+          this._dirtyChunks.delete(key);
+
+          // Add to manifest only after successful writeback verification
+          if (this._pendingManifest.has(key)) {
+            try {
+              await this.store.addGeneratedChunk(key);
+              this._pendingManifest.delete(key);
+            } catch (e) {
+              // Manifest write failed — chunk data is saved, just not tracked in manifest.
+              // It will be picked up on next load via hasChunk() check.
+            }
+          }
+
+// Chunk verified and saved — no log
+        } else {
+          // Failed all retries — keep dirty so it retries on next flush cycle
+          console.warn(`[DirtyFlush] FAILED writeback verification for ${key} after 3 retries`);
+        }
+      } catch (err) {
+        // Silently skip corrupt chunks that can't be encoded.
+        this._dirtyChunks.delete(key);
+      }
+    }
+
+    // Log summary of successfully saved chunks
+    if (keysToFlush.length > 0 && this._dirtyChunks.size < keysToFlush.length + this._pendingManifest.size) {
+      const stillDirty = this._dirtyChunks.size;
+      console.log(`[DirtyFlush] Flush cycle complete. ${stillDirty} chunk(s) still dirty.`);
+    }
+  }
+
+  /**
+   * Save a chunk to IndexedDB, then immediately read back and verify checksum.
+   * Retries up to maxRetries times with exponential backoff on failure.
    * @param {string} key - "cx,cz" string key
-   * @param {Chunk} chunkData - Current in-memory chunk data (lazy getter reference)
+   * @param {ArrayBuffer} data - Binary-encoded chunk data (with checksum in header)
+   * @param {number} expectedChecksum - FNV-1a checksum computed before save
+   * @param {number} [maxRetries=3] - Maximum retry attempts
+   * @returns {Promise<boolean>} true if writeback verified successfully
+   */
+  async _saveAndVerify(key, data, expectedChecksum, maxRetries = 3) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Save chunk to IndexedDB
+        await this.store.saveChunk(key, data);
+
+        // Immediate readback
+        const readBackData = await this.store.loadChunk(key);
+        if (!readBackData) {
+          console.warn(`[DirtyFlush] Readback returned null for ${key} (attempt ${attempt + 1}/${maxRetries})`);
+          continue; // Retry
+        }
+
+        // Verify checksum of readback data
+        const readBackChecksum = ChunkBinaryCodec.computeChecksum(readBackData);
+        if (readBackChecksum !== expectedChecksum) {
+          console.warn(
+            `[DirtyFlush] Checksum mismatch for ${key} (attempt ${attempt + 1}/${maxRetries}): ` +
+            `expected=0x${expectedChecksum.toString(16)}, got=0x${readBackChecksum.toString(16)}`
+          );
+          // Delete corrupt data so we can retry clean
+          try { await this.store.deleteChunk(key); } catch (_) {}
+          continue; // Retry
+        }
+
+        // Success — writeback verified
+        return true;
+
+      } catch (err) {
+        if (attempt < maxRetries - 1) {
+          // Exponential backoff: 50ms, 150ms, 350ms...
+          const backoff = Math.pow(2, attempt) * 50 + attempt * 50;
+          await new Promise(resolve => setTimeout(resolve, backoff));
+        } else {
+          console.error(`[DirtyFlush] Save error for ${key} after ${maxRetries} attempts:`, err);
+        }
+      }
+    }
+
+    return false; // All retries exhausted
+  }
+
+  /**
+   * Mark a chunk as dirty and pending manifest addition.
+   * The chunk will only be added to generatedChunks AFTER successful writeback verification.
+   * @param {string} key - "cx,cz" string key
+   * @param {Chunk} chunkData - Current in-memory chunk data
    */
   markDirty(key, chunkData) {
     if (!this._active || !chunkData) return;
@@ -44,6 +162,20 @@ class DirtyFlushManager {
     // Store a lazy getter function instead of the actual chunk data.
     // This ensures we always flush the latest state, not a stale snapshot.
     this._dirtyChunks.set(key, () => chunkData);
+  }
+
+  /**
+   * Mark a newly generated chunk as dirty AND pending manifest addition.
+   * The chunk will only be added to generatedChunks AFTER successful writeback verification.
+   * Use this for freshly generated chunks instead of markDirty().
+   * @param {string} key - "cx,cz" string key
+   * @param {Chunk} chunkData - Current in-memory chunk data
+   */
+  markNewlyGenerated(key, chunkData) {
+    if (!this._active || !chunkData) return;
+
+    this._dirtyChunks.set(key, () => chunkData);
+    this._pendingManifest.add(key);
   }
 
   /**
@@ -75,51 +207,6 @@ class DirtyFlushManager {
       this._flushTimerId = null;
     }
     this._active = false;
-  }
-
-  /**
-   * Immediately flush all dirty chunks to IndexedDB.
-   * @returns {Promise<void>}
-   */
-  async flush() {
-    if (this._dirtyChunks.size === 0) return;
-
-    // Resolve lazy getters and encode chunks
-    const entries = [];
-    for (const [key, getter] of this._dirtyChunks) {
-      try {
-        const chunkData = typeof getter === 'function' ? getter() : getter;
-        if (!chunkData || !chunkData.blocks) continue;
-
-        // Encode to binary using ChunkBinaryCodec
-        const data = ChunkBinaryCodec.encode(chunkData);
-        entries.push({ key, data });
-
-// Chunk queued for flush — no log
-      } catch (err) {
-        // Silently skip corrupt chunks that can't be encoded.
-      }
-    }
-
-    if (entries.length === 0) return;
-
-    try {
-      // Batch save all chunks in one transaction
-      await this.store.saveChunks(entries);
-
-      // Clear dirty tracking for successfully saved chunks
-      let totalBytes = 0;
-      const keys = [];
-      for (const entry of entries) {
-        totalBytes += entry.data.byteLength;
-        keys.push(entry.key);
-        this._dirtyChunks.delete(entry.key);
-      }
-
-      console.log(`[DirtyFlush] SAVED ${entries.length} chunk(s) to IndexedDB (${totalBytes} bytes): [${keys.join(', ')}]`);
-    } catch (err) {
-      // Silently ignore batch save failures — chunks will retry on next flush.
-    }
   }
 
   /**
@@ -236,6 +323,7 @@ class DirtyFlushManager {
   dispose() {
     this.stop();
     this._dirtyChunks.clear();
+    this._pendingManifest.clear();
     this._active = false;
   }
 }
