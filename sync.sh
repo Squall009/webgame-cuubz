@@ -33,7 +33,9 @@ tar czf "$ARCHIVE" \
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no "$ARCHIVE" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/$(basename "$SOURCE_DIR").tar.gz"
 
 ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" \
-    "cd ${REMOTE_DIR} && tar xzf $(basename "$SOURCE_DIR").tar.gz && rm $(basename "$SOURCE_DIR").tar.gz"
+    "cd ${REMOTE_DIR} && tar xzf $(basename \"$SOURCE_DIR\").tar.gz && rm $(basename \"$SOURCE_DIR\").tar.gz \
+     && find ${REMOTE_DIR} -type f -exec chmod 644 {} + \
+     && find ${REMOTE_DIR} -type d -exec chmod 755 {} +"
 
 rm -f "$ARCHIVE"
 
