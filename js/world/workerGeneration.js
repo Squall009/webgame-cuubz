@@ -257,8 +257,7 @@
     var rngOre     = mulberry32(sInt ^ ((chunkX * 73856093) ^ (chunkZ * 19349663)) ^ 0x3000);
 
     var chunk      = new Uint8Array(CHUNK_W * CHUNK_H * CHUNK_D);
-    var biomeNames = new Array(256);
-    var surfaceMap = new Int32Array(256);
+    var surfaceMap = new Int32Array(256); // Used internally for cave carving phase
 
     // ── Phase 1: Terrain + block placement per column ────────────────
     for (var lx = 0; lx < 16; lx++) {
@@ -268,7 +267,6 @@
         // Sample blended biome parameters.
         var blended = sampleBiomeParams(p, wx, wz, params.continentScale, params.contScale,
                                         params.tempScale, params.humScale, params.erosScale);
-        biomeNames[lx * 16 + lz] = { name: blended.biome.name, frozenWater: !!blended.biome.frozenWater };
 
         // Mountain factor — smooth 0→1 from continentalness + erosion blend.
         var MOUNTAIN_RADIUS = 1, STEP2 = 8;
@@ -462,15 +460,12 @@
     return {
       cx: chunkX - params.baseChunkX,
       cz: chunkZ - params.baseChunkZ,
-      chunkBytes: chunk.buffer,       // ArrayBuffer — transferred by worker
-      biomeNames: biomeNames,         // plain objects — cloned by structured clone
-      surfaceMap: surfaceMap.buffer   // ArrayBuffer — transferred by worker
+      chunkBytes: chunk.buffer       // ArrayBuffer — transferred by worker
     };
   }
 
   // ── Worker message handler (only active in Web Worker context) ──────
   if (typeof globalScope !== 'undefined' && typeof globalScope.postMessage === 'function' && !globalScope.document) {
-    // We're inside a Web Worker — register message handler.
     globalScope.onmessage = function (e) {
       var msg = e.data;
       try {
@@ -480,10 +475,8 @@
             type: 'result',
             cx: result.cx,
             cz: result.cz,
-            chunkBytes: result.chunkBytes,
-            biomeNames: result.biomeNames,
-            surfaceMap: result.surfaceMap
-          }, [result.chunkBytes, result.surfaceMap]);
+            chunkBytes: result.chunkBytes
+          }, [result.chunkBytes]);
         }
       } catch (err) {
         globalScope.postMessage({ type: 'error', error: err.message, stack: err.stack });

@@ -317,7 +317,7 @@ class Player {
   respawn(spawnPoint) {
     this.position = {
       x: spawnPoint ? spawnPoint.x : 0,
-      y: spawnPoint ? spawnPoint.y : 20,
+      y: spawnPoint ? spawnPoint.y : SEA_LEVEL + 4,
       z: spawnPoint ? spawnPoint.z : 0,
     };
     this.velocity = { x: 0, y: 0, z: 0 };

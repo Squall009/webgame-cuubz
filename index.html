@@ -325,26 +325,22 @@
 
   <!-- World Generation (VoxelGen Overhaul) -->
   <script src="js/world/noise.js?v=vgen-1"></script>
-  <script src="js/world/chunkData.js?v=vgen-1"></script>
+  <script src="js/world/chunkData.js?v=vgen-2"></script>
   <script src="js/world/biomeSystem.js?v=vgen-1"></script>
   <!-- Worker-side generation code (loaded for fetch-based Blob URL creation) -->
-  <script src="js/world/workerGeneration.js?v=vgen-4"></script>
-  <script src="js/world/workerPool.js?v=vgen-2"></script>
-  <script src="js/world/featurePlacer.js?v=20260601-4"></script>
-  <!-- REMOVED: caveGenerator.js, oreGenerator.js — now in workerGeneration.js -->
-  <script src="js/world/chunkGrid.js?v=20260601-4"></script>
-  <!-- New chunked storage system (IndexedDB + binary codec) -->
-  <script src="js/world/chunkBinaryCodec.js?v=20260604-1"></script>
-  <script src="js/world/chunkStore.js?v=20260604-1"></script>
-  <script src="js/world/dirtyFlushManager.js?v=20260604-1"></script>
+  <script src="js/world/workerGeneration.js?v=vgen-6"></script>
+  <!-- REMOVED: featurePlacer, caveGenerator, oreGenerator — in workerGeneration.js -->
+  <!-- New monolithic chunk manager (workers + IndexedDB + flush + region tracking) -->
+  <script src="js/world/chunkBinaryCodec.js?v=20260610-2"></script>
+  <script src="js/chunkmanager.js?v=20260610-3"></script>
+  <!-- REMOVED: chunkStore, dirtyFlushManager, worldGenerator, chunkGrid → merged into chunkmanager.js -->
   <script src="js/world/persistence.js?v=20260601-4"></script>
-  <script src="js/world/worldGenerator.js?v=vgen-2"></script>
-  <script src="js/world/spawnManager.js?v=20260601-4"></script>
+  <script src="js/world/spawnManager.js?v=20260610-3"></script>
 
   <!-- Renderer -->
   <script src="js/renderer/textureAtlas.js?v=20260601-6"></script>
-  <script src="js/renderer/chunkMeshBuilder.js?v=20260603-1"></script>
-  <script src="js/renderer/chunkManager.js?v=vgen-3"></script>
+  <script src="js/renderer/chunkMeshBuilder.js?v=20260610-3"></script>
+  <!-- REMOVED: renderer/chunkManager.js → merged into js/chunkmanager.js -->
   <script src="js/renderer/voxelRenderer.js?v=20260601-4"></script>
   <script src="js/renderer/crosshair.js?v=20260601-4"></script>
   <script src="js/renderer/skybox.js?v=20260601-4"></script>
@@ -389,6 +385,6 @@
   <script src="js/game.js?v=20260601-4"></script>
 
   <!-- Main Entry (menu system, screen management) -->
-  <script src="js/main.js?v=20260603-1"></script>
+<script src="js/main.js?v=20260610-1"></script>
 </body>
 </html>

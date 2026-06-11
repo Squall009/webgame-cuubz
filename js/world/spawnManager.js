@@ -8,8 +8,8 @@ class SpawnManager {
     // Map: "worldId" → { "playerId" → { x, y, z } }
     this.spawnPoints = new Map();
     
-    // Default spawn position (world center)
-    this.defaultSpawn = { x: 0, y: 20, z: 0 };
+    // Default spawn position — above sea level so player doesn't drown on first load
+    this.defaultSpawn = { x: 0, y: SEA_LEVEL + 4, z: 0 };
   }
 
   /**

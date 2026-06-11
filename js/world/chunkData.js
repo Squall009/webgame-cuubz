@@ -52,106 +52,50 @@ const MIN_Y = 0;
 const MAX_Y = 256;
 const SEA_LEVEL = 64;
 
-// Water level constants (Minecraft-style: 8 levels for fluids).
-const WATER_LEVEL_SOURCE = 8;
-const WATER_LEVEL_FLOWING_MIN = 1;
-const WATER_LEVEL_FLOWING_MAX = 7;
-
 class Chunk {
   constructor(chunkX, chunkZ) {
-    this.chunkX = chunkX;
-    this.chunkZ = chunkZ;
-    this.worldX = chunkX * CHUNK_WIDTH;
-    this.worldZ = chunkZ * CHUNK_DEPTH;
+    this.cx = chunkX;
+    this.cz = chunkZ;
     this.blocks = new Uint8Array(CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT);
-    // Water level metadata: 0 = no water/not fluid, 1-8 = water/lava level.
-    this.waterLevels = new Uint8Array(CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT);
-    this.neighbors = { positiveX: null, negativeX: null, positiveZ: null, negativeZ: null };
-    this.dirty = false;
+    this.dirty   = false;  // Player modified → needs flush to IndexedDB (every 5s)
+    this.changed = false;  // Block changed since last frame → needs mesh rebuild now
   }
 
-  _localIndex(x, y, z) {
+  _idx(x, y, z) {
     return x + (z * CHUNK_WIDTH) + (y * CHUNK_WIDTH * CHUNK_DEPTH);
   }
 
-  getBlock(x, y, z) {
-    if (y < 0 || y >= CHUNK_HEIGHT) return BLOCK_TYPES.AIR;
-    if (x < 0 && this.neighbors.negativeX) return this.neighbors.negativeX.getBlock(CHUNK_WIDTH + x, y, z);
-    if (x >= CHUNK_WIDTH && this.neighbors.positiveX) return this.neighbors.positiveX.getBlock(x - CHUNK_WIDTH, y, z);
-    if (z < 0 && this.neighbors.negativeZ) return this.neighbors.negativeZ.getBlock(x, y, CHUNK_DEPTH + z);
-    if (z >= CHUNK_DEPTH && this.neighbors.positiveZ) return this.neighbors.positiveZ.getBlock(x, y, z - CHUNK_DEPTH);
-    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH) return BLOCK_TYPES.AIR;
-    return this.blocks[this._localIndex(x, y, z)];
+  getBlock(lx, ly, lz) {
+    if (ly < 0 || ly >= CHUNK_HEIGHT) return BLOCK_TYPES.AIR;
+    if (lx < 0 || lx >= CHUNK_WIDTH || lz < 0 || lz >= CHUNK_DEPTH) return -1; // out of bounds → caller handles neighbor lookup
+    return this.blocks[this._idx(lx, ly, lz)];
   }
 
-  setBlock(x, y, z, type) {
-    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < 0 || y >= CHUNK_HEIGHT) return;
-    const idx = this._localIndex(x, y, z);
+  setBlock(lx, ly, lz, type) {
+    if (lx < 0 || lx >= CHUNK_WIDTH || lz < 0 || lz >= CHUNK_DEPTH || ly < 0 || ly >= CHUNK_HEIGHT) return false;
+    const idx = this._idx(lx, ly, lz);
     if (this.blocks[idx] !== type) {
       this.blocks[idx] = type;
-      if ((type === BLOCK_TYPES.WATER || type === BLOCK_TYPES.LAVA)) {
-        this.waterLevels[idx] = WATER_LEVEL_SOURCE;
-      } else {
-        this.waterLevels[idx] = 0;
-      }
       this.dirty = true;
+      this.changed = true;
+      return true; // block actually changed
     }
-  }
-
-  getWaterLevel(x, y, z) {
-    if (y < 0 || y >= CHUNK_HEIGHT) return 0;
-    if (x < 0 && this.neighbors.negativeX) return this.neighbors.negativeX.getWaterLevel(CHUNK_WIDTH + x, y, z);
-    if (x >= CHUNK_WIDTH && this.neighbors.positiveX) return this.neighbors.positiveX.getWaterLevel(x - CHUNK_WIDTH, y, z);
-    if (z < 0 && this.neighbors.negativeZ) return this.neighbors.negativeZ.getWaterLevel(x, y, CHUNK_DEPTH + z);
-    if (z >= CHUNK_DEPTH && this.neighbors.positiveZ) return this.neighbors.positiveZ.getWaterLevel(x, y, z - CHUNK_DEPTH);
-    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH) return 0;
-    const blockType = this.blocks[this._localIndex(x, y, z)];
-    if (blockType !== BLOCK_TYPES.WATER && blockType !== BLOCK_TYPES.LAVA) return 0;
-    return this.waterLevels[this._localIndex(x, y, z)];
-  }
-
-  setWaterLevel(x, y, z, level) {
-    if (x < 0 || x >= CHUNK_WIDTH || z < 0 || z >= CHUNK_DEPTH || y < 0 || y >= CHUNK_HEIGHT) return;
-    const idx = this._localIndex(x, y, z);
-    const blockType = this.blocks[idx];
-    if (blockType !== BLOCK_TYPES.WATER && blockType !== BLOCK_TYPES.LAVA) return;
-    const clampedLevel = Math.max(0, Math.min(WATER_LEVEL_SOURCE, level));
-    if (this.waterLevels[idx] !== clampedLevel) {
-      this.waterLevels[idx] = clampedLevel;
-      this.dirty = true;
-    }
-  }
-
-  isWaterSource(x, y, z) {
-    return this.getWaterLevel(x, y, z) === WATER_LEVEL_SOURCE;
+    return false; // no change
   }
 
   serialize() {
     const indices = [], types = [];
-    const waterLevelIndices = [], waterLevelValues = [];
     for (let i = 0; i < this.blocks.length; i++) {
       if (this.blocks[i] !== BLOCK_TYPES.AIR) {
         indices.push(i); types.push(this.blocks[i]);
       }
-      if (this.waterLevels[i] > 0 && this.waterLevels[i] < WATER_LEVEL_SOURCE) {
-        waterLevelIndices.push(i); waterLevelValues.push(this.waterLevels[i]);
-      }
     }
-    return { chunkX: this.chunkX, chunkZ: this.chunkZ, indices, types, dirty: this.dirty,
-             waterLevelIndices, waterLevelValues };
+    return { cx: this.cx, cz: this.cz, indices, types, dirty: this.dirty };
   }
 
   static deserialize(data) {
-    const chunk = new Chunk(data.chunkX, data.chunkZ);
+    const chunk = new Chunk(data.cx ?? data.chunkX, data.cz ?? data.chunkZ);
     for (let i = 0; i < data.indices.length; i++) chunk.blocks[data.indices[i]] = data.types[i];
-    for (let i = 0; i < chunk.blocks.length; i++) {
-      if ((chunk.blocks[i] === BLOCK_TYPES.WATER || chunk.blocks[i] === BLOCK_TYPES.LAVA)) {
-        chunk.waterLevels[i] = WATER_LEVEL_SOURCE;
-      }
-    }
-    if (data.waterLevelIndices) {
-      for (let i = 0; i < data.waterLevelIndices.length; i++) chunk.waterLevels[data.waterLevelIndices[i]] = data.waterLevelValues[i];
-    }
     chunk.dirty = data.dirty;
     return chunk;
   }

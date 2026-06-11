@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 /**
- * Cuubz — Chunk Data Structure Tests
- * Tests Chunk class, block access, serialization, edge data.
+ * Cuubz — Chunk Data Tests (Post-Overhaul)
+ * Tests simplified Chunk class: no water levels, no neighbors, dirty/changed flags.
  */
-
 'use strict';
 
-const { Chunk, BLOCK_TYPES, BLOCK_PROPERTIES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, SEA_LEVEL, MIN_Y, MAX_Y } = require('../js/world/chunkData');
-
-// ============================================================
-// Test Framework (embedded)
-// ============================================================
+const path = require('path');
+require(path.resolve(__dirname, '..', 'js', 'util', 'logger'));
+const { Chunk, BLOCK_TYPES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT } = require(path.resolve(__dirname, '..', 'js', 'world', 'chunkData'));
 
 let passCount = 0;
 let failCount = 0;
@@ -19,173 +16,106 @@ const failures = [];
 function assert(condition, message) {
   if (condition) {
     passCount++;
-    console.log(`  ✅ ${message}`);
   } else {
     failCount++;
     failures.push(message);
-    console.log(`  ❌ ${message}`);
+    console.log(`FAIL: ${message}`);
   }
 }
 
-function assertEquals(actual, expected, message) {
-  assert(actual === expected, `${message}: expected ${expected}, got ${actual}`);
+// ─── Tests ──────────────────────────────────────────────────────
+
+console.log('\n=== Chunk (simplified) ===\n');
+
+// Test 1: Creates chunk with correct dimensions
+{
+  const chunk = new Chunk(10, -5);
+  assert(chunk.cx === 10, 'Chunk cx should be 10');
+  assert(chunk.cz === -5, 'Chunk cz should be -5');
+  assert(chunk.blocks.length === CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT, 'Blocks array length should be 65536');
+  assert(chunk.dirty === false, 'New chunk dirty should be false');
+  assert(chunk.changed === false, 'New chunk changed should be false');
+  assert(typeof chunk.waterLevels === 'undefined', 'Chunk should not have waterLevels');
+  assert(typeof chunk.neighbors === 'undefined', 'Chunk should not have neighbors');
 }
 
-function assertNotNull(value, message) {
-  assert(value !== null && value !== undefined, message);
+// Test 2: getBlock returns AIR for out-of-bounds Y
+{
+  const chunk = new Chunk(0, 0);
+  assert(chunk.getBlock(8, -1, 8) === BLOCK_TYPES.AIR, 'getBlock(-1 Y) should return AIR');
+  assert(chunk.getBlock(8, CHUNK_HEIGHT, 8) === BLOCK_TYPES.AIR, 'getBlock(MAX_Y) should return AIR');
 }
 
-function assertTrue(value, message) {
-  assert(!!value, message);
+// Test 3: getBlock returns -1 for out-of-bounds X/Z (neighbor signal)
+{
+  const chunk = new Chunk(0, 0);
+  assert(chunk.getBlock(-1, 64, 8) === -1, 'getBlock(-1 X) should return -1');
+  assert(chunk.getBlock(CHUNK_WIDTH, 64, 8) === -1, 'getBlock(MAX_X) should return -1');
+  assert(chunk.getBlock(8, 64, -1) === -1, 'getBlock(-1 Z) should return -1');
+  assert(chunk.getBlock(8, 64, CHUNK_DEPTH) === -1, 'getBlock(MAX_Z) should return -1');
 }
 
-// ============================================================
-// Tests
-// ============================================================
+// Test 4: setBlock updates block and sets dirty+changed flags
+{
+  const chunk = new Chunk(0, 0);
+  assert(chunk.dirty === false, 'Initial dirty should be false');
+  assert(chunk.changed === false, 'Initial changed should be false');
+  const result = chunk.setBlock(8, 64, 8, BLOCK_TYPES.GRASS);
+  assert(result === true, 'setBlock should return true for actual change');
+  assert(chunk.getBlock(8, 64, 8) === BLOCK_TYPES.GRASS, 'Block should be GRASS after setBlock');
+  assert(chunk.dirty === true, 'dirty should be true after setBlock');
+  assert(chunk.changed === true, 'changed should be true after setBlock');
+}
 
-console.log('Chunk Data Structure Tests');
-console.log('==========================\n');
+// Test 5: setBlock returns false when setting same value
+{
+  const chunk = new Chunk(0, 0);
+  chunk.setBlock(8, 64, 8, BLOCK_TYPES.GRASS);
+  const result = chunk.setBlock(8, 64, 8, BLOCK_TYPES.GRASS); // same value
+  assert(result === false, 'setBlock should return false for no-change');
+}
 
-// --- Test: Constants ---
-console.log('[Constants]');
+// Test 6: setBlock is no-op for out-of-bounds
+{
+  const chunk = new Chunk(0, 0);
+  chunk.setBlock(-1, 64, 8, BLOCK_TYPES.STONE); // out of bounds
+  assert(chunk.dirty === false, 'setBlock OOB should not set dirty');
+}
 
-assertEquals(CHUNK_WIDTH, 16, 'Chunk width is 16');
-assertEquals(CHUNK_DEPTH, 16, 'Chunk depth is 16');
-assertEquals(CHUNK_HEIGHT, 96, 'Chunk height is 96');
-assertEquals(SEA_LEVEL, 0, 'Sea level is 0');
-assertEquals(MIN_Y, -32, 'Min Y is -32');
-assertEquals(MAX_Y, 64, 'Max Y is 64');
+// Test 7: serialize/deserialize roundtrip
+{
+  const chunk = new Chunk(5, -3);
+  chunk.setBlock(0, 0, 0, BLOCK_TYPES.BEDROCK);
+  chunk.setBlock(15, 255, 15, BLOCK_TYPES.STONE);
 
-// --- Test: Block Types ---
-console.log('\n[Block Types]');
+  const data = chunk.serialize();
+  assert(data.cx === 5, 'serialize cx should be 5');
+  assert(data.cz === -3, 'serialize cz should be -3');
+  assert(Array.isArray(data.indices), 'serialize indices should be array');
+  assert(typeof data.waterLevelIndices === 'undefined', 'serialize should not have waterLevelIndices');
 
-assertEquals(BLOCK_TYPES.AIR, 0, 'AIR = 0');
-assertEquals(BLOCK_TYPES.GRASS, 1, 'GRASS = 1');
-assertEquals(BLOCK_TYPES.DIRT, 2, 'DIRT = 2');
-assertEquals(BLOCK_TYPES.STONE, 3, 'STONE = 3');
-assertEquals(BLOCK_TYPES.BEDROCK, 11, 'BEDROCK = 11');
-assertEquals(BLOCK_TYPES.WATER, 6, 'WATER = 6');
+  const restored = Chunk.deserialize(data);
+  assert(restored.cx === 5, 'deserialize cx should be 5');
+  assert(restored.cz === -3, 'deserialize cz should be -3');
+  assert(restored.getBlock(0, 0, 0) === BLOCK_TYPES.BEDROCK, 'deserialize block at (0,0,0) should be BEDROCK');
+  assert(restored.getBlock(15, 255, 15) === BLOCK_TYPES.STONE, 'deserialize block at (15,255,15) should be STONE');
+}
 
-// Block properties exist
-assertNotNull(BLOCK_PROPERTIES[BLOCK_TYPES.AIR], 'AIR has properties');
-assertNotNull(BLOCK_PROPERTIES[BLOCK_TYPES.GRASS], 'GRASS has properties');
-assertNotNull(BLOCK_PROPERTIES[BLOCK_TYPES.STONE], 'STONE has properties');
+// Test 8: deserialize handles legacy chunkX/chunkZ keys
+{
+  const data = { chunkX: 7, chunkZ: -2, indices: [0], types: [BLOCK_TYPES.DIRT], dirty: false };
+  const chunk = Chunk.deserialize(data);
+  assert(chunk.cx === 7, 'deserialize legacy chunkX should map to cx');
+  assert(chunk.cz === -2, 'deserialize legacy chunkZ should map to cz');
+}
 
-// --- Test: Chunk Construction ---
-console.log('\n[Chunk Construction]');
-
-const chunk = new Chunk(3, 7);
-assertEquals(chunk.chunkX, 3, 'Chunk X coordinate stored');
-assertEquals(chunk.chunkZ, 7, 'Chunk Z coordinate stored');
-assertEquals(chunk.worldX, 48, 'World X = chunkX * 16');
-assertEquals(chunk.worldZ, 112, 'World Z = chunkZ * 16');
-assert(!chunk.dirty, 'New chunk is not dirty');
-assertTrue(chunk.isEmpty(), 'New chunk is empty (all air)');
-
-// --- Test: Block Get/Set ---
-console.log('\n[Block Get/Set]');
-
-const testChunk = new Chunk(0, 0);
-
-assertEquals(testChunk.getBlock(8, 10, 8), BLOCK_TYPES.AIR, 'Default block is AIR');
-
-testChunk.setBlock(5, 0, 5, BLOCK_TYPES.GRASS);
-assertEquals(testChunk.getBlock(5, 0, 5), BLOCK_TYPES.GRASS, 'Set and get GRASS block');
-
-testChunk.setBlock(5, 1, 5, BLOCK_TYPES.STONE);
-assertEquals(testChunk.getBlock(5, 1, 5), BLOCK_TYPES.STONE, 'Set STONE above GRASS');
-assertEquals(testChunk.getBlock(5, 0, 5), BLOCK_TYPES.GRASS, 'Adjacent block unchanged');
-
-// Dirty flag
-assert(testChunk.dirty, 'Setting a block marks chunk dirty');
-
-// --- Test: Out of Bounds ---
-console.log('\n[Out of Bounds]');
-
-assertEquals(testChunk.getBlock(-1, 0, 0), BLOCK_TYPES.AIR, 'Negative X returns AIR');
-assertEquals(testChunk.getBlock(16, 0, 0), BLOCK_TYPES.AIR, 'X >= width returns AIR');
-assertEquals(testChunk.getBlock(0, -33, 0), BLOCK_TYPES.AIR, 'Below MIN_Y returns AIR');
-assertEquals(testChunk.getBlock(0, 65, 0), BLOCK_TYPES.AIR, 'Above MAX_Y returns AIR');
-
-// --- Test: World Coordinate Access ---
-console.log('\n[World Coordinates]');
-
-const wChunk = new Chunk(1, 1);
-wChunk.setBlock(0, 0, 0, BLOCK_TYPES.DIRT); // Local (0,0,0) → world (16, 0, 16)
-
-assertEquals(wChunk.getBlockAtWorld(16, 0, 16), BLOCK_TYPES.DIRT, 'World coordinates map correctly');
-assertEquals(wChunk.getBlockAtWorld(32, 0, 0), null, 'Outside chunk returns null (cx=2)');
-assertEquals(wChunk.getBlockAtWorld(0, 0, 0), null, 'Outside chunk returns null (cx=0)');
-
-// --- Test: Serialization ---
-console.log('\n[Serialization]');
-
-const serChunk = new Chunk(5, 10);
-serChunk.setBlock(3, 10, 4, BLOCK_TYPES.STONE);
-serChunk.setBlock(7, -5, 8, BLOCK_TYPES.COAL_ORE);
-serChunk.setBlock(12, 0, 12, BLOCK_TYPES.DIRT);
-
-const serialized = serChunk.serialize();
-assertEquals(serialized.chunkX, 5, 'Serialized chunkX preserved');
-assertEquals(serialized.chunkZ, 10, 'Serialized chunkZ preserved');
-assert(Array.isArray(serialized.indices), 'Indices is an array');
-assert(Array.isArray(serialized.types), 'Types is an array');
-assert(serialized.indices.length > 0, 'Indices contains entries');
-assertEquals(serialized.indices.length, serialized.types.length, 'indices and types have same length');
-
-// --- Test: Deserialization ---
-console.log('\n[Deserialization]');
-
-const deserialized = Chunk.deserialize(serialized);
-assertEquals(deserialized.chunkX, 5, 'Deserialized chunkX matches');
-assertEquals(deserialized.chunkZ, 10, 'Deserialized chunkZ matches');
-assertEquals(deserialized.getBlock(3, 10, 4), BLOCK_TYPES.STONE, 'STONE block restored');
-assertEquals(deserialized.getBlock(7, -5, 8), BLOCK_TYPES.COAL_ORE, 'Coal ore restored');
-assertEquals(deserialized.getBlock(12, 0, 12), BLOCK_TYPES.DIRT, 'Dirt block restored');
-
-// Check that air blocks are still air
-assertEquals(deserialized.getBlock(0, 0, 0), BLOCK_TYPES.AIR, 'Unset blocks are AIR after deserialization');
-
-// --- Test: Edge Data ---
-console.log('\n[Edge Data]');
-
-const edgeChunk = new Chunk(0, 0);
-edgeChunk.setBlock(15, 0, 7, BLOCK_TYPES.GRASS); // Positive Z edge
-edgeChunk.setBlock(0, 5, 0, BLOCK_TYPES.DIRT);   // Negative Z edge
-
-const posZEdge = edgeChunk.getEdgeData('positiveZ');
-assert(posZEdge.length === CHUNK_HEIGHT * CHUNK_WIDTH, 'Edge data has correct length');
-
-// --- Test: Mark Clean ---
-console.log('\n[Dirty Flag]');
-
-serChunk.markClean();
-assert(!serChunk.dirty, 'markClean() clears dirty flag');
-
-serChunk.setBlock(1, 1, 1, BLOCK_TYPES.IRON_ORE);
-assert(serChunk.dirty, 'Setting block after clean marks dirty again');
-
-// --- Test: Multiple Chunks Independent ---
-console.log('\n[Independence]');
-
-const chunkA = new Chunk(0, 0);
-const chunkB = new Chunk(1, 0);
-
-chunkA.setBlock(0, 0, 0, BLOCK_TYPES.GRASS);
-assertEquals(chunkB.getBlock(0, 0, 0), BLOCK_TYPES.AIR, 'Chunks are independent');
-
-// ============================================================
-// Report
-// ============================================================
-
-console.log('\n==========================');
+// ─── Results ────────────────────────────────────────────────────
+console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passCount} passed, ${failCount} failed`);
-
-if (failCount > 0) {
+if (failures.length > 0) {
   console.log('\nFailures:');
   failures.forEach(f => console.log(`  - ${f}`));
   process.exit(1);
 } else {
-  console.log('🎉 All chunk data tests passing!');
-  process.exit(0);
+  console.log('All tests passed!\n');
 }

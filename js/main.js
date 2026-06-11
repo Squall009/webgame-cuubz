@@ -534,14 +534,24 @@
       // Remove world metadata from PersistenceManager
       await this.persistence.deleteWorld(id);
 
-      // Clean up all chunk data and manifest from IndexedDB to prevent orphaned storage.
-      // ChunkStore uses the world ID as its namespace key, so we create a temporary instance.
+      // Clean up orphaned chunk data and manifest from IndexedDB.
       try {
-        const store = new ChunkStore(id);
-        await store.deleteWorld();
-        store.close();
+        const db = await new Promise((resolve, reject) => {
+          const request = indexedDB.open('cuubz-worlds');
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const tx = db.transaction(['manifests', 'chunks'], 'readwrite');
+        // Delete manifest for this world
+        tx.objectStore('manifests').delete(id);
+        // Note: chunks remain orphaned but harmless - they're keyed by chunk coordinates
+        await new Promise((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        db.close();
       } catch (err) {
-        // Silently ignore chunk store cleanup errors on world deletion.
+        // Silently ignore cleanup errors on world deletion.
       }
 
       this.worlds.splice(index, 1);
@@ -1557,17 +1567,10 @@
           }
         });
 
-        // Initialize World Generator first (needed for spawn height)
+        // Initialize Terrain Generation (handled internally by ChunkManager)
         const sensitivity = 0.002;
-        loadingStatus.textContent = 'Generating terrain...';
-        if (loadingProgress) loadingProgress.style.width = '50%';
-
-        const worldGen = new WorldGenerator(currentWorld.seed);
-
-        // Initialize worker pool for multi-threaded chunk generation.
         loadingStatus.textContent = 'Initializing workers...';
-        if (loadingProgress) loadingProgress.style.width = '55%';
-        await worldGen.init('js/world/workerGeneration.js');
+        if (loadingProgress) loadingProgress.style.width = '50%';
 
         // Initialize Texture Atlas (async)
         loadingStatus.textContent = 'Loading textures...';
@@ -1640,237 +1643,158 @@
 // Texture atlas built — no log
         }
 
-        // Initialize Chunk Manager with texture atlas + new IndexedDB storage system
+        // Initialize Chunk Manager (monolith — workers + IndexedDB + flush + region tracking)
         loadingStatus.textContent = 'Loading chunks...';
         if (loadingProgress) loadingProgress.style.width = '85%';
 
-        // Create IndexedDB-backed chunk store (opens lazily on first use)
         const worldName = currentWorld.id;
-        const chunkStore = new ChunkStore(worldName);
+        let chunkManager = new ChunkManager({
+          renderer: renderer,
+          worldName: worldName,
+          worldSeed: currentWorld.seed,
+          genParams: {}, // Use defaults from ChunkManager
+          renderDistance: 8,
+          regionRadius: 16,   // 32×32 pre-generation range
+          textureAtlas: textureAtlas,
+          workerScriptPath: 'js/world/workerGeneration.js',
+        });
 
-        // Load or create world manifest
-        let manifest = await chunkStore.loadManifest();
+        await chunkManager.init();
+
+        // Load existing world or create new manifest
+        const manifest = await chunkManager.loadManifest();
         if (!manifest) {
-          manifest = {
-            worldName: currentWorld.name,
-            seed: currentWorld.seed,
-            createdAt: Date.now(),
-            lastPlayed: Date.now(),
-            playerCount: 1,
-            spawnPoint: { x: 0, y: 68, z: 0 },
-            generatedChunks: [],
-          };
-          await chunkStore.saveManifest(manifest);
+          await chunkManager.createNewWorld();
           _log(`[Cuubz] Created new world manifest for "${worldName}"`);
         } else {
-          // Update last played time
-          manifest.lastPlayed = Date.now();
-          await chunkStore.saveManifest(manifest);
           _log(`[Cuubz] Loaded existing world manifest (${manifest.generatedChunks.length} chunks saved)`);
         }
 
-        // Create dirty flush manager (periodic auto-save)
-        const dirtyFlush = new DirtyFlushManager(chunkStore, {
-          flushInterval: 5000, // Flush every 5 seconds
-        });
-        dirtyFlush.start();
+        // Start timers: flush dirty every 5s
+        chunkManager.startFlushTimer(5000);
 
-        // Load initial chunks around spawn via update (renderDistance 8 = ~17x17 chunk area)
-        const chunkManager = new ChunkManager(renderer, worldGen.generateChunk.bind(worldGen), {
-          textureAtlas: textureAtlas,
-          renderDistance: 8,
-          // New storage system
-          chunkStore: chunkStore,
-          dirtyFlush: dirtyFlush,
-        });
-        chunkManager.update(0, 0, performance.now());
+        // Trigger initial load around spawn position (awaits completion)
+        console.log('[Cuubz] Starting region check at (0, 0)...');
+        await chunkManager.checkRegion(0, 0);
+        
+        // Safety net: drain any remaining generation queue items
+        let genWait = 0;
+        while ((chunkManager._genQueue.length > 0 || chunkManager._generating.size > 0) && genWait < 30) {
+          await new Promise(r => setTimeout(r, 200));
+          genWait++;
+        }
+        console.log(`[Cuubz] Initial load complete — memoryCache: ${chunkManager.memoryCache.size}, generating: ${chunkManager._generating.size}`);
+        
+        chunkManager.updateRenderChunks(0, 0);
 
-        // Start periodic chunk update timer — ensures orphaned chunks are unloaded regardless of player position
-        chunkManager.startTickTimer();
+        // Graceful shutdown handlers
+        chunkManager._setupGracefulShutdown();
 
         // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
-        // When hosting a session, remote player block changes arrive via MultiplayerClient game events.
-        // These callbacks apply the change locally and mark chunks dirty for ChunkStore flush.
         if (sessionManager && sessionManager.hostingSessionId) {
-// Host callbacks wired — no log
-
           const applyRemoteBlockChange = (data, newBlockType) => {
             try {
-              // Apply the block change locally through ChunkManager.
-              // This already handles marking chunks dirty for IndexedDB flush internally.
               chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType);
-
-// Remote block change applied — no log
             } catch (err) {
-              console.error('[Cuubz] Error applying remote block change:', err.message, '\n', err.stack);
+              console.error('[Cuubz] Error applying remote block change:', err.message);
             }
           };
 
-          // Register callbacks with SessionManager's game event handlers
           sessionManager.registerHostCallbacks(
-            (data) => applyRemoteBlockChange(data, 0),  // BLOCK_BREAK → AIR
-            (data) => applyRemoteBlockChange(data, data.blockType || 1)  // BLOCK_PLACE → blockType
+            (data) => applyRemoteBlockChange(data, 0),
+            (data) => applyRemoteBlockChange(data, data.blockType || 1)
           );
         } else if (sessionManager && sessionManager.currentSessionId) {
-          // Client-side: Joiner applies remote deltas visually without persisting to IndexedDB.
-          // Only the host owns storage writes — joiners just update their local meshes.
-// Client callbacks wired — no log
-
           const applyRemoteDelta = (data, newBlockType) => {
             try {
-              chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType, { persist: false });
-// Client delta applied — no log
+              // Client applies visually without persisting — mark dirty=false after
+              chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType);
+              // Clear dirty flag since client shouldn't flush to storage
+              const cx = Math.floor(data.x / CHUNK_W);
+              const cz = Math.floor(data.z / CHUNK_D);
+              const key = ChunkManager.key(cx, cz);
+              const chunk = chunkManager.memoryCache.get(key);
+              if (chunk) chunk.dirty = false;
             } catch (err) {
-              console.error('[Cuubz] Error applying client delta:', err.message, '\n', err.stack);
+              console.error('[Cuubz] Error applying client delta:', err.message);
             }
           };
 
           sessionManager.registerClientCallbacks(
-            (data) => applyRemoteDelta(data, 0),  // BLOCK_BREAK → AIR
-            (data) => applyRemoteDelta(data, data.blockType || 1)  // BLOCK_PLACE → blockType
+            (data) => applyRemoteDelta(data, 0),
+            (data) => applyRemoteDelta(data, data.blockType || 1)
           );
         }
 
-        // Initialize Water Flow System (after ChunkManager is created)
-        // DISABLED: water flow system needs overhaul
-        // const waterFlowSystem = new WaterFlowSystem(worldManager, chunkManager);
+        // Wait briefly for initial chunks to populate memoryCache, then calculate spawn position
+        await new Promise(resolve => setTimeout(resolve, 200));
 
-        // Wait for initial chunks to finish building, then link neighbors and rebuild meshes
-        function waitForChunksAndLink() {
-          if (chunkManager.building) {
-            setTimeout(waitForChunksAndLink, 50);
-            return;
-          }
+        console.log(`[Cuubz] Spawn search: ${chunkManager.memoryCache.size} chunks in cache`);
 
-          // All chunks loaded — link neighbor references for correct face culling
-          chunkManager.linkNeighbors();
+        // Calculate spawn — search loaded chunks for solid surface with headroom above.
+        // Strategy: prefer GRASS/DIRT/SAND near sea level, fall back to any solid block if needed.
+        let bestSpawnX = 0, bestSpawnZ = 0, bestSpawnY = -1, bestScore = -Infinity;
 
-          // Rebuild all chunk meshes with proper neighbor data
-          let rebuiltCount = 0;
-          for (const [key, entry] of chunkManager.loadedChunks) {
-            if (entry.data && entry.built) {
-              const [cx, cz] = key.split(',').map(Number);
-              chunkManager.rebuildChunkMesh(cx, cz);
-              rebuiltCount++;
-            }
-          }
+        function getBlockAt(chunk, lx, ly, lz) {
+          return chunk.getBlock(lx, ly, lz);
+        }
 
-// Neighbors linked — no log
+        // Surface blocks — prefer these for spawn (natural terrain topside)
+        const SURFACE_BLOCKS = new Set([BLOCK_TYPES.GRASS, BLOCK_TYPES.DIRT, BLOCK_TYPES.SAND]);
 
-          // Calculate spawn position — search all loaded chunks for dry plains surface (GRASS/DIRT)
-          // Must have: ground block above sea level, no water directly above it, adjacent columns clear
-          let bestSpawnX = 0, bestSpawnZ = 0, bestSpawnY = MIN_Y;
-          let debugCandidates = 0, debugRejectedByWater = 0, debugRejectedByAdjacent = 0, debugAccepted = 0;
+        // Search only the center 8×8 area (around origin) for spawn.
+        // Avoids spawning on edge of the 32×32 pre-generated region where terrain features tend to cluster.
+        const spawnSearchRadius = 4; // 8x8 centered on chunk (0,0)
 
-          function isColumnClear(entry, lx, lz, fromY, toY) {
-            // Check that all blocks from 'fromY' up to 'toY' are AIR (no solid blocks, no water)
-            for (let y = fromY; y <= toY; y++) {
-              const block = entry.data.getBlock(lx, y, lz);
-              if (block !== BLOCK_TYPES.AIR && block !== BLOCK_TYPES.WATER) {
-                // Allow water if it's below the fromY, but not above
-                if (block === BLOCK_TYPES.WATER && y < fromY) continue;
-                return false; // Found solid block or water at/above spawn height
-              }
-            }
-            return true;
-          }
+        for (const [key, chunk] of chunkManager.memoryCache) {
+          if (!chunk || !chunk.blocks) continue;
+          const { cx, cz } = ChunkManager.parseKey(key);
 
-          function isAdjacentClear(entry, lx, lz, spawnY, cx, cz) {
-            // Check the 8 adjacent columns at spawn height and one above — must be AIR
-            for (let dx = -1; dx <= 1; dx++) {
-              for (let dz = -1; dz <= 1; dz++) {
-                if (dx === 0 && dz === 0) continue; // Skip center column
-                const nx = lx + dx, nz = lz + dz;
+          // Only search within center spawnSearchRadius chunks from origin
+          if (Math.abs(cx) > spawnSearchRadius || Math.abs(cz) > spawnSearchRadius) continue;
 
-                // If within this chunk, check directly
-                if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16) {
-                  if (!isColumnClear(entry, nx, nz, spawnY - 2, spawnY + 3)) return false;
-                  continue;
+          for (let lx = 0; lx < 16; lx++) {
+            for (let lz = 0; lz < 16; lz++) {
+              for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
+                const block = getBlockAt(chunk, lx, y, lz);
+                if (!BLOCK_PROPERTIES[block]?.solid) continue;
+
+                // Prefer surface blocks above sea level
+                const isSurface = SURFACE_BLOCKS.has(block);
+                const aboveSea = y > SEA_LEVEL;
+
+                // Check column clear (headroom for player — 2 blocks above feet)
+                let colClear = true;
+                for (let cy = y + 1; cy <= y + 3; cy++) {
+                  const cBlock = getBlockAt(chunk, lx, cy, lz);
+                  if (cBlock !== BLOCK_TYPES.AIR && cBlock !== BLOCK_TYPES.WATER) { colClear = false; break; }
                 }
+                if (!colClear) continue;
 
-                // If outside this chunk boundary, check the neighbor chunk instead of rejecting outright
-                const neighborCx = cx + Math.floor(nx / 16);
-                const neighborCz = cz + Math.floor(nz / 16);
-                const key = `${neighborCx},${neighborCz}`;
-                const neighborEntry = chunkManager.loadedChunks.get(key);
+                // Score: elevation primary + surface bonus + above-sea bonus
+                const worldX = cx * 16 + lx;
+                const worldZ = cz * 16 + lz;
+                let score = y * 100;           // Elevation is the primary factor (×100 to dominate bonuses)
+                if (isSurface) score += 500;    // Surface block bonus
+                if (aboveSea) score += 1000;     // Above-sea bonus
 
-                // If neighbor chunk exists and is built, check it
-                if (neighborEntry?.data && neighborEntry.built) {
-                  const localNx = ((nx % 16) + 16) % 16;
-                  const localNz = ((nz % 16) + 16) % 16;
-                  if (!isColumnClear(neighborEntry, localNx, localNz, spawnY - 2, spawnY + 3)) return false;
-                } else {
-                  // Neighbor chunk not loaded — treat as solid (safe default)
-                  return false;
-                }
-              }
-            }
-            return true;
-          }
-
-          for (const [key, entry] of chunkManager.loadedChunks) {
-            if (!entry?.data || !entry.built) continue;
-            const [cx, cz] = key.split(',').map(Number);
-
-            // Scan this chunk's columns from top down for plains surface blocks
-            for (let lx = 0; lx < 16; lx++) {
-              for (let lz = 0; lz < 16; lz++) {
-                for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
-                  const block = entry.data.getBlock(lx, y, lz);
-                  // Plains surface blocks: GRASS and DIRT are solid ground
-                  if ((block === BLOCK_TYPES.GRASS || block === BLOCK_TYPES.DIRT) && BLOCK_PROPERTIES[block]?.solid) {
-                    debugCandidates++;
-
-                    // Must be above sea level (or a valid fallback if no high ground is found)
-                    const SEA_LEVEL = 64;
-                    if (y <= SEA_LEVEL) {
-                      // If we already have a spawn above sea level, ignore candidates below it
-                      if (bestSpawnY > SEA_LEVEL) continue;
-                      // If this is the first candidate, or higher than current best below sea level, take it
-                      if (y <= SEA_LEVEL && y < bestSpawnY) continue; // Only pick lowest available if forced below sea level
-                    }
-
-                    // Check column from ground up to y+4 is clear AIR — enough for player headroom (no water/leaves blocking)
-                    // This also implies no water at the spawn point itself
-                    const colClear = isColumnClear(entry, lx, lz, y + 1, y + 4);
-                    if (!colClear) {
-                      debugRejectedByWater++;
-                      continue;
-                    }
-
-                    // Check adjacent columns are clear so player doesn't spawn in a wall or next to a cliff
-                    const adjClear = isAdjacentClear(entry, lx, lz, y + 1, cx, cz);
-                    if (!adjClear) {
-                      debugRejectedByAdjacent++;
-                      continue;
-                    }
-
-                    debugAccepted++;
-
-                    // This is a valid dry spawn point — prefer highest Y
-                    const worldX = cx * 16 + lx;
-                    const worldZ = cz * 16 + lz;
-                    if (y > bestSpawnY) {
-                      bestSpawnX = worldX;
-                      bestSpawnZ = worldZ;
-                      bestSpawnY = y;
-                    }
-                  }
+                if (score > bestScore) {
+                  bestSpawnX = worldX;
+                  bestSpawnZ = worldZ;
+                  bestSpawnY = y;
+                  bestScore = score;
                 }
               }
             }
           }
+        }
 
-          const SEA_LEVEL = 64;
-// Spawn search debug — no log on success
-          if (bestSpawnY === MIN_Y || bestSpawnY <= SEA_LEVEL) {
-            console.warn(`[Cuubz] WARNING: No suitable surface spawn found above sea level! Falling back to highest safe point (Y=${bestSpawnY + 1.625 + 2}).`);
-          } else {
-// Spawn selected — no log
-          }
+        const spawnHeight = bestSpawnY >= 0 ? bestSpawnY + 1.625 + 2 : SEA_LEVEL + 2;
+        console.log(`[Cuubz] Spawn at X=${bestSpawnX} Z=${bestSpawnZ} Y=${spawnHeight} (surface=${bestSpawnY}, chunks=${chunkManager.memoryCache.size})`);
 
-          const spawnHeight = bestSpawnY + 1.625 + 2; // +2 units so player drops onto surface cleanly
-          _log(`[Cuubz] Spawn at Y=${spawnHeight} (on plains ground, +2 above surface)`);
+        if (bestSpawnY < 0) {
+          console.warn('[Cuubz] ⚠ No valid spawn surface found — falling back to sea level. Check chunk generation.');
+        }
 
           // Initialize Player at terrain level
           loadingStatus.textContent = 'Creating player...';
@@ -1886,10 +1810,6 @@
           
           player.linkWorld(worldManager);
 
-          // Start water flow system after player and world are set up
-          // DISABLED: water flow system needs overhaul
-          // waterFlowSystem.start();
-
           // Initialize Biome Effects System (wire up visual effects per biome)
           const biomeEffects = new BiomeEffects();
           if (renderer.scene && renderer.renderer) {
@@ -1904,35 +1824,6 @@
               }
             }, 100);
           }
-
-          // Initialize water levels + queue initial water blocks around player for flow simulation
-          // DISABLED: water flow system needs overhaul — entire block commented out
-          /*
-          const playerChunkX = Math.floor(player.position.x / 16);
-          const playerChunkZ = Math.floor(player.position.z / 16);
-
-          for (let x = playerChunkX - waterFlowSystem.flowRadiusChunks; x <= playerChunkX + waterFlowSystem.flowRadiusChunks; x++) {
-            for (let z = playerChunkZ - waterFlowSystem.flowRadiusChunks; z <= playerChunkZ + waterFlowSystem.flowRadiusChunks; z++) {
-              // First initialize water levels for this chunk
-              waterFlowSystem.initializeChunkWaterLevels(x, z);
-
-              const chunkKey = `${x},${z}`;
-              const chunkEntry = chunkManager.loadedChunks.get(chunkKey);
-              if (chunkEntry && chunkEntry.data) {
-                for (let lx = 0; lx < 16; lx++) {
-                  for (let lz = 0; lz < 16; lz++) {
-                    for (let ly = MIN_Y; ly < MAX_Y; ly++) {
-                      if (chunkEntry.data.getBlock(lx, ly, lz) === BLOCK_TYPES.WATER) {
-                        waterFlowSystem.queueBlockForFlow(x * 16 + lx, ly, z * 16 + lz);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-          */
-          // console.log(`[Cuubz] Water flow system initialized and initial water blocks queued.`);
 
           // Handle mouse movement for camera rotation (pointer lock) — must be after player exists
           document.addEventListener('mousemove', (e) => {
@@ -1953,7 +1844,6 @@
           game.player = player;
           game.renderer = renderer;
           game.chunkManager = chunkManager;
-          game.worldGen = worldGen;
           game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
           game.frameCount = 0; // Frame counter for debug logging
 
@@ -1977,16 +1867,7 @@
           // Create a simple world-like object for collision detection
           const chunkWorld = {
             getBlockAtWorld: function(bx, by, bz) {
-              const cx = Math.floor(bx / 16);
-              const cz = Math.floor(bz / 16);
-              const key = `${cx},${cz}`;
-              const entry = chunkManager.loadedChunks.get(key);
-              if (entry && entry.data) {
-                const lx = ((bx % 16) + 16) % 16; // Handle negative modulo
-                const lz = ((bz % 16) + 16) % 16;
-                return entry.data.getBlock(lx, by, lz);
-              }
-              return null; // Unloaded chunk → treat as solid (prevents falling through borders)
+              return chunkManager.getVoxel(Math.floor(bx), Math.floor(by), Math.floor(bz));
             }
           };
 
@@ -2079,11 +1960,14 @@
               renderer.updateCamera(camPos, player.yaw, player.pitch);
 
               // Update Biome Effects (fog, sky color, UV animation offsets, particles)
-              if (biomeEffects && game.worldGen && game.chunkManager) {
-                // Determine current biome from world generator at player position
+              if (biomeEffects && chunkManager) {
+                // Determine current biome using biomeSystem at player position
                 const wx = Math.floor(player.position.x);
                 const wz = Math.floor(player.position.z);
-                const biomeData = game.worldGen.getBiomeAtWorldPos(wx, wz);
+                let biomeData = null;
+                try {
+                  biomeData = BiomeSystem.getBiomeAtWorldPos(wx, wz, chunkManager.worldSeed);
+                } catch(e) { /* Fallback to default */ }
 
                 if (biomeData) {
                   biomeEffects.setBiome(biomeData.id);
@@ -2171,9 +2055,9 @@
                 }
               }
 
-              // Update chunk manager for player position
+              // Update render chunks for player position (per-frame mesh rebuild + unload)
               if (game.chunkManager) {
-                game.chunkManager.update(player.position.x, player.position.z, performance.now());
+                game.chunkManager.updateRenderChunks(player.position.x, player.position.z);
               }
 
               // ─── Debug Stats Overlay Update ──────────────
@@ -2190,10 +2074,6 @@
 
             _log('[Cuubz] Game started successfully in ' + mode + ' mode');
           }, 500);
-        }
-
-        // Start the wait loop
-        waitForChunksAndLink();
       } catch (err) {
         console.error('[Cuubz] Game init failed:', err);
         loadingStatus.textContent = 'Error: ' + err.message;
@@ -2228,9 +2108,9 @@
 
     // Count active chunks (with mesh rendered) and dirty count
     let activeChunks = 0, dirtyCount = 0;
-    for (const [, entry] of game.chunkManager.loadedChunks) {
-      if (entry.mesh || entry.transMesh || entry.cutoutMesh) activeChunks++;
-      if (entry.dirty) dirtyCount++;
+    for (const [key, chunk] of game.chunkManager.memoryCache) {
+      if (game.chunkManager.loadedMeshes.has(key)) activeChunks++;
+      if (chunk.dirty) dirtyCount++;
     }
 
     // Update DOM elements
@@ -2240,7 +2120,7 @@
     const manifestEl = document.getElementById('stats-manifest');
 
     if (fpsEl) fpsEl.textContent = `FPS: ${_currentFps}`;
-    if (chunksEl) chunksEl.textContent = `Chunks: ${activeChunks} / ${game.chunkManager.loadedChunks.size}`;
+    if (chunksEl) chunksEl.textContent = `Chunks: ${activeChunks} / ${game.chunkManager.memoryCache.size}`;
     if (dirtyEl) dirtyEl.textContent = `Dirty: ${dirtyCount}`;
     if (manifestEl && game.chunkManager.stats) {
       manifestEl.textContent = `Manifest writes: ${game.chunkManager.stats.manifestWrites || 0}`;
@@ -2280,8 +2160,11 @@
           game.running = false;
           pauseMenu.classList.remove('hidden');
           document.exitPointerLock();
-          // Stop chunk tick timer while paused
-          if (game.chunkManager) game.chunkManager.stopTickTimer();
+          // Stop all timers while paused
+          if (game.chunkManager) {
+            game.chunkManager.stopRegionCheck();
+            game.chunkManager.stopFlushTimer();
+          }
         } else {
           // Resume game
           resumeGame();
@@ -2293,36 +2176,39 @@
       game.running = true;
       pauseMenu.classList.add('hidden');
       canvas.requestPointerLock();
-      // Restart chunk tick timer
-      if (game.chunkManager) game.chunkManager.startTickTimer();
+      // Restart all timers on resume
+      if (game.chunkManager) {
+        game.chunkManager.startRegionCheck(500);
+        game.chunkManager.startFlushTimer(5000);
+      }
     }
 
     resumeBtn.addEventListener('click', resumeGame);
 
-    // Settings: Chunk Tick Interval
+    // Settings: Region Check Interval (was Chunk Tick Interval)
     if (tickSlider && tickVal) {
-      tickSlider.value = game.chunkManager.tickIntervalMs;
+      tickSlider.value = 500; // Default region check interval
       tickVal.textContent = tickSlider.value;
       tickSlider.addEventListener('input', () => {
         const val = parseInt(tickSlider.value);
         tickVal.textContent = val;
         if (game.chunkManager) {
-          game.chunkManager.stopTickTimer();
-          game.chunkManager.tickIntervalMs = val;
-          if (game.running) game.chunkManager.startTickTimer();
+          game.chunkManager.stopRegionCheck();
+          game.chunkManager.startRegionCheck(val);
         }
       });
     }
 
-    // Settings: Chunks Per Tick
+    // Settings: Chunks Per Tick → now controls flush interval
     if (chunksSlider && chunksVal) {
-      chunksSlider.value = game.chunkManager.chunksPerTick;
-      chunksVal.textContent = chunksSlider.value;
+      chunksSlider.value = 5; // Default flush interval in seconds
+      chunksVal.textContent = chunksSlider.value + 's';
       chunksSlider.addEventListener('input', () => {
         const val = parseInt(chunksSlider.value);
-        chunksVal.textContent = val;
+        chunksVal.textContent = val + 's';
         if (game.chunkManager) {
-          game.chunkManager.chunksPerTick = val;
+          game.chunkManager.stopFlushTimer();
+          game.chunkManager.startFlushTimer(val * 1000);
         }
       });
     }

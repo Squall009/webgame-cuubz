@@ -38,13 +38,8 @@ class ChunkMeshBuilder {
 
   /**
    * Build merged geometry from chunk data (separate solid + transparent)
-   * @param {Chunk} chunk - Chunk data structure
-   * @param {TextureAtlas} atlas - Optional texture atlas for UV mapping
-   * @param {Function} neighborLookup - Cross-chunk block lookup: (worldX, worldY, worldZ) => blockType
-   * @param {Function} waterLevelLookup - Cross-chunk water level lookup: (worldX, worldY, worldZ) => level
-   * @returns {Object} Geometry data: positions, normals, uvs, indices, transparentPositions, etc.
    */
-  buildMeshData(chunk, atlas, neighborLookup = null, waterLevelLookup = null) {
+  buildMeshData(chunk, atlas, neighborLookup = null) {
     // Solid geometry arrays
     const positions = [];
     const normals = [];
@@ -129,8 +124,8 @@ class ChunkMeshBuilder {
               } else {
                 // Neighbor is outside chunk bounds — use cross-chunk lookup or default to air
                 if (neighborLookup) {
-                  const worldX = chunk.chunkX * 16 + x;
-                  const worldZ = chunk.chunkZ * 16 + z;
+                  const worldX = chunk.cx * 16 + x;
+                  const worldZ = chunk.cz * 16 + z;
                   neighborBlock = neighborLookup(worldX + face.dir[0], ny, worldZ + face.dir[2]);
                 } else {
                   // No cross-chunk data available — draw the face to be safe
