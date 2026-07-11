@@ -1840,7 +1840,7 @@
           if (loadingProgress) loadingProgress.style.width = '90%';
 
           const game = new CuubzGame();
-          game.mode = mode || 'survival';
+          game.setMode(mode || 'survival');
           game.player = player;
           game.renderer = renderer;
           game.chunkManager = chunkManager;

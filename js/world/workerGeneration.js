@@ -54,7 +54,7 @@
   // treeMaxY: trees won't place above this height
   // flowerMaxY: flowers won't place above this height
   var FEATURE_RATES = {
-    'Forest':       { treeChance: 0.35, redFlowerChance: 0.06, yellowFlowerChance: 0.06, treeMaxY: 125, flowerMaxY: 120 },
+    'Forest':       { treeChance: 0.09, redFlowerChance: 0.015, yellowFlowerChance: 0.015, treeMaxY: 125, flowerMaxY: 120 },
     'Plains':       { treeChance: 0.15, redFlowerChance: 0.12, yellowFlowerChance: 0.12, treeMaxY: 125, flowerMaxY: 120 },
     'Mountains':    { treeChance: 0.08, redFlowerChance: 0.02, yellowFlowerChance: 0.02, treeMaxY: 110, flowerMaxY: 115 },
     'Beach':        { treeChance: 0.03, redFlowerChance: 0.01, yellowFlowerChance: 0.01, treeMaxY: 125, flowerMaxY: 120 },
