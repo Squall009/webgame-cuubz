@@ -247,31 +247,20 @@
   // Receives biomeMap (256 entries, one per column) with biome names from Phase 1.
   function placeFeatures(chunk, surfaceMap, biomeMap, rng) {
     var placedTrees = []; // [{lx, lz}] for exclusion zone checks
-
-    // ── Debug: count biome distribution and grass columns ──────────
-    var debugCounts = {};
-    var grassCols = 0, eligibleCols = 0;
-    for (var dbg = 0; dbg < 256; dbg++) {
-      var dbgName = biomeMap[dbg];
-      debugCounts[dbgName] = (debugCounts[dbgName] || 0) + 1;
-      var dbgY = surfaceMap[dbg];
-      var dbgLx = dbg % 16, dbgLz = Math.floor(dbg / 16);
-      if (chunk[cidx(dbgLx, dbgY, dbgLz)] === BLOCK.GRASS) grassCols++;
-      if (chunk[cidx(dbgLx, dbgY, dbgLz)] === BLOCK.GRASS && FEATURE_RATES[dbgName] && FEATURE_RATES[dbgName].treeChance > 0) eligibleCols++;
-    }
-    console.log('[placeFeatures] biomeMap:', JSON.stringify(debugCounts), 'grassCols:', grassCols, 'eligibleCols:', eligibleCols);
+    var treeCount = 0, flowerCount = 0;
 
     // ── Tree placement pass ────────────────────────────────────────
     for (var lx = 0; lx < 16; lx++) {
       for (var lz = 0; lz < 16; lz++) {
-        var surfY = surfaceMap[lx * 16 + lz];
+        var idx = lx * 16 + lz;
+        var surfY = surfaceMap[idx];
         if (surfY < 2 || surfY >= CHUNK_H - 10) continue;
 
         // Trees only on grass blocks.
         if (chunk[cidx(lx, surfY, lz)] !== BLOCK.GRASS) continue;
 
         // Look up biome rates.
-        var biomeName = biomeMap[lx * 16 + lz];
+        var biomeName = biomeMap[idx];
         var rates = FEATURE_RATES[biomeName];
         if (!rates || rates.treeChance <= 0) continue;
 
@@ -279,7 +268,8 @@
         if (surfY > rates.treeMaxY) continue;
 
         // Roll against per-column chance.
-        if (rng() > rates.treeChance) continue;
+        var roll = rng();
+        if (roll > rates.treeChance) continue;
 
         // Check exclusion zone (4-block radius from any placed tree).
         var tooClose = false;
@@ -330,20 +320,22 @@
         }
 
         placedTrees.push({ lx: lx, lz: lz });
+        treeCount++;
       }
     }
 
     // ── Flower placement pass ──────────────────────────────────────
     for (var lx = 0; lx < 16; lx++) {
       for (var lz = 0; lz < 16; lz++) {
-        var surfY = surfaceMap[lx * 16 + lz];
+        var idx = lx * 16 + lz;
+        var surfY = surfaceMap[idx];
         if (surfY < 1 || surfY >= CHUNK_H - 1) continue;
 
         // Flowers only on grass blocks.
         if (chunk[cidx(lx, surfY, lz)] !== BLOCK.GRASS) continue;
 
         // Look up biome rates.
-        var biomeName = biomeMap[lx * 16 + lz];
+        var biomeName = biomeMap[idx];
         var rates = FEATURE_RATES[biomeName];
         if (!rates) continue;
 
@@ -358,17 +350,24 @@
         if (treeHere) continue;
 
         // Roll for red flower.
-        if (rates.redFlowerChance > 0 && rng() < rates.redFlowerChance) {
+        var rollR = rng();
+        if (rates.redFlowerChance > 0 && rollR < rates.redFlowerChance) {
           chunk[cidx(lx, surfY + 1, lz)] = BLOCK.RED_FLOWER;
+          flowerCount++;
           continue; // Only one flower per column.
         }
 
         // Roll for yellow flower.
-        if (rates.yellowFlowerChance > 0 && rng() < rates.yellowFlowerChance) {
+        var rollY = rng();
+        if (rates.yellowFlowerChance > 0 && rollY < rates.yellowFlowerChance) {
           chunk[cidx(lx, surfY + 1, lz)] = BLOCK.YELLOW_FLOWER;
+          flowerCount++;
         }
       }
     }
+
+    // Diagnostic (worker console — check Workers filter in DevTools).
+    console.log('[placeFeatures] trees=' + treeCount + ' flowers=' + flowerCount + ' biomeSample=' + (biomeMap[0] || 'undefined'));
   }
 
   // ── Ore placement ───────────────────────────────────────────────────

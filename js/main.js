@@ -1840,8 +1840,8 @@
           if (loadingProgress) loadingProgress.style.width = '90%';
 
           const game = new CuubzGame();
-          game.setMode(mode || 'survival');
           game.player = player;
+          game.setMode(mode || 'survival');
           game.renderer = renderer;
           game.chunkManager = chunkManager;
           game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
