@@ -22,7 +22,9 @@
     AIR: 0, BEDROCK: 1, STONE: 2, DIRT: 3, GRASS: 4, SAND: 5, GRAVEL: 6,
     WATER: 7, COAL_ORE: 8, IRON_ORE: 9, GOLD_ORE: 10, DIAMOND_ORE: 11,
     CAVE_AIR: 12, SNOW: 13, SNOW_STONE: 14, LAVA: 15, TERRACOTTA: 16,
-    RED_SAND: 17, ICE: 18, CLAY: 19
+    RED_SAND: 17, ICE: 18, CLAY: 19,
+    // Decoration blocks (IDs match chunkData.js)
+    WOOD_LOG: 32, LEAVES: 33, RED_FLOWER: 42, YELLOW_FLOWER: 43
   };
 
   // ── Biome definitions (must match biomeSystem.js) ───────────────────
@@ -44,6 +46,24 @@
   ];
 
   var SEA_LEVEL = 64;
+
+  // ── Feature placement rates per biome ─────────────────────────────
+  // treeChance: per-column probability of attempting tree placement
+  // redFlowerChance / yellowFlowerChance: per-column probability of placing a flower
+  // treeMaxY: trees won't place above this height
+  // flowerMaxY: flowers won't place above this height
+  var FEATURE_RATES = {
+    'Forest':       { treeChance: 0.35, redFlowerChance: 0.06, yellowFlowerChance: 0.06, treeMaxY: 125, flowerMaxY: 120 },
+    'Plains':       { treeChance: 0.15, redFlowerChance: 0.12, yellowFlowerChance: 0.12, treeMaxY: 125, flowerMaxY: 120 },
+    'Mountains':    { treeChance: 0.08, redFlowerChance: 0.02, yellowFlowerChance: 0.02, treeMaxY: 110, flowerMaxY: 115 },
+    'Beach':        { treeChance: 0.03, redFlowerChance: 0.01, yellowFlowerChance: 0.01, treeMaxY: 125, flowerMaxY: 120 },
+    'Tundra':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    'Desert':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    'Badlands':     { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    'Frozen Peaks': { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    'Ocean':        { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    'Deep Ocean':   { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 }
+  };
 
   // ── Ore definitions ────────────────────────────────────────────────
   var ORE_DEFS = [
@@ -221,6 +241,122 @@
     return { baseY: sumBase / sumW, amplitude: sumAmp / sumW, biome: dominantBiome, isCold: blendedTemp < -0.35 };
   }
 
+  // ── Feature placement (trees + flowers) ─────────────────────────────
+  // Called as Phase 4 after terrain, caves, and ores are complete.
+  // Receives biomeMap (256 entries, one per column) with biome names from Phase 1.
+  function placeFeatures(chunk, surfaceMap, biomeMap, rng) {
+    var placedTrees = []; // [{lx, lz}] for exclusion zone checks
+
+    // ── Tree placement pass ────────────────────────────────────────
+    for (var lx = 0; lx < 16; lx++) {
+      for (var lz = 0; lz < 16; lz++) {
+        var surfY = surfaceMap[lx * 16 + lz];
+        if (surfY < 2 || surfY >= CHUNK_H - 10) continue;
+
+        // Trees only on grass blocks.
+        if (chunk[cidx(lx, surfY, lz)] !== BLOCK.GRASS) continue;
+
+        // Look up biome rates.
+        var biomeName = biomeMap[lx * 16 + lz];
+        var rates = FEATURE_RATES[biomeName];
+        if (!rates || rates.treeChance <= 0) continue;
+
+        // Elevation cap.
+        if (surfY > rates.treeMaxY) continue;
+
+        // Roll against per-column chance.
+        if (rng() > rates.treeChance) continue;
+
+        // Check exclusion zone (4-block radius from any placed tree).
+        var tooClose = false;
+        for (var t = 0; t < placedTrees.length; t++) {
+          var dx = lx - placedTrees[t].lx;
+          var dz = lz - placedTrees[t].lz;
+          if (Math.abs(dx) < 4 && Math.abs(dz) < 4) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+
+        // Place tree: 4-block trunk + 5×5×5 leaf canopy.
+        var trunkH = 4;
+        var baseY = surfY + 1; // First log sits on top of grass.
+
+        // Trunk.
+        for (var ty = 0; ty < trunkH; ty++) {
+          var logY = baseY + ty;
+          if (logY < CHUNK_H) {
+            chunk[cidx(lx, logY, lz)] = BLOCK.WOOD_LOG;
+          }
+        }
+
+        // Leaf canopy: 5×5×5 centered at top of trunk.
+        var canopyCenterY = baseY + trunkH;
+        for (var cx = -2; cx <= 2; cx++) {
+          for (var cy = -2; cy <= 2; cy++) {
+            for (var cz = -2; cz <= 2; cz++) {
+              var bx = lx + cx;
+              var by = canopyCenterY + cy;
+              var bz = lz + cz;
+
+              // Skip trunk area (center column below canopy center).
+              if (cx === 0 && cz === 0 && cy < 0) continue;
+
+              // Round corners: skip if all three axes are at edge.
+              if (Math.abs(cx) === 2 && Math.abs(cy) === 2 && Math.abs(cz) === 2) continue;
+
+              // Bounds check.
+              if (bx >= 0 && bx < 16 && bz >= 0 && bz < 16 && by >= 0 && by < CHUNK_H) {
+                // Only place in air or replace existing leaves.
+                var existing = chunk[cidx(bx, by, bz)];
+                if (existing === BLOCK.AIR || existing === BLOCK.CAVE_AIR || existing === BLOCK.LEAVES) {
+                  chunk[cidx(bx, by, bz)] = BLOCK.LEAVES;
+                }
+              }
+            }
+          }
+        }
+
+        placedTrees.push({ lx: lx, lz: lz });
+      }
+    }
+
+    // ── Flower placement pass ──────────────────────────────────────
+    for (var lx = 0; lx < 16; lx++) {
+      for (var lz = 0; lz < 16; lz++) {
+        var surfY = surfaceMap[lx * 16 + lz];
+        if (surfY < 1 || surfY >= CHUNK_H - 1) continue;
+
+        // Flowers only on grass blocks.
+        if (chunk[cidx(lx, surfY, lz)] !== BLOCK.GRASS) continue;
+
+        // Look up biome rates.
+        var biomeName = biomeMap[lx * 16 + lz];
+        var rates = FEATURE_RATES[biomeName];
+        if (!rates) continue;
+
+        // Elevation cap.
+        if (surfY > rates.flowerMaxY) continue;
+
+        // Check if a tree is already on this column — skip flowers under trees.
+        var treeHere = false;
+        for (var t = 0; t < placedTrees.length; t++) {
+          if (placedTrees[t].lx === lx && placedTrees[t].lz === lz) { treeHere = true; break; }
+        }
+        if (treeHere) continue;
+
+        // Roll for red flower.
+        if (rates.redFlowerChance > 0 && rng() < rates.redFlowerChance) {
+          chunk[cidx(lx, surfY + 1, lz)] = BLOCK.RED_FLOWER;
+          continue; // Only one flower per column.
+        }
+
+        // Roll for yellow flower.
+        if (rates.yellowFlowerChance > 0 && rng() < rates.yellowFlowerChance) {
+          chunk[cidx(lx, surfY + 1, lz)] = BLOCK.YELLOW_FLOWER;
+        }
+      }
+    }
+  }
+
   // ── Ore placement ───────────────────────────────────────────────────
   function placeOres(chunk, rng) {
     for (var oi = 0; oi < ORE_DEFS.length; oi++) {
@@ -251,13 +387,15 @@
     var p = createSharedPerlin(seed);
     var sInt = hashString(String(seed));
 
-    // Separate RNG streams for surface, caves, ores (deterministic per-chunk).
+    // Separate RNG streams for surface, caves, ores, features (deterministic per-chunk).
     var rngSurface = mulberry32(sInt ^ ((chunkX * 73856093) ^ (chunkZ * 19349663)) ^ 0x1000);
     var rngCave    = mulberry32(sInt ^ ((chunkX * 73856093) ^ (chunkZ * 19349663)) ^ 0x2000);
     var rngOre     = mulberry32(sInt ^ ((chunkX * 73856093) ^ (chunkZ * 19349663)) ^ 0x3000);
+    var rngFeature = mulberry32(sInt ^ ((chunkX * 73856093) ^ (chunkZ * 19349663)) ^ 0x4000);
 
     var chunk      = new Uint8Array(CHUNK_W * CHUNK_H * CHUNK_D);
     var surfaceMap = new Int32Array(256); // Used internally for cave carving phase
+    var biomeMap   = new Array(256);      // Biome name string per column, for feature placement
 
     // ── Phase 1: Terrain + block placement per column ────────────────
     for (var lx = 0; lx < 16; lx++) {
@@ -359,6 +497,7 @@
         // Clamp surface height.
         var surfY = Math.max(5, Math.min(CHUNK_H - 2, baseTerrainY));
         surfaceMap[lx * 16 + lz] = surfY;
+        biomeMap[lx * 16 + lz] = blended.biome.name;
 
         var isSub = surfY <= SEA_LEVEL + 1;
 
@@ -455,6 +594,9 @@
 
     // ── Phase 3: Ore placement ───────────────────────────────────────
     placeOres(chunk, rngOre);
+
+    // ── Phase 4: Feature placement (trees + flowers) ─────────────────
+    placeFeatures(chunk, surfaceMap, biomeMap, rngFeature);
 
     // Return result (used by both worker and inline fallback).
     return {
