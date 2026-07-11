@@ -203,7 +203,7 @@ class ChunkManager {
     if (this._disposed) return;
 
     try {
-      const response = await fetch(this.workerScriptPath);
+      const response = await fetch(this.workerScriptPath + (this.workerScriptPath.includes('?') ? '&' : '?') + 'v=' + Date.now());
       const source = await response.text();
       const blob = new Blob([source], { type: 'application/javascript' });
       this._blobUrl = URL.createObjectURL(blob);

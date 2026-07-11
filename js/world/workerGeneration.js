@@ -8,6 +8,7 @@
 
 (function (globalScope) {
   'use strict';
+  console.log('[workerGeneration] *** v2 with feature placement loaded ***');
 
   // ── Chunk constants (must match main thread) ───────────────────────
   var CHUNK_W = 16;
