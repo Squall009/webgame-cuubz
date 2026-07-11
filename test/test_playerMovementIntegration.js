@@ -10,10 +10,16 @@
  */
 
 const Player = require('../js/entities/player');
-const KeyboardInput = require('../js/input/keyboard');
+const { KeyboardInput } = require('../js/input/keyboard');
 const TouchInput = require('../js/input/touch');
 const { SurvivalSystem, STAMINA_COSTS } = require('../js/systems/survival');
-const { BLOCK_TYPES } = require('../js/world/chunkData');
+const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../js/world/chunkData');
+
+// Globals needed by player.js
+global.MIN_Y = -64;
+global.SEA_LEVEL = 30;
+global.BLOCK_TYPES = BLOCK_TYPES;
+global.BLOCK_PROPERTIES = BLOCK_PROPERTIES;
 
 let passed = 0;
 let failed = 0;
@@ -62,7 +68,7 @@ console.log('\n=== Group 1: Keyboard Input Event Handling ===');
   assert(ki.backward === false, 'Initial backward is false');
   assert(ki.left === false, 'Initial left is false');
   assert(ki.right === false, 'Initial right is false');
-  assert(ki.jump === false, 'Initial jump is false');
+  assert(ki.jumpAction.held === false, 'Initial jump is false');
   assert(ki.sprint === false, 'Initial sprint is false');
   assert(ki.interact === false, 'Initial interact is false');
 
@@ -85,7 +91,9 @@ console.log('\n=== Group 1: Keyboard Input Event Handling ===');
 
   // Space → jump
   simulateKeyDown(ki, 'Space');
-  assert(ki.jump === true, 'Space sets jump=true');
+  ki.update(); // Process edge detection
+  assert(ki.jumpAction.held === true, 'Space sets jump held=true');
+  assert(ki.jumpAction.down === true, 'Space sets jump down=true on first frame');
 
   // Shift → sprint
   simulateKeyDown(ki, 'ShiftLeft');
@@ -114,7 +122,8 @@ console.log('\n=== Group 1: Keyboard Input Event Handling ===');
   assert(ki.right === false, 'D release sets right=false');
 
   simulateKeyUp(ki, 'Space');
-  assert(ki.jump === false, 'Space release sets jump=false');
+  ki.update(); // Process edge detection
+  assert(ki.jumpAction.held === false, 'Space release sets jump held=false');
 
   // Just-pressed tracking
   simulateKeyDown(ki, 'KeyW');
@@ -130,53 +139,54 @@ console.log('\n=== Group 1: Keyboard Input Event Handling ===');
 console.log('\n=== Group 2: Camera-Relative Movement ===');
 
 {
-  // Yaw = 0 → facing +Z (forward). sin(0)=0, cos(0)=1
+  // Three.js YXZ Euler: forward = (-sin(yaw), 0, -cos(yaw))
+  // Yaw = 0 → facing -Z (forward). sin(0)=0, cos(0)=1 → moveZ = -1
   {
     const p = new Player();
     p.yaw = 0;
-    const input = { forward: true, backward: false, left: false, right: false, jump: false };
+    const input = { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
-    assert(p.velocity.z > 0, 'Forward at yaw=0 moves in +Z');
-    assertApprox(p.velocity.x, 0, 0.001, 'No X movement when facing +Z');
-    assertApprox(p.velocity.z, p.moveSpeed, 0.01, 'Velocity magnitude equals moveSpeed');
+    assert(p.velocity.z < 0, 'Forward at yaw=0 moves in -Z');
+    assertApprox(p.velocity.x, 0, 0.001, 'No X movement when facing -Z');
+    assertApprox(Math.abs(p.velocity.z), p.moveSpeed, 0.01, 'Velocity magnitude equals moveSpeed');
   }
 
-  // Yaw = π → facing -Z
+  // Yaw = π → facing +Z
   {
     const p = new Player();
     p.yaw = Math.PI;
-    const input = { forward: true, backward: false, left: false, right: false, jump: false };
+    const input = { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
-    assert(p.velocity.z < 0, 'Forward at yaw=π moves in -Z');
+    assert(p.velocity.z > 0, 'Forward at yaw=π moves in +Z');
   }
 
-  // Yaw = π/2 → facing +X
+  // Yaw = π/2 → facing -X (moveX = -sin(π/2) = -1)
   {
     const p = new Player();
     p.yaw = Math.PI / 2;
-    const input = { forward: true, backward: false, left: false, right: false, jump: false };
+    const input = { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
-    assert(p.velocity.x > 0, 'Forward at yaw=π/2 moves in +X');
+    assert(p.velocity.x < 0, 'Forward at yaw=π/2 moves in -X');
   }
 
-  // Yaw = -π/2 → facing -X
+  // Yaw = -π/2 → facing +X (moveX = -sin(-π/2) = 1)
   {
     const p = new Player();
     p.yaw = -Math.PI / 2;
-    const input = { forward: true, backward: false, left: false, right: false, jump: false };
+    const input = { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
-    assert(p.velocity.x < 0, 'Forward at yaw=-π/2 moves in -X');
+    assert(p.velocity.x > 0, 'Forward at yaw=-π/2 moves in +X');
   }
 
   // Strafe left (A) at yaw=0: sideX=cos(0)=1 → dx -= 1 → -X direction
   {
     const p = new Player();
     p.yaw = 0;
-    const input = { forward: false, backward: false, left: true, right: false, jump: false };
+    const input = { forward: false, backward: false, left: true, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
     assert(p.velocity.x < 0, 'Strafe left at yaw=0 moves in -X');
@@ -187,7 +197,7 @@ console.log('\n=== Group 2: Camera-Relative Movement ===');
   {
     const p = new Player();
     p.yaw = 0;
-    const input = { forward: false, backward: false, left: false, right: true, jump: false };
+    const input = { forward: false, backward: false, left: false, right: true, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
     assert(p.velocity.x > 0, 'Strafe right at yaw=0 moves in +X');
@@ -198,29 +208,29 @@ console.log('\n=== Group 2: Camera-Relative Movement ===');
   {
     const p = new Player();
     p.yaw = 0;
-    const input = { forward: false, backward: true, left: false, right: false, jump: false };
+    const input = { forward: false, backward: true, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
-    assert(p.velocity.z < 0, 'Backward at yaw=0 moves in -Z');
+    assert(p.velocity.z > 0, 'Backward at yaw=0 moves in +Z');
   }
 
   // Diagonal normalization (W+A)
   {
     const p = new Player();
     p.yaw = 0;
-    const input = { forward: true, backward: false, left: true, right: false, jump: false };
+    const input = { forward: true, backward: false, left: true, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
     const mag = Math.sqrt(p.velocity.x ** 2 + p.velocity.z ** 2);
     assert(mag <= p.moveSpeed * 1.001, `Diagonal normalized (mag=${mag.toFixed(3)} ≤ ${p.moveSpeed})`);
-    assert(p.velocity.x < 0 && p.velocity.z > 0, 'W+A: X negative (left), Z positive (forward)');
+    assert(p.velocity.x < 0 && p.velocity.z < 0, 'W+A: X negative (left), Z negative (forward)');
   }
 
   // No input → no horizontal movement
   {
     const p = new Player();
     p.yaw = 0;
-    const input = { forward: false, backward: false, left: false, right: false, jump: false };
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
     assertApprox(p.velocity.x, 0, 0.001, 'No horizontal velocity with no input');
@@ -231,7 +241,7 @@ console.log('\n=== Group 2: Camera-Relative Movement ===');
   {
     const p = new Player();
     p.yaw = 0;
-    const input = { forward: true, backward: true, left: false, right: false, jump: false };
+    const input = { forward: true, backward: true, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
     assertApprox(p.velocity.x, 0, 0.001, 'W+S cancel horizontal X');
@@ -248,7 +258,7 @@ console.log('\n=== Group 3: Gravity and Jumping ===');
   // Gravity accumulates over time
   {
     const p = new Player();
-    const input = { forward: false, backward: false, left: false, right: false, jump: false };
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
     const v1 = p.velocity.y;
     p.update(0.1, input, null);
@@ -263,7 +273,7 @@ console.log('\n=== Group 3: Gravity and Jumping ===');
     const p = new Player();
     p.onGround = true;
     p.velocity.y = 0;
-    const input = { forward: false, backward: false, left: false, right: false, jump: true };
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: true, jumpHeld: true };
     p.update(0.1, input, null);
 
     assert(p.velocity.y === p.jumpVelocity, 'Jump sets velocity to jumpVelocity');
@@ -275,7 +285,7 @@ console.log('\n=== Group 3: Gravity and Jumping ===');
     const p = new Player();
     p.onGround = false;
     p.velocity.y = -5;
-    const input = { forward: false, backward: false, left: false, right: false, jump: true };
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: true, jumpHeld: true };
     p.update(0.1, input, null);
 
     assert(p.velocity.y < 0, 'Jump in air does not boost upward');
@@ -289,13 +299,13 @@ console.log('\n=== Group 3: Gravity and Jumping ===');
     const startY = p.position.y;
 
     // Frame 0: jump
-    p.update(0.05, { forward: false, backward: false, left: false, right: false, jump: true }, null);
+    p.update(0.05, { forward: false, backward: false, left: false, right: false, jumpDown: true, jumpHeld: true }, null);
     assert(p.position.y > startY, 'Player rises immediately after jump');
 
     // Peak reached within ~0.4s (vy=9, gravity=-25 → 9/25 ≈ 0.36s)
     let maxY = p.position.y;
     for (let i = 1; i < 12; i++) {
-      p.update(0.05, { forward: false, backward: false, left: false, right: false, jump: false }, null);
+      p.update(0.05, { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false }, null);
       if (p.position.y > maxY) maxY = p.position.y;
     }
 
@@ -309,20 +319,21 @@ console.log('\n=== Group 3: Gravity and Jumping ===');
 console.log('\n=== Group 4: Collision Detection ===');
 
 {
-  // _isSolid correctly identifies solid/non-solid blocks
+  // _isSolidAt correctly identifies solid/non-solid blocks
   {
     const p = new Player();
+    const makeWorld = (blockId) => ({ getBlockAtWorld: () => blockId });
 
-    assert(p._isSolid(BLOCK_TYPES.GRASS) === true, 'Grass is solid');
-    assert(p._isSolid(BLOCK_TYPES.DIRT) === true, 'Dirt is solid');
-    assert(p._isSolid(BLOCK_TYPES.STONE) === true, 'Stone is solid');
-    assert(p._isSolid(BLOCK_TYPES.WOOD_LOG) === true, 'Wood log is solid');
-    assert(p._isSolid(BLOCK_TYPES.SAND) === true, 'Sand is solid');
-    assert(p._isSolid(BLOCK_TYPES.BEDROCK) === true, 'Bedrock is solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.GRASS)) === true, 'Grass is solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.DIRT)) === true, 'Dirt is solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.STONE)) === true, 'Stone is solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.WOOD_LOG)) === true, 'Wood log is solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.SAND)) === true, 'Sand is solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.BEDROCK)) === true, 'Bedrock is solid');
 
-    assert(p._isSolid(BLOCK_TYPES.AIR) === false, 'Air is not solid');
-    assert(p._isSolid(BLOCK_TYPES.WATER) === false, 'Water is not solid');
-    assert(p._isSolid(BLOCK_TYPES.LEAVES) === false, 'Leaves are not solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.AIR)) === false, 'Air is not solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.WATER)) === false, 'Water is not solid');
+    assert(p._isSolidAt(0, 0, 0, makeWorld(BLOCK_TYPES.LEAVES)) === false, 'Leaves are not solid');
   }
 
   // Collision with a single block at player feet level
@@ -344,7 +355,7 @@ console.log('\n=== Group 4: Collision Detection ===');
     p.velocity.y = -2; // Falling slowly toward ground
 
     // After one update, player should hit the ground block at y=0
-    const input = { forward: false, backward: false, left: false, right: false, jump: false };
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.05, input, mockWorld);
 
     assert(p.onGround === true || p.velocity.y >= 0, 'Player should detect ground collision or stop falling');
@@ -368,7 +379,7 @@ console.log('\n=== Group 4: Collision Detection ===');
     p.onGround = true;
 
     // Without input, player should stay at same Y (gravity pulls down but ground blocks)
-    const input = { forward: false, backward: false, left: false, right: false, jump: false };
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, mockWorld);
 
     assert(p.position.y >= 0.5, 'Player should stay above ground (y=' + p.position.y.toFixed(2) + ')');
@@ -380,21 +391,21 @@ console.log('\n=== Group 4: Collision Detection ===');
     p.position.y = 10;
     const startY = p.position.y;
 
-    const input = { forward: false, backward: false, left: false, right: false, jump: false };
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null); // No world — gravity applies freely
 
     assert(p.position.y < startY, 'Without world, player falls due to gravity (no collision)');
   }
 
-  // World bounds clamp Y to minimum -32
+  // World bounds clamp Y to minimum MIN_Y
   {
     const p = new Player();
-    p.position.y = -31;
+    p.position.y = MIN_Y + 1;
     p.velocity.y = -100;
 
-    p.update(0.1, { forward: false, backward: false, left: false, right: false, jump: false }, null);
+    p.update(0.1, { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false }, null);
 
-    assert(p.position.y >= -32, 'Player Y clamped to minimum world bound (-32)');
+    assert(p.position.y >= MIN_Y, 'Player Y clamped to minimum world bound');
   }
 }
 
@@ -410,12 +421,12 @@ console.log('\n=== Group 5: Sprint + Stamina Interaction ===');
     p.isSprinting = true;
     p.yaw = 0;
 
-    const input = { forward: true, backward: false, left: false, right: false, jump: false };
+    const input = { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
     p.update(0.1, input, null);
 
     const expected = p.moveSpeed * p.sprintMultiplier;
-    assertApprox(p.velocity.z, expected, 0.01, `Sprint speed = moveSpeed * sprintMultiplier (${expected})`);
-    assert(p.velocity.z > p.moveSpeed, 'Sprint velocity exceeds base moveSpeed');
+    assertApprox(Math.abs(p.velocity.z), expected, 0.01, `Sprint speed = moveSpeed * sprintMultiplier (${expected})`);
+    assert(Math.abs(p.velocity.z) > p.moveSpeed, 'Sprint velocity exceeds base moveSpeed');
   }
 
   // Sprinting consumes stamina (STAMINA_COSTS.SPRINT per second)
@@ -590,25 +601,27 @@ console.log('\n=== Group 7: Full Keyboard → Player → World Integration ===')
   const p = new Player();
   p.position.y = 1;
 
-  // Press W → move forward (+Z at yaw=0)
+  // Press W → move forward (-Z at yaw=0 in Three.js YXZ Euler)
   simulateKeyDown(ki, 'KeyW');
+  ki.update(); // Process edge detection
   p.update(0.05, {
     forward: ki.forward, backward: ki.backward,
-    left: ki.left, right: ki.right, jump: ki.jump
+    left: ki.left, right: ki.right, jumpDown: ki.jumpAction.down, jumpHeld: ki.jumpAction.held
   }, null);
 
   const moved1 = p.position.z;
-  assert(moved1 > 0, 'Player moves in +Z when W pressed');
+  assert(moved1 < 0, 'Player moves in -Z when W pressed');
 
   // Continue moving for several frames
   for (let i = 0; i < 4; i++) {
+    ki.update();
     p.update(0.05, {
       forward: ki.forward, backward: ki.backward,
-      left: ki.left, right: ki.right, jump: ki.jump
+      left: ki.left, right: ki.right, jumpDown: ki.jumpAction.down, jumpHeld: ki.jumpAction.held
     }, null);
   }
 
-  assert(p.position.z > moved1, 'Player continues moving forward over frames');
+  assert(p.position.z < moved1, 'Player continues moving forward over frames');
 
   // Release W, press A → strafe left (-X at yaw=0)
   simulateKeyUp(ki, 'KeyW');
@@ -617,7 +630,7 @@ console.log('\n=== Group 7: Full Keyboard → Player → World Integration ===')
   const zBefore = p.position.z;
   p.update(0.05, {
     forward: ki.forward, backward: ki.backward,
-    left: ki.left, right: ki.right, jump: ki.jump
+    left: ki.left, right: ki.right, jumpDown: ki.jumpAction.down, jumpHeld: ki.jumpAction.held
   }, null);
 
   assert(p.position.x < 0, 'Player strafes in -X when A pressed');
@@ -627,10 +640,11 @@ console.log('\n=== Group 7: Full Keyboard → Player → World Integration ===')
   simulateKeyUp(ki, 'KeyA');
   p.onGround = true;
   simulateKeyDown(ki, 'Space');
+  ki.update(); // Process edge detection
 
   p.update(0.05, {
     forward: ki.forward, backward: ki.backward,
-    left: ki.left, right: ki.right, jump: ki.jump
+    left: ki.left, right: ki.right, jumpDown: ki.jumpAction.down, jumpHeld: ki.jumpAction.held
   }, null);
 
   assert(p.velocity.y > 0, 'Jump applies upward velocity in integration');
@@ -657,7 +671,7 @@ console.log('\n=== Group 8: Edge Cases ===');
   {
     const p = new Player();
     p.respawn(null);
-    assert(p.position.x === 0 && p.position.y === 20 && p.position.z === 0, 'Default respawn to (0,20,0)');
+    assert(p.position.x === 0 && p.position.y === SEA_LEVEL + 4 && p.position.z === 0, 'Default respawn to (0, SEA_LEVEL+4, 0)');
   }
 
   // getEyePosition correct offset

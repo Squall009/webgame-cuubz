@@ -27,6 +27,7 @@ class TouchInput {
     
     // Jump button state
     this.jump = false;
+    this.jumpJustPressed = false; // edge: true for one frame on touchstart
     
     // Disposed flag for cleanup safety
     this._disposed = false;
@@ -66,7 +67,7 @@ class TouchInput {
     // Mobile action buttons
     const jumpBtn = document.getElementById('btn-jump-mobile');
     if (jumpBtn) {
-      this._handlers.onJumpStart = (e) => { e.preventDefault(); this.jump = true; };
+      this._handlers.onJumpStart = (e) => { e.preventDefault(); this.jump = true; this.jumpJustPressed = true; };
       this._handlers.onJumpEnd = (e) => { e.preventDefault(); this.jump = false; };
       jumpBtn.addEventListener('touchstart', this._handlers.onJumpStart);
       jumpBtn.addEventListener('touchend', this._handlers.onJumpEnd);
@@ -192,6 +193,7 @@ class TouchInput {
   update() {
     // Look deltas accumulate, so we don't clear them here
     // They should be consumed by the game loop
+    this.jumpJustPressed = false; // consume edge signal
   }
 
   /**

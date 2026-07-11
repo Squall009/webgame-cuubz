@@ -1901,14 +1901,17 @@
               }
 
               // Build merged input state (keyboard OR touch — both can contribute)
+              const jumpRaw = keyboard.jumpAction.held || touch.jump;
+              const jumpDown = keyboard.jumpAction.down || touch.jumpJustPressed;
               const inputState = {
                 forward: keyboard.forward || (touch.joystickY < -0.3),
                 backward: keyboard.backward || (touch.joystickY > 0.3),
                 left: keyboard.left || (touch.joystickX < -0.3),
                 right: keyboard.right || (touch.joystickX > 0.3),
-                jump: keyboard.jump || touch.jump,
+                jumpHeld: jumpRaw,
+                jumpDown: jumpDown,
                 sprint: keyboard.sprint, // No mobile sprint yet — could add a dedicated button later
-                sneak: keyboard.keys['ShiftLeft'] || keyboard.keys['ShiftRight'],
+                sneak: keyboard.sneakAction.held,
               };
 
               // Update player physics with input (pass chunkWorld for collision)
@@ -1923,15 +1926,7 @@
                 player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
               }
               
-              // Handle fly mode toggle (F key — single press only)
-              if (keyboard.consumeFlyToggle() && !player.gravityEnabled && player.flyMode) {
-                console.log('[Cuubz] ⬇️ FLY MODE DEACTIVATED — falling back to survival physics');
-                player.gravityEnabled = true;
-                player.flyMode = false;
-                player.velocity.y = 0;
-              }
-              
-              // Update fly mode indicator HUD
+              // Update fly mode indicator HUD (creative only)
               const flyIndicator = document.getElementById('fly-mode-indicator');
               if (player.flyMode && !player.gravityEnabled) {
                 if (flyIndicator) flyIndicator.classList.remove('hidden');

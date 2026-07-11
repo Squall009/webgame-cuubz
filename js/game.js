@@ -5,7 +5,7 @@
  * Creative Mode Features:
  * - Unlimited blocks (no inventory check for placement)
  * - No gravity (disabled when creative mode active)
- * - Fly mode (double-tap space to toggle)
+ * - Fly mode (double-tap space to toggle, creative only)
  * - Block palette selector for all block types
  * - Toggle between Creative and Survival at runtime
  */
@@ -22,53 +22,6 @@ const MODES = {
   SURVIVAL: 'survival',
   CREATIVE: 'creative',
 };
-
-// ============================================================
-// Double-Tap Detector (for fly mode toggle)
-// ============================================================
-
-class DoubleTapDetector {
-  /**
-   * Detects double-tap/double-press of a key within a time threshold.
-   * Default threshold: 300ms between taps.
-   */
-  constructor(threshold = 300) {
-    this.threshold = threshold;
-    this.lastTapTime = 0;
-  }
-
-  /**
-   * Check if the current tap forms a double-tap with the previous one.
-   * @param {number} currentTime - Current timestamp (ms, e.g., performance.now())
-   * @returns {boolean} true if double-tap detected
-   */
-  check(currentTime) {
-    if (this.lastTapTime === 0) {
-      this.lastTapTime = currentTime;
-      return false;
-    }
-
-    const elapsed = currentTime - this.lastTapTime;
-    
-    if (elapsed < this.threshold) {
-      // Double tap detected! Reset for next cycle.
-      const isDoubleTap = true;
-      this.lastTapTime = 0;
-      return isDoubleTap;
-    }
-
-    // Too much time elapsed — treat as new single tap
-    this.lastTapTime = currentTime;
-    return false;
-  }
-
-  /**
-   * Reset the detector state.
-   */
-  reset() {
-    this.lastTapTime = 0;
-  }
-}
 
 // ============================================================
 // Block Palette (Creative Mode Block Selector)
@@ -313,13 +266,11 @@ class Game {
 
 // Attach constants to class for static access
 Game.MODES = MODES;
-Game.DoubleTapDetector = DoubleTapDetector;
 Game.BlockPalette = BlockPalette;
 
 // Export for browser context
 if (typeof window !== 'undefined') {
   window.CuubzGame = Game;
-  window.CuubzDoubleTapDetector = DoubleTapDetector;
   window.CuubzBlockPalette = BlockPalette;
 }
 

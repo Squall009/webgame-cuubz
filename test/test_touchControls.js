@@ -5,7 +5,7 @@
  */
 
 const TouchInput = require('../js/input/touch');
-const KeyboardInput = require('../js/input/keyboard');
+const { KeyboardInput } = require('../js/input/keyboard');
 const MouseInput = require('../js/input/mouse');
 
 let pass = 0;
@@ -307,11 +307,11 @@ console.log('\n=== KeyboardInput: Constructor & Initial State ===');
   assertEqual(kb.backward, false, 'backward starts false');
   assertEqual(kb.left, false, 'left starts false');
   assertEqual(kb.right, false, 'right starts false');
-  assertEqual(kb.jump, false, 'jump starts false');
+  assertEqual(kb.jumpAction.held, false, 'jump starts false');
   assertEqual(kb.sprint, false, 'sprint starts false');
   assertEqual(kb.interact, false, 'interact starts false');
   assert(Object.keys(kb.keys).length === 0, 'keys map starts empty');
-  assert(Object.keys(kb.justPressed).length === 0, 'justPressed starts empty');
+  assert(Object.keys(kb._justPressed).length === 0, 'justPressed starts empty');
 }
 
 console.log('\n=== KeyboardInput: Key Down Mapping ===');
@@ -323,7 +323,7 @@ console.log('\n=== KeyboardInput: Key Down Mapping ===');
   kb._onKeyDown({ code: 'KeyW' });
   assertEqual(kb.forward, true, 'W sets forward=true');
   assertEqual(kb.keys['KeyW'], true, 'keys[KeyW] = true');
-  assertEqual(kb.justPressed['KeyW'], true, 'justPressed[KeyW] = true');
+  assertEqual(kb._justPressed['KeyW'], true, 'justPressed[KeyW] = true');
   
   // A key
   kb._onKeyDown({ code: 'KeyA' });
@@ -339,7 +339,8 @@ console.log('\n=== KeyboardInput: Key Down Mapping ===');
   
   // Space — needs preventDefault mock
   kb._onKeyDown({ code: 'Space', preventDefault: () => {} });
-  assertEqual(kb.jump, true, 'Space sets jump=true');
+  kb.update(); // Process edge detection
+  assertEqual(kb.jumpAction.held, true, 'Space sets jump=true');
   
   // Shift
   kb._onKeyDown({ code: 'ShiftLeft' });
@@ -374,17 +375,19 @@ console.log('\n=== KeyboardInput: Multiple Keys Held ===');
   kb._onKeyDown({ code: 'KeyW' });
   kb._onKeyDown({ code: 'KeyD' });
   kb._onKeyDown({ code: 'Space', preventDefault: () => {} });
-  
+  kb.update(); // Process edge detection
+
   assertEqual(kb.forward, true, 'forward still true');
   assertEqual(kb.right, true, 'right still true');
-  assertEqual(kb.jump, true, 'jump still true');
-  
+  assertEqual(kb.jumpAction.held, true, 'jump still true');
+
   // Release one key
   kb._onKeyUp({ code: 'KeyD' });
-  
+  kb.update(); // Process edge detection
+
   assertEqual(kb.forward, true, 'forward unaffected by D release');
   assertEqual(kb.right, false, 'right=false after D release');
-  assertEqual(kb.jump, true, 'jump unaffected');
+  assertEqual(kb.jumpAction.held, true, 'jump unaffected');
 }
 
 console.log('\n=== KeyboardInput: update() clears justPressed ===');
@@ -393,10 +396,10 @@ console.log('\n=== KeyboardInput: update() clears justPressed ===');
   const kb = new KeyboardInput();
   
   kb._onKeyDown({ code: 'KeyW' });
-  assertEqual(kb.justPressed['KeyW'], true, 'justPressed set on keydown');
+  assertEqual(kb._justPressed['KeyW'], true, 'justPressed set on keydown');
   
   kb.update();
-  assert(Object.keys(kb.justPressed).length === 0, 'justPressed cleared after update');
+  assert(Object.keys(kb._justPressed).length === 0, 'justPressed cleared after update');
 }
 
 console.log('\n=== KeyboardInput: isJustPressed() ===');

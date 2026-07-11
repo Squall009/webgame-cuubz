@@ -84,50 +84,59 @@ assertEqual(player.flySpeed !== undefined, true, 'Fly speed should be set in cre
 player.setCreativeMode(false);
 assertEqual(player.gravityEnabled, true, 'Gravity should be re-enabled when leaving creative');
 
-// --- Group 5: Fly mode toggle ---
-setGroup('Fly Mode Toggle');
+// --- Group 5: Fly mode (creative only) ---
+setGroup('Fly Mode Creative Only');
 player.setCreativeMode(true);
 
 // Initially not flying
 assertEqual(player.flyMode, false, 'Fly mode should start as off');
 assertEqual(player.isFlying, false, 'isFlying should be false');
 
-// Enable fly mode
-player.toggleFlyMode();
-assertEqual(player.flyMode, true, 'Fly mode should toggle on');
-assertEqual(player.isFlying, true, 'isFlying should be true when fly mode on and moving vertically');
+// Fly mode is toggled via double-tap Space in the game loop
+// Test that fly mode state is correct when manually set (simulating game loop)
+player.flyMode = true;
+player.gravityEnabled = false;
+assertEqual(player.isFlying, true, 'isFlying should be true when fly mode on and gravity off');
 
-// Disable fly mode
-player.toggleFlyMode();
-assertEqual(player.flyMode, false, 'Fly mode should toggle off');
-
-// Fly mode should only work in creative
+// Fly mode should be disabled when leaving creative
 player.setCreativeMode(false);
-player.toggleFlyMode();
-assertEqual(player.flyMode, false, 'Fly mode should not activate in survival mode');
+assertEqual(player.flyMode, false, 'Fly mode should be off when leaving creative');
+assertEqual(player.gravityEnabled, true, 'Gravity should be on when leaving creative');
 player.setCreativeMode(true);
 
-// --- Group 6: Double-tap space detection ---
-setGroup('Double-Tap Space Detection');
-const doubleTapDetector = new (require('../js/game')).DoubleTapDetector();
+// --- Group 6: InputAction edge detection ---
+setGroup('InputAction Edge Detection');
+const { InputAction } = require('../js/input/keyboard');
+const action = new InputAction();
 
-// Single tap — no double tap detected
-doubleTapDetector.check(1000);
-assertEqual(doubleTapDetector.lastTapTime, 1000, 'Should record first tap time');
+// Initially all false
+assertEqual(action.down, false, 'down should be false initially');
+assertEqual(action.up, false, 'up should be false initially');
+assertEqual(action.held, false, 'held should be false initially');
 
-// Tap too soon after (within threshold) — should detect
-const result = doubleTapDetector.check(1150); // 150ms later (< 300ms threshold)
-assertEqual(result, true, 'Two taps within 300ms should be detected as double tap');
+// Press: false → true
+action.update(true);
+assertEqual(action.down, true, 'down should be true on first press');
+assertEqual(action.up, false, 'up should be false on press');
+assertEqual(action.held, true, 'held should be true when pressed');
 
-// Next single tap after cooldown — no double tap
-doubleTapDetector.check(2000); // 850ms later (> 300ms threshold)
-const result2 = doubleTapDetector.check(2100); // 100ms later
-assertEqual(result2, true, 'Two close taps after cooldown should detect again');
+// Hold: true → true
+action.update(true);
+assertEqual(action.down, false, 'down should be false while holding');
+assertEqual(action.up, false, 'up should be false while holding');
+assertEqual(action.held, true, 'held should remain true while holding');
 
-// Reset and single tap — no detection
-doubleTapDetector.reset();
-const result3 = doubleTapDetector.check(3000);
-assertEqual(result3, false, 'Single tap after reset should not trigger');
+// Release: true → false
+action.update(false);
+assertEqual(action.down, false, 'down should be false on release');
+assertEqual(action.up, true, 'up should be true on release');
+assertEqual(action.held, false, 'held should be false after release');
+
+// Idle: false → false
+action.update(false);
+assertEqual(action.down, false, 'down should be false when idle');
+assertEqual(action.up, false, 'up should be false when idle');
+assertEqual(action.held, false, 'held should be false when idle');
 
 // --- Group 7: Fly speed constants ---
 setGroup('Fly Speed Constants');
@@ -249,9 +258,10 @@ assertEqual(game6.mode, 'creative', 'Switched to creative mode');
 assertEqual(player6.gravityEnabled, false, 'Player gravity disabled in creative');
 assertEqual(player6.flySpeed !== undefined, true, 'Fly speed set in creative');
 
-// Toggle fly mode
-player6.toggleFlyMode();
-assertEqual(player6.flyMode, true, 'Fly mode activated');
+// Fly mode is toggled via double-tap Space in the game loop
+// Simulate it being active
+player6.flyMode = true;
+assertEqual(player6.flyMode, true, 'Fly mode can be active in creative');
 
 // Switch back to survival
 game6.setMode(Game.MODES.SURVIVAL);

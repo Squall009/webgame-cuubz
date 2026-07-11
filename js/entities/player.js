@@ -4,6 +4,11 @@
  *
  * Uses axis-separated AABB resolution (X → Y → Z) to prevent corner catching.
  * Includes step-up mechanic for smooth stair climbing.
+ *
+ * Creative mode fly:
+ *   - Double-tap Space (within 300ms) to toggle fly on/off
+ *   - Hold Space to ascend, hold Shift to descend
+ *   - Only available in creative mode
  */
 
 class Player {
@@ -39,10 +44,9 @@ class Player {
     this.inWater = false;
     this.isSprinting = false;
 
-    // Double-jump → fly mode detection (survival mode)
-    this.jumpCount = 0;       // consecutive jump presses
-    this.jumpTimer = 0;        // ms since last jump press
-    this.doubleJumpThreshold = 750; // max ms between jumps to count as double-tap (increased from 250ms for usability)
+    // Fly mode double-tap detection (creative only)
+    this._lastJumpDown = 0;   // performance.now() of last jump press edge
+    this.doubleTapThreshold = 300; // ms between two jump presses to toggle fly
 
     // Step-up height for smooth stair climbing
     this.stepHeight = 0.5;
@@ -69,17 +73,12 @@ class Player {
     } else {
       this.gravityEnabled = true;
       this.flyMode = false;
-    }
-  }
-
-  toggleFlyMode() {
-    if (!this.gravityEnabled) {
-      this.flyMode = !this.flyMode;
+      this._lastJumpDown = 0;
     }
   }
 
   get isFlying() {
-    return this.flyMode && !this.onGround;
+    return this.flyMode && !this.gravityEnabled;
   }
 
   update(deltaTime, inputState, world) {
@@ -94,11 +93,11 @@ class Player {
       }
     }
 
-    // Fly mode vertical movement
+    // Fly mode vertical movement (creative only)
     if (this.flyMode && !this.gravityEnabled) {
-      if (inputState.jump) {
+      if (inputState.jumpHeld) {
         this.velocity.y = this.flySpeed;
-      } else if (inputState.sneak || inputState.backward_fly) {
+      } else if (inputState.sneak) {
         this.velocity.y = -this.flySpeed;
       } else {
         this.velocity.y *= 0.9;
@@ -136,38 +135,37 @@ class Player {
     this.velocity.x = dx;
     this.velocity.z = dz;
 
-    // Jump (survival only) — single jump on ground, double-jump triggers flying mode
-    if (this.gravityEnabled && inputState.jump) {
+    // Jump / fly toggle — uses edge-detected input (fires once per press)
+    if (inputState.jumpDown) {
       const now = performance.now();
-      
-      if (this.onGround) {
-        // First jump from ground — reset counter
-        this.velocity.y = this.jumpVelocity;
-        this.onGround = false;
-        this.jumpCount = 1;
-        this.jumpTimer = now;
-      } else if (this.jumpCount === 0 || (now - this.jumpTimer) > this.doubleJumpThreshold * 3) {
-        // Too much time since last jump — treat as fresh single jump attempt mid-air (ignored)
-        // This handles: player jumps, lands, then tries to jump again without ground contact flag resetting
-      } else if (this.jumpCount === 1 && (now - this.jumpTimer) <= this.doubleJumpThreshold) {
-        // Double-jump detected! Activate flying mode.
-        console.log('[Cuubz] 🚀 DOUBLE-JUMP → FLY MODE ACTIVATED! Press Space to go up, Shift/S to go down.');
-        this.gravityEnabled = false;
-        this.flyMode = true;
-        this.velocity.y = this.jumpVelocity * 0.8; // upward boost on activation
-        this.jumpCount = 2;
-        this.jumpTimer = now;
-      } else if (this.jumpCount === 1) {
-        // Second jump press but too slow — treat as mid-air jump attempt (ignored in survival)
-      } else {
-        // Already double-jumped or too slow — ignore extra jump presses
-      }
-    }
 
-    // Reset jump counter when landing
-    if (this.onGround) {
-      this.jumpCount = 0;
-      this.jumpTimer = 0;
+      if (!this.gravityEnabled) {
+        // Creative mode: double-tap Space to toggle fly on/off
+        if (this.flyMode && (now - this._lastJumpDown) <= this.doubleTapThreshold) {
+          // Second tap — deactivate fly
+          console.log('[Cuubz] ⬇️ FLY MODE DEACTIVATED');
+          this.flyMode = false;
+          this.gravityEnabled = true;
+          this.velocity.y = 0;
+        } else if (!this.flyMode && (now - this._lastJumpDown) <= this.doubleTapThreshold) {
+          // Second tap — activate fly
+          console.log('[Cuubz] 🚀 FLY MODE ACTIVATED — hold Space to ascend, Shift to descend');
+          this.flyMode = true;
+          this.gravityEnabled = false;
+          this.velocity.y = this.jumpVelocity * 0.8;
+        } else if (!this.flyMode && this.onGround) {
+          // Single tap on ground — normal jump (creative without fly)
+          this.velocity.y = this.jumpVelocity;
+          this.onGround = false;
+        }
+        this._lastJumpDown = now;
+      } else {
+        // Survival mode: single jump from ground only
+        if (this.onGround) {
+          this.velocity.y = this.jumpVelocity;
+          this.onGround = false;
+        }
+      }
     }
 
     this._moveAndCollide(deltaTime, world);
@@ -198,25 +196,19 @@ class Player {
     // --- X ---
     const newX = this.position.x + this.velocity.x * deltaTime;
     if (this._resolveAxis(newX, this.position.y, this.position.z, hw, 'x', world)) {
-      // position.x already snapped inside _resolveAxis
       this.velocity.x = 0;
     } else {
       this.position.x = newX;
     }
 
     // --- Y ---
-    // This is the critical one. _resolveAxis scans the full AABB volume at the
-    // new position. If any solid block overlaps, the player is snapped to its
-    // surface. This correctly handles: landing, walking off edges (no hit →
-    // onGround=false → gravity takes over), and ceiling bumps.
     const newY = this.position.y + this.velocity.y * deltaTime;
     if (this._resolveAxis(this.position.x, newY, this.position.z, hw, 'y', world)) {
-      // position.y snapped. landing = true, head-bump = false.
       this.onGround = this.velocity.y <= 0;
-      this.velocity.y = 0; // MUST zero — otherwise gravity accumulates and tunnels
+      this.velocity.y = 0;
     } else {
       this.position.y = newY;
-      this.onGround = false; // no floor contact — gravity will accelerate next frame
+      this.onGround = false;
     }
 
     // --- Z ---
@@ -233,16 +225,12 @@ class Player {
   /**
    * Check the AABB at (newX, newY, newZ) for solid block overlap on one axis.
    * Returns true and snaps this.position if a collision is found.
-   *
-   * The Y range spans [floor(feetY), ceil(headY)) — exactly the blocks the
-   * player body occupies. No extra rows above or below; those caused false
-   * positives in earlier versions.
    */
   _resolveAxis(newX, newY, newZ, hw, axis, world) {
     const minX = Math.floor(newX - hw);
     const maxX = Math.floor(newX + hw);
-    const minY = Math.floor(newY);              // feet block (inclusive)
-    const maxY = Math.ceil(newY + this.height); // head block (exclusive)
+    const minY = Math.floor(newY);
+    const maxY = Math.ceil(newY + this.height);
     const minZ = Math.floor(newZ - hw);
     const maxZ = Math.floor(newZ + hw);
 
@@ -251,9 +239,6 @@ class Player {
         for (let bz = minZ; bz <= maxZ; bz++) {
           if (!this._isSolidAt(bx, by, bz, world)) continue;
 
-          // Block occupies [bx, bx+1] × [by, by+1] × [bz, bz+1]
-          // Player AABB occupies [newX-hw, newX+hw] × [newY, newY+height] × [newZ-hw, newZ+hw]
-          // Only snap if there is actual overlap (guards against adjacent-but-touching blocks)
           const overlapX = (newX - hw) < (bx + 1) && (newX + hw) > bx;
           const overlapY = newY < (by + 1) && (newY + this.height) > by;
           const overlapZ = (newZ - hw) < (bz + 1) && (newZ + hw) > bz;
@@ -266,8 +251,8 @@ class Player {
               return true;
             case 'y':
               this.position.y = this.velocity.y > 0
-                ? by - this.height  // head bump: snap feet down below block
-                : by + 1;           // landing: snap feet to block top
+                ? by - this.height
+                : by + 1;
               return true;
             case 'z':
               this.position.z = this.velocity.z > 0 ? bz - hw : bz + 1 + hw;
