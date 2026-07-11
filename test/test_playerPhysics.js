@@ -78,14 +78,14 @@ player5.yaw = 0; // Facing -Z (forward in Three.js YXZ Euler)
 player5.update(0.1, { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false }, null);
 assert(player5.velocity.z < 0, 'Forward at yaw=0 should move in -Z');
 
-// --- Test 10: Sprint multiplier applied ---
+// --- Test 10: Sprint multiplier applied (Shift + moving) ---
 const player6 = new Player();
-player6.isSprinting = true;
 player6.yaw = 0;
-player6.update(0.1, { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false }, null);
+player6.update(0.1, { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false, sprint: true }, null);
 const sprintMag = Math.abs(player6.velocity.z);
 const baseMag = player.moveSpeed;
 assert(sprintMag > baseMag, `Sprint should increase speed beyond base (${sprintMag.toFixed(2)} > ${baseMag})`);
+assert(player6.isSprinting === true, 'isSprinting auto-set when sprint input + moving');
 
 // --- Test 11: getEyePosition returns correct offset ---
 const eye = player.getEyePosition();

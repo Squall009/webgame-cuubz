@@ -415,18 +415,31 @@ console.log('\n=== Group 4: Collision Detection ===');
 console.log('\n=== Group 5: Sprint + Stamina Interaction ===');
 
 {
-  // Sprint multiplier increases speed
+  // Sprint multiplier increases speed (Shift + moving)
   {
     const p = new Player();
-    p.isSprinting = true;
     p.yaw = 0;
 
-    const input = { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false };
+    const input = { forward: true, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false, sprint: true };
     p.update(0.1, input, null);
 
     const expected = p.moveSpeed * p.sprintMultiplier;
     assertApprox(Math.abs(p.velocity.z), expected, 0.01, `Sprint speed = moveSpeed * sprintMultiplier (${expected})`);
     assert(Math.abs(p.velocity.z) > p.moveSpeed, 'Sprint velocity exceeds base moveSpeed');
+    assert(p.isSprinting === true, 'isSprinting is auto-set when sprint input + moving');
+  }
+
+  // No sprint when not moving (Shift alone does nothing)
+  {
+    const p = new Player();
+    p.yaw = 0;
+
+    const input = { forward: false, backward: false, left: false, right: false, jumpDown: false, jumpHeld: false, sprint: true };
+    p.update(0.1, input, null);
+
+    assert(p.isSprinting === false, 'isSprinting is false when not moving');
+    assertApprox(p.velocity.x, 0, 0.001, 'No horizontal velocity without movement keys');
+    assertApprox(p.velocity.z, 0, 0.001, 'No Z velocity without movement keys');
   }
 
   // Sprinting consumes stamina (STAMINA_COSTS.SPRINT per second)

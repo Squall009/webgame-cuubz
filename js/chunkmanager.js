@@ -18,7 +18,7 @@
 const CHUNK_W = 16;
 const CHUNK_D = 16;
 const DB_NAME = 'cuubz-worlds';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_CHUNKS = 'chunks';
 const STORE_MANIFESTS = 'manifests';
 
@@ -242,15 +242,23 @@ class ChunkManager {
     this._dbReady = new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
+      request.onblocked = (event) => {
+        console.error('[ChunkManager] IndexedDB upgrade blocked — another tab may hold the DB open:', event);
+      };
+
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
-        if (!db.objectStoreNames.contains(STORE_CHUNKS)) {
-          const store = db.createObjectStore(STORE_CHUNKS, { keyPath: 'chunkKey' });
-          store.createIndex('worldName', 'worldName', { unique: false });
+        console.log(`[ChunkManager] IndexedDB upgrade: version ${event.oldVersion} -> ${event.newVersion}`);
+        // Drop old stores and recreate — handles schema changes cleanly
+        const storesToDelete = [];
+        for (let i = 0; i < db.objectStoreNames.length; i++) {
+          storesToDelete.push(db.objectStoreNames[i]);
         }
-        if (!db.objectStoreNames.contains(STORE_MANIFESTS)) {
-          db.createObjectStore(STORE_MANIFESTS, { keyPath: 'worldName' });
-        }
+        storesToDelete.forEach(name => db.deleteObjectStore(name));
+
+        const chunkStore = db.createObjectStore(STORE_CHUNKS, { keyPath: 'chunkKey' });
+        chunkStore.createIndex('worldName', 'worldName', { unique: false });
+        db.createObjectStore(STORE_MANIFESTS, { keyPath: 'worldName' });
       };
 
       request.onsuccess = (event) => {
@@ -258,7 +266,11 @@ class ChunkManager {
         resolve(this._db);
       };
 
-      request.onerror = () => reject(new Error('IndexedDB open failed'));
+      request.onerror = (event) => {
+        const err = event.target.error;
+        console.error('[ChunkManager] IndexedDB open failed:', err);
+        reject(new Error(`IndexedDB open failed: ${err ? err.name + ' - ' + err.message : 'unknown error'}`));
+      };
     });
 
     return this._dbReady;

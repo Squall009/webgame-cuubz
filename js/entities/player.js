@@ -114,7 +114,6 @@ class Player {
 
     let speed = this.moveSpeed;
     if (!this.gravityEnabled) speed *= 1.5;
-    if (this.isSprinting) speed *= this.sprintMultiplier;
 
     // Reset horizontal velocity every frame — prevents stale yaw direction bleeding
     this.velocity.x = 0;
@@ -127,7 +126,13 @@ class Player {
     if (inputState.right)    { dx += sideX; dz += sideZ; }
 
     const mag = Math.sqrt(dx * dx + dz * dz);
-    if (mag > 0) {
+
+    // Sprint: Shift + moving (not in fly mode)
+    const isMoving = mag > 0;
+    this.isSprinting = isMoving && inputState.sprint && this.gravityEnabled;
+    if (this.isSprinting) speed *= this.sprintMultiplier;
+
+    if (isMoving) {
       dx = (dx / mag) * speed;
       dz = (dz / mag) * speed;
     }
