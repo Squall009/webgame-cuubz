@@ -247,6 +247,19 @@
   function placeFeatures(chunk, surfaceMap, biomeMap, rng) {
     var placedTrees = []; // [{lx, lz}] for exclusion zone checks
 
+    // ── Debug: count biome distribution and grass columns ──────────
+    var debugCounts = {};
+    var grassCols = 0, eligibleCols = 0;
+    for (var dbg = 0; dbg < 256; dbg++) {
+      var dbgName = biomeMap[dbg];
+      debugCounts[dbgName] = (debugCounts[dbgName] || 0) + 1;
+      var dbgY = surfaceMap[dbg];
+      var dbgLx = dbg % 16, dbgLz = Math.floor(dbg / 16);
+      if (chunk[cidx(dbgLx, dbgY, dbgLz)] === BLOCK.GRASS) grassCols++;
+      if (chunk[cidx(dbgLx, dbgY, dbgLz)] === BLOCK.GRASS && FEATURE_RATES[dbgName] && FEATURE_RATES[dbgName].treeChance > 0) eligibleCols++;
+    }
+    console.log('[placeFeatures] biomeMap:', JSON.stringify(debugCounts), 'grassCols:', grassCols, 'eligibleCols:', eligibleCols);
+
     // ── Tree placement pass ────────────────────────────────────────
     for (var lx = 0; lx < 16; lx++) {
       for (var lz = 0; lz < 16; lz++) {
