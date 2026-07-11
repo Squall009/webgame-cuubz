@@ -35,6 +35,7 @@ class Player {
     this.maxFallSpeed = 40;   // Terminal velocity
 
     // Creative mode physics
+    this.creativeMode = false; // Tracked independently of fly/gravity state
     this.gravityEnabled = true;
     this.flyMode = false;
     this.flySpeed = 8;
@@ -43,6 +44,9 @@ class Player {
     this.onGround = false;
     this.inWater = false;
     this.isSprinting = false;
+
+    // Creative mode flag (set by setCreativeMode, independent of fly state)
+    this.creativeMode = false;
 
     // Fly mode double-tap detection (creative only)
     this._lastJumpDown = 0;   // performance.now() of last jump press edge
@@ -67,6 +71,7 @@ class Player {
   }
 
   setCreativeMode(creative) {
+    this.creativeMode = creative;
     if (creative) {
       this.gravityEnabled = false;
       this.flySpeed = 8;
@@ -144,26 +149,30 @@ class Player {
     if (inputState.jumpDown) {
       const now = performance.now();
 
-      if (!this.gravityEnabled) {
-        // Creative mode: double-tap Space to toggle fly on/off
+      // Creative mode: double-tap Space to toggle fly on/off
+      if (this.creativeMode) {
         if (this.flyMode && (now - this._lastJumpDown) <= this.doubleTapThreshold) {
-          // Second tap — deactivate fly
+          // Second tap while flying — deactivate fly
           console.log('[Cuubz] ⬇️ FLY MODE DEACTIVATED');
           this.flyMode = false;
           this.gravityEnabled = true;
           this.velocity.y = 0;
+          this._lastJumpDown = now;
         } else if (!this.flyMode && (now - this._lastJumpDown) <= this.doubleTapThreshold) {
-          // Second tap — activate fly
+          // Second tap while not flying — activate fly
           console.log('[Cuubz] 🚀 FLY MODE ACTIVATED — hold Space to ascend, Shift to descend');
           this.flyMode = true;
           this.gravityEnabled = false;
           this.velocity.y = this.jumpVelocity * 0.8;
+          this._lastJumpDown = now;
         } else if (!this.flyMode && this.onGround) {
           // Single tap on ground — normal jump (creative without fly)
           this.velocity.y = this.jumpVelocity;
           this.onGround = false;
+          this._lastJumpDown = now;
+        } else {
+          this._lastJumpDown = now;
         }
-        this._lastJumpDown = now;
       } else {
         // Survival mode: single jump from ground only
         if (this.onGround) {

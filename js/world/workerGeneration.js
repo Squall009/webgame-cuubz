@@ -54,10 +54,10 @@
   // treeMaxY: trees won't place above this height
   // flowerMaxY: flowers won't place above this height
   var FEATURE_RATES = {
-    'Forest':       { treeChance: 0.09, redFlowerChance: 0.015, yellowFlowerChance: 0.015, treeMaxY: 125, flowerMaxY: 120 },
-    'Plains':       { treeChance: 0.15, redFlowerChance: 0.12, yellowFlowerChance: 0.12, treeMaxY: 125, flowerMaxY: 120 },
-    'Mountains':    { treeChance: 0.08, redFlowerChance: 0.02, yellowFlowerChance: 0.02, treeMaxY: 110, flowerMaxY: 115 },
-    'Beach':        { treeChance: 0.03, redFlowerChance: 0.01, yellowFlowerChance: 0.01, treeMaxY: 125, flowerMaxY: 120 },
+    'Forest':       { treeChance: 0.02, redFlowerChance: 0.005, yellowFlowerChance: 0.005, treeMaxY: 125, flowerMaxY: 120 },
+    'Plains':       { treeChance: 0.05, redFlowerChance: 0.03, yellowFlowerChance: 0.03, treeMaxY: 125, flowerMaxY: 120 },
+    'Mountains':    { treeChance: 0.02, redFlowerChance: 0.005, yellowFlowerChance: 0.005, treeMaxY: 110, flowerMaxY: 115 },
+    'Beach':        { treeChance: 0.005, redFlowerChance: 0.001, yellowFlowerChance: 0.001, treeMaxY: 125, flowerMaxY: 120 },
     'Tundra':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
     'Desert':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
     'Badlands':     { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
@@ -249,6 +249,18 @@
     var placedTrees = []; // [{lx, lz}] for exclusion zone checks
     var treeCount = 0, flowerCount = 0;
 
+    // ── Debug: count biome distribution ────────────────────────────
+    var biomeCounts = {};
+    var grassCols = 0;
+    for (var dbg = 0; dbg < 256; dbg++) {
+      var dbgName = biomeMap[dbg];
+      biomeCounts[dbgName] = (biomeCounts[dbgName] || 0) + 1;
+      var dbgY = surfaceMap[dbg];
+      var dbgLx = dbg % 16, dbgLz = Math.floor(dbg / 16);
+      if (chunk[cidx(dbgLx, dbgY, dbgLz)] === BLOCK.GRASS) grassCols++;
+    }
+    console.log('[placeFeatures] biomes=' + JSON.stringify(biomeCounts) + ' grassCols=' + grassCols);
+
     // ── Tree placement pass ────────────────────────────────────────
     for (var lx = 0; lx < 16; lx++) {
       for (var lz = 0; lz < 16; lz++) {
@@ -367,7 +379,9 @@
     }
 
     // Diagnostic (worker console — check Workers filter in DevTools).
-    console.log('[placeFeatures] trees=' + treeCount + ' flowers=' + flowerCount + ' biomeSample=' + (biomeMap[0] || 'undefined'));
+    var biomeDist = {};
+    for (var d = 0; d < 256; d++) { var bn = biomeMap[d]; biomeDist[bn] = (biomeDist[bn] || 0) + 1; }
+    console.log('[placeFeatures] trees=' + treeCount + ' flowers=' + flowerCount + ' biomes=' + JSON.stringify(biomeDist));
   }
 
   // ── Ore placement ───────────────────────────────────────────────────
