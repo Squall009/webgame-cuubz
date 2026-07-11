@@ -118,7 +118,11 @@ class Player {
     const sideZ = -Math.sin(this.yaw);
 
     let speed = this.moveSpeed;
-    if (!this.gravityEnabled) speed *= 1.5;
+    if (this.flyMode) {
+      speed *= 4; // 4x faster when flying
+    } else if (!this.gravityEnabled) {
+      speed *= 1.5;
+    }
 
     // Reset horizontal velocity every frame — prevents stale yaw direction bleeding
     this.velocity.x = 0;

@@ -54,10 +54,10 @@
   // treeMaxY: trees won't place above this height
   // flowerMaxY: flowers won't place above this height
   var FEATURE_RATES = {
-    'Forest':       { treeChance: 0.02, redFlowerChance: 0.005, yellowFlowerChance: 0.005, treeMaxY: 125, flowerMaxY: 120 },
-    'Plains':       { treeChance: 0.05, redFlowerChance: 0.03, yellowFlowerChance: 0.03, treeMaxY: 125, flowerMaxY: 120 },
-    'Mountains':    { treeChance: 0.02, redFlowerChance: 0.005, yellowFlowerChance: 0.005, treeMaxY: 110, flowerMaxY: 115 },
-    'Beach':        { treeChance: 0.005, redFlowerChance: 0.001, yellowFlowerChance: 0.001, treeMaxY: 125, flowerMaxY: 120 },
+    'Forest':       { treeChance: 0.008, redFlowerChance: 0.005, yellowFlowerChance: 0.005, treeMaxY: 125, flowerMaxY: 120 },
+    'Plains':       { treeChance: 0.004, redFlowerChance: 0.015, yellowFlowerChance: 0.015, treeMaxY: 125, flowerMaxY: 120 },
+    'Mountains':    { treeChance: 0.003, redFlowerChance: 0.002, yellowFlowerChance: 0.002, treeMaxY: 110, flowerMaxY: 115 },
+    'Beach':        { treeChance: 0.001, redFlowerChance: 0.001, yellowFlowerChance: 0.001, treeMaxY: 125, flowerMaxY: 120 },
     'Tundra':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
     'Desert':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
     'Badlands':     { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
@@ -278,6 +278,9 @@
 
         // Elevation cap.
         if (surfY > rates.treeMaxY) continue;
+
+        // Don't place trees near chunk edges — canopy extends ±2 blocks.
+        if (lx < 2 || lx > 13 || lz < 2 || lz > 13) continue;
 
         // Roll against per-column chance.
         var roll = rng();
