@@ -1860,6 +1860,344 @@
             touch: touch, // Mobile break/place support
           });
 
+          // ─── Initialize Inventory System ────────────────
+          const inventory = new Inventory();
+          player.inventory = inventory;
+          game.inventory = inventory;
+
+          // Load saved inventory from character data
+          const selectedChar = characterManager ? characterManager.getSelectedCharacter() : null;
+          if (selectedChar && selectedChar.inventory && selectedChar.inventory.length > 0) {
+            try {
+              const savedInv = Inventory.deserialize({
+                rows: 4, cols: 9,
+                selectedHotbarSlot: 0,
+                slots: selectedChar.inventory,
+              });
+              // Copy saved slots into our inventory
+              for (let i = 0; i < savedInv.totalSlots; i++) {
+                inventory.slots[i] = savedInv.slots[i];
+              }
+              _log('[Cuubz] Loaded saved inventory with ' + savedInv.getItems().length + ' items');
+            } catch(e) {
+              _log('[Cuubz] Failed to load saved inventory: ' + e.message);
+            }
+          }
+
+          // Wire inventory to block interaction (for block drops)
+          blockInteraction.inventory = inventory;
+
+          // Wire block broken callback to spawn dropped items
+          blockInteraction.onBlockBroken = (dropType, worldPos) => {
+            droppedItems.addDrop(dropType, worldPos);
+          };
+
+          // ─── Dropped Items System ──────────────────────
+          const droppedItems = {
+            drops: [],
+            scene: renderer.scene,
+
+            addDrop(typeId, worldPos) {
+              const color = getBlockColor(typeId);
+              const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+              const mat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.85 });
+              const mesh = new THREE.Mesh(geo, mat);
+              mesh.position.set(worldPos.x + 0.5, worldPos.y + 0.5, worldPos.z + 0.5);
+              this.scene.add(mesh);
+
+              this.drops.push({
+                mesh,
+                typeId,
+                velocity: {
+                  x: (Math.random() - 0.5) * 2,
+                  y: 3 + Math.random() * 2,
+                  z: (Math.random() - 0.5) * 2,
+                },
+                bobPhase: Math.random() * Math.PI * 2,
+                landed: false,
+                landedY: worldPos.y + 0.5,
+                lifetime: 120, // seconds before disappearing
+              });
+            },
+
+            update(delta, playerPos, inventory) {
+              for (let i = this.drops.length - 1; i >= 0; i--) {
+                const drop = this.drops[i];
+
+                // Gravity when not landed
+                if (!drop.landed) {
+                  drop.velocity.y -= 15 * delta;
+                  drop.mesh.position.x += drop.velocity.x * delta;
+                  drop.mesh.position.y += drop.velocity.y * delta;
+                  drop.mesh.position.z += drop.velocity.z * delta;
+                  drop.mesh.rotation.y += delta * 3;
+
+                  // Check if landed
+                  if (drop.mesh.position.y <= drop.landedY) {
+                    drop.mesh.position.y = drop.landedY;
+                    drop.landed = true;
+                    drop.velocity.x = 0;
+                    drop.velocity.y = 0;
+                    drop.velocity.z = 0;
+                  }
+                } else {
+                  // Bob animation when landed
+                  drop.bobPhase += delta * 3;
+                  drop.mesh.position.y = drop.landedY + Math.sin(drop.bobPhase) * 0.1;
+                  drop.mesh.rotation.y += delta * 1.5;
+                }
+
+                // Pickup check — player within 3 blocks
+                const dx = drop.mesh.position.x - playerPos.x;
+                const dy = drop.mesh.position.y - playerPos.y;
+                const dz = drop.mesh.position.z - playerPos.z;
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+                if (dist < 3) {
+                  // Pickup!
+                  const result = inventory.addItem(drop.typeId, 1);
+                  if (result.added > 0) {
+                    this.scene.remove(drop.mesh);
+                    drop.mesh.geometry.dispose();
+                    drop.mesh.material.dispose();
+                    this.drops.splice(i, 1);
+                    _log('[Cuubz] Picked up item: ' + drop.typeId);
+                  }
+                  continue;
+                }
+
+                // Lifetime decay
+                drop.lifetime -= delta;
+                if (drop.lifetime <= 0) {
+                  this.scene.remove(drop.mesh);
+                  drop.mesh.geometry.dispose();
+                  drop.mesh.material.dispose();
+                  this.drops.splice(i, 1);
+                }
+              }
+            },
+
+            clear() {
+              for (const drop of this.drops) {
+                this.scene.remove(drop.mesh);
+                drop.mesh.geometry.dispose();
+                drop.mesh.material.dispose();
+              }
+              this.drops = [];
+            },
+          };
+
+          // ─── Block Color Helper ────────────────────────
+          function getBlockColor(blockType) {
+            const colors = {
+              0: '#888888', 1: '#333333', 2: '#808080', 3: '#8B4513', 4: '#228B22',
+              5: '#F4A460', 6: '#808080', 7: '#4169E1', 8: '#2c2c2c', 9: '#CD853F',
+              10: '#FFD700', 11: '#00CED1', 12: '#888888', 13: '#FFFFFF', 14: '#DCDCDC',
+              15: '#FF4500', 16: '#B22222', 17: '#FF6347', 18: '#87CEEB', 19: '#B0C4DE',
+              32: '#8B4513', 33: '#228B22', 34: '#DEB887', 35: '#1a0a2e', 36: '#36454F',
+              37: '#32CD32', 38: '#9400D3', 39: '#8B0000', 40: '#FF0000', 41: '#FFD700',
+              42: '#FF69B4', 43: '#FFD700', 44: '#FFA500', 45: '#FFFF00',
+            };
+            if (typeof blockType === 'string') {
+              const namedColors = {
+                coal: '#2c2c2c', iron_ore: '#CD853F', gold_ore: '#FFD700',
+                diamond: '#00CED1', corrupt_crystal: '#9400D3',
+                apple: '#FF0000', cooked_meat: '#8B4513', berry: '#8B008B',
+                bread: '#DEB887', golden_apple: '#FFD700',
+              };
+              return namedColors[blockType] || '#888888';
+            }
+            return colors[blockType] || '#888888';
+          }
+
+          // ─── Hotbar UI Update ──────────────────────────
+          function updateHotbarUI() {
+            const hotbarSlots = document.querySelectorAll('.hotbar-slot');
+            for (let i = 0; i < 9; i++) {
+              const globalIndex = inventory.hotbarSlotIndex(i);
+              const slot = inventory.getSlot(globalIndex);
+              const el = hotbarSlots[i];
+              if (!el) continue;
+
+              // Update active state
+              el.classList.toggle('active', i === inventory.selectedHotbarSlot);
+
+              if (slot) {
+                const color = getBlockColor(slot.typeId);
+                const name = inventory.getDisplayName(slot.typeId);
+                el.style.background = 'linear-gradient(135deg, ' + color + ' 0%, rgba(0,0,0,0.4) 100%)';
+                el.style.border = '2px solid rgba(255,255,255,0.2)';
+                el.innerHTML = '<span class="hotbar-item-count">' + (slot.count > 1 ? slot.count : '') + '</span>';
+                el.title = name;
+              } else {
+                el.style.background = 'rgba(255,255,255,0.06)';
+                el.style.border = '2px solid rgba(255,255,255,0.1)';
+                el.innerHTML = '';
+                el.title = '';
+              }
+            }
+          }
+
+          // Wire inventory callbacks for hotbar updates
+          inventory.onSlotChange = (index, slot) => {
+            updateHotbarUI();
+          };
+          inventory.onSelectionChange = () => {
+            updateHotbarUI();
+          };
+
+          // Initial hotbar render
+          updateHotbarUI();
+
+          // ─── Inventory Screen ──────────────────────────
+          const inventoryScreen = document.getElementById('inventory-screen');
+          const inventoryGrid = document.getElementById('inventory-grid');
+          const btnCloseInventory = document.getElementById('btn-close-inventory');
+          let inventoryOpen = false;
+
+          function renderInventoryGrid() {
+            if (!inventoryGrid) return;
+            inventoryGrid.innerHTML = '';
+
+            for (let i = 0; i < inventory.totalSlots; i++) {
+              const slot = inventory.getSlot(i);
+              const isHotbar = inventory.isHotbarSlot(i);
+              const div = document.createElement('div');
+              div.className = 'inventory-slot' + (isHotbar ? ' hotbar' : '');
+              div.dataset.slot = i;
+
+              if (slot) {
+                const color = getBlockColor(slot.typeId);
+                const name = inventory.getDisplayName(slot.typeId);
+                div.style.background = 'linear-gradient(135deg, ' + color + ' 0%, rgba(0,0,0,0.3) 100%)';
+                div.innerHTML = '<span class="item-count">' + (slot.count > 1 ? slot.count : '') + '</span>';
+                div.title = name + (slot.count > 1 ? ' (x' + slot.count + ')' : '');
+              } else {
+                div.title = 'Empty slot';
+              }
+
+              // Click to move item to hotbar or select
+              div.addEventListener('click', () => {
+                if (slot) {
+                  // If clicking a non-hotbar slot, move to selected hotbar slot
+                  if (!isHotbar) {
+                    const hotbarIdx = inventory.hotbarSlotIndex(inventory.selectedHotbarSlot);
+                    const hotbarSlot = inventory.getSlot(hotbarIdx);
+                    if (!hotbarSlot) {
+                      inventory.setSlot(hotbarIdx, { typeId: slot.typeId, count: slot.count });
+                      inventory.clearSlot(i);
+                    } else if (inventory.itemsMatch(hotbarSlot.typeId, slot.typeId)) {
+                      const maxStack = inventory.getMaxStack(slot.typeId);
+                      const space = maxStack - hotbarSlot.count;
+                      if (space > 0) {
+                        const move = Math.min(space, slot.count);
+                        hotbarSlot.count += move;
+                        slot.count -= move;
+                        if (slot.count <= 0) inventory.clearSlot(i);
+                        inventory._notifySlotChange(hotbarIdx);
+                      }
+                    }
+                  } else {
+                    // Clicking hotbar slot — select it
+                    const hotbarPos = i - inventory.hotbarStart;
+                    inventory.selectHotbarSlot(hotbarPos);
+                  }
+                }
+                renderInventoryGrid();
+                updateHotbarUI();
+              });
+
+              inventoryGrid.appendChild(div);
+            }
+          }
+
+          function toggleInventoryScreen() {
+            inventoryOpen = !inventoryOpen;
+            if (inventoryOpen) {
+              renderInventoryGrid();
+              inventoryScreen.classList.remove('hidden');
+            } else {
+              inventoryScreen.classList.add('hidden');
+            }
+          }
+
+          if (btnCloseInventory) {
+            btnCloseInventory.addEventListener('click', () => {
+              inventoryOpen = false;
+              inventoryScreen.classList.add('hidden');
+            });
+          }
+
+          // ─── Keyboard Shortcuts ────────────────────────
+          document.addEventListener('keydown', function gameKeyHandler(e) {
+            if (game.paused || !game.running) return;
+
+            // Number keys 1-9 for hotbar selection
+            if (e.key >= '1' && e.key <= '9') {
+              e.preventDefault();
+              inventory.selectByNumber(parseInt(e.key));
+              updateHotbarUI();
+            }
+
+            // E for inventory screen
+            if (e.key === 'e' || e.key === 'E') {
+              e.preventDefault();
+              toggleInventoryScreen();
+            }
+          });
+
+          // Scroll wheel for hotbar cycling
+          document.addEventListener('wheel', function gameWheelHandler(e) {
+            if (game.paused || !game.running) return;
+            if (inventoryOpen) return; // Don't cycle when inventory is open
+            inventory.cycleSelection(e.deltaY > 0 ? 1 : -1);
+            updateHotbarUI();
+          });
+
+          // ─── Periodic Save (every 30 seconds) ──────────
+          function savePlayerState() {
+            const selected = characterManager ? characterManager.getSelectedCharacter() : null;
+            if (!selected) return;
+
+            // Save inventory
+            const serialized = inventory.serialize();
+            selected.inventory = serialized.slots;
+
+            // Save spawn point
+            selected.spawnPoints = selected.spawnPoints || {};
+            selected.spawnPoints[currentWorld.id] = {
+              x: player.position.x,
+              y: player.position.y,
+              z: player.position.z,
+            };
+
+            characterManager.persistence.saveCharacter(selected);
+            _log('[Cuubz] Saved player state');
+          }
+
+          // Save every 30 seconds
+          const saveIntervalId = setInterval(() => {
+            if (!game.paused && game.running) {
+              savePlayerState();
+            }
+          }, 30000);
+
+          // Save when pausing (Escape key)
+          document.addEventListener('keydown', function saveOnPause(e) {
+            if (e.key === 'Escape' && !game.paused) {
+              savePlayerState();
+            }
+          });
+
+          // Clean up save interval on game stop
+          const origStop = game.stop.bind(game);
+          game.stop = function() {
+            savePlayerState();
+            droppedItems.clear();
+            clearInterval(saveIntervalId);
+            origStop();
+          };
+
           // Start game loop
           loadingStatus.textContent = 'Almost ready...';
           if (loadingProgress) loadingProgress.style.width = '100%';
@@ -1876,7 +2214,14 @@
 
             // Main render loop
             function renderLoop() {
+              requestAnimationFrame(renderLoop); // Always schedule next frame first
               if (!game.running) return;
+
+              // When paused, just render the scene (don't update game logic)
+              if (game.paused) {
+                renderer.render();
+                return;
+              }
 
               const now = performance.now();
               game.delta = Math.min((now - game.lastTime) / 1000, 0.1);
@@ -1939,6 +2284,22 @@
               // Update block interaction (break/place)
               if (blockInteraction) {
                 blockInteraction.update(game.delta);
+              }
+
+              // Update dropped items (floating drops with pickup)
+              if (droppedItems && droppedItems.drops.length > 0) {
+                droppedItems.update(game.delta, player.position, inventory);
+              }
+
+              // Scroll wheel for hotbar cycling
+              if (mouse.scrollDelta !== 0) {
+                inventory.cycleSelection(mouse.scrollDelta > 0 ? 1 : -1);
+                mouse.scrollDelta = 0;
+              }
+
+              // Update hotbar UI periodically
+              if (game.frameCount % 5 === 0) {
+                updateHotbarUI();
               }
 
               // Emergency rescue: only teleport if player falls completely out of the world.
@@ -2057,8 +2418,6 @@
 
               // ─── Debug Stats Overlay Update ──────────────
               updateDebugStats(game);
-
-              requestAnimationFrame(renderLoop);
             }
 
             // ─── Wire up Pause Menu & Settings ────────────
@@ -2152,7 +2511,7 @@
 
         if (!isPaused) {
           // Pause game
-          game.running = false;
+          game.paused = true;
           pauseMenu.classList.remove('hidden');
           document.exitPointerLock();
           // Stop all timers while paused
@@ -2168,9 +2527,9 @@
     });
 
     function resumeGame() {
-      game.running = true;
+      game.paused = false;
       pauseMenu.classList.add('hidden');
-      canvas.requestPointerLock();
+      game.renderer.domElement.requestPointerLock();
       // Restart all timers on resume
       if (game.chunkManager) {
         game.chunkManager.startRegionCheck(500);

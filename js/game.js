@@ -131,6 +131,7 @@ class BlockPalette {
 class Game {
   constructor() {
     this.running = false;
+    this.paused = false;
     this.mode = MODES.SURVIVAL; // Default to survival mode
     this.lastTime = 0;
     this.delta = 0;

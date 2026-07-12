@@ -1,6 +1,15 @@
 /**
  * Cuubz — Block Interaction System
- * Handles block breaking and placing via mouse input + raycasting.
+ * Progressive block breaking with crack overlay, block placing, and dropped items.
+ * 
+ * Breaking:
+ *   - Hold left click to start breaking a block
+ *   - Break progress based on block hardness (harder = slower)
+ *   - Crack overlay shows damage stages (0-8)
+ *   - On break complete: spawn dropped item at block position
+ * 
+ * Placing:
+ *   - Right click to place selected block type
  */
 
 class BlockInteraction {
@@ -10,6 +19,7 @@ class BlockInteraction {
    * @param {ChunkManager} options.chunkManager - Chunk manager for updating chunks
    * @param {MouseInput} options.mouse - Mouse input handler
    * @param {Player} options.player - Player entity
+   * @param {Inventory} [options.inventory] - Player inventory (optional)
    */
   constructor(options) {
     this.renderer = options.renderer;
@@ -18,17 +28,26 @@ class BlockInteraction {
     this.player = options.player;
     // Optional touch input for mobile break/place (set by main.js)
     this.touch = null;
+    // Optional inventory for block drops
+    this.inventory = options.inventory || null;
 
     // Interaction range (blocks)
     this.breakRange = 7;
     this.placeRange = 7;
 
-    // Break animation state
-    this.breakProgress = 0;
-    this.breakingBlock = null; // { blockPos, faceNormal }
+    // Progressive breaking state
+    this.breakingBlock = null; // { x, y, z, chunkX, chunkZ, blockType, hardness, faceNormal }
+    this.breakProgress = 0;    // 0-1 float
+    this.breakStartTime = 0;
+
+    // Crack overlay
+    this.crackOverlay = null;
+    this.crackTexture = null;
+    this.crackCanvas = null;
+    this.crackCtx = null;
 
     // Block types that can be broken/placed
-    this.unbreakableBlocks = new Set([BLOCK_TYPES.BEDROCK, 35]); // BEDROCK(1) + OBSIDIAN(35) unbreakable
+    this.unbreakableBlocks = new Set([BLOCK_TYPES.BEDROCK, BLOCK_TYPES.OBSIDIAN]); // BEDROCK(1) + OBSIDIAN(35)
 
     // Selected block type for placing (from hotbar)
     this.selectedBlockType = 3; // Default: STONE
@@ -41,15 +60,27 @@ class BlockInteraction {
   update(delta) {
     if (!this.renderer) return;
 
-    // Handle block breaking on left click (mouse) or break button held (touch)
-    const shouldBreak = this.mouse && this.mouse.justLeftClicked || 
-                        (this.touch && this.touch.breakPressed);
-    if (shouldBreak) {
-      this._tryBreakBlock();
+    // ─── Block Breaking (Progressive) ────────────────────
+    const isHoldingBreak = (this.mouse && this.mouse.leftClick) ||
+                           (this.touch && this.touch.breakHeld);
+    const justStartedBreak = (this.mouse && this.mouse.justClickedLeft) ||
+                             (this.touch && this.touch.breakJustPressed);
+
+    if (isHoldingBreak) {
+      if (!this.breakingBlock && justStartedBreak) {
+        this._startBreak();
+      } else if (this.breakingBlock) {
+        this._continueBreak(delta);
+      }
+    } else {
+      // Released — cancel breaking
+      if (this.breakingBlock) {
+        this._cancelBreak();
+      }
     }
 
-    // Handle block placing on right click (mouse) or place button held (touch)
-    const shouldPlace = this.mouse && this.mouse.justRightClicked || 
+    // ─── Block Placing ──────────────────────────────────
+    const shouldPlace = (this.mouse && this.mouse.justClickedRight) ||
                         (this.touch && this.touch.placePressed);
     if (shouldPlace) {
       this._tryPlaceBlock();
@@ -64,7 +95,6 @@ class BlockInteraction {
     const hit = this.renderer.raycast(this.breakRange);
     if (!hit || !hit.point) return null;
 
-    // Calculate world position of the block face
     const point = hit.point;
     const normal = hit.faceNormal;
 
@@ -81,13 +111,13 @@ class BlockInteraction {
   }
 
   /**
-   * Try to break the targeted block.
+   * Start breaking a block.
    */
-  _tryBreakBlock() {
+  _startBreak() {
     const target = this._getTargetBlock();
     if (!target) return;
 
-    const { blockPos, chunkX, chunkZ } = target;
+    const { blockPos, faceNormal, chunkX, chunkZ } = target;
 
     // Get chunk data
     const chunkData = this.chunkManager.getChunkData(chunkX, chunkZ);
@@ -101,20 +131,144 @@ class BlockInteraction {
 
     if (dist > this.breakRange) return;
 
-    // Get block type at position
-    const blockType = chunkData.getBlock(blockPos.x, blockPos.y, blockPos.z);
-    if ((blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) || this.unbreakableBlocks.has(blockType)) return;
+    // Get block type at position (convert to local coords)
+    const lx = ((blockPos.x % 16) + 16) % 16;
+    const lz = ((blockPos.z % 16) + 16) % 16;
+    const blockType = chunkData.getBlock(lx, blockPos.y, lz);
 
-    // Break the block (set to AIR)
-    chunkData.setBlock(blockPos.x, blockPos.y, blockPos.z, BLOCK_TYPES.AIR);
+    if ((blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) ||
+        this.unbreakableBlocks.has(blockType)) return;
+
+    // Get block properties
+    const props = BLOCK_PROPERTIES[blockType];
+    if (!props || props.hardness === -1) return;
+
+    const hardness = props.hardness || 1;
+
+    // Start breaking
+    this.breakingBlock = {
+      x: blockPos.x, y: blockPos.y, z: blockPos.z,
+      chunkX, chunkZ, blockType, hardness, faceNormal,
+    };
+    this.breakProgress = 0;
+    this.breakStartTime = performance.now();
+
+    // Create crack overlay
+    this._createCrackOverlay(blockPos.x, blockPos.y, blockPos.z, blockType);
+  }
+
+  /**
+   * Continue breaking the current block.
+   * @param {number} delta - Time delta in seconds
+   */
+  _continueBreak(delta) {
+    if (!this.breakingBlock) return;
+
+    // Check if still targeting the same block
+    const target = this._getTargetBlock();
+    if (!target) {
+      this._cancelBreak();
+      return;
+    }
+
+    const { blockPos } = target;
+    if (blockPos.x !== this.breakingBlock.x ||
+        blockPos.y !== this.breakingBlock.y ||
+        blockPos.z !== this.breakingBlock.z) {
+      // Switched to a different block — cancel and start new break
+      this._cancelBreak();
+      this._startBreak();
+      return;
+    }
+
+    // Progress break based on hardness
+    // Base break time = hardness * 1.5 seconds (dirt=0.75s, stone=4.5s, etc.)
+    const breakSpeed = 1 / (this.breakingBlock.hardness * 1.5);
+    this.breakProgress += breakSpeed * delta;
+
+    // Update crack overlay
+    const damageLevel = Math.min(8, Math.floor(this.breakProgress * 9));
+    this._updateCrackOverlay(damageLevel);
+
+    // Check if broken
+    if (this.breakProgress >= 1) {
+      this._completeBreak();
+    }
+  }
+
+  /**
+   * Complete breaking the current block.
+   */
+  _completeBreak() {
+    const { x, y, z, chunkX, chunkZ, blockType } = this.breakingBlock;
+
+    // Get chunk data and set block to air
+    const chunkData = this.chunkManager.getChunkData(chunkX, chunkZ);
+    if (chunkData) {
+      const lx = ((x % 16) + 16) % 16;
+      const lz = ((z % 16) + 16) % 16;
+      chunkData.setBlock(lx, y, lz, BLOCK_TYPES.AIR);
+    }
 
     // Mark chunk as dirty for saving
     this.chunkManager.markChunkDirty(chunkX, chunkZ);
 
-    // Rebuild chunk mesh
-    this._rebuildChunk(chunkX, chunkZ);
+    // Remove crack overlay
+    this._removeCrackOverlay();
 
-    _log(`[BlockInteraction] Broke block ${blockType} at (${blockPos.x}, ${blockPos.y}, ${blockPos.z})`);
+    // Determine what drops
+    const dropType = this._getDropType(blockType);
+    if (dropType !== null && dropType !== 0) {
+      // Spawn dropped item at block position
+      if (this.onBlockBroken) {
+        this.onBlockBroken(dropType, { x, y, z });
+      }
+    }
+
+    _log('[BlockInteraction] Broke block ' + blockType + ' at (' + x + ', ' + y + ', ' + z + ')');
+
+    this.breakingBlock = null;
+    this.breakProgress = 0;
+  }
+
+  /**
+   * Cancel breaking the current block.
+   */
+  _cancelBreak() {
+    this.breakingBlock = null;
+    this.breakProgress = 0;
+    this._removeCrackOverlay();
+  }
+
+  /**
+   * Determine what item type drops from a block.
+   * @param {number} blockType - The block type that was broken
+   * @returns {number|string|null} The drop type ID, or null for no drop
+   */
+  _getDropType(blockType) {
+    // Use BLOCK_PROPERTIES.drop if available (from inventory system)
+    if (typeof _INLINE_BLOCK_PROPERTIES !== 'undefined') {
+      const props = _INLINE_BLOCK_PROPERTIES[blockType];
+      if (props) {
+        if (props.drop !== null) return props.drop;
+        if (props.mineable && props.drop) return props.drop;
+      }
+    }
+
+    // Try window.BLOCK_PROPERTIES (browser context)
+    if (typeof window !== 'undefined' && window.BLOCK_PROPERTIES) {
+      const props = window.BLOCK_PROPERTIES[blockType];
+      if (props && props.drop !== null) return props.drop;
+    }
+
+    // Default: most blocks drop themselves
+    // Exceptions: grass drops dirt, unbreakable blocks drop nothing
+    if (blockType === BLOCK_TYPES.GRASS) return BLOCK_TYPES.DIRT;
+    if (blockType === BLOCK_TYPES.BEDROCK || blockType === BLOCK_TYPES.OBSIDIAN) return null;
+    if (blockType === BLOCK_TYPES.WATER || blockType === BLOCK_TYPES.LAVA) return null;
+    if (blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) return null;
+
+    return blockType;
   }
 
   /**
@@ -124,7 +278,7 @@ class BlockInteraction {
     const target = this._getTargetBlock();
     if (!target) return;
 
-    const { blockPos, faceNormal, chunkX, chunkZ } = target;
+    const { blockPos, faceNormal } = target;
 
     if (!faceNormal) return;
 
@@ -147,137 +301,144 @@ class BlockInteraction {
     const pz = Math.floor(this.player.position.z);
     if (placeX === px && (placeY === py || placeY === py + 1) && placeZ === pz) return;
 
+    // Determine block type to place
+    let placeType = this.selectedBlockType;
+
+    // If inventory exists, use selected hotbar slot
+    if (this.inventory) {
+      const selectedItem = this.inventory.getSelectedItem();
+      if (selectedItem && typeof selectedItem.typeId === 'number') {
+        placeType = selectedItem.typeId;
+      }
+    }
+
     // Find which chunk contains the placement position
     const targetChunkX = Math.floor(placeX / 16);
     const targetChunkZ = Math.floor(placeZ / 16);
 
-    // Get or generate chunk data for target chunk
+    // Get chunk data
     let chunkData = this.chunkManager.getChunkData(targetChunkX, targetChunkZ);
-    if (!chunkData) {
-      // Chunk not loaded yet — skip placing
-      return;
+    if (!chunkData) return;
+
+    // Convert to local coords
+    const lx = ((placeX % 16) + 16) % 16;
+    const lz = ((placeZ % 16) + 16) % 16;
+
+    // Don't overwrite non-air blocks
+    const existingBlock = chunkData.getBlock(lx, placeY, lz);
+    if (existingBlock !== BLOCK_TYPES.AIR && existingBlock !== BLOCK_TYPES.CAVE_AIR) return;
+
+    // Consume from inventory if available
+    if (this.inventory && !this.player.creativeMode) {
+      const consumed = this.inventory.consumeSelectedBlock();
+      if (!consumed) return; // Can't place — no blocks in selected slot
     }
 
     // Place the block
-    chunkData.setBlock(placeX, placeY, placeZ, this.selectedBlockType);
+    chunkData.setBlock(lx, placeY, lz, placeType);
 
     // Mark chunk as dirty for saving
     this.chunkManager.markChunkDirty(targetChunkX, targetChunkZ);
 
-    // Rebuild chunk mesh
-    this._rebuildChunk(targetChunkX, targetChunkZ);
+    _log('[BlockInteraction] Placed block ' + placeType + ' at (' + placeX + ', ' + placeY + ', ' + placeZ + ')');
+  }
 
-    _log(`[BlockInteraction] Placed block ${this.selectedBlockType} at (${placeX}, ${placeY}, ${placeZ})`);
+  // ─── Crack Overlay ────────────────────────────────────
+
+  /**
+   * Create a crack overlay at the block position.
+   */
+  _createCrackOverlay(x, y, z, blockType) {
+    this._removeCrackOverlay();
+
+    // Create canvas texture
+    this.crackCanvas = document.createElement('canvas');
+    this.crackCanvas.width = 64;
+    this.crackCanvas.height = 64;
+    this.crackCtx = this.crackCanvas.getContext('2d');
+    this.crackTexture = new THREE.CanvasTexture(this.crackCanvas);
+
+    // Create box geometry slightly larger than block
+    const geometry = new THREE.BoxGeometry(1.02, 1.02, 1.02);
+    const material = new THREE.MeshLambertMaterial({
+      map: this.crackTexture,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+
+    this.crackOverlay = new THREE.Mesh(geometry, material);
+    this.crackOverlay.position.set(x + 0.5, y + 0.5, z + 0.5);
+
+    // Add to scene
+    if (this.renderer && this.renderer.scene) {
+      this.renderer.scene.add(this.crackOverlay);
+    }
+
+    // Update texture to stage 0
+    this._updateCrackOverlay(0);
   }
 
   /**
-   * Rebuild a chunk's mesh after block changes.
+   * Update the crack overlay texture for a given damage level.
+   * @param {number} damageLevel - 0-8 (9 stages)
    */
-  _rebuildChunk(cx, cz) {
-    const key = `${cx},${cz}`;
-    const entry = this.chunkManager.loadedChunks.get(key);
-    if (!entry || !entry.data) return;
+  _updateCrackOverlay(damageLevel) {
+    if (!this.crackCtx || !this.crackTexture) return;
 
-    // Remove old meshes from scene
-    if (entry.mesh) {
-      if (this.renderer.chunkGroup) {
-        this.renderer.chunkGroup.remove(entry.mesh);
-      }
-      if (entry.mesh.geometry) entry.mesh.geometry.dispose();
-      if (entry.mesh.material) entry.mesh.material.dispose();
+    const ctx = this.crackCtx;
+    ctx.clearRect(0, 0, 64, 64);
+
+    // Semi-transparent dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.fillRect(0, 0, 64, 64);
+
+    // Draw crack lines based on damage level
+    const numCracks = damageLevel + 1;
+    let seed = 42 + damageLevel * 1000;
+    function rand() {
+      seed = (seed * 16807) % 2147483647;
+      return (seed - 1) / 2147483646;
     }
 
-    if (entry.transMesh) {
-      if (this.renderer.chunkGroup) {
-        this.renderer.chunkGroup.remove(entry.transMesh);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.lineWidth = Math.max(1, 2.5 - damageLevel * 0.2);
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < numCracks; i++) {
+      let x = rand() * 64;
+      let y = rand() * 64;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      const segments = 2 + Math.floor(rand() * (2 + damageLevel));
+      for (let j = 0; j < segments; j++) {
+        x += (rand() - 0.5) * 20;
+        y += (rand() - 0.5) * 20;
+        ctx.lineTo(x, y);
       }
-      if (entry.transMesh.geometry) entry.transMesh.geometry.dispose();
-      if (entry.transMesh.material) entry.transMesh.material.dispose();
+      ctx.stroke();
     }
 
-    // Remove old cutout mesh (leaves, flowers, torches) — was missing causing orphaned meshes
-    if (entry.cutoutMesh) {
-      if (this.renderer.chunkGroup) {
-        this.renderer.chunkGroup.remove(entry.cutoutMesh);
+    this.crackTexture.needsUpdate = true;
+  }
+
+  /**
+   * Remove the crack overlay.
+   */
+  _removeCrackOverlay() {
+    if (this.crackOverlay) {
+      if (this.renderer && this.renderer.scene) {
+        this.renderer.scene.remove(this.crackOverlay);
       }
-      if (entry.cutoutMesh.geometry) entry.cutoutMesh.geometry.dispose();
-      if (entry.cutoutMesh.material) entry.cutoutMesh.material.dispose();
+      this.crackOverlay.geometry.dispose();
+      this.crackOverlay.material.dispose();
+      if (this.crackTexture) this.crackTexture.dispose();
+      this.crackOverlay = null;
+      this.crackTexture = null;
+      this.crackCanvas = null;
+      this.crackCtx = null;
     }
-
-    // Rebuild meshes
-    const chunkData = entry.data;
-    const meshBuilder = new ChunkMeshBuilder();
-    const meshData = meshBuilder.buildMeshData(chunkData, this.chunkManager.textureAtlas);
-    let solidMesh = null;
-    let cutoutMesh = null;
-    let transMesh = null;
-
-    if (meshData.indices.length > 0 || (meshData.cutoutIndices && meshData.cutoutIndices.length > 0) || (meshData.transparentIndices && meshData.transparentIndices.length > 0)) {
-      const geoResult = meshBuilder.buildThreeGeometry(meshData, chunkData);
-
-      // Solid mesh
-      if (geoResult.solidGeometry) {
-        let material;
-        if (this.chunkManager.textureAtlas && this.chunkManager.textureAtlas.loaded) {
-          material = new THREE.MeshLambertMaterial({
-            map: this.chunkManager.textureAtlas.getTexture(),
-            fog: true
-          });
-        } else {
-          material = new THREE.MeshLambertMaterial({
-            color: 0x8B7355,
-            fog: true
-          });
-        }
-
-        solidMesh = new THREE.Mesh(geoResult.solidGeometry, material);
-        solidMesh.position.set(cx * 16, 0, cz * 16);
-        if (this.renderer.chunkGroup) {
-          this.renderer.chunkGroup.add(solidMesh);
-        }
-      }
-
-      // Cutout mesh (leaves, flowers, torches)
-      if (geoResult.cutoutGeometry) {
-        const cutoutMaterial = new THREE.MeshLambertMaterial({
-          map: this.chunkManager.textureAtlas ? this.chunkManager.textureAtlas.getTexture() : null,
-          transparent: true,
-          alphaToCoverage: true,
-          depthWrite: true,
-          fog: true,
-          side: THREE.DoubleSide
-        });
-
-        cutoutMesh = new THREE.Mesh(geoResult.cutoutGeometry, cutoutMaterial);
-        cutoutMesh.position.set(cx * 16, 0, cz * 16);
-        if (this.renderer.chunkGroup) {
-          this.renderer.chunkGroup.add(cutoutMesh);
-        }
-      }
-
-      // Transparent mesh
-      if (geoResult.transparentGeometry) {
-        const transMaterial = new THREE.MeshLambertMaterial({
-          map: this.chunkManager.textureAtlas ? this.chunkManager.textureAtlas.getTexture() : null,
-          transparent: true,
-          opacity: 0.6,
-          depthWrite: false,
-          fog: true
-        });
-
-        transMesh = new THREE.Mesh(geoResult.transparentGeometry, transMaterial);
-        transMesh.position.set(cx * 16, 0, cz * 16);
-        if (this.renderer.chunkGroup) {
-          this.renderer.chunkGroup.add(transMesh);
-        }
-      }
-    }
-
-    // Update entry
-    entry.mesh = solidMesh;
-    entry.cutoutMesh = cutoutMesh;
-    entry.transMesh = transMesh;
-    entry.built = !!(solidMesh || cutoutMesh || transMesh);
   }
 
   /**
@@ -286,6 +447,14 @@ class BlockInteraction {
    */
   setSelectedBlockType(blockType) {
     this.selectedBlockType = blockType;
+  }
+
+  /**
+   * Clean up resources.
+   */
+  dispose() {
+    this._removeCrackOverlay();
+    this.breakingBlock = null;
   }
 }
 

@@ -534,12 +534,56 @@ html, body {
 
 #inventory-grid {
   display: grid;
-  grid-template-columns: repeat(9, 48px);
+  grid-template-columns: repeat(9, 56px);
+  grid-template-rows: repeat(4, 56px);
   gap: 4px;
   padding: 12px;
   background: rgba(30,30,46,0.95);
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.1);
+}
+
+.inventory-slot {
+  width: 56px;
+  height: 56px;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.inventory-slot:hover {
+  border-color: rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.1);
+}
+
+.inventory-slot.hotbar {
+  border-color: rgba(255,255,255,0.15);
+}
+
+.inventory-slot .item-count {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.9), -1px -1px 2px rgba(0,0,0,0.9);
+  pointer-events: none;
+}
+
+/* Hotbar item count */
+.hotbar-item-count {
+  font-size: 11px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.9), -1px -1px 2px rgba(0,0,0,0.9);
+  pointer-events: none;
 }
 
 .overlay-close {
