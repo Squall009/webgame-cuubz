@@ -51,6 +51,10 @@ class BlockInteraction {
 
     // Selected block type for placing (from hotbar)
     this.selectedBlockType = 3; // Default: STONE
+
+    // Multiplayer: track last block change for network sync (cleared by main.js after send)
+    this._lastBroken = null;  // { x, y, z }
+    this._lastPlaced = null;  // { x, y, z, blockType }
   }
 
   /**
@@ -227,6 +231,9 @@ class BlockInteraction {
 
     _log('[BlockInteraction] Broke block ' + blockType + ' at (' + x + ', ' + y + ', ' + z + ')');
 
+    // Multiplayer: track for network sync
+    this._lastBroken = { x, y, z };
+
     this.breakingBlock = null;
     this.breakProgress = 0;
   }
@@ -341,6 +348,9 @@ class BlockInteraction {
     this.chunkManager.markChunkDirty(targetChunkX, targetChunkZ);
 
     _log('[BlockInteraction] Placed block ' + placeType + ' at (' + placeX + ', ' + placeY + ', ' + placeZ + ')');
+
+    // Multiplayer: track for network sync
+    this._lastPlaced = { x: placeX, y: placeY, z: placeZ, blockType: placeType };
   }
 
   // ─── Crack Overlay ────────────────────────────────────

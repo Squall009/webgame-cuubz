@@ -85,7 +85,7 @@ class PingTracker {
   /**
    * Get maximum ping in ms, or null if no samples.
    */
-  getMaximun() {
+  getMaximum() {
     if (this._samples.length === 0) return null;
     return Math.max(...this._samples);
   }

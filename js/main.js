@@ -1060,9 +1060,12 @@
       `;
 
       if (!isFull) {
-        item.addEventListener('click', () => {
+        item.addEventListener('click', async () => {
           if (sessionManager) {
-            sessionManager.joinSession(session.sessionId);
+            await sessionManager.joinSession(session.sessionId);
+            // Start the game loop after joining
+            _log(`[SessionManager] Starting game in ${mode} mode (joining)`);
+            startGame(mode);
           }
         });
       } else {
@@ -1153,11 +1156,6 @@
       this._serverUrl = serverUrl || 'ws://localhost:8765';
 
       if (typeof MultiplayerClient !== 'undefined') {
-        const urlObj = new URL(this._serverUrl);
-        // TEMPORARY DISABLE: WebSocket proxy not configured yet. Re-enable after NPM /ws location is set up.
-        console.log('[Cuubz] Multiplayer disabled — WebSocket proxy at', this._serverUrl, 'not configured yet.');
-        return;
-
         this.client = new MultiplayerClient({ url: this._serverUrl });
         this._wireClientEvents();
       } else {
@@ -1293,12 +1291,31 @@
         } catch (err) {
           updateConnectionStatus('disconnected');
           showHostError(`Failed to host: ${err.message}`);
+          return;
         }
       } else {
         // Offline simulation
         this.hostingSessionId = `session_${Date.now()}`;
         updateConnectionStatus('connected');
         _log(`[SessionManager] Simulated hosting: ${name} (offline)`);
+      }
+
+      // Start the game loop after session is created
+      _log(`[SessionManager] Starting game in ${mode} mode (hosting)`);
+      startGame(mode);
+
+      // ─── Initialize HostManager for server-authoritative validation ───
+      // HostManager validates all remote player actions (movement, blocks, inventory).
+      // It is wired in startGame() after the chunk manager is ready.
+      if (typeof HostManager !== 'undefined' && this.client) {
+        this._hostManager = new HostManager({ client: this.client });
+        this._hostManager.onPlayerJoined = (data) => {
+          _log(`[HostManager] Player joined: ${data.playerId} (${data.character?.name})`);
+        };
+        this._hostManager.onPlayerLeft = (data) => {
+          _log(`[HostManager] Player left: ${data.playerId}`);
+        };
+        _log('[SessionManager] HostManager initialized for server-authoritative validation');
       }
 
       // Wire up block validation callbacks for host persistence to IndexedDB.
@@ -1458,7 +1475,8 @@
 
   /**
    * Determine the correct WebSocket relay URL based on page origin.
-   * Auto-detects whether running locally or deployed behind NPM proxy.
+   * The relay server runs as a separate service on port 8765.
+   * Game sessions use dynamic ports (8766+) on the same host.
    *
    * @param {string} [pageOrigin] — Override for testing (e.g., 'https://webgame-cuubz.thehomelabguy.com')
    * @returns {string} WebSocket URL for the matchmaking relay server
@@ -1471,12 +1489,13 @@
       if (relayOverride) return relayOverride;
     }
 
-    // Route WebSocket through the same domain via /ws path — reuses existing SSL cert.
-    // Nginx reverse proxy forwards /ws to the relay server on port 8765.
+    // Connect directly to the relay server on port 8765.
+    // The relay is a separate service — game sessions use dynamic ports (8766+) on the same host.
     const origin = pageOrigin || (typeof location !== 'undefined' ? location.origin : '');
     if (origin) {
-      const base = origin.replace('https://', 'wss://').replace('http://', 'ws://');
-      return `${base}/ws`;
+      const protocol = origin.startsWith('https') ? 'wss' : 'ws';
+      const host = origin.replace(/^https?:\/\//, '');
+      return `${protocol}://${host}:8765`;
     }
 
     // Default: localhost for local development / direct server access
@@ -1690,6 +1709,19 @@
         // Graceful shutdown handlers
         chunkManager._setupGracefulShutdown();
 
+        // ─── Multiplayer: Send JOIN to game session ───
+        // The host/client must send JOIN so the relay knows who they are.
+        // If the game session connection isn't ready yet, the message is queued.
+        if (sessionManager && sessionManager.client) {
+          const charData = characterManager ? characterManager.getSelectedCharacter() : null;
+          sessionManager.client.joinGame(
+            charData ? { name: charData.name, color: charData.color } : { name: 'Player', color: '#ffffff' },
+            { x: 0, y: 20, z: 0 }, // Will be updated by movement sync
+            { yaw: 0, pitch: 0 }
+          );
+          _log('[Cuubz] Sent JOIN to game session');
+        }
+
         // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
         if (sessionManager && sessionManager.hostingSessionId) {
           const applyRemoteBlockChange = (data, newBlockType) => {
@@ -1851,6 +1883,41 @@
           const initCamPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
           renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
 
+          // ─── Initialize Multiplayer Player Sync ─────────
+          let playerSync = null;
+          if (typeof PlayerSyncManager !== 'undefined' && sessionManager && sessionManager.client) {
+            playerSync = new PlayerSyncManager();
+            playerSync.setGameMode(mode || 'survival');
+
+            // Wire session events to player sync
+            sessionManager.client.onGame('PLAYER_JOINED', (data) => {
+              const state = playerSync.addPlayer(data.playerId, {
+                name: data.character?.name || 'Player',
+                color: data.character?.color || '#888888',
+                position: data.position,
+              });
+              if (state.mesh && renderer.scene) renderer.scene.add(state.mesh);
+              if (state.nameTag && renderer.scene) renderer.scene.add(state.nameTag);
+              if (state.healthBar && renderer.scene) renderer.scene.add(state.healthBar);
+              _log(`[Cuubz] Remote player joined: ${data.playerId} (${state.name})`);
+            });
+
+            sessionManager.client.onGame('PLAYER_MOVE', (data) => {
+              playerSync.processServerUpdate(data.playerId, {
+                position: data.position,
+                yaw: data.rotation?.yaw,
+                pitch: data.rotation?.pitch,
+              });
+            });
+
+            sessionManager.client.onGame('PLAYER_LEFT', (data) => {
+              const removed = playerSync.removePlayer(data.playerId);
+              _log(`[Cuubz] Remote player left: ${data.playerId}`);
+            });
+
+            _log('[Cuubz] PlayerSyncManager initialized for multiplayer');
+          }
+
           // Initialize Block Interaction system
           const blockInteraction = new BlockInteraction({
             renderer: renderer,
@@ -1864,6 +1931,38 @@
           const inventory = new Inventory();
           player.inventory = inventory;
           game.inventory = inventory;
+
+          // ─── Multiplayer: Inventory Sync ────────────────
+          let inventorySync = null;
+          if (typeof InventorySync !== 'undefined' && sessionManager && sessionManager.client) {
+            inventorySync = new InventorySync(inventory, { playerId: sessionManager.client.playerId });
+
+            // On join: send full inventory to host
+            if (sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
+              const joinPayload = inventorySync.createJoinPayload();
+              sessionManager.client.sendInventoryUpdate(joinPayload);
+              _log('[Cuubz] Sent initial inventory to host on join');
+            }
+
+            // Start periodic diff sync (5s interval)
+            inventorySync.startPeriodicSync((payload) => {
+              if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
+                sessionManager.client.sendInventory(payload);
+              }
+            });
+
+            // Handle incoming inventory sync from host
+            sessionManager.client.onGame('INVENTORY_SYNC', (data) => {
+              if (inventorySync && data.playerId && data.inventory) {
+                // Only apply host's authoritative sync for our own inventory
+                if (data.playerId === sessionManager.client.playerId) {
+                  inventorySync.applyRemoteSync(data.playerId, data.inventory);
+                }
+              }
+            });
+
+            _log('[Cuubz] InventorySync initialized');
+          }
 
           // Load saved inventory from character data
           const selectedChar = characterManager ? characterManager.getSelectedCharacter() : null;
@@ -2262,6 +2361,14 @@
               // Update player physics with input (pass chunkWorld for collision)
               player.update(game.delta, inputState, chunkWorld);
               
+              // ─── Multiplayer: Send movement updates (~20Hz) ───
+              if (sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected && game.frameCount % 3 === 0) {
+                sessionManager.client.sendMove(
+                  { x: player.position.x, y: player.position.y, z: player.position.z },
+                  { yaw: player.yaw, pitch: player.pitch }
+                );
+              }
+              
               // Apply touch look deltas to player rotation (swipe right half of screen)
               const look = touch.consumeLookDeltas();
               if (look.x !== 0 || look.y !== 0) {
@@ -2289,6 +2396,23 @@
               // Update block interaction (break/place)
               if (blockInteraction) {
                 blockInteraction.update(game.delta);
+              }
+
+              // ─── Multiplayer: Sync remote player positions ───
+              if (playerSync) {
+                playerSync.update(game.delta);
+              }
+
+              // ─── Multiplayer: Send block changes to game session ───
+              if (blockInteraction && sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected) {
+                if (blockInteraction._lastBroken) {
+                  sessionManager.client.breakBlock(blockInteraction._lastBroken.x, blockInteraction._lastBroken.y, blockInteraction._lastBroken.z);
+                  blockInteraction._lastBroken = null;
+                }
+                if (blockInteraction._lastPlaced) {
+                  sessionManager.client.placeBlock(blockInteraction._lastPlaced.x, blockInteraction._lastPlaced.y, blockInteraction._lastPlaced.z, blockInteraction._lastPlaced.blockType);
+                  blockInteraction._lastPlaced = null;
+                }
               }
 
               // Update dropped items (floating drops with pickup)

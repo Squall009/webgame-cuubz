@@ -5,13 +5,13 @@ After=network.target
 [Service]
 Type=simple
 User=dadmin
-WorkingDirectory=/var/www/html/webgame-cuubz/server
+WorkingDirectory=/home/dadmin/projects/cuubz/server
 ExecStart=/usr/bin/node index.js
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
 Environment=MATCHMAKING_PORT=8765
-Environment=GAME_SESSION_PORT=8766
+Environment=SESSION_BASE_PORT=8766
 
 # Logging
 StandardOutput=journal
@@ -19,4 +19,4 @@ StandardError=journal
 SyslogIdentifier=cuubz-relay
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

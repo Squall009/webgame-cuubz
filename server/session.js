@@ -302,7 +302,7 @@ class SessionManager {
     if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)) {
       return false;
     }
-    if (y < -32 || y > 64) {
+    if (y < 0 || y > 96) {
       return false; // Out of world Y range
     }
 
@@ -329,7 +329,7 @@ class SessionManager {
     if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)) {
       return false;
     }
-    if (y < -32 || y > 64) return false;
+    if (y < 0 || y > 96) return false;
     if (blockType === undefined || blockType < 0) return false;
 
     // Distance check

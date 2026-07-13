@@ -38,8 +38,8 @@ const HOST_STATE = {
 const DEFAULT_HOST_CONFIG = {
   maxPlayers: 4,
   reachDistance: 6,           // Max blocks a player can interact with
-  yMin: -32,                  // World Y bounds
-  yMax: 64,
+  yMin: 0,                    // World Y bounds (aligned with chunkData.js MIN_Y/MAX_Y)
+  yMax: 96,
   moveRateLimit: 20,          // Max movement updates per second per player
   blockChangeCooldown: 100,   // Min ms between block changes from same player
   inventorySyncInterval: 5000,// How often to request inventory sync (ms)
@@ -669,6 +669,20 @@ class HostManager {
     if (!valid.valid) {
       console.warn(`[HostManager] Invalid move from ${playerId}: ${valid.reason}`);
       return;
+    }
+
+    // Speed validation: reject positions that require impossible velocity
+    const now = Date.now();
+    const dt = Math.max((now - player.lastMoveTime) / 1000, 0.016); // seconds since last move
+    const dx = data.position.x - player.position.x;
+    const dy = data.position.y - player.position.y;
+    const dz = data.position.z - player.position.z;
+    const speed = Math.sqrt(dx * dx + dy * dy + dz * dz) / dt;
+    const maxSpeed = 30; // blocks per second (generous — walking ~5, sprinting ~8, falling ~20)
+
+    if (speed > maxSpeed) {
+      console.warn(`[HostManager] Speed violation from ${playerId}: ${speed.toFixed(1)} > ${maxSpeed} blocks/s`);
+      return; // Reject impossible movement
     }
 
     // Update player state (server-authoritative on host)
