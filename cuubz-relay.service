@@ -5,13 +5,12 @@ After=network.target
 [Service]
 Type=simple
 User=dadmin
-WorkingDirectory=/home/dadmin/projects/cuubz/server
-ExecStart=/usr/bin/node index.js
+WorkingDirectory=/var/www/html/server
+ExecStart=/home/dadmin/.local/node-v22.22.0-linux-x64/bin/node index.js
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
 Environment=MATCHMAKING_PORT=8765
-Environment=SESSION_BASE_PORT=8766
 
 # Logging
 StandardOutput=journal
