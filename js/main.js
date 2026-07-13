@@ -1475,31 +1475,26 @@
 
   /**
    * Determine the correct WebSocket relay URL based on page origin.
-   * The relay server runs as a separate service on port 8765.
-   * Game sessions use dynamic ports (8766+) on the same host.
+   * The relay server runs on cuubz-relay.thehomelabguy.com with path-based routing:
+   *   /matchmaking  → session discovery
+   *   /session/:id  → game session
+   * Nginx handles TLS termination — the game never specifies a port.
    *
    * @param {string} [pageOrigin] — Override for testing (e.g., 'https://webgame-cuubz.thehomelabguy.com')
    * @returns {string} WebSocket URL for the matchmaking relay server
    */
   function getRelayUrl(pageOrigin) {
-    // Allow override via URL query parameter: ?relayUrl=ws://custom-host:8765
+    // Allow override via URL query parameter: ?relayUrl=wss://custom-host
     if (typeof location !== 'undefined' && location.search) {
       const params = new URLSearchParams(location.search);
       const relayOverride = params.get('relayUrl');
       if (relayOverride) return relayOverride;
     }
 
-    // Connect directly to the relay server on port 8765.
-    // The relay is a separate service — game sessions use dynamic ports (8766+) on the same host.
-    const origin = pageOrigin || (typeof location !== 'undefined' ? location.origin : '');
-    if (origin) {
-      const protocol = origin.startsWith('https') ? 'wss' : 'ws';
-      const host = origin.replace(/^https?:\/\//, '');
-      return `${protocol}://${host}:8765`;
-    }
-
-    // Default: localhost for local development / direct server access
-    return 'ws://localhost:8765';
+    // Fixed relay subdomain — works regardless of how the game is accessed.
+    // Nginx handles TLS (wss://) and forwards to the relay on port 8765.
+    const protocol = (typeof location !== 'undefined' && location.protocol === 'https:') ? 'wss' : 'ws';
+    return `${protocol}://cuubz-relay.thehomelabguy.com`;
   }
 
   /** Initialize session UI — create SessionManager and set defaults */

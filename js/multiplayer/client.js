@@ -725,7 +725,7 @@ class MultiplayerClient {
 
     try {
       const port = this.matchmakingPort ? `:${this.matchmakingPort}` : '';
-      const url = `${this._getProtocol()}://${this.host}${port}${this._wsPath}`;
+      const url = `${this._getProtocol()}://${this.host}${port}/matchmaking`;
       this._matchmakingConn = new WSConnection({
         url,
         wsFactory: this._wsFactory,
@@ -766,8 +766,8 @@ class MultiplayerClient {
     for (const eventType of sessionEvents) {
       this._matchmakingConn.on(eventType, (data) => {
         // Auto-connect to game session when join is accepted
-        if (eventType === 'JOIN_ACCEPTED' && data.sessionPort) {
-          this._connectToGameSession(data.sessionPort);
+        if (eventType === 'JOIN_ACCEPTED' && data.sessionId) {
+          this._connectToGameSession(data.sessionId);
         }
         this._emitMatchmaking(eventType, data);
       });
@@ -786,12 +786,13 @@ class MultiplayerClient {
     }
   }
 
-  /** Connect to game session server */
-  _connectToGameSession(sessionPort) {
+  /** Connect to game session server via path-based routing */
+  _connectToGameSession(sessionId) {
     if (this._disposed || this._gameSessionConn) return;
 
     try {
-      const url = `${this._getProtocol()}://${this.host}:${sessionPort}`;
+      const port = this.matchmakingPort ? `:${this.matchmakingPort}` : '';
+      const url = `${this._getProtocol()}://${this.host}${port}/session/${sessionId}`;
       this._gameSessionConn = new WSConnection({
         url,
         wsFactory: this._wsFactory,

@@ -1,82 +1,107 @@
 /**
  * Cuubz — Relay Server Entry Point
- * Manages matchmaking lobby (port 8765) and game session relaying (dynamic ports).
+ *
+ * Single WebSocket server on one port with path-based routing:
+ *   /matchmaking  → session discovery, host/join routing
+ *   /session/:id  → game session relay
+ *
+ * No dynamic ports — everything goes through the same server.
+ * Nginx reverse proxy can handle TLS termination.
  */
 
 'use strict';
 
 const { WebSocketServer, WebSocket } = require('ws');
 const http = require('http');
+const url = require('url');
 const Matchmaking = require('./matchmaking');
 const SessionManager = require('./session');
 
 // ─── Configuration ────────────────────────────────────────────
 
-const MATCHMAKING_PORT = process.env.MATCHMAKING_PORT || 8765;
-const SESSION_BASE_PORT = parseInt(process.env.SESSION_BASE_PORT) || 8766;
+const PORT = parseInt(process.env.MATCHMAKING_PORT) || 8765;
 const MAX_PLAYERS_PER_SESSION = 4;
 const HEARTBEAT_INTERVAL = 30000; // 30s keepalive
 
 // ─── State ────────────────────────────────────────────────────
 
-let nextSessionPort = SESSION_BASE_PORT;
 const sessions = new Map(); // sessionId → SessionManager instance
 
-// ─── Matchmaking Server (Lobby) ───────────────────────────────
+// ─── HTTP Server ──────────────────────────────────────────────
 
-const matchmakingServer = http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     const activeSessions = sessions.size;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', activeSessions, uptime: process.uptime() }));
   } else if (req.url === '/sessions') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(matchmaking.listSessions()));
+    res.end(JSON.stringify(listSessions()));
   } else {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Cuubz Matchmaking Relay\n');
+    res.end('Cuubz Relay Server\n');
   }
 });
 
-const matchmakingWSS = new WebSocketServer({ server: matchmakingServer });
+// ─── WebSocket Server (noServer mode for path routing) ────────
 
-// Load matchmaking logic
-const matchmaking = new Matchmaking({
-  wss: matchmakingWSS,
-  onHostRequest: (playerId, sessionName, worldSeed, mode) => {
-    // Create a new game session on a dynamic port
-    const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-    const sessionPort = nextSessionPort++;
+const wss = new WebSocketServer({ noServer: true });
 
-    console.log(`[MATCHMAKING] Creating session ${sessionId} for "${sessionName}" on port ${sessionPort}`);
+// Route WebSocket connections by URL path
+server.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
 
-    // Start game session relay server
-    const sessionHttp = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('Cuubz Game Session\n');
+  // /matchmaking → matchmaking relay
+  if (pathname === '/matchmaking') {
+    return wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
     });
+  }
 
-    const sessionWSS = new WebSocketServer({ server: sessionHttp });
+  // /session/:id → game session relay
+  const sessionMatch = pathname.match(/^\/session\/([^/]+)$/);
+  if (sessionMatch) {
+    const sessionId = sessionMatch[1];
+    const entry = sessions.get(sessionId);
+    if (!entry) {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\nSession not found');
+      socket.destroy();
+      return;
+    }
+    return entry.wss.handleUpgrade(request, socket, head, (ws) => {
+      entry.wss.emit('connection', ws, request);
+    });
+  }
+
+  // Unknown path — reject
+  socket.write('HTTP/1.1 404 Not Found\r\n\r\nUnknown path');
+  socket.destroy();
+});
+
+// ─── Matchmaking Logic ────────────────────────────────────────
+
+const matchmaking = new Matchmaking({
+  wss,
+  onHostRequest: (playerId, sessionName, worldSeed, mode) => {
+    const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+
+    console.log(`[MATCHMAKING] Creating session ${sessionId} for "${sessionName}"`);
+
+    // Create a dedicated WebSocket server for this session
+    // (noServer mode — upgrades are handled by the main server's upgrade handler)
+    const sessionWss = new WebSocketServer({ noServer: true });
     const session = new SessionManager({
-      wss: sessionWSS,
+      wss: sessionWss,
       sessionId,
       hostId: playerId,
       maxPlayers: MAX_PLAYERS_PER_SESSION,
       heartbeatInterval: HEARTBEAT_INTERVAL,
     });
 
-    sessions.set(sessionId, { session, httpServer: sessionHttp, port: sessionPort });
+    sessions.set(sessionId, { session, wss: sessionWss });
 
-    // Start listening
-    sessionHttp.listen(sessionPort, () => {
-      console.log(`[SESSION] ${sessionId} listening on port ${sessionPort}`);
-    }).on('error', (err) => {
-      console.error(`[SESSION] Failed to listen on port ${sessionPort}:`, err.message);
-      // Clean up the failed session
-      sessions.delete(sessionId);
-    });
-
-    return { sessionId, sessionPort };
+    console.log(`[SESSION] ${sessionId} created (path: /session/${sessionId})`);
+    return { sessionId };
   },
   onJoinRequest: (playerId, sessionId) => {
     const entry = sessions.get(sessionId);
@@ -87,34 +112,39 @@ const matchmaking = new Matchmaking({
     if (!canJoin) {
       return { error: 'Session is full' };
     }
-    return { sessionPort: entry.port };
+    // Client connects to /session/:id on the same host
+    return { sessionId };
   },
-  listSessions: () => {
-    const list = [];
-    for (const [id, entry] of sessions) {
-      const info = entry.session.getSessionInfo();
-      if (info) {
-        list.push({ ...info, sessionPort: entry.port });
-      }
-    }
-    return list;
-  },
+  listSessions: () => listSessions(),
   onSessionLeave: (sessionId) => {
     const entry = sessions.get(sessionId);
     if (entry) {
       console.log(`[MATCHMAKING] Cleaning up session ${sessionId}`);
       entry.session.dispose();
-      entry.httpServer.close();
       sessions.delete(sessionId);
     }
   },
 });
 
-// ─── Start Servers ────────────────────────────────────────────
+// ─── Helper: List Active Sessions ─────────────────────────────
 
-matchmakingServer.listen(MATCHMAKING_PORT, () => {
-  console.log(`[MATCHMAKING] Lobby listening on port ${MATCHMAKING_PORT}`);
-  console.log(`[MATCHMAKING] Sessions will use ports starting from ${SESSION_BASE_PORT}`);
+function listSessions() {
+  const list = [];
+  for (const [id, entry] of sessions) {
+    const info = entry.session.getSessionInfo();
+    if (info) {
+      list.push(info);
+    }
+  }
+  return list;
+}
+
+// ─── Start Server ─────────────────────────────────────────────
+
+server.listen(PORT, () => {
+  console.log(`[RELAY] Listening on port ${PORT}`);
+  console.log(`[RELAY] Matchmaking: ws://<host>:${PORT}/matchmaking`);
+  console.log(`[RELAY] Sessions:    ws://<host>:${PORT}/session/:id`);
 });
 
 // ─── Graceful Shutdown ────────────────────────────────────────
@@ -124,14 +154,13 @@ process.on('SIGINT', () => {
   for (const [id, entry] of sessions) {
     try {
       entry.session.dispose();
-      entry.httpServer.close();
     } catch (e) {
       console.error(`[SERVER] Error cleaning up session ${id}:`, e.message);
     }
   }
   sessions.clear();
-  try { matchmakingWSS.close(); } catch (e) {}
-  matchmakingServer.close(() => {
+  try { wss.close(); } catch (e) {}
+  server.close(() => {
     console.log('[SERVER] Shutdown complete.');
     process.exit(0);
   });
@@ -141,11 +170,8 @@ process.on('SIGTERM', () => {
   process.emit('SIGINT');
 });
 
-// ─── Process-Level Error Handlers ─────────────────────────────
-
 process.on('uncaughtException', (err) => {
   console.error('[SERVER] Uncaught Exception:', err.message, err.stack);
-  // Attempt graceful shutdown
   process.emit('SIGINT');
 });
 
