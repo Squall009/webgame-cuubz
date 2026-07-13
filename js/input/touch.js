@@ -23,11 +23,16 @@ class TouchInput {
     
     // Mobile action button states (break, place)
     this.breakPressed = false;
+    this.breakHeld = false;       // alias for BlockInteraction (held state)
+    this.breakJustPressed = false; // edge: true for one frame on touchstart
     this.placePressed = false;
     
     // Jump button state
     this.jump = false;
     this.jumpJustPressed = false; // edge: true for one frame on touchstart
+    
+    // Inventory toggle
+    this.inventoryToggled = false; // edge: true for one frame when inventory button tapped
     
     // Disposed flag for cleanup safety
     this._disposed = false;
@@ -76,8 +81,8 @@ class TouchInput {
     // Break block button
     const breakBtn = document.getElementById('btn-break-mobile');
     if (breakBtn) {
-      this._handlers.onBreakStart = (e) => { e.preventDefault(); this.breakPressed = true; };
-      this._handlers.onBreakEnd = (e) => { e.preventDefault(); this.breakPressed = false; };
+      this._handlers.onBreakStart = (e) => { e.preventDefault(); this.breakPressed = true; this.breakHeld = true; this.breakJustPressed = true; };
+      this._handlers.onBreakEnd = (e) => { e.preventDefault(); this.breakPressed = false; this.breakHeld = false; this.breakJustPressed = false; };
       breakBtn.addEventListener('touchstart', this._handlers.onBreakStart);
       breakBtn.addEventListener('touchend', this._handlers.onBreakEnd);
     }
@@ -89,6 +94,13 @@ class TouchInput {
       this._handlers.onPlaceEnd = (e) => { e.preventDefault(); this.placePressed = false; };
       placeBtn.addEventListener('touchstart', this._handlers.onPlaceStart);
       placeBtn.addEventListener('touchend', this._handlers.onPlaceEnd);
+    }
+    
+    // Inventory button
+    const invBtn = document.getElementById('btn-inventory-mobile');
+    if (invBtn) {
+      this._handlers.onInvClick = (e) => { e.preventDefault(); this.inventoryToggled = true; };
+      invBtn.addEventListener('touchstart', this._handlers.onInvClick);
     }
   }
 
@@ -194,6 +206,8 @@ class TouchInput {
     // Look deltas accumulate, so we don't clear them here
     // They should be consumed by the game loop
     this.jumpJustPressed = false; // consume edge signal
+    this.breakJustPressed = false; // consume edge signal
+    this.inventoryToggled = false; // consume edge signal
   }
 
   /**
@@ -263,6 +277,11 @@ class TouchInput {
       if (placeBtn) {
         if (this._handlers.onPlaceStart) placeBtn.removeEventListener('touchstart', this._handlers.onPlaceStart);
         if (this._handlers.onPlaceEnd) placeBtn.removeEventListener('touchend', this._handlers.onPlaceEnd);
+      }
+
+      const invBtn = document.getElementById('btn-inventory-mobile');
+      if (invBtn) {
+        if (this._handlers.onInvClick) invBtn.removeEventListener('touchstart', this._handlers.onInvClick);
       }
     }
 

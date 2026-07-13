@@ -2271,6 +2271,11 @@
                 player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
               }
               
+              // Mobile inventory toggle
+              if (touch.inventoryToggled) {
+                toggleInventoryScreen();
+              }
+              
               // Update fly mode indicator HUD (creative only)
               const flyIndicator = document.getElementById('fly-mode-indicator');
               if (player.flyMode && !player.gravityEnabled) {
