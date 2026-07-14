@@ -133,6 +133,7 @@ const matchmaking = new Matchmaking({
     const session = new SessionManager({
       wss: sessionWss,
       sessionId,
+      sessionName: sessionName || 'Untitled',
       hostId: playerId,
       maxPlayers: MAX_PLAYERS_PER_SESSION,
       heartbeatInterval: HEARTBEAT_INTERVAL,

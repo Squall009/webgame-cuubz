@@ -1414,12 +1414,24 @@
       const healthPercent = player.health !== undefined ? Math.max(0, Math.min(100, player.health)) : 100;
       const healthColor = healthPercent > 60 ? '#4CAF50' : healthPercent > 30 ? '#f1c40f' : '#e74c3c';
 
+      // Position info
+      let posHtml = '';
+      if (player.position) {
+        const px = Math.round(player.position.x);
+        const py = Math.round(player.position.y);
+        const pz = Math.round(player.position.z);
+        posHtml = `<span class="player-list-item-pos">(${px}, ${py}, ${pz})</span>`;
+      }
+
       item.innerHTML = `
-        <span class="player-color-dot" style="background:${escapeHtml(player.color || '#ffffff')}"></span>
-        <span class="player-name-text">${escapeHtml(player.name || 'Player')}</span>
-        <div class="player-health-bar">
-          <div class="player-health-fill" style="width:${healthPercent}%;background:${healthColor};"></div>
+        <div class="player-list-item-header">
+          <span class="player-color-dot" style="background:${escapeHtml(player.color || '#ffffff')}"></span>
+          <span class="player-name-text">${escapeHtml(player.name || 'Player')}</span>
+          <div class="player-health-bar">
+            <div class="player-health-fill" style="width:${healthPercent}%;background:${healthColor};"></div>
+          </div>
         </div>
+        ${posHtml}
       `;
 
       itemsContainer.appendChild(item);
@@ -2186,12 +2198,14 @@
         // If the game session connection isn't ready yet, the message is queued.
         if (sessionManager && sessionManager.client) {
           const charData = characterManager ? characterManager.getSelectedCharacter() : null;
+          // Send actual spawn position so other players can see us
+          const spawnPos = { x: bestSpawnX + 0.5, y: spawnHeight, z: bestSpawnZ + 0.5 };
           sessionManager.client.joinGame(
             charData ? { name: charData.name, color: charData.color } : { name: 'Player', color: '#ffffff' },
-            { x: 0, y: 20, z: 0 }, // Will be updated by movement sync
+            spawnPos,
             { yaw: 0, pitch: 0 }
           );
-          _log('[Cuubz] Sent JOIN to game session');
+          _log(`[Cuubz] Sent JOIN to game session at ${JSON.stringify(spawnPos)}`);
         }
 
         // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
@@ -2362,6 +2376,25 @@
             playerSync.setGameMode(mode || 'survival');
 
             // Wire session events to player sync
+            // Handle WELCOME — it includes existing players already in the session
+            sessionManager.client.onGame('WELCOME', (data) => {
+              if (data.players && Array.isArray(data.players) && data.players.length > 0) {
+                for (const p of data.players) {
+                  // Skip self
+                  if (p.playerId === sessionManager.client.playerId) continue;
+                  const state = playerSync.addPlayer(p.playerId, {
+                    name: p.name || 'Player',
+                    color: p.color || '#888888',
+                    position: p.position,
+                  });
+                  if (state.mesh && renderer.scene) renderer.scene.add(state.mesh);
+                  if (state.nameTag && renderer.scene) renderer.scene.add(state.nameTag);
+                  if (state.healthBar && renderer.scene) renderer.scene.add(state.healthBar);
+                  _log(`[Cuubz] Existing player from WELCOME: ${p.playerId} (${p.name})`);
+                }
+              }
+            });
+
             sessionManager.client.onGame('PLAYER_JOINED', (data) => {
               const state = playerSync.addPlayer(data.playerId, {
                 name: data.character?.name || 'Player',
@@ -2413,6 +2446,23 @@
               }
               playerListHUD.updatePlayers(initialPlayers);
 
+              // Wire WELCOME — add existing players already in the session
+              sessionManager.client.onGame('WELCOME', (data) => {
+                if (playerListHUD && data.players && Array.isArray(data.players)) {
+                  for (const p of data.players) {
+                    // Skip self
+                    if (p.playerId === sessionManager.client.playerId) continue;
+                    playerListHUD.addPlayer({
+                      id: p.playerId,
+                      name: p.name || 'Player',
+                      color: p.color || '#888888',
+                      health: 100,
+                      position: p.position,
+                    });
+                  }
+                }
+              });
+
               // Wire PLAYER_JOINED to add to HUD
               sessionManager.client.onGame('PLAYER_JOINED', (data) => {
                 if (playerListHUD) {
@@ -2432,14 +2482,13 @@
                 }
               });
 
-              // Wire PLAYER_MOVE to update health in HUD (if health data included)
+              // Wire PLAYER_MOVE to update health + position in HUD
               sessionManager.client.onGame('PLAYER_MOVE', (data) => {
-                if (playerListHUD && data.playerId && data.health !== undefined) {
-                  const current = playerListHUD.getPlayers();
-                  const existing = current.find(p => p.id === data.playerId);
-                  if (existing) {
-                    playerListHUD.addPlayer({ id: data.playerId, health: data.health });
-                  }
+                if (playerListHUD && data.playerId) {
+                  const update = { id: data.playerId };
+                  if (data.health !== undefined) update.health = data.health;
+                  if (data.position) update.position = data.position;
+                  playerListHUD.addPlayer(update);
                 }
               });
 
@@ -3008,6 +3057,24 @@
               // ─── Multiplayer: Sync remote player positions ───
               if (playerSync) {
                 playerSync.update(game.delta);
+              }
+
+              // ─── Multiplayer: Update player list HUD positions (every 30 frames ≈ 0.5s) ───
+              if (playerListHUD && game.frameCount % 30 === 0) {
+                // Update local player position
+                playerListHUD.addPlayer({
+                  id: 'local',
+                  position: { x: player.position.x, y: player.position.y, z: player.position.z },
+                });
+                // Update remote player positions from PlayerSyncManager
+                if (playerSync) {
+                  for (const remotePlayer of playerSync.getActivePlayers()) {
+                    playerListHUD.addPlayer({
+                      id: remotePlayer.playerId,
+                      position: { ...remotePlayer.authoritativePosition },
+                    });
+                  }
+                }
               }
 
               // ─── Multiplayer: Update ChunkStreamer with player positions (host) ───

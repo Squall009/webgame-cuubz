@@ -993,12 +993,12 @@ html, body {
 .connection-hud.disconnected { background: rgba(231,76,60,0.2); color: #e74c3c; }
 .connection-hud.reconnecting { background: rgba(241,196,15,0.2); color: #f1c40f; }
 
-/* --- Player List Overlay (in-game) --- */
+/* --- Player List Overlay (in-game, bottom-right) --- */
 .player-list-overlay {
   position: fixed;
-  top: 8px;
-  left: 8px;
-  width: min(180px, 30vw);
+  bottom: 80px;
+  right: 8px;
+  width: min(200px, 30vw);
   background: rgba(0,0,0,0.6);
   border-radius: 8px;
   padding: 8px;
@@ -1058,11 +1058,24 @@ html, body {
 
 .player-list-item {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 2px;
   font-size: 11px;
   color: #e0e0e0;
   pointer-events: none;
+}
+
+.player-list-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.player-list-item-pos {
+  font-size: 9px;
+  color: #888;
+  font-family: monospace;
+  margin-left: 14px;
 }
 
 .player-color-dot {
@@ -1236,8 +1249,8 @@ html, body {
   /* === PLAYER LIST HUD — Mobile adjustments === */
   .player-list-overlay {
     width: min(150px, 35vw);
-    top: 4px;
-    left: 4px;
+    bottom: 160px;
+    right: 4px;
     padding: 6px;
   }
 

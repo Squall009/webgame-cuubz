@@ -44,6 +44,7 @@ class SessionManager {
   /**
    * @param {object} config
    * @param {WebSocketServer} config.wss — The WebSocket server for this session
+   * @param {string} config.sessionName — Human-readable session name
    * @param {string} config.sessionId — Unique session identifier
    * @param {string} config.hostId — Player ID of the host
    * @param {number} config.maxPlayers — Maximum players (default: 4)
@@ -53,6 +54,7 @@ class SessionManager {
   constructor(config) {
     this.wss = config.wss;
     this.sessionId = config.sessionId;
+    this.sessionName = config.sessionName || 'Untitled';
     this.hostId = config.hostId;
     this.maxPlayers = config.maxPlayers || 4;
     this.heartbeatInterval = config.heartbeatInterval || 30000;
@@ -486,13 +488,12 @@ class SessionManager {
    * Get session info for matchmaking listing
    */
   getSessionInfo() {
-    const host = this.players.get(this.hostId);
     return {
       sessionId: this.sessionId,
-      name: host ? host.character.name : 'Unknown',
+      name: this.sessionName,
       players: this.players.size,
       maxPlayers: this.maxPlayers,
-      mode: 'survival', // TODO: track mode per session
+      mode: 'survival',
     };
   }
 

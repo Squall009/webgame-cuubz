@@ -308,12 +308,24 @@ class PlayerListHUD {
       const name = escapeHtml(player.name || 'Player');
       const color = escapeHtml(player.color || '#ffffff');
 
+      // Position info
+      let posHtml = '';
+      if (player.position) {
+        const px = Math.round(player.position.x);
+        const py = Math.round(player.position.y);
+        const pz = Math.round(player.position.z);
+        posHtml = `<span class="player-list-item-pos">(${px}, ${py}, ${pz})</span>`;
+      }
+
       item.innerHTML = `
-        <span class="player-color-dot" style="background:${color}"></span>
-        <span class="player-name-text">${name}</span>
-        <div class="player-health-bar">
-          <div class="player-health-fill" style="width:${healthPercent}%;background:${healthColor};"></div>
+        <div class="player-list-item-header">
+          <span class="player-color-dot" style="background:${color}"></span>
+          <span class="player-name-text">${name}</span>
+          <div class="player-health-bar">
+            <div class="player-health-fill" style="width:${healthPercent}%;background:${healthColor};"></div>
+          </div>
         </div>
+        ${posHtml}
       `;
 
       this._items.appendChild(item);
