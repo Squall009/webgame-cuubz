@@ -21,7 +21,7 @@ const SessionManager = require('./session');
 
 const PORT = parseInt(process.env.MATCHMAKING_PORT) || 8765;
 const MAX_PLAYERS_PER_SESSION = 4;
-const HEARTBEAT_INTERVAL = 60000; // 60s keepalive (browser throttles background tabs)
+const HEARTBEAT_INTERVAL = 120000; // 120s keepalive (browser throttles background tabs hard)
 
 // ─── State ────────────────────────────────────────────────────
 

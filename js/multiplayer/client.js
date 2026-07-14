@@ -27,8 +27,8 @@ const CLIENT_STATE = {
 };
 
 const DEFAULT_CONFIG = {
-  heartbeatInterval: 15000,    // Send heartbeat every 15s (server expects within 30s)
-  heartbeatTimeout: 5000,      // Consider dead if no response in 5s
+  heartbeatInterval: 25000,    // Send heartbeat every 25s (server timeout is 120s)
+  heartbeatTimeout: 30000,     // Consider dead if no ACK in 30s (survives background throttling)
   maxReconnectAttempts: 10,
   reconnectBaseDelay: 1000,    // 1s base delay
   reconnectMaxDelay: 30000,    // Cap at 30s
