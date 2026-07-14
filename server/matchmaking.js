@@ -172,6 +172,7 @@ class Matchmaking {
           client.isHost = false; // Joiners are never the host
           this._send(ws, {
             type: 'JOIN_ACCEPTED',
+            sessionId: msg.sessionId,
             sessionPort: result.sessionPort,
             message: `Joining session ${msg.sessionId}. Connect to game session on port ${result.sessionPort}`,
           });
