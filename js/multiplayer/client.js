@@ -769,6 +769,10 @@ class MultiplayerClient {
         if (eventType === 'JOIN_ACCEPTED' && data.sessionId) {
           this._connectToGameSession(data.sessionId);
         }
+        // Auto-connect to game session when host is created
+        if (eventType === 'HOST_CREATED' && data.sessionId) {
+          this._connectToGameSession(data.sessionId);
+        }
         this._emitMatchmaking(eventType, data);
       });
     }
