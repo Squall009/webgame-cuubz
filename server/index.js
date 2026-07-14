@@ -27,18 +27,48 @@ const HEARTBEAT_INTERVAL = 30000; // 30s keepalive
 
 const sessions = new Map(); // sessionId → SessionManager instance
 
+// ─── CORS Configuration ─────────────────────────────────────
+const ALLOWED_ORIGINS = new Set([
+  'https://cuubz.thehomelabguy.com',
+  'https://cuubz-relay.thehomelabguy.com',
+  'http://localhost',
+  'http://127.0.0.1',
+]);
+
+function getCorsHeaders(origin) {
+  if (ALLOWED_ORIGINS.has(origin) || origin === '*') {
+    return {
+      'Access-Control-Allow-Origin': origin || '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+    };
+  }
+  return {};
+}
+
 // ─── HTTP Server ──────────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
+  const origin = req.headers.origin || '';
+  const corsHeaders = getCorsHeaders(origin);
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { 'Content-Type': 'text/plain', ...corsHeaders });
+    res.end();
+    return;
+  }
+
   if (req.url === '/health') {
     const activeSessions = sessions.size;
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
     res.end(JSON.stringify({ status: 'ok', activeSessions, uptime: process.uptime() }));
   } else if (req.url === '/sessions') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
     res.end(JSON.stringify(listSessions()));
   } else {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.writeHead(200, { 'Content-Type': 'text/plain', ...corsHeaders });
     res.end('Cuubz Relay Server\n');
   }
 });
