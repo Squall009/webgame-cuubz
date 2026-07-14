@@ -1092,13 +1092,13 @@ class ChunkManager {
     if (geoResult.solid) {
       const geo = this._wrapBuffers(geoResult.solid);
       if (geo && geo.index && geo.index.count > 0) {
-        const material = new THREE.MeshLambertMaterial({ map: texMap, color: 0xffffff, fog: true });
+        const material = new THREE.MeshLambertMaterial({ map: texMap, color: 0xffffff, fog: true, side: THREE.DoubleSide });
         solidMesh = new THREE.Mesh(geo, material);
         solidMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
       }
     } else if (geoResult.solidGeometry) {
       // Inline fallback returns BufferGeometry directly
-      const material = new THREE.MeshLambertMaterial({ map: texMap, color: 0xffffff, fog: true });
+      const material = new THREE.MeshLambertMaterial({ map: texMap, color: 0xffffff, fog: true, side: THREE.DoubleSide });
       solidMesh = new THREE.Mesh(geoResult.solidGeometry, material);
       solidMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
     }

@@ -47,7 +47,12 @@ class BlockInteraction {
     this.crackCtx = null;
 
     // Block types that can be broken/placed
-    this.unbreakableBlocks = new Set([BLOCK_TYPES.BEDROCK, BLOCK_TYPES.OBSIDIAN]); // BEDROCK(1) + OBSIDIAN(35)
+    this.unbreakableBlocks = new Set([
+      BLOCK_TYPES.BEDROCK,    // 1
+      BLOCK_TYPES.OBSIDIAN,   // 35
+      BLOCK_TYPES.WATER,      // 7 — fluid, can't be broken
+      BLOCK_TYPES.LAVA,       // 15 — fluid, can't be broken
+    ]);
 
     // Selected block type for placing (from hotbar)
     this.selectedBlockType = 3; // Default: STONE

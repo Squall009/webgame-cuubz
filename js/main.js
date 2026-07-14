@@ -3356,6 +3356,59 @@
 
     resumeBtn.addEventListener('click', resumeGame);
 
+    // Exit to Menu button
+    const exitBtn = document.getElementById('btn-exit-menu');
+    if (exitBtn) {
+      exitBtn.addEventListener('click', () => {
+        // Stop the game loop
+        game.running = false;
+        game.paused = false;
+
+        // Stop chunk manager timers and dispose resources
+        if (game.chunkManager) {
+          game.chunkManager.dispose();
+        }
+
+        // Exit pointer lock
+        if (document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+
+        // Hide in-game HUD overlays
+        const hud = document.getElementById('hud');
+        if (hud) hud.classList.add('hidden');
+        const pauseMenuEl = document.getElementById('pause-menu');
+        if (pauseMenuEl) pauseMenuEl.classList.add('hidden');
+        const debugStatsEl = document.getElementById('debug-stats');
+        if (debugStatsEl) debugStatsEl.classList.add('hidden');
+        const inventoryScreenEl = document.getElementById('inventory-screen');
+        if (inventoryScreenEl) inventoryScreenEl.classList.add('hidden');
+        const touchControlsEl = document.getElementById('touch-controls');
+        if (touchControlsEl) touchControlsEl.classList.add('hidden');
+        const crosshairEl = document.getElementById('crosshair');
+        if (crosshairEl) crosshairEl.classList.add('hidden');
+        const flyIndicatorEl = document.getElementById('fly-mode-indicator');
+        if (flyIndicatorEl) flyIndicatorEl.classList.add('hidden');
+        const connectionHudEl = document.getElementById('connection-hud');
+        if (connectionHudEl) connectionHudEl.classList.add('hidden');
+        const playerListOverlayEl = document.getElementById('player-list-overlay');
+        if (playerListOverlayEl) playerListOverlayEl.classList.add('hidden');
+
+        // Clean up Three.js renderer
+        if (game.renderer) {
+          const container = document.getElementById('game-container');
+          if (container) container.innerHTML = '';
+          if (game.renderer.renderer) {
+            game.renderer.renderer.dispose();
+          }
+        }
+
+        // Show main menu
+        showScreen('mainMenu');
+        _log('[Cuubz] Exited to main menu');
+      });
+    }
+
     // Settings: Region Check Interval (was Chunk Tick Interval)
     if (tickSlider && tickVal) {
       tickSlider.value = 500; // Default region check interval
