@@ -2986,6 +2986,9 @@
               // Update touch input (clears per-frame state)
               touch.update();
 
+              // Update mouse input (clears just-clicked flags)
+              mouse.update();
+
               // Update mouse pointer lock state
               if (document.pointerLockElement === canvas) {
                 mouse.locked = true;
