@@ -47,6 +47,7 @@ class SessionManager {
    * @param {string} config.hostId — Player ID of the host
    * @param {number} config.maxPlayers — Maximum players (default: 4)
    * @param {number} config.heartbeatInterval — Heartbeat timeout in ms (default: 30000)
+   * @param {function} [config.onSessionEmpty] — Called when the session has 0 players (for relay cleanup)
    */
   constructor(config) {
     this.wss = config.wss;
@@ -54,6 +55,7 @@ class SessionManager {
     this.hostId = config.hostId;
     this.maxPlayers = config.maxPlayers || 4;
     this.heartbeatInterval = config.heartbeatInterval || 30000;
+    this.onSessionEmpty = config.onSessionEmpty || (() => {});
 
     // Connected players: playerId → { ws, character, position, rotation, lastHeartbeat }
     this.players = new Map();
@@ -65,7 +67,50 @@ class SessionManager {
     };
 
     this._disposed = false;
+    this._heartbeatTimer = null;
+
     this._setupConnectionHandler();
+    this._startHeartbeatCheck();
+  }
+
+  /**
+   * Start periodic heartbeat enforcement — kicks players who haven't
+   * sent a heartbeat within the configured interval.
+   */
+  _startHeartbeatCheck() {
+    const checkInterval = Math.max(this.heartbeatInterval / 2, 5000); // Check every 15s (half of timeout)
+
+    this._heartbeatTimer = setInterval(() => {
+      if (this._disposed) {
+        this._stopHeartbeatCheck();
+        return;
+      }
+
+      const now = Date.now();
+      const stalePlayers = [];
+
+      for (const [playerId, player] of this.players) {
+        const elapsed = now - player.lastHeartbeat;
+        if (elapsed > this.heartbeatInterval) {
+          stalePlayers.push(playerId);
+        }
+      }
+
+      for (const playerId of stalePlayers) {
+        console.log(`[SESSION ${this.sessionId}] Heartbeat timeout for ${playerId} — kicking`);
+        this._removePlayer(playerId);
+      }
+    }, checkInterval);
+  }
+
+  /**
+   * Stop the heartbeat enforcement timer.
+   */
+  _stopHeartbeatCheck() {
+    if (this._heartbeatTimer) {
+      clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = null;
+    }
   }
 
   /**
@@ -95,7 +140,6 @@ class SessionManager {
 
       ws.on('error', (err) => {
         console.error(`[SESSION ${this.sessionId}] WebSocket error:`, err.message);
-        // Clean up the player on WebSocket error to prevent dangling connections
         const playerId = this._findPlayerIdByWs(ws);
         if (playerId) {
           this._removePlayer(playerId);
@@ -132,6 +176,20 @@ class SessionManager {
 
       case MESSAGE_TYPES.INVENTORY_UPDATE:
         this._handleInventoryUpdate(playerId, msg);
+        break;
+
+      case MESSAGE_TYPES.CHUNK_DATA:
+        this._handleChunkData(playerId, msg);
+        break;
+
+      case MESSAGE_TYPES.QUEST_UPDATE:
+        // Broadcast quest progress to all players
+        this._broadcast(null, {
+          type: 'QUEST_UPDATE',
+          questId: msg.questId,
+          progress: msg.progress,
+          updatedBy: playerId,
+        });
         break;
 
       case MESSAGE_TYPES.HEARTBEAT:
@@ -285,6 +343,44 @@ class SessionManager {
   }
 
   /**
+   * Handle chunk data streaming — relay to target players or all players.
+   * Only the host may send chunk data.
+   */
+  _handleChunkData(playerId, msg) {
+    if (!playerId) return;
+
+    // Only the host should send chunk data
+    if (playerId !== this.hostId) {
+      console.warn(`[SESSION ${this.sessionId}] Non-host ${playerId} sent CHUNK_DATA — ignoring`);
+      return;
+    }
+
+    // Build the forwarded message
+    const chunkMsg = {
+      type: 'CHUNK_DATA',
+      chunkX: msg.chunkX,
+      chunkZ: msg.chunkZ,
+      data: msg.data,
+      compressed: msg.compressed || false,
+      dirty: msg.dirty || false,
+    };
+
+    // Send to target players if specified, otherwise all non-host players
+    if (msg.targetPlayers && Array.isArray(msg.targetPlayers) && msg.targetPlayers.length > 0) {
+      for (const targetId of msg.targetPlayers) {
+        if (targetId === playerId) continue; // Skip sender
+        const target = this.players.get(targetId);
+        if (target) {
+          this._send(target.ws, chunkMsg);
+        }
+      }
+    } else {
+      // Broadcast to all non-host players
+      this._broadcast(playerId, chunkMsg);
+    }
+  }
+
+  /**
    * Handle heartbeat keepalive
    */
   _handleHeartbeat(playerId) {
@@ -370,9 +466,10 @@ class SessionManager {
 
     console.log(`[SESSION ${this.sessionId}] Player ${playerId} removed (${this.players.size}/${this.maxPlayers})`);
 
-    // If host left and session is empty, signal cleanup
+    // If host left, or session is empty, signal relay to clean up
     if (playerId === this.hostId || this.players.size === 0) {
       console.log(`[SESSION ${this.sessionId}] Session ending (host left or empty)`);
+      this.onSessionEmpty(this.sessionId);
     }
   }
 
@@ -466,6 +563,8 @@ class SessionManager {
     if (this._disposed) return;
     this._disposed = true;
 
+    this._stopHeartbeatCheck();
+
     // Disconnect all players
     for (const player of this.players.values()) {
       try { player.ws.close(); } catch (e) {}
@@ -473,7 +572,7 @@ class SessionManager {
     this.players.clear();
 
     // Close WebSocket server
-    this.wss.close();
+    try { this.wss.close(); } catch (e) {}
   }
 }
 

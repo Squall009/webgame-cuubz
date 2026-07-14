@@ -219,8 +219,38 @@
       <button id="tab-browse" class="lobby-tab active">Browse Sessions</button>
       <button id="tab-host" class="lobby-tab">Host Session</button>
     </div>
+    <!-- Rejoin Session Button (shown when there's a recent session) -->
+    <div id="rejoin-panel" class="lobby-panel hidden" style="background:rgba(76,175,80,0.1);border:1px solid rgba(76,175,80,0.3);border-radius:6px;padding:12px;margin:8px 0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <span style="color:#4CAF50;font-weight:bold;">⚡ Rejoin Session</span>
+          <span id="rejoin-session-name" style="color:#aaa;margin-left:8px;"></span>
+        </div>
+        <div>
+          <button id="btn-rejoin-session" class="menu-btn primary" style="margin:0;">Rejoin</button>
+          <button id="btn-clear-rejoin" class="menu-btn secondary" style="margin:0;margin-left:4px;">✕</button>
+        </div>
+      </div>
+    </div>
     <!-- Browse Tab: Session List -->
     <div id="browse-panel" class="lobby-panel">
+      <!-- Character selection for joining -->
+      <div style="margin-bottom:12px;">
+        <label for="browse-character-select" style="font-size:13px;color:#aaa;display:block;margin-bottom:4px;">Play as:</label>
+        <div class="host-select-row">
+          <select id="browse-character-select"></select>
+          <button id="btn-browse-create-char" class="menu-btn" style="padding:8px 12px;font-size:13px;white-space:nowrap;">+ New</button>
+        </div>
+        <!-- Inline character creation for browse -->
+        <div id="browse-create-char-form" class="host-inline-form hidden">
+          <div class="host-inline-form-row">
+            <input type="text" id="browse-char-name" maxlength="16" placeholder="Character name...">
+            <input type="color" id="browse-char-color" value="#4CAF50" title="Character color">
+          </div>
+          <div id="browse-char-error" class="modal-error hidden"></div>
+          <button id="btn-browse-save-char" class="menu-btn primary" style="padding:8px 16px;font-size:13px;">Create Character</button>
+        </div>
+      </div>
       <div id="session-list"></div>
       <p id="no-sessions-msg" class="lobby-empty hidden">No sessions available. Be the first to host!</p>
       <button id="btn-refresh-sessions" class="menu-btn secondary" style="margin-top:8px;">Refresh</button>
@@ -228,18 +258,54 @@
     <!-- Host Tab: Session Creation -->
     <div id="host-panel" class="lobby-panel hidden">
       <div class="host-form">
+        <!-- Session Name -->
         <label for="host-session-name">Session Name:</label>
         <input type="text" id="host-session-name" maxlength="32" placeholder="My Awesome World">
+
+        <!-- Character Selection -->
+        <label for="host-character-select">Your Character:</label>
+        <div class="host-select-row">
+          <select id="host-character-select"></select>
+          <button id="btn-host-create-char" class="menu-btn" style="padding:8px 12px;font-size:13px;white-space:nowrap;">+ New</button>
+        </div>
+        <!-- Inline character creation form (collapsed by default) -->
+        <div id="host-create-char-form" class="host-inline-form hidden">
+          <div class="host-inline-form-row">
+            <input type="text" id="host-char-name" maxlength="16" placeholder="Character name...">
+            <input type="color" id="host-char-color" value="#4CAF50" title="Character color">
+          </div>
+          <div id="host-char-error" class="modal-error hidden"></div>
+          <button id="btn-host-save-char" class="menu-btn primary" style="padding:8px 16px;font-size:13px;">Create Character</button>
+        </div>
+
+        <!-- World Selection -->
         <label for="host-world-select">World:</label>
-        <select id="host-world-select"></select>
+        <div class="host-select-row">
+          <select id="host-world-select"></select>
+          <button id="btn-host-create-world" class="menu-btn" style="padding:8px 12px;font-size:13px;white-space:nowrap;">+ New</button>
+        </div>
+        <!-- Inline world creation form (collapsed by default) -->
+        <div id="host-create-world-form" class="host-inline-form hidden">
+          <div class="host-inline-form-row">
+            <input type="text" id="host-world-name" maxlength="32" placeholder="World name...">
+            <input type="text" id="host-world-seed" maxlength="15" placeholder="Seed (optional)">
+          </div>
+          <div id="host-world-error" class="modal-error hidden"></div>
+          <button id="btn-host-save-world" class="menu-btn primary" style="padding:8px 16px;font-size:13px;">Create World</button>
+        </div>
+
+        <!-- Game Mode -->
         <label for="host-mode-select">Game Mode:</label>
         <select id="host-mode-select">
           <option value="survival">Survival</option>
           <option value="creative">Creative</option>
         </select>
+
+        <!-- Max Players -->
         <label for="host-max-players">Max Players:</label>
         <input type="range" id="host-max-players" min="2" max="4" value="4">
         <span id="host-max-players-value">4</span>
+
         <div id="host-error" class="modal-error hidden"></div>
       </div>
       <div class="menu-buttons">

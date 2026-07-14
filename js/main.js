@@ -718,10 +718,12 @@
 
       document.getElementById('btn-host').addEventListener('click', () => {
       showScreen('lobbyScreen');
+      updateRejoinPanel();
     });
 
     document.getElementById('btn-join').addEventListener('click', () => {
       showScreen('lobbyScreen');
+      updateRejoinPanel();
     });
 
     document.getElementById('btn-settings').addEventListener('click', () => {
@@ -914,6 +916,61 @@
       }
     });
 
+    // ─── Browse Panel: Character Selection ───
+    // Toggle inline character creation for browse
+    const btnBrowseCreateChar = document.getElementById('btn-browse-create-char');
+    const browseCreateCharForm = document.getElementById('browse-create-char-form');
+    if (btnBrowseCreateChar && browseCreateCharForm) {
+      btnBrowseCreateChar.addEventListener('click', () => {
+        browseCreateCharForm.classList.toggle('hidden');
+        if (!browseCreateCharForm.classList.contains('hidden')) {
+          document.getElementById('browse-char-color').value = '#' + Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6, '0');
+          document.getElementById('browse-char-name').value = '';
+          document.getElementById('browse-char-name').focus();
+        }
+      });
+    }
+
+    // Save inline character for browse
+    const btnBrowseSaveChar = document.getElementById('btn-browse-save-char');
+    const browseCharError = document.getElementById('browse-char-error');
+    if (btnBrowseSaveChar) {
+      btnBrowseSaveChar.addEventListener('click', async () => {
+        const nameInput = document.getElementById('browse-char-name');
+        const colorInput = document.getElementById('browse-char-color');
+        const name = nameInput ? nameInput.value.trim() : '';
+        const color = colorInput ? colorInput.value : '#4CAF50';
+
+        if (!name) {
+          if (browseCharError) { browseCharError.textContent = 'Please enter a character name.'; browseCharError.classList.remove('hidden'); }
+          return;
+        }
+
+        const result = await characterManager.createCharacter(name, color);
+        if (result.success) {
+          if (browseCharError) browseCharError.classList.add('hidden');
+          browseCreateCharForm.classList.add('hidden');
+          populateBrowseCharacterSelect();
+          const select = document.getElementById('browse-character-select');
+          if (select) select.value = result.character.id;
+          _log(`[Cuubz] Character created in browse panel: ${result.character.name}`);
+        } else {
+          if (browseCharError) { browseCharError.textContent = result.error; browseCharError.classList.remove('hidden'); }
+        }
+      });
+
+      const browseCharNameInput = document.getElementById('browse-char-name');
+      if (browseCharNameInput) {
+        browseCharNameInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); btnBrowseSaveChar.click(); }
+          if (e.key === 'Escape') { browseCreateCharForm.classList.add('hidden'); }
+        });
+      }
+    }
+
+    // Populate browse character select on init
+    populateBrowseCharacterSelect();
+
     // Host form — max players slider
     const hostMaxPlayers = document.getElementById('host-max-players');
     const hostMaxPlayersValue = document.getElementById('host-max-players-value');
@@ -923,6 +980,125 @@
       });
     }
 
+    // ─── Inline Character Creation in Host Panel ───
+    const btnHostCreateChar = document.getElementById('btn-host-create-char');
+    const hostCreateCharForm = document.getElementById('host-create-char-form');
+    if (btnHostCreateChar && hostCreateCharForm) {
+      btnHostCreateChar.addEventListener('click', () => {
+        hostCreateCharForm.classList.toggle('hidden');
+        if (!hostCreateCharForm.classList.contains('hidden')) {
+          // Generate random color and focus name input
+          document.getElementById('host-char-color').value = '#' + Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6, '0');
+          document.getElementById('host-char-name').value = '';
+          document.getElementById('host-char-name').focus();
+        }
+      });
+    }
+
+    // Save inline character
+    const btnHostSaveChar = document.getElementById('btn-host-save-char');
+    const hostCharError = document.getElementById('host-char-error');
+    if (btnHostSaveChar) {
+      btnHostSaveChar.addEventListener('click', async () => {
+        const nameInput = document.getElementById('host-char-name');
+        const colorInput = document.getElementById('host-char-color');
+        const name = nameInput ? nameInput.value.trim() : '';
+        const color = colorInput ? colorInput.value : '#4CAF50';
+
+        if (!name) {
+          if (hostCharError) { hostCharError.textContent = 'Please enter a character name.'; hostCharError.classList.remove('hidden'); }
+          return;
+        }
+
+        const result = await characterManager.createCharacter(name, color);
+        if (result.success) {
+          if (hostCharError) hostCharError.classList.add('hidden');
+          hostCreateCharForm.classList.add('hidden');
+          populateHostCharacterSelect();
+          // Auto-select the newly created character
+          const select = document.getElementById('host-character-select');
+          if (select) select.value = result.character.id;
+          _log(`[Cuubz] Character created in host panel: ${result.character.name}`);
+        } else {
+          if (hostCharError) { hostCharError.textContent = result.error; hostCharError.classList.remove('hidden'); }
+        }
+      });
+
+      // Enter key in name input triggers save
+      const hostCharNameInput = document.getElementById('host-char-name');
+      if (hostCharNameInput) {
+        hostCharNameInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); btnHostSaveChar.click(); }
+          if (e.key === 'Escape') { hostCreateCharForm.classList.add('hidden'); }
+        });
+      }
+    }
+
+    // ─── Inline World Creation in Host Panel ───
+    const btnHostCreateWorld = document.getElementById('btn-host-create-world');
+    const hostCreateWorldForm = document.getElementById('host-create-world-form');
+    if (btnHostCreateWorld && hostCreateWorldForm) {
+      btnHostCreateWorld.addEventListener('click', () => {
+        hostCreateWorldForm.classList.toggle('hidden');
+        if (!hostCreateWorldForm.classList.contains('hidden')) {
+          // Generate random seed and focus name input
+          document.getElementById('host-world-seed').value = String(Math.floor(Math.random() * 0xFFFFFFFF));
+          document.getElementById('host-world-name').value = '';
+          document.getElementById('host-world-name').focus();
+        }
+      });
+    }
+
+    // Save inline world
+    const btnHostSaveWorld = document.getElementById('btn-host-save-world');
+    const hostWorldError = document.getElementById('host-world-error');
+    if (btnHostSaveWorld) {
+      btnHostSaveWorld.addEventListener('click', async () => {
+        const nameInput = document.getElementById('host-world-name');
+        const seedInput = document.getElementById('host-world-seed');
+        const name = nameInput ? nameInput.value.trim() : '';
+        const seedRaw = seedInput ? seedInput.value.trim() : '';
+
+        if (!name) {
+          if (hostWorldError) { hostWorldError.textContent = 'Please enter a world name.'; hostWorldError.classList.remove('hidden'); }
+          return;
+        }
+
+        let seed = undefined;
+        if (seedRaw !== '') {
+          const parsed = parseInt(seedRaw, 10);
+          if (!isNaN(parsed)) {
+            seed = parsed;
+          } else {
+            if (hostWorldError) { hostWorldError.textContent = 'Seed must be a valid integer.'; hostWorldError.classList.remove('hidden'); }
+            return;
+          }
+        }
+
+        const result = await worldManager.createWorld(name, seed);
+        if (result.success) {
+          if (hostWorldError) hostWorldError.classList.add('hidden');
+          hostCreateWorldForm.classList.add('hidden');
+          populateHostWorldSelect();
+          // Auto-select the newly created world
+          const select = document.getElementById('host-world-select');
+          if (select) select.value = result.world.id;
+          _log(`[Cuubz] World created in host panel: ${result.world.name}`);
+        } else {
+          if (hostWorldError) { hostWorldError.textContent = result.error; hostWorldError.classList.remove('hidden'); }
+        }
+      });
+
+      // Enter key in name input triggers save
+      const hostWorldNameInput = document.getElementById('host-world-name');
+      if (hostWorldNameInput) {
+        hostWorldNameInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); btnHostSaveWorld.click(); }
+          if (e.key === 'Escape') { hostCreateWorldForm.classList.add('hidden'); }
+        });
+      }
+    }
+
     // Start hosting button
     document.getElementById('btn-start-hosting').addEventListener('click', async () => {
       if (sessionManager) {
@@ -930,7 +1106,58 @@
       }
     });
 
+    // Session rejoin button
+    const btnRejoin = document.getElementById('btn-rejoin-session');
+    if (btnRejoin) {
+      btnRejoin.addEventListener('click', async () => {
+        await rejoinSession();
+      });
+    }
+
+    // Clear rejoin button
+    const btnClearRejoin = document.getElementById('btn-clear-rejoin');
+    if (btnClearRejoin) {
+      btnClearRejoin.addEventListener('click', () => {
+        clearLastSession();
+        updateRejoinPanel();
+      });
+    }
+
     initSessionUI();
+
+    // ─── Save session state before page unload (F5, tab close, etc.) ───
+    // This ensures that if the user refreshes while in a game session,
+    // we can auto-rejoin instead of going back to the main menu.
+    window.addEventListener('beforeunload', () => {
+      try {
+        if (sessionManager && sessionManager.hostingSessionId) {
+          // Save host session state
+          const world = worldManager ? worldManager.getSelectedWorld() : null;
+          const char = characterManager ? characterManager.getSelectedCharacter() : null;
+          localStorage.setItem('cuubz_last_session', JSON.stringify({
+            sessionId: sessionManager.hostingSessionId,
+            name: document.getElementById('host-session-name')?.value || 'My Session',
+            mode: document.getElementById('host-mode-select')?.value || 'survival',
+            seed: world ? world.seed : null,
+            isHost: true,
+            characterId: char ? char.id : null,
+            worldId: world ? world.id : null,
+            timestamp: Date.now(),
+          }));
+        } else if (sessionManager && sessionManager.currentSessionId) {
+          // Save joiner session state
+          localStorage.setItem('cuubz_last_session', JSON.stringify({
+            sessionId: sessionManager.currentSessionId,
+            name: 'Joined Session',
+            mode: 'survival',
+            isHost: false,
+            characterId: characterManager ? characterManager.selectedId : null,
+            timestamp: Date.now(),
+          }));
+        }
+      } catch (e) { /* ignore localStorage errors */ }
+    });
+
     _log('[Cuubz] initMenuNavigation complete');
   } catch (e) {
     console.error('[Cuubz] initMenuNavigation CRASHED:', e.message, '\n', e.stack);
@@ -960,14 +1187,43 @@
       if (sessionManager) {
         sessionManager.browseSessions();
       }
+      // Populate browse character select
+      populateBrowseCharacterSelect();
     } else {
       tabHost.classList.add('active');
       tabBrowse.classList.remove('active');
       sessionUI.hostPanel.classList.remove('hidden');
       sessionUI.browsePanel.classList.add('hidden');
-      // Populate world select dropdown when switching to host
+      // Populate character and world select dropdowns when switching to host
+      populateHostCharacterSelect();
       populateHostWorldSelect();
     }
+  }
+
+  /**
+   * Populate the host form's character dropdown with available characters.
+   */
+  function populateHostCharacterSelect() {
+    const select = document.getElementById('host-character-select');
+    if (!select) return;
+
+    select.innerHTML = '';
+    const characters = characterManager ? characterManager.getAllCharacters() : [];
+
+    if (characters.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No characters — create one below';
+      select.appendChild(opt);
+      return;
+    }
+
+    characters.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = `${c.name} (${c.color})`;
+      select.appendChild(opt);
+    });
   }
 
   /**
@@ -983,7 +1239,7 @@
     if (worlds.length === 0) {
       const opt = document.createElement('option');
       opt.value = '';
-      opt.textContent = 'No worlds available';
+      opt.textContent = 'No worlds — create one below';
       select.appendChild(opt);
       return;
     }
@@ -992,6 +1248,32 @@
       const opt = document.createElement('option');
       opt.value = w.id;
       opt.textContent = `${w.name} (seed: ${BrowserWorldManager.formatSeed(w.seed)})`;
+      select.appendChild(opt);
+    });
+  }
+
+  /**
+   * Populate the browse panel's character dropdown with available characters.
+   */
+  function populateBrowseCharacterSelect() {
+    const select = document.getElementById('browse-character-select');
+    if (!select) return;
+
+    select.innerHTML = '';
+    const characters = characterManager ? characterManager.getAllCharacters() : [];
+
+    if (characters.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No characters — create one below';
+      select.appendChild(opt);
+      return;
+    }
+
+    characters.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
       select.appendChild(opt);
     });
   }
@@ -1062,6 +1344,33 @@
       if (!isFull) {
         item.addEventListener('click', async () => {
           if (sessionManager) {
+            // Validate character selection for joining
+            const browseCharSelect = document.getElementById('browse-character-select');
+            const characterId = browseCharSelect ? browseCharSelect.value : '';
+            if (!characterId) {
+              alert('Please select or create a character to play as.');
+              return;
+            }
+            await characterManager.selectCharacter(characterId);
+
+            // For joining, create a temporary world with the session's seed
+            // so startGame() has a world to work with for local chunk generation.
+            // The host's world state is authoritative; this is just for local rendering.
+            const sessionSeed = session.seed || Math.floor(Math.random() * 0xFFFFFFFF);
+            if (!worldManager.selectedId || !worldManager.getSelectedWorld()) {
+              // Create a temp world entry if none selected
+              const tempWorld = {
+                id: `temp_${session.sessionId}`,
+                name: session.name || 'Remote World',
+                seed: sessionSeed,
+                biomeMap: { dominantBiomes: ['Plains'], seed: sessionSeed },
+                questProgress: {},
+                chunkReferences: [],
+              };
+              worldManager.worlds.push(tempWorld);
+              worldManager.selectedId = tempWorld.id;
+            }
+
             await sessionManager.joinSession(session.sessionId);
             // Start the game loop after joining
             _log(`[SessionManager] Starting game in ${mode} mode (joining)`);
@@ -1129,6 +1438,136 @@
     }
   }
 
+  // ============================================================
+  // Session Rejoin
+  // ============================================================
+
+  const REJOIN_STORAGE_KEY = 'cuubz_last_session';
+  const REJOIN_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
+
+  /**
+   * Get the last saved session from localStorage.
+   * Returns null if no session or session is too old.
+   */
+  function getLastSession() {
+    try {
+      const raw = localStorage.getItem(REJOIN_STORAGE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || !data.sessionId) return null;
+      // Expire sessions older than 24 hours
+      if (Date.now() - data.timestamp > REJOIN_MAX_AGE) {
+        localStorage.removeItem(REJOIN_STORAGE_KEY);
+        return null;
+      }
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Clear the saved session from localStorage.
+   */
+  function clearLastSession() {
+    try { localStorage.removeItem(REJOIN_STORAGE_KEY); } catch (e) {}
+  }
+
+  /**
+   * Update the rejoin panel visibility and content.
+   */
+  function updateRejoinPanel() {
+    const panel = document.getElementById('rejoin-panel');
+    const nameEl = document.getElementById('rejoin-session-name');
+    if (!panel) return;
+
+    const session = getLastSession();
+    if (session) {
+      panel.classList.remove('hidden');
+      if (nameEl) {
+        nameEl.textContent = `${session.name} (${session.isHost ? 'hosting' : 'joined'}, ${session.mode})`;
+      }
+    } else {
+      panel.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Rejoin the last session.
+   */
+  async function rejoinSession() {
+    const session = getLastSession();
+    if (!session) return;
+
+    // Ensure character is selected (use first available if none)
+    const characters = characterManager ? characterManager.getAllCharacters() : [];
+    if (characters.length > 0) {
+      await characterManager.selectCharacter(characters[0].id);
+    }
+
+    // Ensure world is selected
+    if (session.isHost && session.seed) {
+      // For re-hosting, find or create a world with the session's seed
+      const worlds = worldManager ? worldManager.getAllWorlds() : [];
+      const existingWorld = worlds.find(w => w.seed === session.seed);
+      if (existingWorld) {
+        await worldManager.selectWorld(existingWorld.id);
+      } else if (worlds.length > 0) {
+        await worldManager.selectWorld(worlds[0].id);
+      }
+    } else if (!session.isHost && session.seed) {
+      // For re-joining, create temp world with session seed
+      const tempWorld = {
+        id: `temp_${session.sessionId}`,
+        name: session.name || 'Remote World',
+        seed: session.seed,
+        biomeMap: { dominantBiomes: ['Plains'], seed: session.seed },
+        questProgress: {},
+        chunkReferences: [],
+      };
+      worldManager.worlds.push(tempWorld);
+      worldManager.selectedId = tempWorld.id;
+    } else if (worldManager && worldManager.getAllWorlds().length > 0) {
+      await worldManager.selectWorld(worldManager.getAllWorlds()[0].id);
+    }
+
+    if (!sessionManager) {
+      // Initialize session manager if needed
+      sessionManager = new SessionManager();
+      const relayUrl = getRelayUrl();
+      sessionManager.init(relayUrl);
+    }
+
+    updateConnectionStatus('connecting');
+
+    if (session.isHost && sessionManager.client) {
+      // Re-host the session
+      try {
+        await sessionManager.client.hostSession({
+          name: session.name,
+          seed: session.seed || Math.floor(Math.random() * 0xFFFFFFFF),
+          mode: session.mode,
+        });
+        _log(`[Cuubz] Re-hosting session: ${session.name}`);
+      } catch (err) {
+        updateConnectionStatus('disconnected');
+        showHostError(`Failed to re-host: ${err.message}`);
+      }
+    } else if (sessionManager.client) {
+      // Re-join the session
+      try {
+        await sessionManager.joinSession(session.sessionId);
+        _log(`[Cuubz] Re-joining session: ${session.sessionId}`);
+      } catch (err) {
+        updateConnectionStatus('disconnected');
+        showHostError(`Failed to rejoin: ${err.message}`);
+      }
+    }
+
+    // Start the game
+    startGame(session.mode || 'survival');
+  }
+
   /**
    * SessionManager — Handles multiplayer session lifecycle in the browser.
    * Wraps MultiplayerClient for UI integration.
@@ -1176,12 +1615,34 @@
       this.client.on('HOST_CREATED', (data) => {
         this.hostingSessionId = data.sessionId;
         updateConnectionStatus('connected');
+        // Persist session for rejoin
+        try {
+          localStorage.setItem('cuubz_last_session', JSON.stringify({
+            sessionId: data.sessionId,
+            name: data.name || 'My Session',
+            mode: data.mode || 'survival',
+            isHost: true,
+            timestamp: Date.now(),
+          }));
+        } catch (e) { /* ignore localStorage errors */ }
+        updateRejoinPanel();
         if (this._hostCreatedCallback) this._hostCreatedCallback(data);
       });
 
       this.client.on('JOIN_ACCEPTED', (data) => {
         this.currentSessionId = data.sessionId;
         updateConnectionStatus('connected');
+        // Persist session for rejoin
+        try {
+          localStorage.setItem('cuubz_last_session', JSON.stringify({
+            sessionId: data.sessionId,
+            name: data.name || 'Joined Session',
+            mode: data.mode || 'survival',
+            isHost: false,
+            timestamp: Date.now(),
+          }));
+        } catch (e) { /* ignore localStorage errors */ }
+        updateRejoinPanel();
         if (this._joinAcceptedCallback) this._joinAcceptedCallback(data);
       });
 
@@ -1232,11 +1693,8 @@
     }
 
     /**
-     * Start hosting a new session.
-     * Validates form inputs and creates the session on the server.
-     */
-    /**
      * Start hosting a multiplayer session.
+     * Validates form inputs, sets character/world selection, creates the session on the server.
      * @param {Object} [options] — Optional configuration
      * @param {Function} [options.onBlockBreakValidated] — Called when remote player breaks block (host marks chunk dirty)
      * @param {Function} [options.onBlockPlaceValidated] — Called when remote player places block (host marks chunk dirty)
@@ -1244,6 +1702,7 @@
     async startHosting(options = {}) {
       const nameInput = document.getElementById('host-session-name');
       const worldSelect = document.getElementById('host-world-select');
+      const characterSelect = document.getElementById('host-character-select');
       const modeSelect = document.getElementById('host-mode-select');
       const maxPlayersSlider = document.getElementById('host-max-players');
 
@@ -1260,22 +1719,39 @@
         return;
       }
 
-      // Validate world selection
-      const worldId = worldSelect ? worldSelect.value : '';
-      if (!worldId) {
-        showHostError('Please create a world first (go to Play Solo → Create World).');
+      // Validate character selection (required for hosting)
+      const characterId = characterSelect ? characterSelect.value : '';
+      if (!characterId) {
+        showHostError('Please select or create a character to play as.');
+        return;
+      }
+      const selectedCharacter = characterManager ? characterManager.getCharacter(characterId) : null;
+      if (!selectedCharacter) {
+        showHostError('Selected character not found.');
         return;
       }
 
-      const mode = modeSelect ? modeSelect.value : 'survival';
-      const maxPlayers = parseInt(maxPlayersSlider ? maxPlayersSlider.value : '4', 10);
-
-      // Get world seed
+      // Validate world selection
+      const worldId = worldSelect ? worldSelect.value : '';
+      if (!worldId) {
+        showHostError('Please select or create a world to host.');
+        return;
+      }
       const selectedWorld = worldManager ? worldManager.getWorld(worldId) : null;
       if (!selectedWorld) {
         showHostError('Selected world not found.');
         return;
       }
+
+      // Wire up character and world selection so startGame() finds them.
+      // This is critical: startGame() checks characterManager.getSelectedCharacter()
+      // and worldManager.getSelectedWorld(), which rely on selectedId.
+      await characterManager.selectCharacter(characterId);
+      await worldManager.selectWorld(worldId);
+      _log(`[SessionManager] Selected character: ${selectedCharacter.name}, world: ${selectedWorld.name}`);
+
+      const mode = modeSelect ? modeSelect.value : 'survival';
+      const maxPlayers = parseInt(maxPlayersSlider ? maxPlayersSlider.value : '4', 10);
 
       updateConnectionStatus('connecting');
 
@@ -1302,6 +1778,7 @@
 
       // Start the game loop after session is created
       _log(`[SessionManager] Starting game in ${mode} mode (hosting)`);
+      this._gameMode = mode; // Store for auto-rejoin
       startGame(mode);
 
       // ─── Initialize HostManager for server-authoritative validation ───
@@ -1913,6 +2390,141 @@
             _log('[Cuubz] PlayerSyncManager initialized for multiplayer');
           }
 
+          // ─── Initialize PlayerListHUD (connected to live player data) ───
+          let playerListHUD = null;
+          if (typeof PlayerListHUD !== 'undefined' && sessionManager && sessionManager.client) {
+            const overlayEl = document.getElementById('player-list-overlay');
+            const countEl = document.getElementById('player-count');
+            const itemsEl = document.getElementById('player-list-items');
+
+            if (overlayEl && itemsEl) {
+              playerListHUD = new PlayerListHUD({ overlay: overlayEl, count: countEl, items: itemsEl });
+
+              // Build initial player list: include local player + any remote players
+              const localChar = characterManager ? characterManager.getSelectedCharacter() : null;
+              const initialPlayers = [];
+              if (localChar) {
+                initialPlayers.push({
+                  id: 'local',
+                  name: localChar.name,
+                  color: localChar.color || '#4CAF50',
+                  health: 100,
+                });
+              }
+              playerListHUD.updatePlayers(initialPlayers);
+
+              // Wire PLAYER_JOINED to add to HUD
+              sessionManager.client.onGame('PLAYER_JOINED', (data) => {
+                if (playerListHUD) {
+                  playerListHUD.addPlayer({
+                    id: data.playerId,
+                    name: data.character?.name || 'Player',
+                    color: data.character?.color || '#888888',
+                    health: data.health !== undefined ? data.health : 100,
+                  });
+                }
+              });
+
+              // Wire PLAYER_LEFT to remove from HUD
+              sessionManager.client.onGame('PLAYER_LEFT', (data) => {
+                if (playerListHUD) {
+                  playerListHUD.removePlayer(data.playerId);
+                }
+              });
+
+              // Wire PLAYER_MOVE to update health in HUD (if health data included)
+              sessionManager.client.onGame('PLAYER_MOVE', (data) => {
+                if (playerListHUD && data.playerId && data.health !== undefined) {
+                  const current = playerListHUD.getPlayers();
+                  const existing = current.find(p => p.id === data.playerId);
+                  if (existing) {
+                    playerListHUD.addPlayer({ id: data.playerId, health: data.health });
+                  }
+                }
+              });
+
+              _log('[Cuubz] PlayerListHUD initialized and wired to live player data');
+            }
+          }
+
+          // ─── Initialize ChunkStreamer (host-side proactive chunk streaming) ───
+          let chunkStreamer = null;
+          if (typeof ChunkStreamer !== 'undefined' && sessionManager && sessionManager.hostingSessionId) {
+            chunkStreamer = new ChunkStreamer({
+              chunkGrid: chunkManager,
+              options: {
+                loadRadius: 6,
+                unloadRadius: 8,
+                streamInterval: 1000,
+                maxChunksPerTick: 4,
+                compressData: true,
+              },
+            });
+
+            // Register host player position
+            chunkStreamer.updatePlayerPosition('host', { x: player.position.x, y: player.position.y, z: player.position.z });
+
+            // Update remote player positions from PlayerSyncManager
+            // This is done in the render loop
+
+            // When chunks are streamed, send them via the game session relay
+            chunkStreamer.onChunkStreamed = (payload) => {
+              if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
+                sessionManager.client._gameSessionConn?.send({
+                  type: 'CHUNK_DATA',
+                  chunkX: payload.chunkX,
+                  chunkZ: payload.chunkZ,
+                  data: payload.data,
+                  compressed: payload.compressed,
+                  dirty: payload.dirty,
+                  targetPlayers: payload.players || [],
+                });
+              }
+            };
+
+            chunkStreamer.onChunkLoaded = (info) => {
+              _log(`[ChunkStreamer] Chunk loaded: ${info.key}`);
+            };
+
+            chunkStreamer.start();
+            _log('[Cuubz] ChunkStreamer initialized for host-side proactive chunk streaming');
+          }
+
+          // ─── Client-side CHUNK_DATA handling (receive streamed chunks from host) ───
+          if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
+            sessionManager.client.onGame('CHUNK_DATA', (data) => {
+              try {
+                if (!data || data.chunkX === undefined || data.chunkZ === undefined) return;
+                if (!data.data || !Array.isArray(data.data)) return;
+
+                const cx = data.chunkX;
+                const cz = data.chunkZ;
+                const key = ChunkManager.key(cx, cz);
+
+                // If chunk is already loaded, apply as dirty update
+                const existing = chunkManager.memoryCache.get(key);
+                if (existing) {
+                  // Apply the streamed block data to the existing chunk
+                  const blockData = data.compressed
+                    ? ChunkCompressor.decompress({ method: 'rle', data: new Uint8Array(data.data) })
+                    : data.data;
+
+                  if (blockData && existing.blocks) {
+                    for (let i = 0; i < Math.min(blockData.length, existing.blocks.length); i++) {
+                      existing.blocks[i] = blockData[i];
+                    }
+                    existing.dirty = true;
+                    _log(`[Cuubz] Applied streamed chunk update: ${key} (${blockData.length} blocks)`);
+                  }
+                }
+                // If chunk not loaded, it will be generated on demand by ChunkManager
+              } catch (err) {
+                console.error('[Cuubz] Error processing CHUNK_DATA:', err.message);
+              }
+            });
+            _log('[Cuubz] CHUNK_DATA handler registered for receiving streamed chunks');
+          }
+
           // Initialize Block Interaction system
           const blockInteraction = new BlockInteraction({
             renderer: renderer,
@@ -2398,6 +3010,22 @@
                 playerSync.update(game.delta);
               }
 
+              // ─── Multiplayer: Update ChunkStreamer with player positions (host) ───
+              if (chunkStreamer) {
+                // Update host player position
+                chunkStreamer.updatePlayerPosition('host', {
+                  x: player.position.x,
+                  y: player.position.y,
+                  z: player.position.z,
+                });
+                // Update remote player positions from PlayerSyncManager
+                if (playerSync) {
+                  for (const remotePlayer of playerSync.getActivePlayers()) {
+                    chunkStreamer.updatePlayerPosition(remotePlayer.playerId, remotePlayer.authoritativePosition);
+                  }
+                }
+              }
+
               // ─── Multiplayer: Send block changes to game session ───
               if (blockInteraction && sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected) {
                 if (blockInteraction._lastBroken) {
@@ -2756,12 +3384,134 @@
         console.error('[Cuubz] detectMobile ERROR:', e);
       }
 
+      // ─── Auto-Rejoin: Check if we were in a session before page refresh ───
+      const lastSession = getLastSession();
+      if (lastSession && lastSession.sessionId) {
+        _log(`[Cuubz] Found saved session: ${lastSession.sessionId} (${lastSession.isHost ? 'host' : 'joiner'})`);
+
+        // Check if the relay still has this session active
+        try {
+          const relayUrl = getRelayUrl();
+          const httpUrl = relayUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+          const resp = await fetch(`${httpUrl}/sessions`, { signal: AbortSignal.timeout(3000) });
+          if (resp.ok) {
+            const sessions = await resp.json();
+            const activeSession = sessions.find(s => s.sessionId === lastSession.sessionId);
+            if (activeSession) {
+              _log(`[Cuubz] Session ${lastSession.sessionId} is still active on relay — auto-rejoining`);
+
+              // Ensure character is selected
+              const characters = characterManager.getAllCharacters();
+              if (characters.length > 0) {
+                await characterManager.selectCharacter(characters[0].id);
+              }
+
+              // Ensure world is selected (for host) or create temp world (for joiner)
+              if (lastSession.isHost && lastSession.seed) {
+                const worlds = worldManager.getAllWorlds();
+                const existingWorld = worlds.find(w => w.seed === lastSession.seed);
+                if (existingWorld) {
+                  await worldManager.selectWorld(existingWorld.id);
+                } else if (worlds.length > 0) {
+                  await worldManager.selectWorld(worlds[0].id);
+                }
+              } else if (!lastSession.isHost && lastSession.seed) {
+                const tempWorld = {
+                  id: `temp_${lastSession.sessionId}`,
+                  name: lastSession.name || 'Remote World',
+                  seed: lastSession.seed,
+                  biomeMap: { dominantBiomes: ['Plains'], seed: lastSession.seed },
+                  questProgress: {},
+                  chunkReferences: [],
+                };
+                worldManager.worlds.push(tempWorld);
+                worldManager.selectedId = tempWorld.id;
+              } else if (worldManager.getAllWorlds().length > 0) {
+                await worldManager.selectWorld(worldManager.getAllWorlds()[0].id);
+              }
+
+              // Initialize session manager and rejoin
+              sessionManager = new SessionManager();
+              sessionManager.init(relayUrl);
+
+              updateConnectionStatus('connecting');
+              showScreen('loadingScreen');
+              document.getElementById('loading-status').textContent =
+                lastSession.isHost ? 'Re-hosting session...' : 'Re-joining session...';
+
+              if (lastSession.isHost && sessionManager.client) {
+                try {
+                  await sessionManager.client.hostSession({
+                    name: lastSession.name,
+                    seed: lastSession.seed || Math.floor(Math.random() * 0xFFFFFFFF),
+                    mode: lastSession.mode || 'survival',
+                  });
+                  _log(`[Cuubz] Re-hosting session: ${lastSession.name}`);
+                } catch (err) {
+                  _log(`[Cuubz] Re-host failed: ${err.message}`);
+                  showScreen('mainMenu');
+                  return;
+                }
+              } else if (sessionManager.client) {
+                try {
+                  await sessionManager.joinSession(lastSession.sessionId);
+                  _log(`[Cuubz] Re-joining session: ${lastSession.sessionId}`);
+                } catch (err) {
+                  _log(`[Cuubz] Re-join failed: ${err.message}`);
+                  showScreen('mainMenu');
+                  return;
+                }
+              }
+
+              // Start the game
+              startGame(lastSession.mode || 'survival');
+              console.error('[Cuubz] === AUTO-REJOIN COMPLETE ===');
+              return; // Skip showing main menu
+            }
+          }
+        } catch (err) {
+          _log(`[Cuubz] Could not check relay for auto-rejoin: ${err.message}`);
+        }
+
+        // Session not found on relay — show main menu with rejoin panel
+        _log(`[Cuubz] Session ${lastSession.sessionId} no longer active on relay`);
+      }
+
       showScreen('mainMenu');
       console.error('[Cuubz] === INIT COMPLETE ===');
     } catch (err) {
       console.error('[Cuubz] FATAL init error:', err.message, err.stack);
     }
   }
+
+  // ─── Save session state before page unload ───
+  // This ensures that if the user refreshes or closes the tab,
+  // we can auto-rejoin on the next load.
+  window.addEventListener('beforeunload', () => {
+    try {
+      if (sessionManager && sessionManager.hostingSessionId) {
+        const selected = characterManager ? characterManager.getSelectedCharacter() : null;
+        const world = worldManager ? worldManager.getSelectedWorld() : null;
+        localStorage.setItem(REJOIN_STORAGE_KEY, JSON.stringify({
+          sessionId: sessionManager.hostingSessionId,
+          name: selected ? selected.name : 'My Session',
+          mode: sessionManager._gameMode || 'survival',
+          isHost: true,
+          seed: world ? world.seed : null,
+          timestamp: Date.now(),
+        }));
+      } else if (sessionManager && sessionManager.currentSessionId) {
+        const selected = characterManager ? characterManager.getSelectedCharacter() : null;
+        localStorage.setItem(REJOIN_STORAGE_KEY, JSON.stringify({
+          sessionId: sessionManager.currentSessionId,
+          name: selected ? selected.name : 'Joined Session',
+          mode: sessionManager._gameMode || 'survival',
+          isHost: false,
+          timestamp: Date.now(),
+        }));
+      }
+    } catch (e) { /* ignore localStorage errors */ }
+  });
 
   // Start when DOM is ready
   if (document.readyState === 'loading') {

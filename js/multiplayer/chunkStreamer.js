@@ -557,10 +557,15 @@ class ChunkStreamer {
     }
 
     // Load needed chunks (use chunk grid generator if available)
-    const generatorFn = this._chunkGrid ? 
-      (cx, cz) => { 
-        const chunk = this._chunkGrid.getChunk(cx, cz, null);
-        return chunk ? chunk.blocks : null; 
+    // Support both getChunkData(cx, cz) and getChunk(cx, cz, null) APIs
+    const generatorFn = this._chunkGrid ?
+      (cx, cz) => {
+        const chunk = this._chunkGrid.getChunkData
+          ? this._chunkGrid.getChunkData(cx, cz)
+          : this._chunkGrid.getChunk
+            ? this._chunkGrid.getChunk(cx, cz, null)
+            : null;
+        return chunk && chunk.blocks ? Array.from(chunk.blocks) : null;
       } : null;
 
     for (const key of toLoad) {

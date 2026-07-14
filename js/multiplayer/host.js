@@ -43,6 +43,10 @@ const DEFAULT_HOST_CONFIG = {
   moveRateLimit: 20,          // Max movement updates per second per player
   blockChangeCooldown: 100,   // Min ms between block changes from same player
   inventorySyncInterval: 5000,// How often to request inventory sync (ms)
+  // Position extrapolation anti-cheat
+  extrapolationMaxDeviation: 8,  // Max blocks player can deviate from predicted position
+  extrapolationMaxSpeed: 30,     // Max blocks/s (walking ~5, sprinting ~8, falling ~20)
+  extrapolationGracePeriod: 2000,// ms after join before extrapolation kicks in
 };
 
 // ─── Validation Helpers ─────────────────────────────────────────────
@@ -146,6 +150,49 @@ function validateMove(playerId, position, rotation, config) {
     if (rotation.pitch < -Math.PI / 2 - 0.1 || rotation.pitch > Math.PI / 2 + 0.1) {
       return { valid: false, reason: 'Pitch out of range' };
     }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate movement using position extrapolation.
+ * Predicts where the player should be based on their last known velocity,
+ * and rejects positions that deviate too far from the prediction.
+ * Returns { valid, reason } object.
+ */
+function validateMoveExtrapolation(playerId, player, position, config) {
+  const cfg = config || DEFAULT_HOST_CONFIG;
+  const now = Date.now();
+  const elapsed = now - player.lastMoveTime;
+
+  // Grace period after join — don't extrapolate immediately
+  if (elapsed < cfg.extrapolationGracePeriod) {
+    return { valid: true };
+  }
+
+  // Need at least one previous position to extrapolate
+  if (!player._prevPosition || !player._velocity) {
+    return { valid: true };
+  }
+
+  // Extrapolate expected position from last known velocity
+  const dt = elapsed / 1000; // seconds
+  const expectedX = player._prevPosition.x + player._velocity.x * dt;
+  const expectedY = player._prevPosition.y + player._velocity.y * dt;
+  const expectedZ = player._prevPosition.z + player._velocity.z * dt;
+
+  // Calculate deviation from predicted position
+  const dx = position.x - expectedX;
+  const dy = position.y - expectedY;
+  const dz = position.z - expectedZ;
+  const deviation = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+  if (deviation > cfg.extrapolationMaxDeviation) {
+    return {
+      valid: false,
+      reason: `Extrapolation deviation ${deviation.toFixed(1)} > ${cfg.extrapolationMaxDeviation} blocks (dt=${dt.toFixed(2)}s)`,
+    };
   }
 
   return { valid: true };
@@ -291,11 +338,27 @@ class HostRemotePlayer {
     this.lastBlockChangeTime = 0;
     this.connected = true;
     this.joinedAt = Date.now();
+
+    // Position extrapolation anti-cheat state
+    this._prevPosition = null;    // Previous authoritative position
+    this._prevMoveTime = null;    // Timestamp of previous move
+    this._velocity = null;        // Calculated velocity { x, y, z } in blocks/s
   }
 
-  /** Update position from movement data */
+  /** Update position from movement data (with velocity tracking for extrapolation) */
   updatePosition(position, rotation) {
     if (position) {
+      // Track velocity for extrapolation anti-cheat
+      if (this._prevPosition && this._prevMoveTime) {
+        const dt = Math.max((Date.now() - this._prevMoveTime) / 1000, 0.016);
+        this._velocity = {
+          x: (position.x - this._prevPosition.x) / dt,
+          y: (position.y - this._prevPosition.y) / dt,
+          z: (position.z - this._prevPosition.z) / dt,
+        };
+      }
+      this._prevPosition = { ...this.position };
+      this._prevMoveTime = this.lastMoveTime;
       this.position = { ...position };
     }
     if (rotation) {
@@ -678,11 +741,18 @@ class HostManager {
     const dy = data.position.y - player.position.y;
     const dz = data.position.z - player.position.z;
     const speed = Math.sqrt(dx * dx + dy * dy + dz * dz) / dt;
-    const maxSpeed = 30; // blocks per second (generous — walking ~5, sprinting ~8, falling ~20)
+    const maxSpeed = this._options.extrapolationMaxSpeed || 30;
 
     if (speed > maxSpeed) {
       console.warn(`[HostManager] Speed violation from ${playerId}: ${speed.toFixed(1)} > ${maxSpeed} blocks/s`);
       return; // Reject impossible movement
+    }
+
+    // Position extrapolation anti-cheat: predict expected position from velocity
+    const extrapolationValid = validateMoveExtrapolation(playerId, player, data.position, this._options);
+    if (!extrapolationValid.valid) {
+      console.warn(`[HostManager] Extrapolation violation from ${playerId}: ${extrapolationValid.reason}`);
+      return; // Reject position that deviates too far from prediction
     }
 
     // Update player state (server-authoritative on host)
@@ -1096,9 +1166,11 @@ if (typeof module !== 'undefined' && module.exports) {
     validateQuestUpdate,
     // Utility classes
     RateLimiter,
-    RemotePlayerState,
+    HostRemotePlayer,
     // Main class
     HostManager,
+    // Anti-cheat validation (exported for testing)
+    validateMoveExtrapolation,
   };
 
 }

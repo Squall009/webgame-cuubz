@@ -794,7 +794,7 @@ html, body {
 
 /* --- Host Form --- */
 .host-form {
-  width: min(320px, 80vw);
+  width: min(360px, 80vw);
   margin-bottom: 16px;
 }
 
@@ -820,6 +820,84 @@ html, body {
 .host-form input[type="range"] {
   width: 100%;
   accent-color: #4CAF50;
+}
+
+.host-form input[type="color"] {
+  width: 48px;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  cursor: pointer;
+}
+
+/* Host select row: dropdown + button side by side */
+.host-select-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+.host-select-row select {
+  flex: 1;
+}
+
+/* Inline creation forms (collapsed by default) */
+.host-inline-form {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 4px;
+}
+
+.host-inline-form.hidden {
+  display: none !important;
+}
+
+.host-inline-form-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+
+.host-inline-form-row input[type="text"] {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* Host select row: dropdown + button side by side */
+.host-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.host-select-row select {
+  flex: 1;
+}
+
+/* Mobile adjustments for host form */
+@media (max-width: 600px) {
+  .host-form {
+    width: min(320px, 90vw);
+  }
+
+  .host-select-row button {
+    padding: 8px;
+    font-size: 12px;
+  }
+
+  .host-inline-form-row {
+    flex-direction: column;
+  }
+
+  .host-inline-form-row input[type="color"] {
+    align-self: flex-start;
+  }
 }
 
 /* --- Connection Status Indicator --- */

@@ -78,6 +78,17 @@ server.on('upgrade', (request, socket, head) => {
   socket.destroy();
 });
 
+// ─── Helper: Destroy a session and remove from the map ────────
+
+function destroySession(sessionId) {
+  const entry = sessions.get(sessionId);
+  if (entry) {
+    console.log(`[RELAY] Destroying session ${sessionId}`);
+    entry.session.dispose();
+    sessions.delete(sessionId);
+  }
+}
+
 // ─── Matchmaking Logic ────────────────────────────────────────
 
 const matchmaking = new Matchmaking({
@@ -88,7 +99,6 @@ const matchmaking = new Matchmaking({
     console.log(`[MATCHMAKING] Creating session ${sessionId} for "${sessionName}"`);
 
     // Create a dedicated WebSocket server for this session
-    // (noServer mode — upgrades are handled by the main server's upgrade handler)
     const sessionWss = new WebSocketServer({ noServer: true });
     const session = new SessionManager({
       wss: sessionWss,
@@ -96,6 +106,10 @@ const matchmaking = new Matchmaking({
       hostId: playerId,
       maxPlayers: MAX_PLAYERS_PER_SESSION,
       heartbeatInterval: HEARTBEAT_INTERVAL,
+      onSessionEmpty: () => {
+        // When the game session has 0 players, clean up the relay entry
+        destroySession(sessionId);
+      },
     });
 
     sessions.set(sessionId, { session, wss: sessionWss });
@@ -112,17 +126,17 @@ const matchmaking = new Matchmaking({
     if (!canJoin) {
       return { error: 'Session is full' };
     }
-    // Client connects to /session/:id on the same host
     return { sessionId };
   },
   listSessions: () => listSessions(),
-  onSessionLeave: (sessionId) => {
-    const entry = sessions.get(sessionId);
-    if (entry) {
-      console.log(`[MATCHMAKING] Cleaning up session ${sessionId}`);
-      entry.session.dispose();
-      sessions.delete(sessionId);
-    }
+  // Only destroy the session when the HOST player disconnects from matchmaking
+  onHostLeave: (sessionId, playerId) => {
+    console.log(`[MATCHMAKING] Host ${playerId} left matchmaking — destroying session ${sessionId}`);
+    destroySession(sessionId);
+  },
+  // Non-host clients disconnecting from matchmaking is normal — session stays alive
+  onClientLeave: (sessionId, playerId) => {
+    console.log(`[MATCHMAKING] Client ${playerId} left matchmaking (session ${sessionId} stays alive)`);
   },
 });
 

@@ -27,17 +27,20 @@ class Matchmaking {
    * @param {function} config.onHostRequest — Called when a player hosts. Returns { sessionId, sessionPort } or { error }.
    * @param {function} config.onJoinRequest — Called when a player joins. Returns { sessionPort } or { error }.
    * @param {function} config.listSessions — Returns array of active sessions.
-   * @param {function} config.onSessionLeave — Called when a session is abandoned.
+   * @param {function} config.onHostLeave — Called when the HOST player leaves matchmaking (session should be destroyed).
+   * @param {function} config.onClientLeave — Called when a non-host client leaves matchmaking (session stays alive).
    */
   constructor(config) {
     this.wss = config.wss;
     this.onHostRequest = config.onHostRequest || (() => ({ error: 'Not implemented' }));
     this.onJoinRequest = config.onJoinRequest || (() => ({ error: 'Not implemented' }));
     this.listSessions = config.listSessions || (() => []);
-    this.onSessionLeave = config.onSessionLeave || (() => {});
+    this.onHostLeave = config.onHostLeave || (() => {});
+    this.onClientLeave = config.onClientLeave || (() => {});
 
     // Track connected clients and their session associations
-    this.clients = new Map(); // ws → { playerId, sessionId, name }
+    // ws → { playerId, sessionId, name, isHost }
+    this.clients = new Map();
 
     this._setupConnectionHandler();
   }
@@ -57,7 +60,7 @@ class Matchmaking {
       const playerId = this._generatePlayerId();
       console.log(`[MATCHMAKING] Client connected: ${playerId}`);
 
-      this.clients.set(ws, { playerId, sessionId: null, name: 'Unknown' });
+      this.clients.set(ws, { playerId, sessionId: null, name: 'Unknown', isHost: false });
 
       // Send welcome message with player ID
       this._send(ws, {
@@ -77,25 +80,34 @@ class Matchmaking {
         }
       });
 
-      // Handle disconnection
+      // Handle disconnection — only destroy session if this client is the host
       ws.on('close', () => {
         const client = this.clients.get(ws);
         if (client && client.sessionId) {
-          console.log(`[MATCHMAKING] Client ${playerId} disconnected from session ${client.sessionId}`);
-          this.onSessionLeave(client.sessionId);
+          if (client.isHost) {
+            console.log(`[MATCHMAKING] Host ${playerId} disconnected — destroying session ${client.sessionId}`);
+            this.onHostLeave(client.sessionId, playerId);
+          } else {
+            console.log(`[MATCHMAKING] Client ${playerId} disconnected from matchmaking (session ${client.sessionId} stays alive)`);
+            this.onClientLeave(client.sessionId, playerId);
+          }
         }
         this.clients.delete(ws);
         console.log(`[MATCHMAKING] Client disconnected: ${playerId}`);
       });
 
-      // Handle errors
+      // Handle errors — same logic as close
       ws.on('error', (err) => {
         console.error(`[MATCHMAKING] WebSocket error for ${playerId}:`, err.message);
-        // Clean up the client on WebSocket error to prevent dangling connections
         const client = this.clients.get(ws);
         if (client && client.sessionId) {
-          console.log(`[MATCHMAKING] Cleaning up session ${client.sessionId} due to error`);
-          this.onSessionLeave(client.sessionId);
+          if (client.isHost) {
+            console.log(`[MATCHMAKING] Host ${playerId} error — destroying session ${client.sessionId}`);
+            this.onHostLeave(client.sessionId, playerId);
+          } else {
+            console.log(`[MATCHMAKING] Client ${playerId} matchmaking error (session stays alive)`);
+            this.onClientLeave(client.sessionId, playerId);
+          }
         }
         this.clients.delete(ws);
       });
@@ -121,9 +133,11 @@ class Matchmaking {
         }
 
         client.name = msg.name;
+        client.isHost = true;
         const result = this.onHostRequest(playerId, msg.name, msg.worldSeed, msg.mode || 'survival');
 
         if (result.error) {
+          client.isHost = false;
           this._send(ws, { type: 'HOST_REJECTED', reason: result.error });
         } else {
           client.sessionId = result.sessionId;
@@ -155,6 +169,7 @@ class Matchmaking {
           this._send(ws, { type: 'JOIN_REJECTED', reason: result.error });
         } else {
           client.sessionId = msg.sessionId;
+          client.isHost = false; // Joiners are never the host
           this._send(ws, {
             type: 'JOIN_ACCEPTED',
             sessionPort: result.sessionPort,
@@ -166,8 +181,13 @@ class Matchmaking {
 
       case 'LEAVE': {
         if (client.sessionId) {
-          this.onSessionLeave(client.sessionId);
+          if (client.isHost) {
+            this.onHostLeave(client.sessionId, playerId);
+          } else {
+            this.onClientLeave(client.sessionId, playerId);
+          }
           client.sessionId = null;
+          client.isHost = false;
         }
         this._send(ws, { type: 'LEFT_LOBBY', message: 'Left matchmaking lobby' });
         break;
