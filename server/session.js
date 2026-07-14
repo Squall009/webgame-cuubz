@@ -392,7 +392,7 @@ class SessionManager {
     const player = this.players.get(playerId);
     if (player) {
       player.lastHeartbeat = Date.now();
-      this._send(playerId, { type: 'HEARTBEAT_ACK' });
+      this._send(player.ws, { type: 'HEARTBEAT_ACK' });
     }
   }
 
