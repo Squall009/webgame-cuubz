@@ -2193,21 +2193,6 @@
         // Graceful shutdown handlers
         chunkManager._setupGracefulShutdown();
 
-        // ─── Multiplayer: Send JOIN to game session ───
-        // The host/client must send JOIN so the relay knows who they are.
-        // If the game session connection isn't ready yet, the message is queued.
-        if (sessionManager && sessionManager.client) {
-          const charData = characterManager ? characterManager.getSelectedCharacter() : null;
-          // Send actual spawn position so other players can see us
-          const spawnPos = { x: bestSpawnX + 0.5, y: spawnHeight, z: bestSpawnZ + 0.5 };
-          sessionManager.client.joinGame(
-            charData ? { name: charData.name, color: charData.color } : { name: 'Player', color: '#ffffff' },
-            spawnPos,
-            { yaw: 0, pitch: 0 }
-          );
-          _log(`[Cuubz] Sent JOIN to game session at ${JSON.stringify(spawnPos)}`);
-        }
-
         // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
         if (sessionManager && sessionManager.hostingSessionId) {
           const applyRemoteBlockChange = (data, newBlockType) => {
@@ -2327,6 +2312,19 @@
           // Player placed — position logged only on error
           
           player.linkWorld(worldManager);
+
+          // ─── Multiplayer: Send JOIN to game session ───
+          // Must be after spawn search so we send the actual spawn position.
+          if (sessionManager && sessionManager.client) {
+            const charData = characterManager ? characterManager.getSelectedCharacter() : null;
+            const spawnPos = { x: player.position.x, y: player.position.y, z: player.position.z };
+            sessionManager.client.joinGame(
+              charData ? { name: charData.name, color: charData.color } : { name: 'Player', color: '#ffffff' },
+              spawnPos,
+              { yaw: 0, pitch: 0 }
+            );
+            _log(`[Cuubz] Sent JOIN to game session at ${JSON.stringify(spawnPos)}`);
+          }
 
           // Initialize Biome Effects System (wire up visual effects per biome)
           const biomeEffects = new BiomeEffects();
