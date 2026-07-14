@@ -21,7 +21,7 @@ const SessionManager = require('./session');
 
 const PORT = parseInt(process.env.MATCHMAKING_PORT) || 8765;
 const MAX_PLAYERS_PER_SESSION = 4;
-const HEARTBEAT_INTERVAL = 30000; // 30s keepalive
+const HEARTBEAT_INTERVAL = 60000; // 60s keepalive (browser throttles background tabs)
 
 // ─── State ────────────────────────────────────────────────────
 
@@ -161,10 +161,10 @@ const matchmaking = new Matchmaking({
     return { sessionId };
   },
   listSessions: () => listSessions(),
-  // Only destroy the session when the HOST player disconnects from matchmaking
+  // Host leaving matchmaking is normal (tab background, network blip) — don't destroy the session.
+  // The game session itself will clean up when the host actually disconnects from it.
   onHostLeave: (sessionId, playerId) => {
-    console.log(`[MATCHMAKING] Host ${playerId} left matchmaking — destroying session ${sessionId}`);
-    destroySession(sessionId);
+    console.log(`[MATCHMAKING] Host ${playerId} left matchmaking (session ${sessionId} stays alive)`);
   },
   // Non-host clients disconnecting from matchmaking is normal — session stays alive
   onClientLeave: (sessionId, playerId) => {

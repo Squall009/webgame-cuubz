@@ -400,11 +400,30 @@ class WSConnection {
   /** Start sending periodic heartbeats */
   _startHeartbeat() {
     this._stopHeartbeat(); // Clear any existing timers
-    this._heartbeatTimer = setInterval(() => {
+    this._scheduleNextHeartbeat();
+    // Send heartbeat immediately when returning to foreground
+    if (typeof document !== 'undefined') {
+      this._visibilityHandler = () => {
+        if (!document.hidden && this.isConnected && !this._disposed) {
+          _log('[WSConnection] Tab visible — sending heartbeat');
+          this._sendRaw({ type: MESSAGE_TYPES.HEARTBEAT });
+          this._setHeartbeatTimeout();
+        }
+      };
+      document.addEventListener('visibilitychange', this._visibilityHandler);
+    }
+  }
+
+  /** Schedule the next heartbeat using setTimeout chain (survives tab throttling) */
+  _scheduleNextHeartbeat() {
+    if (this._disposed || !this.isConnected) return;
+    this._heartbeatTimer = setTimeout(() => {
       if (this.isConnected && !this._disposed) {
         this._sendRaw({ type: MESSAGE_TYPES.HEARTBEAT });
         this._setHeartbeatTimeout();
       }
+      // Chain the next heartbeat
+      this._scheduleNextHeartbeat();
     }, this._options.heartbeatInterval);
   }
 
@@ -432,10 +451,15 @@ class WSConnection {
   /** Stop all heartbeat timers */
   _stopHeartbeat() {
     if (this._heartbeatTimer) {
-      clearInterval(this._heartbeatTimer);
+      clearTimeout(this._heartbeatTimer);
       this._heartbeatTimer = null;
     }
     this._clearHeartbeatTimeout();
+    // Remove visibility listener
+    if (typeof document !== 'undefined' && this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
   }
 
   // ── Reconnection ──────────────────────────────────────────────
