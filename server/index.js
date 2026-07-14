@@ -134,11 +134,12 @@ const matchmaking = new Matchmaking({
       wss: sessionWss,
       sessionId,
       sessionName: sessionName || 'Untitled',
+      worldSeed: worldSeed || 42,
+      gameMode: mode || 'survival',
       hostId: playerId,
       maxPlayers: MAX_PLAYERS_PER_SESSION,
       heartbeatInterval: HEARTBEAT_INTERVAL,
       onSessionEmpty: () => {
-        // When the game session has 0 players, clean up the relay entry
         destroySession(sessionId);
       },
     });

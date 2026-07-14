@@ -55,6 +55,7 @@ class SessionManager {
     this.wss = config.wss;
     this.sessionId = config.sessionId;
     this.sessionName = config.sessionName || 'Untitled';
+    this.gameMode = config.gameMode || 'survival';
     this.hostId = config.hostId;
     this.maxPlayers = config.maxPlayers || 4;
     this.heartbeatInterval = config.heartbeatInterval || 30000;
@@ -236,6 +237,7 @@ class SessionManager {
       type: 'WELCOME',
       sessionId: this.sessionId,
       playerId,
+      mode: this.gameMode,
       players: this._getPlayerList(),
     });
 
@@ -491,9 +493,9 @@ class SessionManager {
     return {
       sessionId: this.sessionId,
       name: this.sessionName,
+      mode: this.gameMode,
       players: this.players.size,
       maxPlayers: this.maxPlayers,
-      mode: 'survival',
     };
   }
 
