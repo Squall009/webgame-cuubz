@@ -193,6 +193,12 @@ class Matchmaking {
         break;
       }
 
+      case 'HEARTBEAT': {
+        // Acknowledge client keepalive so the heartbeat timeout doesn't fire
+        this._send(ws, { type: 'HEARTBEAT_ACK' });
+        break;
+      }
+
       default:
         this._send(ws, { type: 'ERROR', message: `Unknown message type: ${msg.type}` });
     }

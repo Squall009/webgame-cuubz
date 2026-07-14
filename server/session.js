@@ -37,6 +37,7 @@ const MESSAGE_TYPES = {
   INVENTORY_UPDATE: 'INVENTORY_UPDATE',
   QUEST_UPDATE: 'QUEST_UPDATE',
   HEARTBEAT: 'HEARTBEAT',
+  HEARTBEAT_ACK: 'HEARTBEAT_ACK',
 };
 
 class SessionManager {
@@ -387,6 +388,7 @@ class SessionManager {
     const player = this.players.get(playerId);
     if (player) {
       player.lastHeartbeat = Date.now();
+      this._send(playerId, { type: 'HEARTBEAT_ACK' });
     }
   }
 
