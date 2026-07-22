@@ -1107,62 +1107,66 @@ class ChunkManager {
     }
 
     const texMap = this.textureAtlas ? this.textureAtlas.getTexture() : null;
+    const pbrFactory = this.renderer ? this.renderer.getPBRFactory() : null;
 
     let solidMesh = null;
     let cutoutMesh = null;
     let transMesh = null;
 
-    // Handle both worker buffer results and inline geometry results
+    // ── Solid mesh ──────────────────────────────────────────────────
+    let solidGeo = null;
     if (geoResult.solid) {
-      const geo = this._wrapBuffers(geoResult.solid);
-      if (geo && geo.index && geo.index.count > 0) {
-        const material = new THREE.MeshLambertMaterial({ map: texMap, color: 0xffffff, fog: true });
-        solidMesh = new THREE.Mesh(geo, material);
-        solidMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
-      }
+      solidGeo = this._wrapBuffers(geoResult.solid);
     } else if (geoResult.solidGeometry) {
-      // Inline fallback returns BufferGeometry directly
-      const material = new THREE.MeshLambertMaterial({ map: texMap, color: 0xffffff, fog: true });
-      solidMesh = new THREE.Mesh(geoResult.solidGeometry, material);
+      solidGeo = geoResult.solidGeometry;
+    }
+    if (solidGeo) {
+      const material = pbrFactory
+        ? pbrFactory.createSolid(0.0)
+        : new THREE.MeshLambertMaterial({ map: texMap, color: 0xffffff, fog: true });
+      solidMesh = new THREE.Mesh(solidGeo, material);
       solidMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
+      solidMesh.receiveShadow = true;
+      solidMesh.castShadow = true;
     }
 
+    // ── Cutout mesh ─────────────────────────────────────────────────
+    let cutoutGeo = null;
     if (geoResult.cutout) {
-      const geo = this._wrapBuffers(geoResult.cutout);
-      if (geo && geo.index && geo.index.count > 0) {
-        const material = new THREE.MeshLambertMaterial({
-          map: texMap, color: 0xffffff, transparent: true, alphaToCoverage: true,
-          depthWrite: true, fog: true, side: THREE.DoubleSide
-        });
-        cutoutMesh = new THREE.Mesh(geo, material);
-        cutoutMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
-      }
+      cutoutGeo = this._wrapBuffers(geoResult.cutout);
     } else if (geoResult.cutoutGeometry) {
-      const material = new THREE.MeshLambertMaterial({
-        map: texMap, color: 0xffffff, transparent: true, alphaToCoverage: true,
-        depthWrite: true, fog: true, side: THREE.DoubleSide
-      });
-      cutoutMesh = new THREE.Mesh(geoResult.cutoutGeometry, material);
+      cutoutGeo = geoResult.cutoutGeometry;
+    }
+    if (cutoutGeo) {
+      const material = pbrFactory
+        ? pbrFactory.createCutout(0.0, 0.5)
+        : new THREE.MeshLambertMaterial({
+            map: texMap, color: 0xffffff, transparent: true, alphaToCoverage: true,
+            depthWrite: true, fog: true, side: THREE.DoubleSide
+          });
+      cutoutMesh = new THREE.Mesh(cutoutGeo, material);
       cutoutMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
+      cutoutMesh.receiveShadow = true;
+      cutoutMesh.castShadow = true;
     }
 
+    // ── Transparent mesh ────────────────────────────────────────────
+    let transGeo = null;
     if (geoResult.trans) {
-      const geo = this._wrapBuffers(geoResult.trans);
-      if (geo && geo.index && geo.index.count > 0) {
-        const material = new THREE.MeshLambertMaterial({
-          map: texMap, color: 0xffffff, transparent: true, opacity: 0.6,
-          depthWrite: false, fog: true, side: THREE.DoubleSide
-        });
-        transMesh = new THREE.Mesh(geo, material);
-        transMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
-      }
+      transGeo = this._wrapBuffers(geoResult.trans);
     } else if (geoResult.transparentGeometry) {
-      const material = new THREE.MeshLambertMaterial({
-        map: texMap, color: 0xffffff, transparent: true, opacity: 0.6,
-        depthWrite: false, fog: true, side: THREE.DoubleSide
-      });
-      transMesh = new THREE.Mesh(geoResult.transparentGeometry, material);
+      transGeo = geoResult.transparentGeometry;
+    }
+    if (transGeo) {
+      const material = pbrFactory
+        ? pbrFactory.createTransparent(0.0, 0.6)
+        : new THREE.MeshLambertMaterial({
+            map: texMap, color: 0xffffff, transparent: true, opacity: 0.6,
+            depthWrite: false, fog: true, side: THREE.DoubleSide
+          });
+      transMesh = new THREE.Mesh(transGeo, material);
       transMesh.position.set(cx * CHUNK_W, 0, cz * CHUNK_D);
+      transMesh.receiveShadow = true;
     }
 
     // Add to scene graph

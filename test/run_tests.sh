@@ -2,7 +2,7 @@
 # Cuubz Test Runner — Run all tests and report results
 # Usage: bash test/run_tests.sh
 
-cd /home/dadmin/workspace/webgame-cuubz
+cd "$(cd "$(dirname "$0")/.." && pwd)"
 
 PASS=0
 FAIL=0

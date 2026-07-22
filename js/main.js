@@ -2086,16 +2086,19 @@
         loadingStatus.textContent = 'Loading textures...';
         if (loadingProgress) loadingProgress.style.width = '60%';
 
-        const textureAtlas = new TextureAtlas();
+        const textureAtlas = new PBRTextureAtlas();
         await textureAtlas.buildAtlas();
+
+        // Initialize PBR material factory with the triple atlas
+        renderer.initPBR(textureAtlas);
 
         // Wire up texture atlas to debug overlay (top-right corner)
         const atlasOverlay = document.getElementById('atlas-overlay');
         const atlasCanvasEl = document.getElementById('atlas-canvas');
-        if (atlasOverlay && atlasCanvasEl && textureAtlas.canvas) {
+        if (atlasOverlay && atlasCanvasEl && textureAtlas.diffuseCanvas) {
           const ctx = atlasCanvasEl.getContext('2d');
-          const srcW = textureAtlas.canvas.width;
-          const srcH = textureAtlas.canvas.height;
+          const srcW = textureAtlas.diffuseCanvas.width;
+          const srcH = textureAtlas.diffuseCanvas.height;
 
           // Scale canvas to fit nicely in the overlay (max 300px wide)
           const maxDisplayWidth = Math.min(300, window.innerWidth - 40);
@@ -2105,10 +2108,10 @@
 
           // Draw the atlas scaled down
           ctx.imageSmoothingEnabled = false; // Keep pixelated
-          ctx.drawImage(textureAtlas.canvas, 0, 0, atlasCanvasEl.width, atlasCanvasEl.height);
+          ctx.drawImage(textureAtlas.diffuseCanvas, 0, 0, atlasCanvasEl.width, atlasCanvasEl.height);
 
           // Draw block ID labels on each tile for visual verification
-          const debugInfo = textureAtlas.getDebugInfo();
+          const debugInfo = textureAtlas.debugInfo;
           if (debugInfo) {
             ctx.font = `bold ${Math.max(8, Math.round(10 * scale))}px monospace`;
             ctx.textAlign = 'center';
@@ -2126,7 +2129,7 @@
 
               // Draw block ID text
               ctx.fillStyle = '#ffffff';
-              const label = `${info.blockId}_${info.sideNum}`;
+              const label = `${info.blockId}_${info.faceName}`;
               ctx.fillText(label, (x + w / 2) * scale, (y + h / 2 - 1) * scale);
             }
           }
@@ -2288,7 +2291,7 @@
               for (let lz = 0; lz < 16; lz++) {
                 for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
                   const block = getBlockAt(chunk, lx, y, lz);
-                  if (!BLOCK_PROPERTIES[block]?.solid) continue;
+                  if (!BLOCK_BY_ID[block] || BLOCK_BY_ID[block].category !== 'solid') continue;
 
                   // Prefer surface blocks above sea level
                   const isSurface = SURFACE_BLOCKS.has(block);
@@ -3184,6 +3187,31 @@
               // Update camera to follow player at eye level
               const camPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
               renderer.updateCamera(camPos, player.yaw, player.pitch);
+
+              // Update shadow camera to follow the player
+              renderer.updateShadowCamera(player.position);
+
+              // Update PBR materials with shadow data
+              const pbrFactory = renderer.getPBRFactory();
+              if (pbrFactory) {
+                const shadowData = renderer.getShadowData();
+                if (shadowData) {
+                  pbrFactory.updateShadowData(shadowData.map, shadowData.matrix);
+                } else {
+                  // Log once when shadow data is not available
+                  if (typeof game._shadowMissingCount === 'undefined') game._shadowMissingCount = 0;
+                  game._shadowMissingCount++;
+                  if (game._shadowMissingCount <= 5) {
+                    console.warn('[Shadow] getShadowData returned null (frame', game.frameCount, ')');
+                  }
+                }
+              } else {
+                if (typeof game._noPbrCount === 'undefined') game._noPbrCount = 0;
+                game._noPbrCount++;
+                if (game._noPbrCount <= 3) {
+                  console.warn('[Shadow] No PBR factory available');
+                }
+              }
 
               // Update Biome Effects (fog, sky color, UV animation offsets, particles)
               if (biomeEffects && chunkManager) {

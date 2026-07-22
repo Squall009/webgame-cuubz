@@ -22,8 +22,4 @@ A web-based Minecraft-style voxel game with full multiplayer support for up to 4
 
 ## Status
 
-🟡 Approved — Plan created, awaiting review before implementation begins.
-
-## Created
-
-May 23, 2026
+🟢 Active — Fully implemented and deployed.

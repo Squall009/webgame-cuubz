@@ -392,24 +392,26 @@
   <script src="js/util/logger.js?v=20260714-1"></script>
 
   <!-- World Generation (VoxelGen Overhaul) -->
+  <script src="js/world/blockRegistry.js?v=20260722-5"></script>
   <script src="js/world/noise.js?v=vgen-1"></script>
-  <script src="js/world/chunkData.js?v=vgen-3"></script>
+  <script src="js/world/chunkData.js?v=20260722-2"></script>
   <script src="js/world/biomeSystem.js?v=vgen-1"></script>
   <!-- Worker-side generation code (loaded for fetch-based Blob URL creation) -->
-  <script src="js/world/workerGeneration.js?v=vgen-8"></script>
+  <script src="js/world/workerGeneration.js?v=vgen-9"></script>
   <!-- REMOVED: featurePlacer, caveGenerator, oreGenerator — in workerGeneration.js -->
   <!-- New monolithic chunk manager (workers + IndexedDB + flush + region tracking) -->
   <script src="js/world/chunkBinaryCodec.js?v=20260714-1"></script>
-  <script src="js/chunkmanager.js?v=20260722-1"></script>
+  <script src="js/chunkmanager.js?v=20260722-2"></script>
   <!-- REMOVED: chunkStore, dirtyFlushManager, worldGenerator, chunkGrid → merged into chunkmanager.js -->
   <script src="js/world/persistence.js?v=20260714-1"></script>
   <script src="js/world/spawnManager.js?v=20260714-1"></script>
 
-  <!-- Renderer -->
-  <script src="js/renderer/textureAtlas.js?v=20260720-1"></script>
-  <script src="js/renderer/chunkMeshBuilder.js?v=20260722-1"></script>
+  <!-- Renderer (PBR shader before texture atlas) -->
+  <script src="js/renderer/pbrShader.js?v=20260722-7"></script>
+  <script src="js/renderer/textureAtlas.js?v=20260722-7"></script>
+  <script src="js/renderer/chunkMeshBuilder.js?v=20260722-2"></script>
   <!-- REMOVED: renderer/chunkManager.js → merged into js/chunkmanager.js -->
-  <script src="js/renderer/voxelRenderer.js?v=20260722-2"></script>
+  <script src="js/renderer/voxelRenderer.js?v=20260722-3"></script>
   <script src="js/renderer/crosshair.js?v=20260714-1"></script>
   <script src="js/renderer/skybox.js?v=20260714-1"></script>
   <script src="js/renderer/biomeEffects.js?v=20260714-1"></script>
@@ -419,7 +421,7 @@
   <script src="js/input/keyboard.js?v=20260714-1"></script>
   <script src="js/input/mouse.js?v=20260714-1"></script>
   <script src="js/input/touch.js?v=20260712-1"></script>
-  <script src="js/input/interaction.js?v=20260722-1"></script>
+  <script src="js/input/interaction.js?v=20260722-2"></script>
 
   <!-- Entities -->
   <script src="js/entities/player.js?v=20260714-1"></script>
@@ -434,8 +436,6 @@
   <script src="js/systems/survival.js?v=20260714-1"></script>
   <script src="js/systems/damageSystem.js?v=20260714-1"></script>
   <script src="js/systems/questSystem.js?v=20260714-1"></script>
-  <!-- DISABLED: water flow system needs overhaul -->
-  <!-- <script src="js/systems/waterFlowSystem.js?v=20260714-1"></script> -->
 
   <!-- Audio -->
   <script src="js/audio/sfx.js?v=20260714-1"></script>
@@ -453,6 +453,6 @@
   <script src="js/game.js?v=20260714-1"></script>
 
   <!-- Main Entry (menu system, screen management) -->
-<script src="js/main.js?v=20260720-1"></script>
+<script src="js/main.js?v=20260722-2"></script>
 </body>
 </html>

@@ -75,12 +75,12 @@ class BlockInteraction {
     const justStartedBreak = (this.mouse && this.mouse.justClickedLeft) ||
                              (this.touch && this.touch.breakJustPressed);
 
-    // Debug: log mouse state periodically
-    if (this.mouse && this.mouse._debugFrame === undefined) this.mouse._debugFrame = 0;
-    if (this.mouse) this.mouse._debugFrame++;
-    if (this.mouse && this.mouse._debugFrame % 120 === 0) {
-      console.log(`[BREAK_DEBUG] mouse.leftClick=${this.mouse.leftClick}, justClickedLeft=${this.mouse.justClickedLeft}, breakingBlock=${this.breakingBlock ? 'yes' : 'no'}`);
-    }
+    // Debug: log mouse state periodically (disabled)
+    // if (this.mouse && this.mouse._debugFrame === undefined) this.mouse._debugFrame = 0;
+    // if (this.mouse) this.mouse._debugFrame++;
+    // if (this.mouse && this.mouse._debugFrame % 120 === 0) {
+    //   console.log(`[BREAK_DEBUG] mouse.leftClick=${this.mouse.leftClick}, justClickedLeft=${this.mouse.justClickedLeft}, breakingBlock=${this.breakingBlock ? 'yes' : 'no'}`);
+    // }
 
     if (isHoldingBreak) {
       if (!this.breakingBlock) {

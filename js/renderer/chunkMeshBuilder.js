@@ -15,24 +15,27 @@ class ChunkMeshBuilder {
       { dir: [-1,0, 0],  vertices: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], uvCoords: [[0,0],[1,0],[1,1],[0,1]], name: 'left' },
     ];
 
-    // Block type IDs that use cutout rendering (alpha test) — leaves, flowers, torches
-    // These have binary alpha textures and should discard transparent pixels instead of blending.
-    this.cutoutIds = new Set([
-      BLOCK_TYPES.LEAVES,        // 33
-      BLOCK_TYPES.RED_FLOWER,    // 42
-      BLOCK_TYPES.YELLOW_FLOWER, // 43
-      BLOCK_TYPES.CAVE_TORCH     // 44
-    ]);
+    // Derive cutout/transparent/emissive sets from block registry (no hardcoded IDs)
+    this.cutoutIds = new Set(
+      Object.values(BLOCK_BY_ID)
+        .filter(b => b.category === 'cutout')
+        .map(b => b.id)
+    );
 
-    // Block type IDs that use blended transparency — fluids + ice (partial alpha, opacity blend)
-    this.transparentIds = new Set([
-      BLOCK_TYPES.WATER,         // 7
-      BLOCK_TYPES.ICE,           // 18
-      BLOCK_TYPES.TOXIC_SLIME    // 37
-    ]);
+    this.transparentIds = new Set(
+      Object.values(BLOCK_BY_ID)
+        .filter(b => b.category === 'transparent')
+        .map(b => b.id)
+    );
+
+    // Emissive block intensities (for future emissive geometry stream)
+    this.emissiveBlocks = new Map(
+      Object.values(BLOCK_BY_ID)
+        .filter(b => b.emissive && b.emissive > 0)
+        .map(b => [b.id, b.emissive])
+    );
 
     // Combined set for face culling (any block that isn't fully solid/opaque)
-    // Includes cutout blocks + transparent blocks + AIR + CAVE_AIR (both air-like types are non-solid)
     this.nonSolidIds = new Set([...this.cutoutIds, ...this.transparentIds, BLOCK_TYPES.AIR, BLOCK_TYPES.CAVE_AIR]);
   }
 

@@ -18,14 +18,32 @@
 
   function cidx(x, y, z) { return x * STRIDE + y * CHUNK_D + z; }
 
-  // ── Block types (subset used in generation — IDs match chunkData.js) ─
+  // ── Block types (subset used in generation — IDs match blockRegistry.js) ─
   var BLOCK = {
-    AIR: 0, BEDROCK: 1, STONE: 2, DIRT: 3, GRASS: 4, SAND: 5, GRAVEL: 6,
-    WATER: 7, COAL_ORE: 8, IRON_ORE: 9, GOLD_ORE: 10, DIAMOND_ORE: 11,
-    CAVE_AIR: 12, SNOW: 13, SNOW_STONE: 14, LAVA: 15, TERRACOTTA: 16,
-    RED_SAND: 17, ICE: 18, CLAY: 19,
-    // Decoration blocks (IDs match chunkData.js)
-    WOOD_LOG: 32, LEAVES: 33, RED_FLOWER: 42, YELLOW_FLOWER: 43
+    AIR: 0, BEDROCK: 1, STONE: 2,
+    // Surface blocks (IDs 48-60)
+    DIRT: 48, GRASS: 49, SAND: 50, GRAVEL: 51,
+    // Fluids (IDs 46-47)
+    WATER: 46,
+    // Ores (IDs 21-28)
+    COAL_ORE: 21, IRON_ORE: 22, GOLD_ORE: 23, DIAMOND_ORE: 24,
+    // Deepslate ores (IDs 30-35)
+    DEEPSLATE_COAL_ORE: 30, DEEPSLATE_IRON_ORE: 31,
+    DEEPSLATE_GOLD_ORE: 32, DEEPSLATE_DIAMOND_ORE: 33,
+    DEEPSLATE_COPPER_ORE: 34, DEEPSLATE_EMERALD_ORE: 35,
+    // CAVE_AIR is now AIR in the new system
+    CAVE_AIR: 0,
+    // More surface blocks
+    SNOW: 54, SNOW_STONE: 56, // coarse_dirt
+    LAVA: 47, TERRACOTTA: 58, RED_SAND: 52,
+    ICE: 61, CLAY: 53,
+    // Decoration blocks (from registry)
+    WOOD_LOG: 65, LEAVES: 104, RED_FLOWER: 179, YELLOW_FLOWER: 180,
+    // Additional wood types for biome-specific trees
+    SPRUCE_LOG: 66, SPRUCE_LEAVES: 105,
+    BIRCH_LOG: 67, BIRCH_LEAVES: 106,
+    // Deepslate block (for deep terrain)
+    DEEPSLATE: 8
   };
 
   // ── Biome definitions (must match biomeSystem.js) ───────────────────
@@ -67,12 +85,40 @@
   };
 
   // ── Ore definitions ────────────────────────────────────────────────
-  var ORE_DEFS = [
+  // Shallow ores: stone-hosted (above Y=40)
+  var ORE_DEFS_SHALLOW = [
     { type: BLOCK.COAL_ORE,    minY: 5,   maxY: 120, chance: 0.018, vein: 8 },
     { type: BLOCK.IRON_ORE,    minY: 5,   maxY: 85,  chance: 0.014, vein: 6 },
     { type: BLOCK.GOLD_ORE,    minY: 5,   maxY: 42,  chance: 0.006, vein: 4 },
-    { type: BLOCK.DIAMOND_ORE, minY: 5,   maxY: 24,  chance: 0.003, vein: 3 }
+    { type: BLOCK.DIAMOND_ORE, minY: 5,   maxY: 24,  chance: 0.003, vein: 3 },
+    { type: BLOCK.COPPER_ORE,  minY: 5,   maxY: 60,  chance: 0.010, vein: 5 },
+    { type: BLOCK.EMERALD_ORE, minY: 5,   maxY: 16,  chance: 0.002, vein: 2 }
   ];
+
+  // Deep ores: deepslate-hosted (below Y=40)
+  var ORE_DEFS_DEEP = [
+    { type: BLOCK.DEEPSLATE_COAL_ORE,    minY: 5,   maxY: 40, chance: 0.018, vein: 8 },
+    { type: BLOCK.DEEPSLATE_IRON_ORE,    minY: 5,   maxY: 40, chance: 0.014, vein: 6 },
+    { type: BLOCK.DEEPSLATE_GOLD_ORE,    minY: 5,   maxY: 40, chance: 0.006, vein: 4 },
+    { type: BLOCK.DEEPSLATE_DIAMOND_ORE, minY: 5,   maxY: 24, chance: 0.003, vein: 3 },
+    { type: BLOCK.DEEPSLATE_COPPER_ORE,  minY: 5,   maxY: 40, chance: 0.010, vein: 5 },
+    { type: BLOCK.DEEPSLATE_EMERALD_ORE, minY: 5,   maxY: 16, chance: 0.002, vein: 2 }
+  ];
+
+  // ── Tree types per biome ───────────────────────────────────────────
+  // Maps biome name → { log, leaves } block IDs
+  var TREE_TYPES = {
+    'Forest':       { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
+    'Plains':       { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
+    'Mountains':    { log: BLOCK.SPRUCE_LOG,  leaves: BLOCK.SPRUCE_LEAVES },
+    'Tundra':       { log: BLOCK.SPRUCE_LOG,  leaves: BLOCK.SPRUCE_LEAVES },
+    'Frozen Peaks': { log: BLOCK.SPRUCE_LOG,  leaves: BLOCK.SPRUCE_LEAVES },
+    'Beach':        { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
+    'Desert':       { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
+    'Badlands':     { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
+    'Ocean':        { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
+    'Deep Ocean':   { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES }
+  };
 
   // ── Noise infrastructure (self-contained for worker) ────────────────
   function mulberry32(seed) {
@@ -276,6 +322,10 @@
         var rates = FEATURE_RATES[biomeName];
         if (!rates || rates.treeChance <= 0) continue;
 
+        // Look up biome-specific tree type (log + leaves)
+        var treeType = TREE_TYPES[biomeName];
+        if (!treeType) treeType = TREE_TYPES['Plains']; // fallback
+
         // Elevation cap.
         if (surfY > rates.treeMaxY) continue;
 
@@ -303,7 +353,7 @@
         for (var ty = 0; ty < trunkH; ty++) {
           var logY = baseY + ty;
           if (logY < CHUNK_H) {
-            chunk[cidx(lx, logY, lz)] = BLOCK.WOOD_LOG;
+            chunk[cidx(lx, logY, lz)] = treeType.log;
           }
         }
 
@@ -326,8 +376,8 @@
               if (bx >= 0 && bx < 16 && bz >= 0 && bz < 16 && by >= 0 && by < CHUNK_H) {
                 // Only place in air or replace existing leaves.
                 var existing = chunk[cidx(bx, by, bz)];
-                if (existing === BLOCK.AIR || existing === BLOCK.CAVE_AIR || existing === BLOCK.LEAVES) {
-                  chunk[cidx(bx, by, bz)] = BLOCK.LEAVES;
+                if (existing === BLOCK.AIR || existing === BLOCK.CAVE_AIR || existing === treeType.leaves) {
+                  chunk[cidx(bx, by, bz)] = treeType.leaves;
                 }
               }
             }
@@ -388,9 +438,36 @@
   }
 
   // ── Ore placement ───────────────────────────────────────────────────
+  // Deepslate transition depth — below this Y, terrain is deepslate and ores use deepslate variants
+  var DEEPSLATE_DEPTH = 40;
   function placeOres(chunk, rng) {
-    for (var oi = 0; oi < ORE_DEFS.length; oi++) {
-      var ore = ORE_DEFS[oi];
+    // Use shallow ores above DEEPSLATE_DEPTH, deep ores below
+    var oreDefs = ORE_DEFS_SHALLOW;
+    for (var oi = 0; oi < oreDefs.length; oi++) {
+      var ore = oreDefs[oi];
+      var attempts = Math.floor(16 * 16 * ore.chance * 10);
+      for (var a = 0; a < attempts; a++) {
+        if (rng() > ore.chance * 60) continue;
+        var ox = Math.floor(rng() * 16);
+        var oy = Math.floor(rng() * (ore.maxY - ore.minY)) + ore.minY;
+        var oz = Math.floor(rng() * 16);
+        // Skip if ore would place below deepslate depth
+        if (oy < DEEPSLATE_DEPTH) continue;
+        for (var v = 0; v < ore.vein; v++) {
+          var bx = Math.max(0, Math.min(15, ox + Math.floor(rng() * 3) - 1));
+          var by = Math.max(0, Math.min(CHUNK_H - 1, oy + Math.floor(rng() * 3) - 1));
+          var bz = Math.max(0, Math.min(CHUNK_D - 1, oz + Math.floor(rng() * 3) - 1));
+          if (chunk[cidx(bx, by, bz)] === BLOCK.STONE) {
+            chunk[cidx(bx, by, bz)] = ore.type;
+          }
+        }
+      }
+    }
+
+    // Deepslate ores (below DEEPSLATE_DEPTH)
+    var deepDefs = ORE_DEFS_DEEP;
+    for (var oi = 0; oi < deepDefs.length; oi++) {
+      var ore = deepDefs[oi];
       var attempts = Math.floor(16 * 16 * ore.chance * 10);
       for (var a = 0; a < attempts; a++) {
         if (rng() > ore.chance * 60) continue;
@@ -401,7 +478,9 @@
           var bx = Math.max(0, Math.min(15, ox + Math.floor(rng() * 3) - 1));
           var by = Math.max(0, Math.min(CHUNK_H - 1, oy + Math.floor(rng() * 3) - 1));
           var bz = Math.max(0, Math.min(CHUNK_D - 1, oz + Math.floor(rng() * 3) - 1));
-          if (chunk[cidx(bx, by, bz)] === BLOCK.STONE) {
+          // Place in deepslate or stone (deepslate transition)
+          var existing = chunk[cidx(bx, by, bz)];
+          if (existing === BLOCK.DEEPSLATE || existing === BLOCK.STONE) {
             chunk[cidx(bx, by, bz)] = ore.type;
           }
         }
@@ -539,7 +618,7 @@
           } else if (y <= 3 && rngSurface() < (4 - y) * 0.25) {
             block = BLOCK.BEDROCK; // Random bedrock scatter near bottom.
           } else if (y < surfY - 3) {
-            block = BLOCK.STONE;
+            block = (y < DEEPSLATE_DEPTH) ? BLOCK.DEEPSLATE : BLOCK.STONE;
           } else if (y < surfY) {
             // Sub-block layer — mountains use stone sub-block (thin soil).
             if (mountainFactor > 0.5 && blended.isCold) {

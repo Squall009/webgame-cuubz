@@ -3,27 +3,17 @@
  * No Three.js dependency — returns raw Float32Array/Uint16Array buffers via postMessage.
  */
 
-// Block types (must match chunkData.js)
-var BLOCK_TYPES = {
-  AIR: 0, BEDROCK: 1, STONE: 2, DIRT: 3, GRASS: 4, SAND: 5, GRAVEL: 6,
-  WATER: 7, COAL_ORE: 8, IRON_ORE: 9, GOLD_ORE: 10, DIAMOND_ORE: 11,
-  CAVE_AIR: 12, SNOW: 13, SNOW_STONE: 14, LAVA: 15, TERRACOTTA: 16,
-  RED_SAND: 17, ICE: 18, CLAY: 19, WOOD_LOG: 32, LEAVES: 33, PLANKS: 34,
-  OBSIDIAN: 35, BLACKSTONE: 36, TOXIC_SLIME: 37, CORRUPT_CRYSTAL: 38,
-  BED: 39, APPLE: 40, QUEST_KEY: 41, RED_FLOWER: 42, YELLOW_FLOWER: 43,
-  CAVE_TORCH: 44, GLOWSTONE: 45
-};
+// Block categories (IDs match blockRegistry.js)
+var CUTOUT_IDS = {104: true, 179: true, 180: true, 172: true}; // oak_leaves, red_flower, yellow_flower, torch
+var TRANSPARENT_IDS = {46: true, 61: true, 188: true}; // water, ice, toxic_slime
 
+var AIR_ID = 0;
 var CHUNK_W = 16;
 var CHUNK_D = 16;
 var CHUNK_H = 256;
 
-// Block categories (must match chunkMeshBuilder.js)
-var CUTOUT_IDS = {33: true, 42: true, 43: true, 44: true}; // LEAVES, RED_FLOWER, YELLOW_FLOWER, CAVE_TORCH
-var TRANSPARENT_IDS = {7: true, 18: true, 37: true}; // WATER, ICE, TOXIC_SLIME
-
 function isNonSolid(b) {
-  return b === 0 || b === 12 || CUTOUT_IDS[b] || TRANSPARENT_IDS[b];
+  return b === AIR_ID || CUTOUT_IDS[b] || TRANSPARENT_IDS[b];
 }
 
 // Face definitions — use var + simple arrays to avoid const issues with structured-clone
@@ -114,7 +104,7 @@ function buildMeshData(blocks, neighbors, uvLookup) {
               else if (face.d[0] === 0 && face.d[2] === 1) na = neighbors.positiveZ;
               else if (face.d[0] === 0 && face.d[2] === -1) na = neighbors.negativeZ;
               
-              nb = BLOCK_TYPES.AIR;
+              nb = 0; // AIR
               if (na && ny >= 0 && ny < CHUNK_H) {
                 var lnx = ((nx % CHUNK_W) + CHUNK_W) % CHUNK_W;
                 var lnz = ((nz % CHUNK_D) + CHUNK_D) % CHUNK_D;
@@ -122,7 +112,7 @@ function buildMeshData(blocks, neighbors, uvLookup) {
               }
             } else {
               // Y out of bounds → AIR (top/bottom of world)
-              nb = BLOCK_TYPES.AIR;
+              nb = 0; // AIR (top/bottom of world)
             }
           }
 

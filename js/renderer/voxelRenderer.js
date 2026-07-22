@@ -64,18 +64,78 @@ class VoxelRenderer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(this.width, this.height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
     
     // Expose domElement for external access (input handlers)
     this.domElement = this.renderer.domElement;
     
-    // Lighting — ambient + directional sun
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
-    this.scene.add(ambientLight);
+    // PBR lighting is handled via shader uniforms — no Three.js lights needed
+    this.sunDirection = new THREE.Vector3(50, 100, 50).normalize();
     
-    const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    sunLight.position.set(50, 100, 50);
-    this.scene.add(sunLight);
+    // ── Shadow map setup ──
+    // DirectionalLight for shadow camera (actual lighting is in PBR shader)
+    this.shadowLight = new THREE.DirectionalLight(0xffffff, 1);
+    this.shadowLight.castShadow = true;
+    this.shadowLight.shadow.mapSize.width = 2048;
+    this.shadowLight.shadow.mapSize.height = 2048;
+    this.shadowLight.shadow.camera.near = 1;
+    this.shadowLight.shadow.camera.far = 200;
+    this.shadowLight.shadow.camera.left = -30;
+    this.shadowLight.shadow.camera.right = 30;
+    this.shadowLight.shadow.camera.top = 30;
+    this.shadowLight.shadow.camera.bottom = -30;
+    this.shadowLight.shadow.bias = -0.002;
+    this.shadowLight.shadow.normalBias = 0.02;
+    this.shadowLight.shadow.autoUpdate = false; // We render manually
+    this.scene.add(this.shadowLight);
+    this.scene.add(this.shadowLight.target);
+    
+    // Manual render target for depth-as-color.
+    // Three.js r128's native shadow map is a DepthTexture that can't be sampled
+    // by custom shaders (__webglTexture not bound). We render depth as color instead.
+    this.shadowRenderTarget = new THREE.WebGLRenderTarget(2048, 2048, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+      depthBuffer: true,
+    });
+    
+    // Cached matrix for shadow matrix computation (avoid per-frame GC)
+    this._shadowTempMatrix = new THREE.Matrix4();
+    
+    // Depth-to-color shader: outputs normalized depth as red channel
+    this._shadowDepthMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uFar: { value: this.shadowLight.shadow.camera.far },
+        uNear: { value: this.shadowLight.shadow.camera.near },
+      },
+      vertexShader: `
+        varying float vMvZ;
+        void main() {
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          vMvZ = -mvPos.z; // Depth in view space (positive)
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: `
+        varying float vMvZ;
+        uniform float uFar;
+        uniform float uNear;
+        void main() {
+          float depth = (vMvZ - uNear) / (uFar - uNear);
+          depth = clamp(depth, 0.0, 1.0);
+          gl_FragColor = vec4(vec3(depth), 1.0);
+        }
+      `,
+    });
+    
+    console.log('[Shadow] DirectionalLight + depth shader created (2048x2048)');
+    
+    // PBR material factory — initialized after atlas is built
+    this.pbrFactory = null;
     
     // Texture loader for pre-baked textures
     this.textureLoader = new THREE.TextureLoader();
@@ -113,12 +173,148 @@ class VoxelRenderer {
   }
 
   /**
+   * Update the shadow camera to follow the player.
+   * Positions the light and manually computes the shadow matrix.
+   */
+  updateShadowCamera(playerPosition) {
+    if (!this.shadowLight) return;
+    
+    const light = this.shadowLight;
+    const shadowCam = light.shadow.camera;
+    
+    // Position the light high above the player, aligned with sun direction
+    const height = 80;
+    light.position.set(
+      playerPosition.x + this.sunDirection.x * height,
+      playerPosition.y + this.sunDirection.y * height,
+      playerPosition.z + this.sunDirection.z * height
+    );
+    
+    // Target the player's position (slightly below to cover ground)
+    light.target.position.set(
+      playerPosition.x,
+      playerPosition.y - 10,
+      playerPosition.z
+    );
+    light.target.updateMatrixWorld();
+    
+    // Position the shadow camera to match the light
+    shadowCam.position.copy(light.position);
+    shadowCam.lookAt(light.target.position);
+    shadowCam.updateMatrixWorld(true);
+    shadowCam.updateProjectionMatrix();
+    
+    // Manually compute shadow matrix: projectionMatrix × worldInverse
+    this._shadowTempMatrix.copy(shadowCam.matrixWorld).invert();
+    light.shadow.matrix.copy(shadowCam.projectionMatrix).multiply(this._shadowTempMatrix);
+  }
+
+  /**
+   * Get the shadow map texture and matrix for PBR materials.
+   */
+  getShadowData() {
+    if (!this.shadowRenderTarget) return null;
+    return {
+      map: this.shadowRenderTarget.texture,
+      matrix: this.shadowLight.shadow.matrix,
+    };
+  }
+
+  /**
    * Render the scene
    */
   render() {
     if (this.renderer && this.scene && this.camera) {
+      this._renderShadowMap();
       this.renderer.render(this.scene, this.camera);
     }
+  }
+
+  /**
+   * Render the shadow depth map into our manual render target.
+   */
+  _renderShadowMap() {
+    const shadowCam = this.shadowLight.shadow.camera;
+    const target = this.shadowRenderTarget;
+
+    // Disable Three.js auto shadow updates to prevent recursive rendering
+    const prevAutoUpdate = this.renderer.shadowMap.autoUpdate;
+    this.renderer.shadowMap.autoUpdate = false;
+
+    // Use scene.overrideMaterial to force the depth shader on all objects
+    this.scene.overrideMaterial = this._shadowDepthMaterial;
+
+    this.renderer.setRenderTarget(target);
+    this.renderer.clear();
+    this.renderer.render(this.scene, shadowCam);
+    this.renderer.setRenderTarget(null);
+
+    this.scene.overrideMaterial = null;
+    this.renderer.shadowMap.autoUpdate = prevAutoUpdate;
+
+    // Fix: copy __webglTexture from renderer.properties to the texture object
+    const texture = target.texture;
+    if (texture.__webglTexture === undefined) {
+      const props = this.renderer.properties.get(texture);
+      if (props && props.__webglTexture !== undefined) {
+        texture.__webglTexture = props.__webglTexture;
+        console.log('[Shadow] Bound WebGL texture ID:', props.__webglTexture);
+      }
+    }
+  }
+
+  /**
+   * Debug: print shadow system state to console.
+   */
+  debugShadowState() {
+    console.log('=== Shadow System Debug ===');
+    console.log('[Shadow] Renderer shadowMap:', this.renderer.shadowMap);
+    console.log('[Shadow] Light:', {
+      castShadow: this.shadowLight.castShadow,
+      pos: this.shadowLight.position.toArray().map(v => v.toFixed(1)),
+      target: this.shadowLight.target.position.toArray().map(v => v.toFixed(1)),
+      mapExists: !!this.shadowLight.shadow.map,
+      matrix: this.shadowLight.shadow.matrix.elements.map(v => v.toFixed(3)),
+    });
+    const map = this.shadowLight.shadow.map;
+    console.log('[Shadow] Shadow map texture:', {
+      isWebGLTexture: map ? map.__webglTexture !== undefined : false,
+      webglTextureId: map ? map.__webglTexture : null,
+    });
+
+    // Check chunk meshes for shadow flags
+    let receiveCount = 0, castCount = 0, totalCount = 0;
+    this.chunkGroup.traverse((child) => {
+      if (child.isMesh) {
+        totalCount++;
+        if (child.receiveShadow) receiveCount++;
+        if (child.castShadow) castCount++;
+      }
+    });
+    console.log('[Shadow] Chunk meshes:', { total: totalCount, receiveShadow: receiveCount, castShadow: castCount });
+    console.log('=== End Shadow Debug ===');
+  }
+
+  /**
+   * Initialize PBR material factory from the triple atlas.
+   * Call after textureAtlas.buildAtlas() resolves.
+   */
+  initPBR(atlas) {
+    this.pbrFactory = new PBRMaterialFactory(
+      atlas.diffuseTexture,
+      atlas.normalTexture,
+      atlas.smoothnessTexture,
+      this.sunDirection
+    );
+    console.log('[VoxelRenderer] PBR material factory initialized');
+    return this.pbrFactory;
+  }
+
+  /**
+   * Get the PBR material factory (after initPBR is called).
+   */
+  getPBRFactory() {
+    return this.pbrFactory;
   }
 
   /**
@@ -145,6 +341,8 @@ class VoxelRenderer {
     if (!this.chunkGroup) return;
     
     mesh.position.set(chunkX * 16, 0, chunkZ * 16);
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
     this.chunkGroup.add(mesh);
   }
 
@@ -249,8 +447,8 @@ class VoxelRenderer {
     while (steps < maxSteps) {
       const blockType = chunkManager.getVoxel(x, y, z);
 
-      // Stop on any non-air, non-cave_air block
-      if (blockType !== 0 && blockType !== 12) {
+      // Stop on any non-air block
+      if (blockType !== 0) {
         // Hit! `t` is the distance to the face we entered through.
         // For the starting voxel (t=0), hit point is at the camera.
         if (t <= maxDistance) {

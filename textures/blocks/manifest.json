@@ -1,0 +1,2304 @@
+[
+  {
+    "id": 1,
+    "name": "bedrock",
+    "textures": {
+      "all": {
+        "base": "bedrock",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 2,
+    "name": "stone",
+    "textures": {
+      "all": {
+        "base": "stone",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 3,
+    "name": "cobblestone",
+    "textures": {
+      "all": {
+        "base": "cobblestone",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 4,
+    "name": "andesite",
+    "textures": {
+      "all": {
+        "base": "andesite",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 5,
+    "name": "diorite",
+    "textures": {
+      "all": {
+        "base": "diorite",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 6,
+    "name": "granite",
+    "textures": {
+      "all": {
+        "base": "granite",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 7,
+    "name": "tuff",
+    "textures": {
+      "all": {
+        "base": "tuff",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 8,
+    "name": "deepslate",
+    "textures": {
+      "all": {
+        "base": "deepslate",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 9,
+    "name": "cobbled_deepslate",
+    "textures": {
+      "all": {
+        "base": "cobbled_deepslate",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 10,
+    "name": "polished_andesite",
+    "textures": {
+      "all": {
+        "base": "polished_andesite",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 11,
+    "name": "polished_diorite",
+    "textures": {
+      "all": {
+        "base": "polished_diorite",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 12,
+    "name": "polished_granite",
+    "textures": {
+      "all": {
+        "base": "polished_granite",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 13,
+    "name": "polished_deepslate",
+    "textures": {
+      "all": {
+        "base": "polished_deepslate",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 14,
+    "name": "deepslate_bricks",
+    "textures": {
+      "all": {
+        "base": "deepslate_bricks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 15,
+    "name": "deepslate_tiles",
+    "textures": {
+      "all": {
+        "base": "deepslate_tiles",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 16,
+    "name": "stone_bricks",
+    "textures": {
+      "all": {
+        "base": "stone_bricks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 17,
+    "name": "mossy_stone_bricks",
+    "textures": {
+      "all": {
+        "base": "mossy_stone_bricks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 18,
+    "name": "cracked_stone_bricks",
+    "textures": {
+      "all": {
+        "base": "cracked_stone_bricks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 19,
+    "name": "chiseled_stone_bricks",
+    "textures": {
+      "all": {
+        "base": "chiseled_stone_bricks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 20,
+    "name": "moss_block",
+    "textures": {
+      "all": {
+        "base": "moss_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 21,
+    "name": "coal_ore",
+    "textures": {
+      "all": {
+        "base": "coal_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 22,
+    "name": "iron_ore",
+    "textures": {
+      "all": {
+        "base": "iron_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 23,
+    "name": "gold_ore",
+    "textures": {
+      "all": {
+        "base": "gold_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 24,
+    "name": "diamond_ore",
+    "textures": {
+      "all": {
+        "base": "diamond_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 25,
+    "name": "copper_ore",
+    "textures": {
+      "all": {
+        "base": "copper_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 26,
+    "name": "emerald_ore",
+    "textures": {
+      "all": {
+        "base": "emerald_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 27,
+    "name": "lapis_ore",
+    "textures": {
+      "all": {
+        "base": "lapis_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 28,
+    "name": "redstone_ore",
+    "textures": {
+      "all": {
+        "base": "redstone_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 29,
+    "name": "nether_gold_ore",
+    "textures": {
+      "all": {
+        "base": "nether_gold_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 30,
+    "name": "deepslate_coal_ore",
+    "textures": {
+      "all": {
+        "base": "deepslate_coal_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 31,
+    "name": "deepslate_iron_ore",
+    "textures": {
+      "all": {
+        "base": "deepslate_iron_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 32,
+    "name": "deepslate_gold_ore",
+    "textures": {
+      "all": {
+        "base": "deepslate_gold_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 33,
+    "name": "deepslate_diamond_ore",
+    "textures": {
+      "all": {
+        "base": "deepslate_diamond_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 34,
+    "name": "deepslate_copper_ore",
+    "textures": {
+      "all": {
+        "base": "deepslate_copper_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 35,
+    "name": "deepslate_emerald_ore",
+    "textures": {
+      "all": {
+        "base": "deepslate_emerald_ore",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 36,
+    "name": "coal_block",
+    "textures": {
+      "all": {
+        "base": "coal_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 37,
+    "name": "iron_block",
+    "textures": {
+      "all": {
+        "base": "iron_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 38,
+    "name": "gold_block",
+    "textures": {
+      "all": {
+        "base": "gold_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 39,
+    "name": "diamond_block",
+    "textures": {
+      "all": {
+        "base": "diamond_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 40,
+    "name": "copper_block",
+    "textures": {
+      "all": {
+        "base": "copper_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 41,
+    "name": "emerald_block",
+    "textures": {
+      "all": {
+        "base": "emerald_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 42,
+    "name": "lapis_block",
+    "textures": {
+      "all": {
+        "base": "lapis_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 43,
+    "name": "redstone_block",
+    "textures": {
+      "all": {
+        "base": "redstone_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 44,
+    "name": "netherite_block",
+    "textures": {
+      "all": {
+        "base": "netherite_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 45,
+    "name": "raw_iron_block",
+    "textures": {
+      "all": {
+        "base": "raw_iron_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 46,
+    "name": "water",
+    "textures": {
+      "all": {
+        "base": "water",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 47,
+    "name": "lava",
+    "textures": {
+      "all": {
+        "base": "lava",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 48,
+    "name": "dirt",
+    "textures": {
+      "all": {
+        "base": "dirt",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 49,
+    "name": "grass_block",
+    "textures": {
+      "top": {
+        "base": "grass_block_top",
+        "exists": true
+      },
+      "side": {
+        "base": "grass_block_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "dirt",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 50,
+    "name": "sand",
+    "textures": {
+      "all": {
+        "base": "sand",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 51,
+    "name": "gravel",
+    "textures": {
+      "all": {
+        "base": "gravel",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 52,
+    "name": "red_sand",
+    "textures": {
+      "all": {
+        "base": "red_sand",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 53,
+    "name": "clay",
+    "textures": {
+      "all": {
+        "base": "clay",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 54,
+    "name": "snow",
+    "textures": {
+      "all": {
+        "base": "snow",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 55,
+    "name": "podzol",
+    "textures": {
+      "top": {
+        "base": "podzol_top",
+        "exists": true
+      },
+      "side": {
+        "base": "podzol_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "dirt",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 56,
+    "name": "coarse_dirt",
+    "textures": {
+      "all": {
+        "base": "coarse_dirt",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 57,
+    "name": "mycelium",
+    "textures": {
+      "top": {
+        "base": "mycelium_top",
+        "exists": true
+      },
+      "side": {
+        "base": "mycelium_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "dirt",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 58,
+    "name": "terracotta",
+    "textures": {
+      "all": {
+        "base": "terracotta",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 59,
+    "name": "smooth_stone",
+    "textures": {
+      "all": {
+        "base": "smooth_stone",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 60,
+    "name": "calcite",
+    "textures": {
+      "all": {
+        "base": "calcite",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 61,
+    "name": "ice",
+    "textures": {
+      "all": {
+        "base": "ice",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 62,
+    "name": "packed_ice",
+    "textures": {
+      "all": {
+        "base": "packed_ice",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 63,
+    "name": "blue_ice",
+    "textures": {
+      "all": {
+        "base": "blue_ice",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 64,
+    "name": "frosted_ice",
+    "textures": {
+      "all": {
+        "base": "frosted_ice_0",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 65,
+    "name": "oak_log",
+    "textures": {
+      "top": {
+        "base": "oak_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "oak_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "oak_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 66,
+    "name": "spruce_log",
+    "textures": {
+      "top": {
+        "base": "spruce_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "spruce_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "spruce_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 67,
+    "name": "birch_log",
+    "textures": {
+      "top": {
+        "base": "birch_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "birch_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "birch_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 68,
+    "name": "jungle_log",
+    "textures": {
+      "top": {
+        "base": "jungle_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "jungle_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "jungle_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 69,
+    "name": "acacia_log",
+    "textures": {
+      "top": {
+        "base": "acacia_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "acacia_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "acacia_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 70,
+    "name": "dark_oak_log",
+    "textures": {
+      "top": {
+        "base": "dark_oak_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "dark_oak_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "dark_oak_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 71,
+    "name": "cherry_log",
+    "textures": {
+      "top": {
+        "base": "cherry_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "cherry_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "cherry_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 72,
+    "name": "mangrove_log",
+    "textures": {
+      "top": {
+        "base": "mangrove_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "mangrove_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "mangrove_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 73,
+    "name": "pale_oak_log",
+    "textures": {
+      "top": {
+        "base": "pale_oak_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "pale_oak_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "pale_oak_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 74,
+    "name": "poplar_log",
+    "textures": {
+      "top": {
+        "base": "poplar_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "poplar_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "poplar_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 75,
+    "name": "bamboo_block",
+    "textures": {
+      "top": {
+        "base": "bamboo_block_top",
+        "exists": true
+      },
+      "side": {
+        "base": "bamboo_block",
+        "exists": true
+      },
+      "bottom": {
+        "base": "bamboo_block_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 76,
+    "name": "crimson_stem",
+    "textures": {
+      "top": {
+        "base": "crimson_stem_top",
+        "exists": true
+      },
+      "side": {
+        "base": "crimson_stem",
+        "exists": true
+      },
+      "bottom": {
+        "base": "crimson_stem_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 77,
+    "name": "warped_stem",
+    "textures": {
+      "top": {
+        "base": "warped_stem_top",
+        "exists": true
+      },
+      "side": {
+        "base": "warped_stem",
+        "exists": true
+      },
+      "bottom": {
+        "base": "warped_stem_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 78,
+    "name": "stripped_oak_log",
+    "textures": {
+      "top": {
+        "base": "stripped_oak_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_oak_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_oak_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 79,
+    "name": "stripped_spruce_log",
+    "textures": {
+      "top": {
+        "base": "stripped_spruce_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_spruce_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_spruce_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 80,
+    "name": "stripped_birch_log",
+    "textures": {
+      "top": {
+        "base": "stripped_birch_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_birch_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_birch_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 81,
+    "name": "stripped_jungle_log",
+    "textures": {
+      "top": {
+        "base": "stripped_jungle_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_jungle_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_jungle_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 82,
+    "name": "stripped_acacia_log",
+    "textures": {
+      "top": {
+        "base": "stripped_acacia_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_acacia_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_acacia_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 83,
+    "name": "stripped_dark_oak_log",
+    "textures": {
+      "top": {
+        "base": "stripped_dark_oak_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_dark_oak_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_dark_oak_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 84,
+    "name": "stripped_cherry_log",
+    "textures": {
+      "top": {
+        "base": "stripped_cherry_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_cherry_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_cherry_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 85,
+    "name": "stripped_mangrove_log",
+    "textures": {
+      "top": {
+        "base": "stripped_mangrove_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_mangrove_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_mangrove_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 86,
+    "name": "stripped_pale_oak_log",
+    "textures": {
+      "top": {
+        "base": "stripped_pale_oak_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_pale_oak_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_pale_oak_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 87,
+    "name": "stripped_poplar_log",
+    "textures": {
+      "top": {
+        "base": "stripped_poplar_log_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_poplar_log",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_poplar_log_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 88,
+    "name": "stripped_bamboo_block",
+    "textures": {
+      "top": {
+        "base": "stripped_bamboo_block_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_bamboo_block",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_bamboo_block_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 89,
+    "name": "stripped_crimson_stem",
+    "textures": {
+      "top": {
+        "base": "stripped_crimson_stem_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_crimson_stem",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_crimson_stem_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 90,
+    "name": "stripped_warped_stem",
+    "textures": {
+      "top": {
+        "base": "stripped_warped_stem_top",
+        "exists": true
+      },
+      "side": {
+        "base": "stripped_warped_stem",
+        "exists": true
+      },
+      "bottom": {
+        "base": "stripped_warped_stem_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 91,
+    "name": "oak_planks",
+    "textures": {
+      "all": {
+        "base": "oak_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 92,
+    "name": "spruce_planks",
+    "textures": {
+      "all": {
+        "base": "spruce_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 93,
+    "name": "birch_planks",
+    "textures": {
+      "all": {
+        "base": "birch_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 94,
+    "name": "jungle_planks",
+    "textures": {
+      "all": {
+        "base": "jungle_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 95,
+    "name": "acacia_planks",
+    "textures": {
+      "all": {
+        "base": "acacia_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 96,
+    "name": "dark_oak_planks",
+    "textures": {
+      "all": {
+        "base": "dark_oak_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 97,
+    "name": "cherry_planks",
+    "textures": {
+      "all": {
+        "base": "cherry_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 98,
+    "name": "mangrove_planks",
+    "textures": {
+      "all": {
+        "base": "mangrove_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 99,
+    "name": "pale_oak_planks",
+    "textures": {
+      "all": {
+        "base": "pale_oak_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 100,
+    "name": "poplar_planks",
+    "textures": {
+      "all": {
+        "base": "poplar_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 101,
+    "name": "bamboo_planks",
+    "textures": {
+      "all": {
+        "base": "bamboo_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 102,
+    "name": "crimson_planks",
+    "textures": {
+      "all": {
+        "base": "crimson_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 103,
+    "name": "warped_planks",
+    "textures": {
+      "all": {
+        "base": "warped_planks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 104,
+    "name": "oak_leaves",
+    "textures": {
+      "all": {
+        "base": "oak_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 105,
+    "name": "spruce_leaves",
+    "textures": {
+      "all": {
+        "base": "spruce_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 106,
+    "name": "birch_leaves",
+    "textures": {
+      "all": {
+        "base": "birch_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 107,
+    "name": "jungle_leaves",
+    "textures": {
+      "all": {
+        "base": "jungle_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 108,
+    "name": "acacia_leaves",
+    "textures": {
+      "all": {
+        "base": "acacia_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 109,
+    "name": "dark_oak_leaves",
+    "textures": {
+      "all": {
+        "base": "dark_oak_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 110,
+    "name": "cherry_leaves",
+    "textures": {
+      "all": {
+        "base": "cherry_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 111,
+    "name": "mangrove_leaves",
+    "textures": {
+      "all": {
+        "base": "mangrove_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 112,
+    "name": "pale_oak_leaves",
+    "textures": {
+      "all": {
+        "base": "pale_oak_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 113,
+    "name": "orange_poplar_leaves",
+    "textures": {
+      "all": {
+        "base": "orange_poplar_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 114,
+    "name": "leaf_litter",
+    "textures": {
+      "all": {
+        "base": "leaf_litter",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 115,
+    "name": "white_concrete",
+    "textures": {
+      "all": {
+        "base": "white_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 116,
+    "name": "orange_concrete",
+    "textures": {
+      "all": {
+        "base": "orange_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 117,
+    "name": "magenta_concrete",
+    "textures": {
+      "all": {
+        "base": "magenta_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 118,
+    "name": "light_blue_concrete",
+    "textures": {
+      "all": {
+        "base": "light_blue_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 119,
+    "name": "yellow_concrete",
+    "textures": {
+      "all": {
+        "base": "yellow_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 120,
+    "name": "lime_concrete",
+    "textures": {
+      "all": {
+        "base": "lime_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 121,
+    "name": "pink_concrete",
+    "textures": {
+      "all": {
+        "base": "pink_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 122,
+    "name": "gray_concrete",
+    "textures": {
+      "all": {
+        "base": "gray_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 123,
+    "name": "light_gray_concrete",
+    "textures": {
+      "all": {
+        "base": "light_gray_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 124,
+    "name": "cyan_concrete",
+    "textures": {
+      "all": {
+        "base": "cyan_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 125,
+    "name": "purple_concrete",
+    "textures": {
+      "all": {
+        "base": "purple_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 126,
+    "name": "blue_concrete",
+    "textures": {
+      "all": {
+        "base": "blue_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 127,
+    "name": "brown_concrete",
+    "textures": {
+      "all": {
+        "base": "brown_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 128,
+    "name": "green_concrete",
+    "textures": {
+      "all": {
+        "base": "green_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 129,
+    "name": "red_concrete",
+    "textures": {
+      "all": {
+        "base": "red_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 130,
+    "name": "black_concrete",
+    "textures": {
+      "all": {
+        "base": "black_concrete",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 131,
+    "name": "white_wool",
+    "textures": {
+      "all": {
+        "base": "white_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 132,
+    "name": "orange_wool",
+    "textures": {
+      "all": {
+        "base": "orange_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 133,
+    "name": "magenta_wool",
+    "textures": {
+      "all": {
+        "base": "magenta_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 134,
+    "name": "light_blue_wool",
+    "textures": {
+      "all": {
+        "base": "light_blue_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 135,
+    "name": "yellow_wool",
+    "textures": {
+      "all": {
+        "base": "yellow_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 136,
+    "name": "lime_wool",
+    "textures": {
+      "all": {
+        "base": "lime_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 137,
+    "name": "pink_wool",
+    "textures": {
+      "all": {
+        "base": "pink_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 138,
+    "name": "gray_wool",
+    "textures": {
+      "all": {
+        "base": "gray_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 139,
+    "name": "light_gray_wool",
+    "textures": {
+      "all": {
+        "base": "light_gray_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 140,
+    "name": "cyan_wool",
+    "textures": {
+      "all": {
+        "base": "cyan_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 141,
+    "name": "purple_wool",
+    "textures": {
+      "all": {
+        "base": "purple_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 142,
+    "name": "blue_wool",
+    "textures": {
+      "all": {
+        "base": "blue_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 143,
+    "name": "brown_wool",
+    "textures": {
+      "all": {
+        "base": "brown_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 144,
+    "name": "green_wool",
+    "textures": {
+      "all": {
+        "base": "green_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 145,
+    "name": "red_wool",
+    "textures": {
+      "all": {
+        "base": "red_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 146,
+    "name": "black_wool",
+    "textures": {
+      "all": {
+        "base": "black_wool",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 147,
+    "name": "netherrack",
+    "textures": {
+      "all": {
+        "base": "netherrack",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 148,
+    "name": "basalt",
+    "textures": {
+      "top": {
+        "base": "basalt_top",
+        "exists": true
+      },
+      "side": {
+        "base": "basalt_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "basalt_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 149,
+    "name": "blackstone",
+    "textures": {
+      "top": {
+        "base": "blackstone_top",
+        "exists": true
+      },
+      "side": {
+        "base": "blackstone",
+        "exists": true
+      },
+      "bottom": {
+        "base": "blackstone_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 150,
+    "name": "soul_sand",
+    "textures": {
+      "all": {
+        "base": "soul_sand",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 151,
+    "name": "soul_soil",
+    "textures": {
+      "all": {
+        "base": "soul_soil",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 152,
+    "name": "crimson_nylium",
+    "textures": {
+      "top": {
+        "base": "crimson_nylium_side",
+        "exists": true
+      },
+      "side": {
+        "base": "crimson_nylium",
+        "exists": true
+      },
+      "bottom": {
+        "base": "crimson_nylium",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 153,
+    "name": "warped_nylium",
+    "textures": {
+      "top": {
+        "base": "warped_nylium_side",
+        "exists": true
+      },
+      "side": {
+        "base": "warped_nylium",
+        "exists": true
+      },
+      "bottom": {
+        "base": "warped_nylium",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 154,
+    "name": "crying_obsidian",
+    "textures": {
+      "all": {
+        "base": "crying_obsidian",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 155,
+    "name": "magma",
+    "textures": {
+      "all": {
+        "base": "magma",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 156,
+    "name": "ancient_debris",
+    "textures": {
+      "top": {
+        "base": "ancient_debris_top",
+        "exists": true
+      },
+      "side": {
+        "base": "ancient_debris_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "ancient_debris_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 157,
+    "name": "nether_bricks",
+    "textures": {
+      "all": {
+        "base": "nether_bricks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 158,
+    "name": "end_stone",
+    "textures": {
+      "all": {
+        "base": "end_stone",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 159,
+    "name": "end_stone_bricks",
+    "textures": {
+      "all": {
+        "base": "end_stone_bricks",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 160,
+    "name": "purpur_block",
+    "textures": {
+      "top": {
+        "base": "purpur_pillar_top",
+        "exists": true
+      },
+      "side": {
+        "base": "purpur_block",
+        "exists": true
+      },
+      "bottom": {
+        "base": "purpur_pillar_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 161,
+    "name": "bookshelf",
+    "textures": {
+      "all": {
+        "base": "bookshelf",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 162,
+    "name": "crafting_table",
+    "textures": {
+      "top": {
+        "base": "crafting_table_top",
+        "exists": true
+      },
+      "side": {
+        "base": "crafting_table_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "crafting_table_top",
+        "exists": true
+      },
+      "front": {
+        "base": "crafting_table_front",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 163,
+    "name": "furnace",
+    "textures": {
+      "top": {
+        "base": "furnace_top",
+        "exists": true
+      },
+      "side": {
+        "base": "furnace_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "furnace_top",
+        "exists": true
+      },
+      "front": {
+        "base": "furnace_front",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 164,
+    "name": "smoker",
+    "textures": {
+      "top": {
+        "base": "smoker_top",
+        "exists": true
+      },
+      "side": {
+        "base": "smoker_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "smoker_bottom",
+        "exists": true
+      },
+      "front": {
+        "base": "smoker_front",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 165,
+    "name": "blast_furnace",
+    "textures": {
+      "top": {
+        "base": "blast_furnace_top",
+        "exists": true
+      },
+      "side": {
+        "base": "blast_furnace_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "blast_furnace_top",
+        "exists": true
+      },
+      "front": {
+        "base": "blast_furnace_front",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 166,
+    "name": "barrel",
+    "textures": {
+      "top": {
+        "base": "barrel_top",
+        "exists": true
+      },
+      "side": {
+        "base": "barrel_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "barrel_bottom",
+        "exists": true
+      },
+      "front": {
+        "base": "barrel_side",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 167,
+    "name": "chest",
+    "textures": {
+      "top": {
+        "base": "barrel_top",
+        "exists": true
+      },
+      "side": {
+        "base": "barrel_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "barrel_bottom",
+        "exists": true
+      },
+      "front": {
+        "base": "barrel_side",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 168,
+    "name": "ladder",
+    "textures": {
+      "all": {
+        "base": "ladder",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 169,
+    "name": "hay_block",
+    "textures": {
+      "top": {
+        "base": "hay_block_top",
+        "exists": true
+      },
+      "side": {
+        "base": "hay_block_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "hay_block_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 170,
+    "name": "glowstone",
+    "textures": {
+      "all": {
+        "base": "glowstone",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 171,
+    "name": "sea_lantern",
+    "textures": {
+      "all": {
+        "base": "sea_lantern",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 172,
+    "name": "torch",
+    "textures": {
+      "all": {
+        "base": "torch",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 173,
+    "name": "lantern",
+    "textures": {
+      "all": {
+        "base": "lantern",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 174,
+    "name": "soul_lantern",
+    "textures": {
+      "all": {
+        "base": "soul_lantern",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 175,
+    "name": "campfire",
+    "textures": {
+      "all": {
+        "base": "campfire_log_lit",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 176,
+    "name": "target",
+    "textures": {
+      "top": {
+        "base": "target_top",
+        "exists": true
+      },
+      "side": {
+        "base": "target_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "target_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 177,
+    "name": "short_grass",
+    "textures": {
+      "all": {
+        "base": "short_grass",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 178,
+    "name": "tall_grass",
+    "textures": {
+      "top": {
+        "base": "tall_grass_top",
+        "exists": true
+      },
+      "side": {
+        "base": "tall_grass_top",
+        "exists": true
+      },
+      "bottom": {
+        "base": "tall_grass_bottom",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 179,
+    "name": "red_flower",
+    "textures": {
+      "all": {
+        "base": "pink_petals",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 180,
+    "name": "yellow_flower",
+    "textures": {
+      "all": {
+        "base": "pink_petals",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 181,
+    "name": "brown_mushroom",
+    "textures": {
+      "all": {
+        "base": "brown_mushroom_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 182,
+    "name": "red_mushroom",
+    "textures": {
+      "all": {
+        "base": "red_mushroom_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 183,
+    "name": "weeping_vines",
+    "textures": {
+      "all": {
+        "base": "weeping_vines",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 184,
+    "name": "twisting_vines",
+    "textures": {
+      "all": {
+        "base": "twisting_vines",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 185,
+    "name": "cactus",
+    "textures": {
+      "top": {
+        "base": "cactus_top",
+        "exists": true
+      },
+      "side": {
+        "base": "cactus_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "cactus_bottom",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 186,
+    "name": "glow_lichen",
+    "textures": {
+      "all": {
+        "base": "glow_lichen",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 187,
+    "name": "vine",
+    "textures": {
+      "all": {
+        "base": "weeping_vines",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 188,
+    "name": "toxic_slime",
+    "textures": {
+      "all": {
+        "base": "slime_block",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 189,
+    "name": "corrupt_crystal",
+    "textures": {
+      "all": {
+        "base": "amethyst_cluster",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 190,
+    "name": "apple",
+    "textures": {
+      "top": {
+        "base": "melon_top",
+        "exists": true
+      },
+      "side": {
+        "base": "melon_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "melon_top",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 191,
+    "name": "quest_key",
+    "textures": {
+      "all": {
+        "base": "iron_bars",
+        "exists": true
+      }
+    }
+  }
+]
