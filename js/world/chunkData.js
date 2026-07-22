@@ -42,7 +42,24 @@ const BLOCK_PROPERTIES = {
   [BLOCK_TYPES.TERRACOTTA]:   { solid: true, transparent: false, hardness: 1.5 },
   [BLOCK_TYPES.RED_SAND]:     { solid: true, transparent: false, hardness: 0.5 },
   [BLOCK_TYPES.CLAY]:         { solid: true, transparent: false, hardness: 0.5 },
-  [BLOCK_TYPES.SNOW_STONE]:   { solid: true, transparent: false, hardness: 3.0 }
+  [BLOCK_TYPES.SNOW_STONE]:   { solid: true, transparent: false, hardness: 3.0 },
+  // Ores
+  [BLOCK_TYPES.COAL_ORE]:     { solid: true, transparent: false, hardness: 3.0 },
+  [BLOCK_TYPES.IRON_ORE]:     { solid: true, transparent: false, hardness: 3.0 },
+  [BLOCK_TYPES.GOLD_ORE]:     { solid: true, transparent: false, hardness: 3.0 },
+  [BLOCK_TYPES.DIAMOND_ORE]:  { solid: true, transparent: false, hardness: 5.0 },
+  // Cave air (treated as air)
+  [BLOCK_TYPES.CAVE_AIR]:     { solid: false, transparent: true, gravity: false },
+  // Decorations
+  [BLOCK_TYPES.RED_FLOWER]:   { solid: false, transparent: true, hardness: 0.1 },
+  [BLOCK_TYPES.YELLOW_FLOWER]:{ solid: false, transparent: true, hardness: 0.1 },
+  [BLOCK_TYPES.CAVE_TORCH]:   { solid: false, transparent: true, hardness: 0.1 },
+  [BLOCK_TYPES.GLOWSTONE]:    { solid: true, transparent: true, hardness: 0.3 },
+  [BLOCK_TYPES.TOXIC_SLIME]:  { solid: true, transparent: false, hardness: 0.5 },
+  [BLOCK_TYPES.CORRUPT_CRYSTAL]: { solid: true, transparent: false, hardness: 2.0 },
+  [BLOCK_TYPES.BED]:          { solid: true, transparent: false, hardness: 0.3 },
+  [BLOCK_TYPES.APPLE]:        { solid: false, transparent: true, hardness: 0.1 },
+  [BLOCK_TYPES.QUEST_KEY]:    { solid: false, transparent: true, hardness: 0.1 }
 };
 
 const CHUNK_WIDTH = 16;

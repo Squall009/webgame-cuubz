@@ -138,10 +138,19 @@ class ChunkMeshBuilder {
               // - Solid block: cull if neighbor is also solid (not air, not cutout, not transparent).
               // - Cutout block: cull only if neighbor is the SAME cutout block type.
               //   (leaves need to show through each other's alpha gaps)
-              // - Transparent block: cull only if neighbor is the SAME transparent block type.
+              // - Transparent block: cull if neighbor is the SAME type OR if neighbor is SOLID.
+              //   The solid block already draws its face toward the transparent neighbor,
+              //   so drawing the transparent face too would create overlapping geometry at
+              //   the exact same world position. Three.js raycast would hit whichever mesh
+              //   was processed last, often the transparent mesh, causing block interaction bugs.
               if (isCutout || isSelfTransparent) {
                 if (neighborBlock === blockType) {
                   continue; // Same-type non-solid blocks next to each other: cull face
+                }
+                // Cull transparent/cutout face when neighbor is a solid (opaque) block.
+                // The solid block will draw its face toward us, so no overlap.
+                if (neighborBlock !== BLOCK_TYPES.AIR && !isNeighborTransparent) {
+                  continue; // Transparent/cutout face toward solid: cull (solid draws its own face)
                 }
               } else { // Current block is solid
                 if (neighborBlock !== BLOCK_TYPES.AIR && !isNeighborTransparent) {
@@ -523,6 +532,7 @@ class ChunkMeshBuilder {
       geometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.normals, 3));
       geometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.uvs, 2));
       geometry.setIndex(meshData.indices);
+      geometry.computeBoundingSphere(); // Required for raycasting
       result.solidGeometry = geometry;
     }
 
@@ -533,6 +543,7 @@ class ChunkMeshBuilder {
       cutoutGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.cutoutNormals, 3));
       cutoutGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.cutoutUvs, 2));
       cutoutGeometry.setIndex(meshData.cutoutIndices);
+      cutoutGeometry.computeBoundingSphere(); // Required for raycasting
       result.cutoutGeometry = cutoutGeometry;
     }
 
@@ -543,6 +554,7 @@ class ChunkMeshBuilder {
       transGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.transparentNormals, 3));
       transGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.transparentUvs, 2));
       transGeometry.setIndex(meshData.transparentIndices);
+      transGeometry.computeBoundingSphere(); // Required for raycasting
       result.transparentGeometry = transGeometry;
     }
 

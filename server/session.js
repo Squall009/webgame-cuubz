@@ -56,6 +56,7 @@ class SessionManager {
     this.sessionId = config.sessionId;
     this.sessionName = config.sessionName || 'Untitled';
     this.gameMode = config.gameMode || 'survival';
+    this.worldSeed = config.worldSeed || 42;
     this.hostId = config.hostId;
     this.maxPlayers = config.maxPlayers || 4;
     this.heartbeatInterval = config.heartbeatInterval || 30000;
@@ -215,6 +216,7 @@ class SessionManager {
    * Handle player join
    */
   _handleJoin(ws, playerId, msg) {
+    console.log(`[SESSION ${this.sessionId}] JOIN from ${playerId}: ${msg.character?.name || 'unknown'} at ${JSON.stringify(msg.position)}`);
     if (this.players.size >= this.maxPlayers) {
       this._send(ws, { type: 'ERROR', message: 'Session is full' });
       ws.close();
@@ -238,6 +240,7 @@ class SessionManager {
       sessionId: this.sessionId,
       playerId,
       mode: this.gameMode,
+      worldSeed: this.worldSeed,
       players: this._getPlayerList(),
     });
 
@@ -259,11 +262,16 @@ class SessionManager {
    */
   _handleMove(playerId, msg) {
     const player = this.players.get(playerId);
-    if (!player) return;
+    if (!player) {
+      console.warn(`[SESSION ${this.sessionId}] MOVE from unknown player ${playerId}`);
+      return;
+    }
 
     // Update local state (server-authoritative)
     player.position = msg.position || player.position;
     player.rotation = msg.rotation || player.rotation;
+
+    console.log(`[SESSION ${this.sessionId}] MOVE relay: ${playerId} → ${this.players.size - 1} players`);
 
     // Broadcast position update to all other players
     this._broadcast(playerId, {
@@ -356,9 +364,11 @@ class SessionManager {
 
     // Only the host should send chunk data
     if (playerId !== this.hostId) {
-      console.warn(`[SESSION ${this.sessionId}] Non-host ${playerId} sent CHUNK_DATA — ignoring`);
+      console.warn(`[SESSION ${this.sessionId}] Non-host ${playerId} sent CHUNK_DATA — ignoring (hostId=${this.hostId})`);
       return;
     }
+
+    console.log(`[SESSION ${this.sessionId}] Host ${playerId} streaming chunk ${msg.chunkX},${msg.chunkZ} (${msg.compressed ? 'compressed' : 'raw'}) to ${this.players.size - 1} players`);
 
     // Build the forwarded message
     const chunkMsg = {
@@ -494,6 +504,7 @@ class SessionManager {
       sessionId: this.sessionId,
       name: this.sessionName,
       mode: this.gameMode,
+      seed: this.worldSeed,
       players: this.players.size,
       maxPlayers: this.maxPlayers,
     };

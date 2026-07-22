@@ -134,6 +134,12 @@ class ChunkManager {
     this.renderDistance   = Math.max(2, Math.min(16, options.renderDistance ?? 4));
     this.regionRadius     = Math.max(this.renderDistance + 2, Math.min(32, options.regionRadius ?? 16));
 
+    // Client mode: no local chunk generation, no IndexedDB persistence, only receive from host
+    this.clientMode = !!options.clientMode;
+
+    // Client mode: no generation, no IndexedDB persistence, only receive chunks from host
+    this.clientMode = !!options.clientMode;
+
     // Texture atlas for UV mapping during mesh build
     this.textureAtlas = options.textureAtlas || null;
 
@@ -202,18 +208,22 @@ class ChunkManager {
   async init() {
     if (this._disposed) return;
 
-    try {
-      const response = await fetch(this.workerScriptPath + (this.workerScriptPath.includes('?') ? '&' : '?') + 'v=' + Date.now());
-      const source = await response.text();
-      const blob = new Blob([source], { type: 'application/javascript' });
-      this._blobUrl = URL.createObjectURL(blob);
-      this.workerPool = new WorkerPool(navigator.hardwareConcurrency || 4, this._blobUrl);
-      console.log('[ChunkManager] Voxel worker pool init OK:', this.workerPool.workers.length, 'workers');
-    } catch (e) {
-      console.warn('[ChunkManager] Worker pool init failed — will use inline fallback:', e.message);
+    // Client mode: skip voxel generation workers, but keep mesh workers for rendering received chunks
+    if (this.clientMode) {
+      console.log('[ChunkManager] Client mode: skipping voxel workers, keeping mesh workers');
+    } else {
+      try {
+        const response = await fetch(this.workerScriptPath + (this.workerScriptPath.includes('?') ? '&' : '?') + 'v=' + Date.now());
+        const source = await response.text();
+        const blob = new Blob([source], { type: 'application/javascript' });
+        this._blobUrl = URL.createObjectURL(blob);
+        this.workerPool = new WorkerPool(navigator.hardwareConcurrency || 4, this._blobUrl);
+      } catch (e) {
+        console.warn('[ChunkManager] Worker pool init failed:', e.message);
+      }
     }
 
-    // Initialize mesh builder workers
+    // Initialize mesh builder workers (needed for both host and client)
     await this._initMeshWorkers();
 
     // Open IndexedDB lazily on first access
@@ -248,7 +258,7 @@ class ChunkManager {
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
-        console.log(`[ChunkManager] IndexedDB upgrade: version ${event.oldVersion} -> ${event.newVersion}`);
+        // console.log(`[ChunkManager] IndexedDB upgrade: version ${event.oldVersion} -> ${event.newVersion}`);
         // Drop old stores and recreate — handles schema changes cleanly
         const storesToDelete = [];
         for (let i = 0; i < db.objectStoreNames.length; i++) {
@@ -533,7 +543,7 @@ class ChunkManager {
     // Loop until queue is empty or disposed
     while (this._genQueue.length > 0 && !this._disposed) {
       const batchSize = Math.min(this.workerPool ? this.workerPool.workers.length : 4, this._genQueue.length);
-      console.log(`[ChunkManager] _processGenQueue: batch ${batchSize} of remaining ${this._genQueue.length}`);
+      // console.log(`[ChunkManager] _processGenQueue: batch ${batchSize} of remaining ${this._genQueue.length}`);
       
       // Mark items as generating and remove from queue BEFORE dispatching
         const promises = [];
@@ -696,7 +706,7 @@ class ChunkManager {
     const pcz = Math.floor(playerZ / CHUNK_D);
     const radius = this.regionRadius;
 
-    console.log('[ChunkManager] checkRegion:', pcx, pcz, 'radius:', radius);
+    // console.log('[ChunkManager] checkRegion:', pcx, pcz, 'radius:', radius);
 
     // Track which chunks should be in memory
     const shouldBeLoaded = new Set();
@@ -721,7 +731,7 @@ class ChunkManager {
 
     // Wait for all async loads/generations to start (they may still be in-flight)
     await Promise.all(pendingPromises);
-    console.log(`[ChunkManager] checkRegion done — memoryCache: ${this.memoryCache.size}, queue: ${this._genQueue.length}`);
+    // console.log(`[ChunkManager] checkRegion done — memoryCache: ${this.memoryCache.size}, queue: ${this._genQueue.length}`);
 
     // Unload chunks far outside region to bound memory
     const unloadRadius = radius + 2;
@@ -861,6 +871,20 @@ class ChunkManager {
   _updateVoxelRegion(pcx, pcz) {
     if (this._disposed) return;
 
+    // Client mode: never generate chunks — only receive from host via CHUNK_DATA
+    if (this.clientMode) {
+      // Still unload chunks far outside render range to bound memory
+      const rd = this.renderDistance;
+      const unloadRadius = rd + 2;
+      for (const [key] of this.memoryCache) {
+        const { cx: ucx, cz: ucz } = ChunkManager.parseKey(key);
+        if (Math.abs(ucx - pcx) > unloadRadius || Math.abs(ucz - pcz) > unloadRadius) {
+          this.memoryCache.delete(key);
+        }
+      }
+      return;
+    }
+
     const radius = this._voxelRegionRadius;
     const unloadRadius = radius + 2;
 
@@ -887,13 +911,13 @@ class ChunkManager {
 
     // Log when new chunks are being queued
     if (pendingPromises.length > 0) {
-      console.log(`[Cuubz] _updateVoxelRegion: queuing ${pendingPromises.length} new voxels around (${pcx},${pcz}) — memoryCache: ${this.memoryCache.size}, radius: ${radius}`);
+      // console.log(`[Cuubz] _updateVoxelRegion: queuing ${pendingPromises.length} new voxels around (${pcx},${pcz}) — memoryCache: ${this.memoryCache.size}, radius: ${radius}`);
     }
 
     // Fire off async loads/generations without blocking the frame loop
     Promise.all(pendingPromises).then(() => {
       if (!this._disposed && pendingPromises.length > 0) {
-        console.log(`[ChunkManager] Voxel region updated — memoryCache: ${this.memoryCache.size}`);
+        // console.log(`[ChunkManager] Voxel region updated — memoryCache: ${this.memoryCache.size}`);
       }
     });
 
@@ -910,7 +934,7 @@ class ChunkManager {
       }
     }
     if (unloaded > 0) {
-      console.log(`[Cuubz] _updateVoxelRegion: unloaded ${unloaded} distant chunks`);
+      // console.log(`[Cuubz] _updateVoxelRegion: unloaded ${unloaded} distant chunks`);
     }
 
     // Update last known position for other systems that need it
@@ -1163,6 +1187,8 @@ class ChunkManager {
       const idx = new Uint16Array(data.idx);
       if (idx.length > 0) geo.setIndex(new THREE.BufferAttribute(idx, 1));
     }
+    // Required for Three.js raycaster to compute hit point/faceNormal
+    geo.computeBoundingSphere();
     return geo;
   }
 
@@ -1257,7 +1283,7 @@ class ChunkManager {
       return;
     }
 
-    console.log(`[ChunkManager] Loaded existing world: ${this.worldName} (${manifest.generatedChunks.length} chunks saved)`);
+    // console.log(`[ChunkManager] Loaded existing world: ${this.worldName} (${manifest.generatedChunks.length} chunks saved)`);
   }
 
   /** Create a new world manifest. */

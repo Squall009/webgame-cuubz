@@ -129,10 +129,14 @@ function buildMeshData(blocks, neighbors, uvLookup) {
           // Face culling — unified rules matching chunkMeshBuilder:
           // Solid block:   cull only when neighbor is also solid (not AIR/CAVE_AIR/cutout/transparent).
           // Cutout block:  cull only when neighbor is the EXACT same cutout type.
-          // Transparent:   cull only when neighbor is the EXACT same transparent type.
+          // Transparent:   cull when neighbor is the EXACT same type OR when neighbor is SOLID.
+          //   The solid block already draws its face toward the transparent neighbor,
+          //   so drawing both would create overlapping geometry causing raycast interaction bugs.
           var nbIsNonSolid = isNonSolid(nb);
           if (isCutout || isTransparent) {
             if (nb === blockType) continue; // Same-type non-solid → cull
+            // Cull transparent/cutout face toward solid block (solid draws its own face)
+            if (!nbIsNonSolid) continue;
           } else {
             // Solid block
             if (!nbIsNonSolid) continue;    // Neighbor is solid → cull

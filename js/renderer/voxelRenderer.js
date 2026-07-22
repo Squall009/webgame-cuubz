@@ -166,21 +166,138 @@ class VoxelRenderer {
   }
 
   /**
-   * Raycast from camera center for block targeting
+   * Raycast from camera center for block targeting.
+   * Uses voxel DDA (Digital Differential Analyzer) to walk through chunk data directly.
+   * Much more reliable than Three.js geometry raycast — gives exact block coords and face normal.
+   * @param {number} maxDistance - Maximum raycast distance in blocks
+   * @param {ChunkManager} [chunkManager] - Optional: when provided, does voxel DDA raycast.
+   *   When null, falls back to Three.js geometry raycast (legacy).
+   * @returns {{ point, faceNormal } | null}
    */
-  raycast(maxDistance = 7) {
-    if (!this.camera || !this.scene) return null;
-    
+  raycast(maxDistance = 7, chunkManager = null) {
+    if (!this.camera) return null;
+
+    // With chunkManager: use voxel DDA raycast through chunk data directly
+    if (chunkManager) {
+      return this._voxelRaycast(this.camera, maxDistance, chunkManager);
+    }
+
+    // Legacy fallback: Three.js geometry raycast (no faceNormal, less reliable)
+    if (!this.scene) return null;
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
     raycaster.far = maxDistance;
-    
     const intersects = raycaster.intersectObjects(this.chunkGroup.children, true);
-    
-    if (intersects.length > 0) {
-      return intersects[0];
+    return intersects.length > 0 ? intersects[0] : null;
+  }
+
+  /**
+   * Voxel DDA raycast — walks through voxel space step by step.
+   * Returns the first solid (non-air, non-fluid) block hit.
+   * @param {THREE.Camera} camera
+   * @param {number} maxDistance
+   * @param {ChunkManager} chunkManager
+   * @returns {{ point, faceNormal } | null}
+   */
+  _voxelRaycast(camera, maxDistance, chunkManager) {
+    // Get camera position and forward direction
+    const origin = camera.position;
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+
+    const dx = direction.x;
+    const dy = direction.y;
+    const dz = direction.z;
+
+    // Starting voxel
+    let startx = Math.floor(origin.x);
+    let starty = Math.floor(origin.y);
+    let startz = Math.floor(origin.z);
+
+    // Which direction to step on each axis
+    const stepX = dx >= 0 ? 1 : -1;
+    const stepY = dy >= 0 ? 1 : -1;
+    const stepZ = dz >= 0 ? 1 : -1;
+
+    // Distance to next voxel boundary on each axis
+    let tMaxX = dx !== 0 ? ((stepX > 0 ? startx + 1 : startx) - origin.x) / dx : Infinity;
+    let tMaxY = dy !== 0 ? ((stepY > 0 ? starty + 1 : starty) - origin.y) / dy : Infinity;
+    let tMaxZ = dz !== 0 ? ((stepZ > 0 ? startz + 1 : startz) - origin.z) / dz : Infinity;
+
+    // Distance to step to next voxel on each axis
+    const tDeltaX = dx !== 0 ? Math.abs(1 / dx) : Infinity;
+    const tDeltaY = dy !== 0 ? Math.abs(1 / dy) : Infinity;
+    const tDeltaZ = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+
+    let x = startx;
+    let y = starty;
+    let z = startz;
+
+    // Current face normal (the face we entered the current voxel through)
+    let faceNormal = null;
+
+    const maxSteps = maxDistance * 3; // Safety limit
+    let steps = 0;
+
+    while (steps < maxSteps) {
+      // Get block type at current voxel
+      const blockType = chunkManager.getVoxel(x, y, z);
+
+      // Skip air and cave air
+      if (blockType !== 0 && blockType !== 12) {
+        // Found a non-air block — this is our hit!
+        // Compute the hit point on the face we entered through
+        const t = Math.min(
+          faceNormal ? (faceNormal.x !== 0 ? (x + (faceNormal.x > 0 ? 0 : 1) - origin.x) / dx :
+                        faceNormal.y !== 0 ? (y + (faceNormal.y > 0 ? 0 : 1) - origin.y) / dy :
+                        (z + (faceNormal.z > 0 ? 0 : 1) - origin.z) / dz) : 0
+        );
+
+        const hitPoint = new THREE.Vector3(
+          origin.x + dx * Math.max(0, t),
+          origin.y + dy * Math.max(0, t),
+          origin.z + dz * Math.max(0, t)
+        );
+
+        // Check distance
+        const dist = hitPoint.distanceTo(origin);
+        if (dist <= maxDistance) {
+          return { point: hitPoint, faceNormal: faceNormal || new THREE.Vector3(0, 1, 0) };
+        }
+        return null; // Solid block but beyond range
+      }
+
+      // Step to next voxel along the axis with smallest tMax
+      if (tMaxX < tMaxY) {
+        if (tMaxX < tMaxZ) {
+          // Check if we've gone beyond max distance
+          if (tMaxX > maxDistance) break;
+          faceNormal = new THREE.Vector3(-stepX, 0, 0);
+          x += stepX;
+          tMaxX += tDeltaX;
+        } else {
+          if (tMaxZ > maxDistance) break;
+          faceNormal = new THREE.Vector3(0, 0, -stepZ);
+          z += stepZ;
+          tMaxZ += tDeltaZ;
+        }
+      } else {
+        if (tMaxY < tMaxZ) {
+          if (tMaxY > maxDistance) break;
+          faceNormal = new THREE.Vector3(0, -stepY, 0);
+          y += stepY;
+          tMaxY += tDeltaY;
+        } else {
+          if (tMaxZ > maxDistance) break;
+          faceNormal = new THREE.Vector3(0, 0, -stepZ);
+          z += stepZ;
+          tMaxZ += tDeltaZ;
+        }
+      }
+
+      steps++;
     }
-    
+
     return null;
   }
 }

@@ -1374,6 +1374,7 @@
             await sessionManager.joinSession(session.sessionId);
             // Start the game loop after joining
             _log(`[SessionManager] Starting game in ${mode} mode (joining)`);
+            console.log('[JOIN] joinSession called, waiting for game session connect...');
             startGame(mode);
           }
         });
@@ -1665,7 +1666,13 @@
       });
 
       this.client.on('PLAYER_JOINED', (data) => {
-        this.players.push(data.player);
+        this.players.push({
+          id: data.playerId,
+          name: data.character?.name || 'Player',
+          color: data.character?.color || '#888888',
+          health: data.health !== undefined ? data.health : 100,
+          position: data.position,
+        });
         renderPlayerList(this.players);
         if (this._playerJoinedCallback) this._playerJoinedCallback(data);
       });
@@ -2146,6 +2153,10 @@
 // Texture atlas built — no log
         }
 
+        // Determine if this is a joining client (not host) — clients don't generate chunks
+        const isJoiningClient = sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId;
+        console.log(`[JOIN] isJoiningClient=${isJoiningClient} currentSessionId=${sessionManager?.currentSessionId} hostingSessionId=${sessionManager?.hostingSessionId}`);
+
         // Initialize Chunk Manager (monolith — workers + IndexedDB + flush + region tracking)
         loadingStatus.textContent = 'Loading chunks...';
         if (loadingProgress) loadingProgress.style.width = '85%';
@@ -2160,33 +2171,39 @@
           regionRadius: 16,   // 32×32 pre-generation range
           textureAtlas: textureAtlas,
           workerScriptPath: 'js/world/workerGeneration.js',
+          clientMode: isJoiningClient, // Clients receive all chunks from host
         });
 
         await chunkManager.init();
 
-        // Load existing world or create new manifest
-        const manifest = await chunkManager.loadManifest();
-        if (!manifest) {
-          await chunkManager.createNewWorld();
-          _log(`[Cuubz] Created new world manifest for "${worldName}"`);
+        if (isJoiningClient) {
+          // Client: no local generation, no IndexedDB, no flush — all chunks come from host
+          _log('[Cuubz] Client mode: chunk generation disabled, awaiting chunks from host');
         } else {
-          _log(`[Cuubz] Loaded existing world manifest (${manifest.generatedChunks.length} chunks saved)`);
-        }
+          // Host: load existing world or create new manifest
+          const manifest = await chunkManager.loadManifest();
+          if (!manifest) {
+            await chunkManager.createNewWorld();
+            _log(`[Cuubz] Created new world manifest for "${worldName}"`);
+          } else {
+            _log(`[Cuubz] Loaded existing world manifest (${manifest.generatedChunks.length} chunks saved)`);
+          }
 
-        // Start timers: flush dirty every 5s
-        chunkManager.startFlushTimer(5000);
+          // Start timers: flush dirty every 5s
+          chunkManager.startFlushTimer(5000);
 
-        // Trigger initial load around spawn position (awaits completion)
-        console.log('[Cuubz] Starting region check at (0, 0)...');
-        await chunkManager.checkRegion(0, 0);
-        
-        // Safety net: drain any remaining generation queue items
-        let genWait = 0;
-        while ((chunkManager._genQueue.length > 0 || chunkManager._generating.size > 0) && genWait < 30) {
-          await new Promise(r => setTimeout(r, 200));
-          genWait++;
+          // Trigger initial load around spawn position (awaits completion)
+          // console.log('[Cuubz] Starting region check at (0, 0)...');
+          await chunkManager.checkRegion(0, 0);
+          
+          // Safety net: drain any remaining generation queue items
+          let genWait = 0;
+          while ((chunkManager._genQueue.length > 0 || chunkManager._generating.size > 0) && genWait < 30) {
+            await new Promise(r => setTimeout(r, 200));
+            genWait++;
+          }
+          // console.log(`[Cuubz] Initial load complete — memoryCache: ${chunkManager.memoryCache.size}, generating: ${chunkManager._generating.size}`);
         }
-        console.log(`[Cuubz] Initial load complete — memoryCache: ${chunkManager.memoryCache.size}, generating: ${chunkManager._generating.size}`);
         
         chunkManager.updateRenderChunks(0, 0);
 
@@ -2232,60 +2249,72 @@
         // Wait briefly for initial chunks to populate memoryCache, then calculate spawn position
         await new Promise(resolve => setTimeout(resolve, 200));
 
-        console.log(`[Cuubz] Spawn search: ${chunkManager.memoryCache.size} chunks in cache`);
-
-        // Calculate spawn — search loaded chunks for solid surface with headroom above.
-        // Strategy: prefer GRASS/DIRT/SAND near sea level, fall back to any solid block if needed.
+        // Determine spawn position
         let bestSpawnX = 0, bestSpawnZ = 0, bestSpawnY = -1, bestScore = -Infinity;
 
-        function getBlockAt(chunk, lx, ly, lz) {
-          return chunk.getBlock(lx, ly, lz);
-        }
+        // ─── Client-side: skip spawn search, use default position ───
+        // Clients have no chunks at spawn time — host's chunks will stream in.
+        // The player will fall to terrain when chunks arrive.
+        if (isJoiningClient) {
+          bestSpawnX = 0;
+          bestSpawnZ = 0;
+          bestSpawnY = SEA_LEVEL + 2; // Spawn above sea level, will fall to terrain
+          console.log(`[Cuubz] Client spawn: X=${bestSpawnX + 0.5} Y=${bestSpawnY} Z=${bestSpawnZ + 0.5} (no chunks yet, will fall to terrain)`);
+        } else {
+          // console.log(`[Cuubz] Spawn search: ${chunkManager.memoryCache.size} chunks in cache`);
 
-        // Surface blocks — prefer these for spawn (natural terrain topside)
-        const SURFACE_BLOCKS = new Set([BLOCK_TYPES.GRASS, BLOCK_TYPES.DIRT, BLOCK_TYPES.SAND]);
+          // Calculate spawn — search loaded chunks for solid surface with headroom above.
+          // Strategy: prefer GRASS/DIRT/SAND near sea level, fall back to any solid block if needed.
 
-        // Search only the center 8×8 area (around origin) for spawn.
-        // Avoids spawning on edge of the 32×32 pre-generated region where terrain features tend to cluster.
-        const spawnSearchRadius = 4; // 8x8 centered on chunk (0,0)
+          function getBlockAt(chunk, lx, ly, lz) {
+            return chunk.getBlock(lx, ly, lz);
+          }
 
-        for (const [key, chunk] of chunkManager.memoryCache) {
-          if (!chunk || !chunk.blocks) continue;
-          const { cx, cz } = ChunkManager.parseKey(key);
+          // Surface blocks — prefer these for spawn (natural terrain topside)
+          const SURFACE_BLOCKS = new Set([BLOCK_TYPES.GRASS, BLOCK_TYPES.DIRT, BLOCK_TYPES.SAND]);
 
-          // Only search within center spawnSearchRadius chunks from origin
-          if (Math.abs(cx) > spawnSearchRadius || Math.abs(cz) > spawnSearchRadius) continue;
+          // Search only the center 8×8 area (around origin) for spawn.
+          // Avoids spawning on edge of the 32×32 pre-generated region where terrain features tend to cluster.
+          const spawnSearchRadius = 4; // 8x8 centered on chunk (0,0)
 
-          for (let lx = 0; lx < 16; lx++) {
-            for (let lz = 0; lz < 16; lz++) {
-              for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
-                const block = getBlockAt(chunk, lx, y, lz);
-                if (!BLOCK_PROPERTIES[block]?.solid) continue;
+          for (const [key, chunk] of chunkManager.memoryCache) {
+            if (!chunk || !chunk.blocks) continue;
+            const { cx, cz } = ChunkManager.parseKey(key);
 
-                // Prefer surface blocks above sea level
-                const isSurface = SURFACE_BLOCKS.has(block);
-                const aboveSea = y > SEA_LEVEL;
+            // Only search within center spawnSearchRadius chunks from origin
+            if (Math.abs(cx) > spawnSearchRadius || Math.abs(cz) > spawnSearchRadius) continue;
 
-                // Check column clear (headroom for player — 2 blocks above feet)
-                let colClear = true;
-                for (let cy = y + 1; cy <= y + 3; cy++) {
-                  const cBlock = getBlockAt(chunk, lx, cy, lz);
-                  if (cBlock !== BLOCK_TYPES.AIR && cBlock !== BLOCK_TYPES.WATER) { colClear = false; break; }
-                }
-                if (!colClear) continue;
+            for (let lx = 0; lx < 16; lx++) {
+              for (let lz = 0; lz < 16; lz++) {
+                for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
+                  const block = getBlockAt(chunk, lx, y, lz);
+                  if (!BLOCK_PROPERTIES[block]?.solid) continue;
 
-                // Score: elevation primary + surface bonus + above-sea bonus
-                const worldX = cx * 16 + lx;
-                const worldZ = cz * 16 + lz;
-                let score = y * 100;           // Elevation is the primary factor (×100 to dominate bonuses)
-                if (isSurface) score += 500;    // Surface block bonus
-                if (aboveSea) score += 1000;     // Above-sea bonus
+                  // Prefer surface blocks above sea level
+                  const isSurface = SURFACE_BLOCKS.has(block);
+                  const aboveSea = y > SEA_LEVEL;
 
-                if (score > bestScore) {
-                  bestSpawnX = worldX;
-                  bestSpawnZ = worldZ;
-                  bestSpawnY = y;
-                  bestScore = score;
+                  // Check column clear (headroom for player — 2 blocks above feet)
+                  let colClear = true;
+                  for (let cy = y + 1; cy <= y + 3; cy++) {
+                    const cBlock = getBlockAt(chunk, lx, cy, lz);
+                    if (cBlock !== BLOCK_TYPES.AIR && cBlock !== BLOCK_TYPES.WATER) { colClear = false; break; }
+                  }
+                  if (!colClear) continue;
+
+                  // Score: elevation primary + surface bonus + above-sea bonus
+                  const worldX = cx * 16 + lx;
+                  const worldZ = cz * 16 + lz;
+                  let score = y * 100;           // Elevation is the primary factor (×100 to dominate bonuses)
+                  if (isSurface) score += 500;    // Surface block bonus
+                  if (aboveSea) score += 1000;     // Above-sea bonus
+
+                  if (score > bestScore) {
+                    bestSpawnX = worldX;
+                    bestSpawnZ = worldZ;
+                    bestSpawnY = y;
+                    bestScore = score;
+                  }
                 }
               }
             }
@@ -2293,10 +2322,10 @@
         }
 
         const spawnHeight = bestSpawnY >= 0 ? bestSpawnY + 1.625 + 2 : SEA_LEVEL + 2;
-        console.log(`[Cuubz] Spawn at X=${bestSpawnX} Z=${bestSpawnZ} Y=${spawnHeight} (surface=${bestSpawnY}, chunks=${chunkManager.memoryCache.size})`);
+        // console.log(`[Cuubz] Spawn at X=${bestSpawnX} Z=${bestSpawnZ} Y=${spawnHeight} (surface=${bestSpawnY}, chunks=${chunkManager.memoryCache.size})`);
 
         if (bestSpawnY < 0) {
-          console.warn('[Cuubz] ⚠ No valid spawn surface found — falling back to sea level. Check chunk generation.');
+          //console.warn("No valid spawn found — using default") — falling back to sea level. Check chunk generation.');
         }
 
           // Initialize Player at terrain level
@@ -2323,7 +2352,11 @@
               spawnPos,
               { yaw: 0, pitch: 0 }
             );
-            _log(`[Cuubz] Sent JOIN to game session at ${JSON.stringify(spawnPos)}`);
+            if (sessionManager.client._pendingGameJoin) {
+              console.log('[JOIN] joinGame QUEUED — game session not connected yet, will send when ready');
+            } else {
+              console.log(`[JOIN] joinGame SENT immediately to game session at ${JSON.stringify(spawnPos)}`);
+            }
           }
 
           // Initialize Biome Effects System (wire up visual effects per biome)
@@ -2376,6 +2409,7 @@
             // Wire session events to player sync
             // Handle WELCOME — it includes existing players already in the session
             sessionManager.client.onGame('WELCOME', (data) => {
+              console.log('[JOIN] WELCOME received:', JSON.stringify(data).substring(0, 300));
               if (data.players && Array.isArray(data.players) && data.players.length > 0) {
                 for (const p of data.players) {
                   // Skip self
@@ -2502,30 +2536,33 @@
               options: {
                 loadRadius: 6,
                 unloadRadius: 8,
-                streamInterval: 1000,
-                maxChunksPerTick: 4,
+                streamInterval: 500,  // Tick every 500ms for faster streaming
+                maxChunksPerTick: 32, // Stream up to 32 chunks per tick
                 compressData: true,
               },
             });
 
-            // Register host player position
-            chunkStreamer.updatePlayerPosition('host', { x: player.position.x, y: player.position.y, z: player.position.z });
+            // Register host player position — use actual playerId so server can route messages
+            const hostPlayerId = sessionManager.client.playerId || 'host';
+            chunkStreamer.updatePlayerPosition(hostPlayerId, { x: player.position.x, y: player.position.y, z: player.position.z });
 
             // Update remote player positions from PlayerSyncManager
             // This is done in the render loop
 
             // When chunks are streamed, send them via the game session relay
+            // Don't include targetPlayers — let server broadcast to all non-host players
             chunkStreamer.onChunkStreamed = (payload) => {
               if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
-                sessionManager.client._gameSessionConn?.send({
+                const msg = {
                   type: 'CHUNK_DATA',
                   chunkX: payload.chunkX,
                   chunkZ: payload.chunkZ,
                   data: payload.data,
                   compressed: payload.compressed,
                   dirty: payload.dirty,
-                  targetPlayers: payload.players || [],
-                });
+                };
+                // console.log(`[CHUNK_STREAM] → ${payload.chunkX},${payload.chunkZ} (${payload.compressed ? 'compressed' : 'raw'}), ${payload.data ? payload.data.length : 0} bytes`);
+                sessionManager.client._gameSessionConn?.send(msg);
               }
             };
 
@@ -2548,23 +2585,33 @@
                 const cz = data.chunkZ;
                 const key = ChunkManager.key(cx, cz);
 
+                // Decompress if needed
+                const blockData = data.compressed
+                  ? ChunkCompressor.decompress({ method: 'rle', data: new Uint8Array(data.data) })
+                  : data.data;
+
+                if (!blockData || blockData.length === 0) return;
+
                 // If chunk is already loaded, apply as dirty update
                 const existing = chunkManager.memoryCache.get(key);
                 if (existing) {
-                  // Apply the streamed block data to the existing chunk
-                  const blockData = data.compressed
-                    ? ChunkCompressor.decompress({ method: 'rle', data: new Uint8Array(data.data) })
-                    : data.data;
-
-                  if (blockData && existing.blocks) {
-                    for (let i = 0; i < Math.min(blockData.length, existing.blocks.length); i++) {
-                      existing.blocks[i] = blockData[i];
-                    }
-                    existing.dirty = true;
-                    _log(`[Cuubz] Applied streamed chunk update: ${key} (${blockData.length} blocks)`);
+                  for (let i = 0; i < Math.min(blockData.length, existing.blocks.length); i++) {
+                    existing.blocks[i] = blockData[i];
                   }
+                  existing.dirty = true;
+                  existing.changed = true; // Trigger mesh rebuild
+                  _log(`[Cuubz] Applied streamed chunk update: ${key} (${blockData.length} blocks)`);
+                } else {
+                  // Chunk not loaded — create it from host data
+                  const newChunk = new Chunk(cx, cz);
+                  for (let i = 0; i < Math.min(blockData.length, newChunk.blocks.length); i++) {
+                    newChunk.blocks[i] = blockData[i];
+                  }
+                  newChunk.dirty = false; // Host data is authoritative
+                  newChunk.changed = true; // Trigger mesh rebuild
+                  chunkManager.memoryCache.set(key, newChunk);
+                  _log(`[Cuubz] Received streamed chunk: ${key} (${blockData.length} blocks)`);
                 }
-                // If chunk not loaded, it will be generated on demand by ChunkManager
               } catch (err) {
                 console.error('[Cuubz] Error processing CHUNK_DATA:', err.message);
               }
@@ -2594,7 +2641,7 @@
             // On join: send full inventory to host
             if (sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
               const joinPayload = inventorySync.createJoinPayload();
-              sessionManager.client.sendInventoryUpdate(joinPayload);
+              sessionManager.client.sendInventory(joinPayload);
               _log('[Cuubz] Sent initial inventory to host on join');
             }
 
@@ -3080,8 +3127,9 @@
 
               // ─── Multiplayer: Update ChunkStreamer with player positions (host) ───
               if (chunkStreamer) {
-                // Update host player position
-                chunkStreamer.updatePlayerPosition('host', {
+                // Update host player position — use actual playerId so server can route messages
+                const hostPid = sessionManager.client.playerId || 'host';
+                chunkStreamer.updatePlayerPosition(hostPid, {
                   x: player.position.x,
                   y: player.position.y,
                   z: player.position.z,
@@ -3097,10 +3145,12 @@
               // ─── Multiplayer: Send block changes to game session ───
               if (blockInteraction && sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected) {
                 if (blockInteraction._lastBroken) {
+                  console.log(`[BREAK] Sending network break: (${blockInteraction._lastBroken.x},${blockInteraction._lastBroken.y},${blockInteraction._lastBroken.z})`);
                   sessionManager.client.breakBlock(blockInteraction._lastBroken.x, blockInteraction._lastBroken.y, blockInteraction._lastBroken.z);
                   blockInteraction._lastBroken = null;
                 }
                 if (blockInteraction._lastPlaced) {
+                  console.log(`[PLACE] Sending network place: (${blockInteraction._lastPlaced.x},${blockInteraction._lastPlaced.y},${blockInteraction._lastPlaced.z}) type=${blockInteraction._lastPlaced.blockType}`);
                   sessionManager.client.placeBlock(blockInteraction._lastPlaced.x, blockInteraction._lastPlaced.y, blockInteraction._lastPlaced.z, blockInteraction._lastPlaced.blockType);
                   blockInteraction._lastPlaced = null;
                 }

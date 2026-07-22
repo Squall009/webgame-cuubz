@@ -344,6 +344,7 @@ class WSConnection {
     }
 
     if (this.isConnected && this._socket) {
+      // console.log(`[WS] → ${msg.type}`); // JOIN, CHUNK_DATA, MOVE
       this._sendRaw(msg);
     } else {
       // Queue for delivery when connected
@@ -371,6 +372,12 @@ class WSConnection {
     if (data.type === 'HEARTBEAT_ACK') {
       this._clearHeartbeatTimeout();
       return;
+    }
+
+    // Debug: log only important messages (not PLAYER_MOVE or INVENTORY_SYNC)
+    const label = this.url.includes('/session/') ? '[GAME]' : '[MATCH]';
+    if (data.type !== 'PLAYER_MOVE' && data.type !== 'INVENTORY_SYNC') {
+      console.log(`${label} recv: ${data.type}`, data.type === 'CHUNK_DATA' ? `chunk ${data.chunkX},${data.chunkZ}` : JSON.stringify(data).substring(0, 200));
     }
 
     // Route to event handlers
@@ -648,6 +655,10 @@ class MultiplayerClient {
     this._playerId = null;
     this._disposed = false;
 
+    // Queued game join — filled by joinGame() before _gameSessionConn exists,
+    // sent automatically once the game session WebSocket connects.
+    this._pendingGameJoin = null;
+
     // High-level event handlers
     this._matchmakingHandlers = {};
     this._gameHandlers = {};
@@ -662,11 +673,11 @@ class MultiplayerClient {
   // ── State Accessors ───────────────────────────────────────────
 
   get isMatchmakingConnected() {
-    return this.state.matchmaking === CLIENT_STATE.CONNECTED;
+    return this._matchmakingConn && this._matchmakingConn.isConnected;
   }
 
   get isGameSessionConnected() {
-    return this.state.gameSession === CLIENT_STATE.CONNECTED;
+    return this._gameSessionConn && this._gameSessionConn.isConnected;
   }
 
   get currentSessionId() {
@@ -818,6 +829,8 @@ class MultiplayerClient {
   _connectToGameSession(sessionId) {
     if (this._disposed || this._gameSessionConn) return;
 
+    console.log(`[MP] Connecting to game session: ${sessionId}`);
+
     try {
       const port = this.matchmakingPort ? `:${this.matchmakingPort}` : '';
       const url = `${this._getProtocol()}://${this.host}${port}/session/${sessionId}`;
@@ -829,9 +842,19 @@ class MultiplayerClient {
       // Wire up game session event handlers
       this._setupGameSessionHandlers();
 
+      // Send any queued join once the game session WebSocket is open
+      this._gameSessionConn.on('stateChange', (data) => {
+        if (data.to === 'connected' && this._pendingGameJoin) {
+          const join = this._pendingGameJoin;
+          this._pendingGameJoin = null;
+          console.log('[MP] Game session connected — sending queued JOIN');
+          this._gameSessionConn.sendJoin(this._playerId, join.character, join.position, join.rotation);
+        }
+      });
+
       this._gameSessionConn.connect();
     } catch (err) {
-      console.error(`[MultiplayerClient] Failed to connect game session:`, err.message);
+      console.error(`[MP] Failed to connect game session:`, err.message);
       if (this._gameSessionConn) {
         this._gameSessionConn.dispose();
         this._gameSessionConn = null;
@@ -917,6 +940,10 @@ class MultiplayerClient {
   joinGame(character, position, rotation) {
     if (this._gameSessionConn) {
       this._gameSessionConn.sendJoin(this._playerId, character, position, rotation);
+    } else {
+      // Queue the join — it will be sent when the game session connects
+      this._pendingGameJoin = { character, position, rotation };
+      console.log('[MultiplayerClient] Queued game join (game session not connected yet)');
     }
   }
 

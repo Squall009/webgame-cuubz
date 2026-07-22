@@ -75,8 +75,17 @@ class BlockInteraction {
     const justStartedBreak = (this.mouse && this.mouse.justClickedLeft) ||
                              (this.touch && this.touch.breakJustPressed);
 
+    // Debug: log mouse state periodically
+    if (this.mouse && this.mouse._debugFrame === undefined) this.mouse._debugFrame = 0;
+    if (this.mouse) this.mouse._debugFrame++;
+    if (this.mouse && this.mouse._debugFrame % 120 === 0) {
+      console.log(`[BREAK_DEBUG] mouse.leftClick=${this.mouse.leftClick}, justClickedLeft=${this.mouse.justClickedLeft}, breakingBlock=${this.breakingBlock ? 'yes' : 'no'}`);
+    }
+
     if (isHoldingBreak) {
-      if (!this.breakingBlock && justStartedBreak) {
+      if (!this.breakingBlock) {
+        // Try to start breaking — retry every frame while holding
+        // (not just on click) so it works even if raycast fails initially
         this._startBreak();
       } else if (this.breakingBlock) {
         this._continueBreak(delta);
@@ -101,13 +110,22 @@ class BlockInteraction {
    * @returns {{ blockPos, faceNormal, chunkX, chunkZ } | null}
    */
   _getTargetBlock() {
-    const hit = this.renderer.raycast(this.breakRange);
-    if (!hit || !hit.point) return null;
+    const hit = this.renderer.raycast(this.breakRange, this.chunkManager);
+    if (!hit || !hit.point) {
+      // Debug: log raycast failure
+      if (!hit) {
+        console.log('[BREAK] Raycast returned null (no hit)');
+      } else {
+        console.log('[BREAK] Raycast hit has no point:', hit);
+      }
+      return null;
+    }
 
     const point = hit.point;
     const normal = hit.faceNormal;
 
-    // Block position is the integer coordinates of the block being targeted
+    // Block position: step into the block from the hit point by half the face normal,
+    // then floor. This works correctly for all 6 face directions (+/- X/Y/Z).
     const bx = Math.floor(point.x - (normal ? normal.x * 0.5 : 0));
     const by = Math.floor(point.y - (normal ? normal.y * 0.5 : 0));
     const bz = Math.floor(point.z - (normal ? normal.z * 0.5 : 0));
@@ -123,14 +141,21 @@ class BlockInteraction {
    * Start breaking a block.
    */
   _startBreak() {
+    console.log('[BREAK] _startBreak called');
     const target = this._getTargetBlock();
-    if (!target) return;
+    if (!target) {
+      console.log('[BREAK] No target block (raycast failed)');
+      return;
+    }
 
     const { blockPos, faceNormal, chunkX, chunkZ } = target;
 
     // Get chunk data
     const chunkData = this.chunkManager.getChunkData(chunkX, chunkZ);
-    if (!chunkData) return;
+    if (!chunkData) {
+      console.log(`[BREAK] No chunk data at (${chunkX},${chunkZ}) — chunk not in memoryCache`);
+      return;
+    }
 
     // Check distance to player
     const dx = blockPos.x - this.player.position.x;
@@ -138,7 +163,10 @@ class BlockInteraction {
     const dz = blockPos.z - this.player.position.z;
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-    if (dist > this.breakRange) return;
+    if (dist > this.breakRange) {
+      console.log(`[BREAK] Too far: dist=${dist.toFixed(1)} > ${this.breakRange}`);
+      return;
+    }
 
     // Get block type at position (convert to local coords)
     const lx = ((blockPos.x % 16) + 16) % 16;
@@ -146,11 +174,21 @@ class BlockInteraction {
     const blockType = chunkData.getBlock(lx, blockPos.y, lz);
 
     if ((blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) ||
-        this.unbreakableBlocks.has(blockType)) return;
+        this.unbreakableBlocks.has(blockType)) {
+      console.log(`[BREAK] Block type ${blockType} is air/unbreakable`);
+      return;
+    }
 
     // Get block properties
     const props = BLOCK_PROPERTIES[blockType];
-    if (!props || props.hardness === -1) return;
+    if (!props) {
+      console.log(`[BREAK] No BLOCK_PROPERTIES for block type ${blockType}`);
+      return;
+    }
+    if (props.hardness === -1) {
+      console.log(`[BREAK] Block type ${blockType} is unbreakable (hardness=-1)`);
+      return;
+    }
 
     const hardness = props.hardness || 1;
 
@@ -161,6 +199,8 @@ class BlockInteraction {
     };
     this.breakProgress = 0;
     this.breakStartTime = performance.now();
+
+    console.log(`[BREAK] Started breaking block ${blockType} at (${blockPos.x},${blockPos.y},${blockPos.z}) hardness=${hardness}`);
 
     // Create crack overlay
     this._createCrackOverlay(blockPos.x, blockPos.y, blockPos.z, blockType);

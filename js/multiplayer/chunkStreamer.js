@@ -28,8 +28,9 @@ const DEFAULT_STREAM_CONFIG = {
   loadRadius: 6,        // Load chunks within this radius (in chunks)
   unloadRadius: 8,      // Unload chunks beyond this radius
   streamInterval: 500,  // How often to check streaming needs (ms)
-  maxChunksPerTick: 4,  // Max chunks to stream per update cycle
+  maxChunksPerTick: 32, // Max chunks to stream per update cycle
   compressData: true,   // Whether to compress chunk data for transmission
+  loadingTimeout: 8000  // Max ms a chunk can stay in LOADING before forced to LOADED (even without data)
 };
 
 // Chunk states
@@ -128,6 +129,7 @@ class ChunkStreamEntry {
     this.lastStreamed = 0;      // Timestamp of last stream to clients
     this.dirty = false;         // Has unstreamed block changes
     this.playerRefs = new Set(); // Player IDs that need this chunk
+    this.streamedTo = new Set(); // Player IDs that have already received this chunk
     this.loadTime = 0;          // When the chunk was loaded
   }
 
@@ -142,10 +144,14 @@ class ChunkStreamEntry {
   /**
    * Mark chunk as cleanly streamed
    */
-  markClean() {
+  markClean(playerIds) {
     this.dirty = false;
     this.state = CHUNK_STATE.LOADED;
     this.lastStreamed = Date.now();
+    // Track which players received this chunk so we can re-stream for new players
+    if (playerIds && Array.isArray(playerIds)) {
+      for (const pid of playerIds) this.streamedTo.add(pid);
+    }
   }
 
   /**
@@ -388,6 +394,7 @@ class ChunkStreamer {
 
   /**
    * Load a chunk (calls generator function if provided).
+   * Non-blocking: reads from memoryCache, triggers generation for missing chunks.
    */
   loadChunk(cx, cz, generatorFn) {
     const key = `${cx},${cz}`;
@@ -411,7 +418,14 @@ class ChunkStreamer {
     if (generatorFn) {
       try {
         const data = generatorFn(cx, cz);
-        entry.data = Array.isArray(data) ? data : null;
+        entry.data = Array.isArray(data) || ArrayBuffer.isView(data) ? data : null;
+
+        // If generator returned null (chunk not ready yet), keep as LOADING
+        // so it will be retried on the next tick
+        if (!entry.data) {
+          entry.state = CHUNK_STATE.LOADING;
+          return entry;
+        }
 
         // Compress if configured
         if (entry.data && this._options.compressData) {
@@ -490,22 +504,29 @@ class ChunkStreamer {
 
   /**
    * Build the stream queue for this tick.
-   * Prioritizes dirty chunks, then never-streamed chunks.
+   * Prioritizes dirty chunks, then never-streamed chunks, then recently-loaded chunks.
    */
   buildStreamQueue() {
     this._streamQueue = [];
 
-    // First: dirty chunks (highest priority)
+    // First: dirty chunks (highest priority — block changes must propagate)
     for (const [, entry] of this._chunks) {
       if (entry.state === CHUNK_STATE.DIRTY && entry.playerRefs.size > 0) {
         this._streamQueue.push(entry);
       }
     }
 
-    // Second: loaded but never-streamed chunks
+    // Second: loaded chunks where at least one player hasn't received them yet
+    // This fixes the bug where chunks streamed to player A were never sent to player B
     for (const [, entry] of this._chunks) {
-      if (entry.state === CHUNK_STATE.LOADED && entry.lastStreamed === 0) {
-        this._streamQueue.push(entry);
+      if (entry.state === CHUNK_STATE.LOADED && entry.playerRefs.size > 0) {
+        let needsStream = false;
+        for (const pid of entry.playerRefs) {
+          if (!entry.streamedTo.has(pid)) { needsStream = true; break; }
+        }
+        if (needsStream) {
+          this._streamQueue.push(entry);
+        }
       }
     }
   }
@@ -541,6 +562,7 @@ class ChunkStreamer {
   /**
    * Process one tick of chunk streaming.
    * Returns array of stream payloads ready to send.
+   * Non-blocking: streams available chunks immediately, triggers generation for missing chunks.
    */
   tick() {
     const payloads = [];
@@ -558,6 +580,7 @@ class ChunkStreamer {
 
     // Load needed chunks (use chunk grid generator if available)
     // Support both getChunkData(cx, cz) and getChunk(cx, cz, null) APIs
+    // Non-blocking: read from memoryCache immediately, trigger generation for missing chunks
     const generatorFn = this._chunkGrid ?
       (cx, cz) => {
         const chunk = this._chunkGrid.getChunkData
@@ -565,12 +588,58 @@ class ChunkStreamer {
           : this._chunkGrid.getChunk
             ? this._chunkGrid.getChunk(cx, cz, null)
             : null;
-        return chunk && chunk.blocks ? Array.from(chunk.blocks) : null;
+        if (chunk && chunk.blocks) {
+          return Array.from(chunk.blocks);
+        }
+        // Chunk not in memoryCache — trigger async generation in background
+        if (this._chunkGrid._ensureChunkInMemory) {
+          this._chunkGrid._ensureChunkInMemory(cx, cz).catch(() => {});
+        }
+        return null; // Will be retried on next tick
       } : null;
 
     for (const key of toLoad) {
       const [cx, cz] = key.split(',').map(Number);
       this.loadChunk(cx, cz, generatorFn);
+    }
+
+    // Re-check LOADING chunks — they may now be in memoryCache from async generation
+    // Also enforce timeout: chunks stuck in LOADING too long get forced to LOADED
+    // so they don't block the stream queue forever
+    const now = Date.now();
+    const loadingTimeout = this._options.loadingTimeout || 15000;
+    for (const [, entry] of this._chunks) {
+      if (entry.state === CHUNK_STATE.LOADING) {
+        if (generatorFn) {
+          try {
+            const data = generatorFn(entry.cx, entry.cz);
+            if (data && (Array.isArray(data) || ArrayBuffer.isView(data))) {
+              entry.data = data;
+              if (this._options.compressData) {
+                entry.compressedData = ChunkCompressor.compress(data).data;
+              }
+              entry.state = CHUNK_STATE.LOADED;
+              entry.lastStreamed = 0;
+              this._totalLoaded++;
+              if (this.onChunkLoaded) {
+                try { this.onChunkLoaded({ cx: entry.cx, cz: entry.cz, key: entry.key }); }
+                catch (e) { this._emitError('onChunkLoaded callback error: ' + e.message); }
+              }
+              continue;
+            }
+          } catch (err) {
+            // Silently skip — chunk still not ready
+          }
+        }
+        // Timeout: force transition to LOADED even without data
+        // This prevents chunks from being stuck in LOADING forever and blocking the stream queue
+        if (now - entry.loadTime > loadingTimeout) {
+          console.log(`[CHUNK_STREAM] Timeout: chunk ${entry.key} stuck in LOADING for ${Math.round((now - entry.loadTime)/1000)}s, forcing to LOADED`);
+          entry.state = CHUNK_STATE.LOADED;
+          entry.lastStreamed = 0;
+          this._totalLoaded++;
+        }
+      }
     }
 
     // Update which players need which chunks (after loading, so new chunks get refs)
@@ -588,7 +657,7 @@ class ChunkStreamer {
       payload.players = Array.from(entry.playerRefs);
       payloads.push(payload);
 
-      entry.markClean();
+      entry.markClean(Array.from(entry.playerRefs));
       this._totalStreamed++;
       streamedThisTick++;
 
@@ -596,6 +665,19 @@ class ChunkStreamer {
         try { this.onChunkStreamed(payload); }
         catch (e) { this._emitError('onChunkStreamed callback error: ' + e.message); }
       }
+    }
+
+    // Debug: log streaming stats every 5 ticks
+    if (!this._tickCount) this._tickCount = 0;
+    this._tickCount++;
+    if (this._tickCount % 5 === 0) {
+      let loading = 0, loaded = 0, dirty = 0, total = this._chunks.size;
+      for (const [, e] of this._chunks) {
+        if (e.state === CHUNK_STATE.LOADING) loading++;
+        if (e.state === CHUNK_STATE.LOADED) loaded++;
+        if (e.state === CHUNK_STATE.DIRTY) dirty++;
+      }
+      console.log(`[CHUNK_STREAM] tick ${this._tickCount}: streamed=${streamedThisTick}, queue=${this._streamQueue.length}, loaded=${loaded}, loading=${loading}, dirty=${dirty}, total=${total}, memCache=${this._chunkGrid ? this._chunkGrid.memoryCache.size : '?'}, players=${this._playerPositions.size}`);
     }
 
     return payloads;

@@ -197,11 +197,11 @@ class TextureAtlas {
    * Returns a Promise that resolves when all textures are loaded and baked.
    */
   async buildAtlas() {
-    console.log('[TextureAtlas] Discovering textures...');
+    // console.log('[TextureAtlas] Discovering textures...');
 
     // Step 1: Discover all texture files
     const textures = await this._discoverTextures();
-    console.log(`[TextureAtlas] Found ${textures.length} texture files`);
+    // console.log(`[TextureAtlas] Found ${textures.length} texture files`);
 
     if (textures.length === 0) {
       console.warn('[TextureAtlas] No textures found! Atlas will be empty.');
@@ -251,7 +251,7 @@ class TextureAtlas {
     this.gridW = minGridSize;
     this.gridH = minGridSize; // Always square grid to keep horizontal and vertical UV ratios equal
 
-    console.log(`[TextureAtlas] ${this.maxBlockId + 1} block IDs, ${this.totalTiles} total tiles in a square ${this.gridW}x${this.gridH} grid`);
+    // console.log(`[TextureAtlas] ${this.maxBlockId + 1} block IDs, ${this.totalTiles} total tiles in a square ${this.gridW}x${this.gridH} grid`);
 
     // Step 4: Load all textures and build canvas
     this.canvas = document.createElement('canvas');
@@ -284,7 +284,7 @@ class TextureAtlas {
             // Draw to atlas canvas
             this.context.drawImage(img, col * this.tileSize, row * this.tileSize, this.tileSize, this.tileSize);
 
-            console.log(`[TextureAtlas] ${tile.filename} → blockID=${fileId}, slot=${tile.atlasSlot}, grid=(${col},${row})`);
+            // console.log(`[TextureAtlas] ${tile.filename} → blockID=${fileId}, slot=${tile.atlasSlot}, grid=(${col},${row})`);
             resolve();
           };
           img.onerror = () => {
@@ -318,7 +318,7 @@ class TextureAtlas {
     }
 
     this.loaded = true;
-    console.log(`[TextureAtlas] Atlas built: ${this.totalTiles} tiles, grid=${this.gridW}x${this.gridH}, tileSize=${this.tileSize}px`);
+    // console.log(`[TextureAtlas] Atlas built: ${this.totalTiles} tiles, grid=${this.gridW}x${this.gridH}, tileSize=${this.tileSize}px`);
     return this;
   }
 

@@ -8,7 +8,7 @@
 
 (function (globalScope) {
   'use strict';
-  console.log('[workerGeneration] *** v2 with feature placement loaded ***');
+  // console.log('[workerGeneration] *** v2 with feature placement loaded ***');
 
   // ── Chunk constants (must match main thread) ───────────────────────
   var CHUNK_W = 16;
@@ -259,7 +259,7 @@
       var dbgLx = dbg % 16, dbgLz = Math.floor(dbg / 16);
       if (chunk[cidx(dbgLx, dbgY, dbgLz)] === BLOCK.GRASS) grassCols++;
     }
-    console.log('[placeFeatures] biomes=' + JSON.stringify(biomeCounts) + ' grassCols=' + grassCols);
+    // console.log('[placeFeatures] biomes=' + JSON.stringify(biomeCounts) + ' grassCols=' + grassCols);
 
     // ── Tree placement pass ────────────────────────────────────────
     for (var lx = 0; lx < 16; lx++) {
@@ -384,7 +384,7 @@
     // Diagnostic (worker console — check Workers filter in DevTools).
     var biomeDist = {};
     for (var d = 0; d < 256; d++) { var bn = biomeMap[d]; biomeDist[bn] = (biomeDist[bn] || 0) + 1; }
-    console.log('[placeFeatures] trees=' + treeCount + ' flowers=' + flowerCount + ' biomes=' + JSON.stringify(biomeDist));
+    // console.log('[placeFeatures] trees=' + treeCount + ' flowers=' + flowerCount + ' biomes=' + JSON.stringify(biomeDist));
   }
 
   // ── Ore placement ───────────────────────────────────────────────────
