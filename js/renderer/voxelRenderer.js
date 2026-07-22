@@ -106,25 +106,40 @@ class VoxelRenderer {
     // Cached matrix for shadow matrix computation (avoid per-frame GC)
     this._shadowTempMatrix = new THREE.Matrix4();
     
-    // Depth-to-color shader: outputs normalized depth as red channel
+    // Depth-to-color shader with alpha discard for cutout materials.
+    // Samples the diffuse atlas alpha and discards fragments below cutoff.
+    // Solid blocks (alpha = 1.0) pass through unchanged — one shader for all geometry.
     this._shadowDepthMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uFar: { value: this.shadowLight.shadow.camera.far },
         uNear: { value: this.shadowLight.shadow.camera.near },
+        uAlphaCutoff: { value: 0.5 },
+        uDiffuseMap: { value: null }, // Set in initPBR() after atlas is built
       },
       vertexShader: `
         varying float vMvZ;
+        varying vec2 vUv;
         void main() {
           vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
           vMvZ = -mvPos.z; // Depth in view space (positive)
+          vUv = uv;
           gl_Position = projectionMatrix * mvPos;
         }
       `,
       fragmentShader: `
+        precision mediump float;
         varying float vMvZ;
+        varying vec2 vUv;
         uniform float uFar;
         uniform float uNear;
+        uniform float uAlphaCutoff;
+        uniform sampler2D uDiffuseMap;
         void main() {
+          // Alpha discard — cutout blocks only write depth where texture is opaque
+          // Solid blocks have alpha = 1.0 so this is a no-op for them
+          float alpha = texture2D(uDiffuseMap, vUv).a;
+          if (alpha < uAlphaCutoff) discard;
+
           float depth = (vMvZ - uNear) / (uFar - uNear);
           depth = clamp(depth, 0.0, 1.0);
           gl_FragColor = vec4(vec3(depth), 1.0);
@@ -306,6 +321,8 @@ class VoxelRenderer {
       atlas.smoothnessTexture,
       this.sunDirection
     );
+    // Wire the diffuse atlas into the shadow depth shader so it can alpha-test cutout blocks
+    this._shadowDepthMaterial.uniforms.uDiffuseMap.value = atlas.diffuseTexture;
     console.log('[VoxelRenderer] PBR material factory initialized');
     return this.pbrFactory;
   }

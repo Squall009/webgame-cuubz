@@ -4,8 +4,24 @@
  */
 
 // Block categories (IDs match blockRegistry.js)
-var CUTOUT_IDS = {104: true, 179: true, 180: true, 172: true}; // oak_leaves, red_flower, yellow_flower, torch
-var TRANSPARENT_IDS = {46: true, 61: true, 188: true}; // water, ice, toxic_slime
+var CUTOUT_IDS = {
+  104: true, 105: true, 106: true, 107: true, 108: true, 109: true, 110: true,
+  111: true, 112: true, 113: true, 114: true, // leaves + leaf_litter
+  168: true, // ladder
+  170: true, // glowstone
+  172: true, 173: true, 174: true, 175: true, // torch, lantern, soul_lantern, campfire
+  177: true, 178: true, // short_grass, tall_grass
+  179: true, 180: true, // red_flower, yellow_flower
+  181: true, 182: true, // brown_mushroom, red_mushroom
+  183: true, 184: true, // weeping_vines, twisting_vines
+  186: true, 187: true, // glow_lichen, vine
+  189: true, 190: true, 191: true, // corrupt_crystal, apple, quest_key
+}; // cutout: alpha-tested (discard transparent pixels)
+var TRANSPARENT_IDS = {
+  46: true, 47: true,  // water, lava
+  61: true, 62: true, 63: true, 64: true, // ice, packed_ice, blue_ice, frosted_ice
+  188: true, // toxic_slime
+}; // transparent: alpha-blended
 
 var AIR_ID = 0;
 var CHUNK_W = 16;
