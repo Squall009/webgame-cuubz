@@ -495,6 +495,9 @@
         "base": "dirt",
         "exists": true
       }
+    },
+    "overlay": {
+      "side": "grass_block_side_overlay"
     }
   },
   {
@@ -1363,10 +1366,20 @@
   },
   {
     "id": 114,
-    "name": "leaf_litter",
+    "name": "red_poplar_leaves",
     "textures": {
       "all": {
-        "base": "leaf_litter",
+        "base": "red_poplar_leaves",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 115,
+    "name": "yellow_poplar_leaves",
+    "textures": {
+      "all": {
+        "base": "yellow_poplar_leaves",
         "exists": true
       }
     }
@@ -2163,7 +2176,12 @@
         "base": "pink_petals",
         "exists": true
       }
-    }
+    },
+    "color": [
+      1,
+      0.25,
+      0.25
+    ]
   },
   {
     "id": 180,
@@ -2173,7 +2191,12 @@
         "base": "pink_petals",
         "exists": true
       }
-    }
+    },
+    "color": [
+      1,
+      1,
+      0.25
+    ]
   },
   {
     "id": 181,

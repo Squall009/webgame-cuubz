@@ -37,6 +37,16 @@ class ChunkMeshBuilder {
 
     // Combined set for face culling (any block that isn't fully solid/opaque)
     this.nonSolidIds = new Set([...this.cutoutIds, ...this.transparentIds, BLOCK_TYPES.AIR, BLOCK_TYPES.CAVE_AIR]);
+
+    // Block types that receive humidity-based vertex color tinting
+    this.tintableIds = new Set([
+      BLOCK_TYPES.GRASS, BLOCK_TYPES.PODZOL,  // grass blocks
+      BLOCK_TYPES.SHORT_GRASS, BLOCK_TYPES.TALL_GRASS,  // grass (ground cover)
+      BLOCK_TYPES.SPRUCE_LEAVES, BLOCK_TYPES.BIRCH_LEAVES, BLOCK_TYPES.JUNGLE_LEAVES,
+      BLOCK_TYPES.OAK_LEAVES, BLOCK_TYPES.ACACIA_LEAVES, BLOCK_TYPES.DARK_OAK_LEAVES,
+      BLOCK_TYPES.CHERRY_LEAVES, BLOCK_TYPES.MANGROVE_LEAVES, BLOCK_TYPES.PALE_OAK_LEAVES,
+      BLOCK_TYPES.ORANGE_POPLAR_LEAVES, BLOCK_TYPES.RED_POPLAR_LEAVES, BLOCK_TYPES.YELLOW_POPLAR_LEAVES,
+    ]);
   }
 
   /**
@@ -47,6 +57,7 @@ class ChunkMeshBuilder {
     const positions = [];
     const normals = [];
     const uvs = [];
+    const colors = [];
     const indices = [];
     let vertexIndex = 0;
 
@@ -54,6 +65,7 @@ class ChunkMeshBuilder {
     const transparentPositions = [];
     const transparentNormals = [];
     const transparentUvs = [];
+    const transparentColors = [];
     const transparentIndices = [];
     let transparentVertexIndex = 0;
 
@@ -61,8 +73,26 @@ class ChunkMeshBuilder {
     const cutoutPositions = [];
     const cutoutNormals = [];
     const cutoutUvs = [];
+    const cutoutColors = [];
     const cutoutIndices = [];
     let cutoutVertexIndex = 0;
+
+    // Humidity-to-color gradient: dry (0) → yellow-green, moist (1) → lush green
+    const humidityColor = (h) => {
+      if (h < 0) h = 0;
+      if (h > 1) h = 1;
+      const r = 1.0 - h * 0.45;  // 1.0 → 0.55
+      const g = 0.85 + h * 0.15; // 0.85 → 1.0
+      const b = 0.45;
+      return [r, g, b];
+    };
+
+    const getVertexColor = (lx, lz, blockType) => {
+      if (!this.tintableIds.has(blockType)) return [1.0, 1.0, 1.0];
+      if (!chunk.humidityMap) return [1.0, 1.0, 1.0];
+      const h = chunk.humidityMap[lx * 16 + lz];
+      return humidityColor(h);
+    };
 
     // Calculate chunk dimensions from block data
     const totalBlocks = chunk.blocks.length;
@@ -185,7 +215,8 @@ class ChunkMeshBuilder {
                 currentVIdx = vertexIndex;
               }
 
-              // Add quad vertices with proper UVs
+              // Add quad vertices with proper UVs and vertex colors
+              const vColor = getVertexColor(x, z, blockType);
               for (let i = 0; i < 4; i++) {
                 const vertex = face.vertices[i];
                 posArr.push(x + vertex[0], y + vertex[1], z + vertex[2]);
@@ -194,6 +225,10 @@ class ChunkMeshBuilder {
                 // Apply atlas UV mapping
                 const localUV = face.uvCoords[i];
                 uvArr.push(uvU + localUV[0] * uvSize, uvV + localUV[1] * uvSize);
+
+                // Vertex color (humidity-based tint for grass/leaves)
+                const colorArr = isCutout ? cutoutColors : (isSelfTransparent ? transparentColors : colors);
+                colorArr.push(vColor[0], vColor[1], vColor[2]);
               }
 
               // Add triangle indices using the live counter value for this face
@@ -243,9 +278,9 @@ class ChunkMeshBuilder {
       `${totalSolidFaces} solid faces, ${totalCutoutFaces} cutout faces, ${totalTransFaces} transparent faces. Types:`, blockTypeCounts);
 
     return {
-      positions, normals, uvs, indices,
-      cutoutPositions, cutoutNormals, cutoutUvs, cutoutIndices,
-      transparentPositions, transparentNormals, transparentUvs, transparentIndices
+      positions, normals, uvs, colors, indices,
+      cutoutPositions, cutoutNormals, cutoutUvs, cutoutColors, cutoutIndices,
+      transparentPositions, transparentNormals, transparentUvs, transparentColors, transparentIndices
     };
   }
 
@@ -534,6 +569,9 @@ class ChunkMeshBuilder {
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.positions, 3));
       geometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.normals, 3));
       geometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.uvs, 2));
+      if (meshData.colors && meshData.colors.length > 0) {
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(meshData.colors, 3));
+      }
       geometry.setIndex(meshData.indices);
       geometry.computeBoundingSphere(); // Required for raycasting
       result.solidGeometry = geometry;
@@ -545,6 +583,9 @@ class ChunkMeshBuilder {
       cutoutGeometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.cutoutPositions, 3));
       cutoutGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.cutoutNormals, 3));
       cutoutGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.cutoutUvs, 2));
+      if (meshData.cutoutColors && meshData.cutoutColors.length > 0) {
+        cutoutGeometry.setAttribute('color', new THREE.Float32BufferAttribute(meshData.cutoutColors, 3));
+      }
       cutoutGeometry.setIndex(meshData.cutoutIndices);
       cutoutGeometry.computeBoundingSphere(); // Required for raycasting
       result.cutoutGeometry = cutoutGeometry;
@@ -556,6 +597,9 @@ class ChunkMeshBuilder {
       transGeometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.transparentPositions, 3));
       transGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.transparentNormals, 3));
       transGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.transparentUvs, 2));
+      if (meshData.transparentColors && meshData.transparentColors.length > 0) {
+        transGeometry.setAttribute('color', new THREE.Float32BufferAttribute(meshData.transparentColors, 3));
+      }
       transGeometry.setIndex(meshData.transparentIndices);
       transGeometry.computeBoundingSphere(); // Required for raycasting
       result.transparentGeometry = transGeometry;

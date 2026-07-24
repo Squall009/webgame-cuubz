@@ -491,6 +491,13 @@ class ChunkManager {
         }
       }
 
+      // Store humidity map for vertex color tinting (256 floats, one per column)
+      if (result.humidityMap) {
+        chunk.humidityMap = new Float32Array(result.humidityMap);
+      } else {
+        console.warn('[ChunkManager] No humidityMap from worker for chunk', cx, cz);
+      }
+
       this.stats.chunksGenerated++;
       if (this.onChunkGenerated) this.onChunkGenerated(cx, cz);
 
@@ -958,7 +965,7 @@ class ChunkManager {
 
     if (this.meshWorkerPool) {
       // Dispatch to mesh worker pool
-      const promise = this._dispatchMeshBuild(cx, cz, chunk.blocks, neighbors);
+      const promise = this._dispatchMeshBuild(cx, cz, chunk.blocks, neighbors, chunk.humidityMap);
       this._pendingMeshBuilds.set(key, promise);
       promise.then(geoResult => {
         this._onMeshBuilt(key, cx, cz, geoResult);
@@ -969,7 +976,7 @@ class ChunkManager {
     } else {
       // Fallback: inline mesh build on main thread
       try {
-        const geoResult = this._buildMeshInline(cx, cz, chunk.blocks, neighbors);
+        const geoResult = this._buildMeshInline(cx, cz, chunk.blocks, neighbors, chunk.humidityMap);
         this._onMeshBuilt(key, cx, cz, geoResult);
       } catch (e) {
         console.warn('[ChunkManager] Inline mesh build error for', key, ':', e.message);
@@ -979,7 +986,7 @@ class ChunkManager {
   }
 
   /** Dispatch mesh build to worker. Returns Promise<geometry>. */
-  _dispatchMeshBuild(cx, cz, blocks, neighbors) {
+  _dispatchMeshBuild(cx, cz, blocks, neighbors, humidityMap) {
     return new Promise((resolve, reject) => {
       // Build UV lookup table from texture atlas for this chunk's block types
       let uvLookup = null;  // Use 'let' since we reassign below if atlas is loaded
@@ -1011,7 +1018,7 @@ class ChunkManager {
       let w = idleWorkers.pop();
       if (!w) {
         setTimeout(() => {
-          this._dispatchMeshBuild(cx, cz, blocks, neighbors).then(resolve).catch(reject);
+          this._dispatchMeshBuild(cx, cz, blocks, neighbors, humidityMap).then(resolve).catch(reject);
         }, 0);
         return;
       }
@@ -1058,16 +1065,22 @@ class ChunkManager {
           positiveZ: neighbors.positiveZ ? Array.from(neighbors.positiveZ) : null,
           negativeZ: neighbors.negativeZ ? Array.from(neighbors.negativeZ) : null,
         },
-        uvLookup: uvLookup // Texture atlas UV lookup table
+        uvLookup: uvLookup, // Texture atlas UV lookup table
+        humidityMap: humidityMap ? Array.from(humidityMap) : null  // 256 floats 0..1 for vertex color tinting
       }, [blocksBuffer.buffer]);
+      // Debug: log humidityMap presence
+      if (!humidityMap) {
+        console.warn('[ChunkManager] Mesh build for', cx, cz, 'has no humidityMap');
+      }
     });
   }
 
   /** Inline mesh build fallback (main thread). */
-  _buildMeshInline(cx, cz, blocks, neighbors) {
+  _buildMeshInline(cx, cz, blocks, neighbors, humidityMap) {
     // Create a temporary chunk-like object for the mesh builder
     const tempChunk = new Chunk(cx, cz);
     tempChunk.blocks.set(blocks);
+    tempChunk.humidityMap = humidityMap;
 
     // Build neighbor lookup function from neighbor arrays
     const neighborLookup = (wx, wy, wz) => {
@@ -1187,6 +1200,16 @@ class ChunkManager {
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(data.pos), 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(data.norm), 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(data.uv), 2));
+    // Vertex color attribute for humidity-based tinting — always present (defaults to white)
+    if (data.color && data.color.byteLength > 0) {
+      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(data.color), 3));
+    } else {
+      // Fallback: all-white vertex colors so the shader always has the attribute
+      const posCount = new Float32Array(data.pos).length / 3;
+      const whiteColors = new Float32Array(posCount * 3);
+      whiteColors.fill(1.0);
+      geo.setAttribute('color', new THREE.BufferAttribute(whiteColors, 3));
+    }
     if (data.idx && data.idx.byteLength > 0) {
       const idx = new Uint16Array(data.idx);
       if (idx.length > 0) geo.setIndex(new THREE.BufferAttribute(idx, 1));

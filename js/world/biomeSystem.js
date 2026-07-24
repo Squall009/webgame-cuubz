@@ -9,22 +9,95 @@ const CONT_SPLINE = [
 ];
 
 // Biome definitions — surfaceBlock/subBlock match VoxelGen block IDs directly.
+// surfaceVariants/subVariants/stoneVariants: [blockId, weight] arrays for noise-driven mixing.
 const BIOME_DEFS = {
-  DEEP_OCEAN:   { baseY: 32,  amplitude: 9,  surfaceBlock: BLOCK_TYPES.GRAVEL,    subBlock: BLOCK_TYPES.GRAVEL,     color: '#051d3b', name: 'Deep Ocean' },
-  OCEAN:        { baseY: 46,  amplitude: 9,  surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.GRAVEL,    color: '#1565C0', name: 'Ocean' },
-  BEACH:        { baseY: 64,  amplitude: 3,  surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.SAND,     color: '#d4b483', name: 'Beach' },
-  PLAINS:       { baseY: 68,  amplitude: 6,  surfaceBlock: BLOCK_TYPES.GRASS,     subBlock: BLOCK_TYPES.DIRT,     color: '#5a8a3c', name: 'Plains' },
-  FOREST:       { baseY: 70,  amplitude: 10, surfaceBlock: BLOCK_TYPES.GRASS,     subBlock: BLOCK_TYPES.DIRT,     color: '#2d6e2d', name: 'Forest' },
-  BADLANDS:     { baseY: 74,  amplitude: 14, surfaceBlock: BLOCK_TYPES.RED_SAND,  subBlock: BLOCK_TYPES.TERRACOTTA, color: '#b5623e', name: 'Badlands' },
-  TUNDRA:       { baseY: 64,  amplitude: 7,  surfaceBlock: BLOCK_TYPES.SNOW,      subBlock: BLOCK_TYPES.DIRT,     color: '#c8dde8', name: 'Tundra' },
-  DESERT:       { baseY: 68,  amplitude: 4,  surfaceBlock: BLOCK_TYPES.SAND,      subBlock: BLOCK_TYPES.CLAY,     color: '#d1b247', name: 'Desert' },
-  MOUNTAINS:    { baseY: 90,  amplitude: 20, surfaceBlock: BLOCK_TYPES.GRASS,     subBlock: BLOCK_TYPES.STONE,    color: '#607d8b', name: 'Mountains' },
-  FROZEN_PEAKS: { baseY: 100, amplitude: 20, surfaceBlock: BLOCK_TYPES.SNOW,      subBlock: BLOCK_TYPES.SNOW_STONE, color: '#e0f7fa', name: 'Frozen Peaks' }
+  DEEP_OCEAN:   {
+    baseY: 32,  amplitude: 9,
+    surfaceBlock: BLOCK_TYPES.GRAVEL, subBlock: BLOCK_TYPES.GRAVEL,
+    surfaceVariants: [[BLOCK_TYPES.GRAVEL, 60], [BLOCK_TYPES.SAND, 25], [BLOCK_TYPES.CLAY, 15]],
+    subVariants:     [[BLOCK_TYPES.GRAVEL, 70], [BLOCK_TYPES.SAND, 30]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 70], [BLOCK_TYPES.ANDESITE, 10], [BLOCK_TYPES.DIORITE, 10], [BLOCK_TYPES.GRANITE, 10]],
+    color: '#051d3b', name: 'Deep Ocean'
+  },
+  OCEAN:        {
+    baseY: 46,  amplitude: 9,
+    surfaceBlock: BLOCK_TYPES.SAND, subBlock: BLOCK_TYPES.GRAVEL,
+    surfaceVariants: [[BLOCK_TYPES.SAND, 65], [BLOCK_TYPES.GRAVEL, 20], [BLOCK_TYPES.CLAY, 15]],
+    subVariants:     [[BLOCK_TYPES.GRAVEL, 60], [BLOCK_TYPES.SAND, 40]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 70], [BLOCK_TYPES.ANDESITE, 10], [BLOCK_TYPES.DIORITE, 10], [BLOCK_TYPES.GRANITE, 10]],
+    color: '#1565C0', name: 'Ocean'
+  },
+  BEACH:        {
+    baseY: 64,  amplitude: 3,
+    surfaceBlock: BLOCK_TYPES.SAND, subBlock: BLOCK_TYPES.SAND,
+    surfaceVariants: [[BLOCK_TYPES.SAND, 85], [BLOCK_TYPES.GRAVEL, 15]],
+    subVariants:     [[BLOCK_TYPES.SAND, 90], [BLOCK_TYPES.CLAY, 10]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 70], [BLOCK_TYPES.ANDESITE, 10], [BLOCK_TYPES.DIORITE, 10], [BLOCK_TYPES.GRANITE, 10]],
+    color: '#d4b483', name: 'Beach'
+  },
+  PLAINS:       {
+    baseY: 68,  amplitude: 6,
+    surfaceBlock: BLOCK_TYPES.GRASS, subBlock: BLOCK_TYPES.DIRT,
+    surfaceVariants: [[BLOCK_TYPES.GRASS, 70], [BLOCK_TYPES.COARSE_DIRT, 15], [BLOCK_TYPES.MOSS_BLOCK, 8], [BLOCK_TYPES.MYCELIUM, 7]],
+    subVariants:     [[BLOCK_TYPES.DIRT, 80], [BLOCK_TYPES.COARSE_DIRT, 20]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 60], [BLOCK_TYPES.ANDESITE, 13], [BLOCK_TYPES.DIORITE, 12], [BLOCK_TYPES.GRANITE, 15]],
+    color: '#5a8a3c', name: 'Plains'
+  },
+  FOREST:       {
+    baseY: 70,  amplitude: 10,
+    surfaceBlock: BLOCK_TYPES.PODZOL, subBlock: BLOCK_TYPES.DIRT,
+    surfaceVariants: [[BLOCK_TYPES.PODZOL, 50], [BLOCK_TYPES.MYCELIUM, 20], [BLOCK_TYPES.MOSS_BLOCK, 15], [BLOCK_TYPES.GRASS, 15]],
+    subVariants:     [[BLOCK_TYPES.DIRT, 60], [BLOCK_TYPES.COARSE_DIRT, 25], [BLOCK_TYPES.PODZOL, 15]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 55], [BLOCK_TYPES.ANDESITE, 15], [BLOCK_TYPES.DIORITE, 15], [BLOCK_TYPES.GRANITE, 15]],
+    color: '#2d6e2d', name: 'Forest'
+  },
+  BADLANDS:     {
+    baseY: 74,  amplitude: 14,
+    surfaceBlock: BLOCK_TYPES.RED_SAND, subBlock: BLOCK_TYPES.TERRACOTTA,
+    surfaceVariants: [[BLOCK_TYPES.RED_SAND, 55], [BLOCK_TYPES.TERRACOTTA, 25], [BLOCK_TYPES.COARSE_DIRT, 10], [BLOCK_TYPES.STONE, 10]],
+    subVariants:     [[BLOCK_TYPES.TERRACOTTA, 60], [BLOCK_TYPES.RED_SAND, 25], [BLOCK_TYPES.STONE, 15]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 50], [BLOCK_TYPES.ANDESITE, 15], [BLOCK_TYPES.DIORITE, 10], [BLOCK_TYPES.GRANITE, 15], [BLOCK_TYPES.TUFF, 10]],
+    color: '#b5623e', name: 'Badlands'
+  },
+  TUNDRA:       {
+    baseY: 64,  amplitude: 7,
+    surfaceBlock: BLOCK_TYPES.SNOW, subBlock: BLOCK_TYPES.COARSE_DIRT,
+    surfaceVariants: [[BLOCK_TYPES.SNOW, 70], [BLOCK_TYPES.GRASS, 10], [BLOCK_TYPES.COARSE_DIRT, 12], [BLOCK_TYPES.MOSS_BLOCK, 8]],
+    subVariants:     [[BLOCK_TYPES.COARSE_DIRT, 60], [BLOCK_TYPES.DIRT, 40]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 60], [BLOCK_TYPES.ANDESITE, 13], [BLOCK_TYPES.DIORITE, 12], [BLOCK_TYPES.GRANITE, 15]],
+    color: '#c8dde8', name: 'Tundra'
+  },
+  DESERT:       {
+    baseY: 68,  amplitude: 4,
+    surfaceBlock: BLOCK_TYPES.SAND, subBlock: BLOCK_TYPES.CLAY,
+    surfaceVariants: [[BLOCK_TYPES.SAND, 80], [BLOCK_TYPES.CLAY, 10], [BLOCK_TYPES.GRAVEL, 10]],
+    subVariants:     [[BLOCK_TYPES.CLAY, 55], [BLOCK_TYPES.SAND, 30], [BLOCK_TYPES.GRAVEL, 15]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 65], [BLOCK_TYPES.ANDESITE, 10], [BLOCK_TYPES.DIORITE, 10], [BLOCK_TYPES.GRANITE, 15]],
+    color: '#d1b247', name: 'Desert'
+  },
+  MOUNTAINS:    {
+    baseY: 90,  amplitude: 20,
+    surfaceBlock: BLOCK_TYPES.GRASS, subBlock: BLOCK_TYPES.STONE,
+    surfaceVariants: [[BLOCK_TYPES.GRASS, 35], [BLOCK_TYPES.STONE, 25], [BLOCK_TYPES.ANDESITE, 12], [BLOCK_TYPES.DIORITE, 10], [BLOCK_TYPES.GRANITE, 10], [BLOCK_TYPES.COARSE_DIRT, 8]],
+    subVariants:     [[BLOCK_TYPES.STONE, 55], [BLOCK_TYPES.ANDESITE, 15], [BLOCK_TYPES.DIORITE, 12], [BLOCK_TYPES.GRANITE, 10], [BLOCK_TYPES.DIRT, 8]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 40], [BLOCK_TYPES.ANDESITE, 18], [BLOCK_TYPES.DIORITE, 15], [BLOCK_TYPES.GRANITE, 17], [BLOCK_TYPES.TUFF, 10]],
+    color: '#607d8b', name: 'Mountains'
+  },
+  FROZEN_PEAKS: {
+    baseY: 100, amplitude: 20,
+    surfaceBlock: BLOCK_TYPES.SNOW, subBlock: BLOCK_TYPES.COARSE_DIRT,
+    surfaceVariants: [[BLOCK_TYPES.SNOW, 65], [BLOCK_TYPES.STONE, 15], [BLOCK_TYPES.ANDESITE, 8], [BLOCK_TYPES.DIORITE, 7], [BLOCK_TYPES.GRANITE, 5]],
+    subVariants:     [[BLOCK_TYPES.COARSE_DIRT, 50], [BLOCK_TYPES.STONE, 30], [BLOCK_TYPES.DIRT, 20]],
+    stoneVariants:   [[BLOCK_TYPES.STONE, 40], [BLOCK_TYPES.ANDESITE, 18], [BLOCK_TYPES.DIORITE, 15], [BLOCK_TYPES.GRANITE, 17], [BLOCK_TYPES.TUFF, 10]],
+    color: '#e0f7fa', name: 'Frozen Peaks'
+  }
 };
 
 /**
  * Select biome from climate parameters.
  * Continent-first waterfall logic with temp/hum/erosion refinement.
+ * Widened thresholds: lower humidity cutoff for forest, added highlands biome,
+ * reduced plains catch-all area.
  */
 function selectBiome(cont, eros, temp, hum) {
   const isCold = temp < -0.35;
@@ -49,9 +122,14 @@ function selectBiome(cont, eros, temp, hum) {
     return isCold ? BIOME_DEFS.FROZEN_PEAKS : BIOME_DEFS.MOUNTAINS;
   }
 
-  // Hot biomes
+  // Hot biomes (checked before highlands so deserts/badlands aren't overridden)
   if (temp > 0.45) {
     return hum < -0.1 ? BIOME_DEFS.DESERT : BIOME_DEFS.BADLANDS;
+  }
+
+  // Highlands — elevated continental areas in temperate/cold zones
+  if (cont > 0.35 && eros < 0.05) {
+    return isCold ? BIOME_DEFS.FROZEN_PEAKS : BIOME_DEFS.MOUNTAINS;
   }
 
   // Cold land
@@ -59,9 +137,12 @@ function selectBiome(cont, eros, temp, hum) {
     return BIOME_DEFS.TUNDRA;
   }
 
-  // Default: forest or plains based on humidity / continentalness
-  if (hum > 0.2) return BIOME_DEFS.FOREST;
-  if (cont > 0.35) return BIOME_DEFS.PLAINS;
+  // Default: forest or plains — widened forest range (hum > 0.0 instead of 0.2)
+  if (hum > 0.0) return BIOME_DEFS.FOREST;
+
+  // Semi-arid interior: badlands instead of plains
+  if (hum < -0.2) return BIOME_DEFS.BADLANDS;
+
   return BIOME_DEFS.PLAINS;
 }
 

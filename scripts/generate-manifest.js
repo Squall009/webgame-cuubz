@@ -53,6 +53,22 @@ for (const block of BLOCK_REGISTRY) {
     textures: {}
   };
 
+  // Pass through color multiplier (per-face RGB: [r, g, b] where 0-1)
+  if (block.color) {
+    entry.color = block.color; // Single [r,g,b] for all faces
+  }
+
+  // Pass through overlay texture definitions
+  if (block.overlay) {
+    entry.overlay = block.overlay;
+    // Register overlay textures so they're included in the atlas
+    for (const [face, overlayBase] of Object.entries(block.overlay)) {
+      const exists = diffuseFiles.has(overlayBase);
+      if (exists) unusedTextures.delete(overlayBase);
+      if (!exists) missingTextures.push(`${block.name} overlay (${face}): ${overlayBase}.png`);
+    }
+  }
+
   // Handle { all: 'name' } format
   if (block.texture.all) {
     const base = block.texture.all;

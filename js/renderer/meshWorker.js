@@ -65,17 +65,61 @@ function getUV(blockType, faceName, uvLookup) {
   return result;
 }
 
-function buildMeshData(blocks, neighbors, uvLookup) {
-  var solidPos = [], solidNorm = [], solidUV = [], solidIdx = [];
-  var cutoutPos = [], cutoutNorm = [], cutoutUV = [], cutoutIdx = [];
-  var transPos = [], transNorm = [], transUV = [], transIdx = [];
+// Block types that receive humidity-based vertex color tinting
+var TINTABLE_IDS = {
+  // Grass blocks
+  49: true,  // GRASS (grass_block)
+  55: true,  // PODZOL
+  // Grass (ground cover)
+  177: true, // SHORT_GRASS
+  178: true, // TALL_GRASS
+  // Leaves
+  104: true, // OAK_LEAVES
+  105: true, // SPRUCE_LEAVES
+  106: true, // BIRCH_LEAVES
+  107: true, // JUNGLE_LEAVES
+  108: true, // ACACIA_LEAVES
+  109: true, // DARK_OAK_LEAVES
+  110: true, // CHERRY_LEAVES
+  111: true, // MANGROVE_LEAVES
+  112: true, // PALE_OAK_LEAVES
+  113: true, // ORANGE_POPLAR_LEAVES
+  114: true, // RED_POPLAR_LEAVES
+  115: true, // YELLOW_POPLAR_LEAVES
+};
 
-  function addFace(posArr, normArr, uvArr, idxArr, verts, normal, faceUVs, bx, by, bz) {
+function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
+  var solidPos = [], solidNorm = [], solidUV = [], solidIdx = [], solidColor = [];
+  var cutoutPos = [], cutoutNorm = [], cutoutUV = [], cutoutIdx = [], cutoutColor = [];
+  var transPos = [], transNorm = [], transUV = [], transIdx = [], transColor = [];
+
+  // Humidity-to-color gradient: dry (0) → yellow-green, moist (1) → lush green
+  // Using smooth interpolation between [1.0, 0.85, 0.45] (dry) and [0.55, 1.0, 0.45] (moist)
+  function humidityColor(h) {
+    // Clamp 0..1
+    if (h < 0) h = 0;
+    if (h > 1) h = 1;
+    var r = 1.0 - h * 0.45;  // 1.0 → 0.55
+    var g = 0.85 - h * (-0.15); // 0.85 → 1.0
+    var b = 0.45;  // constant
+    return [r, g, b];
+  }
+
+  function getVertexColor(lx, y, lz, blockType) {
+    // Only tint grass/leaf blocks; everything else gets neutral white
+    if (!TINTABLE_IDS[blockType]) return [1.0, 1.0, 1.0];
+    if (!humidityMap) return [1.0, 1.0, 1.0];
+    var h = humidityMap[lx * 16 + lz];
+    return humidityColor(h);
+  }
+
+  function addFace(posArr, normArr, uvArr, colorArr, idxArr, verts, normal, faceUVs, vertexColor, bx, by, bz) {
     var vCount = posArr.length / 3;
     for (var i = 0; i < 4; i++) {
       posArr.push(bx + verts[i][0], by + verts[i][1], bz + verts[i][2]);
       normArr.push(normal[0], normal[1], normal[2]);
       uvArr.push(faceUVs[i][0], faceUVs[i][1]);
+      colorArr.push(vertexColor[0], vertexColor[1], vertexColor[2]);
     }
     idxArr.push(vCount, vCount+1, vCount+2);
     idxArr.push(vCount, vCount+2, vCount+3);
@@ -151,16 +195,17 @@ function buildMeshData(blocks, neighbors, uvLookup) {
           // Face is visible — proceed to build geometry
 
           var faceUVs = getUV(blockType, face.n, uvLookup);
-          addFace(posArr, normArr, uvArr, idxArr, face.v, face.d, faceUVs, x, y, z);
+          var vColor = getVertexColor(x, y, z, blockType);
+          addFace(posArr, normArr, uvArr, (isCutout ? cutoutColor : (isTransparent ? transColor : solidColor)), idxArr, face.v, face.d, faceUVs, vColor, x, y, z);
         }
       }
     }
   }
 
   return {
-    solid:   { pos: new Float32Array(solidPos), norm: new Float32Array(solidNorm), uv: new Float32Array(solidUV), idx: new Uint16Array(solidIdx) },
-    cutout:  { pos: new Float32Array(cutoutPos), norm: new Float32Array(cutoutNorm), uv: new Float32Array(cutoutUV), idx: new Uint16Array(cutoutIdx) },
-    trans:   { pos: new Float32Array(transPos), norm: new Float32Array(transNorm), uv: new Float32Array(transUV), idx: new Uint16Array(transIdx) }
+    solid:   { pos: new Float32Array(solidPos), norm: new Float32Array(solidNorm), uv: new Float32Array(solidUV), idx: new Uint16Array(solidIdx), color: new Float32Array(solidColor) },
+    cutout:  { pos: new Float32Array(cutoutPos), norm: new Float32Array(cutoutNorm), uv: new Float32Array(cutoutUV), idx: new Uint16Array(cutoutIdx), color: new Float32Array(cutoutColor) },
+    trans:   { pos: new Float32Array(transPos), norm: new Float32Array(transNorm), uv: new Float32Array(transUV), idx: new Uint16Array(transIdx), color: new Float32Array(transColor) }
   };
 }
 
@@ -181,20 +226,24 @@ self.onmessage = function (e) {
       }
 
       // Build mesh data
-      var result = buildMeshData(blocks, neighbors, msg.uvLookup || null);
+      var humidityMap = msg.humidityMap ? new Float32Array(msg.humidityMap) : null;
+      if (!humidityMap && !msg.humidityMap) {
+        console.warn('[MeshWorker] No humidityMap for chunk', msg.cx, msg.cz);
+      }
+      var result = buildMeshData(blocks, neighbors, msg.uvLookup || null, humidityMap);
 
       // Send result with transferable buffers
       self.postMessage({
         type: 'result',
         cx: msg.cx,
         cz: msg.cz,
-        solid: { pos: result.solid.pos.buffer, norm: result.solid.norm.buffer, uv: result.solid.uv.buffer, idx: result.solid.idx.buffer },
-        cutout: { pos: result.cutout.pos.buffer, norm: result.cutout.norm.buffer, uv: result.cutout.uv.buffer, idx: result.cutout.idx.buffer },
-        trans:  { pos: result.trans.pos.buffer, norm: result.trans.norm.buffer, uv: result.trans.uv.buffer, idx: result.trans.idx.buffer }
+        solid: { pos: result.solid.pos.buffer, norm: result.solid.norm.buffer, uv: result.solid.uv.buffer, idx: result.solid.idx.buffer, color: result.solid.color.buffer },
+        cutout: { pos: result.cutout.pos.buffer, norm: result.cutout.norm.buffer, uv: result.cutout.uv.buffer, idx: result.cutout.idx.buffer, color: result.cutout.color.buffer },
+        trans:  { pos: result.trans.pos.buffer, norm: result.trans.norm.buffer, uv: result.trans.uv.buffer, idx: result.trans.idx.buffer, color: result.trans.color.buffer }
       }, [
-        result.solid.pos.buffer, result.solid.norm.buffer, result.solid.uv.buffer, result.solid.idx.buffer,
-        result.cutout.pos.buffer, result.cutout.norm.buffer, result.cutout.uv.buffer, result.cutout.idx.buffer,
-        result.trans.pos.buffer, result.trans.norm.buffer, result.trans.uv.buffer, result.trans.idx.buffer
+        result.solid.pos.buffer, result.solid.norm.buffer, result.solid.uv.buffer, result.solid.idx.buffer, result.solid.color.buffer,
+        result.cutout.pos.buffer, result.cutout.norm.buffer, result.cutout.uv.buffer, result.cutout.idx.buffer, result.cutout.color.buffer,
+        result.trans.pos.buffer, result.trans.norm.buffer, result.trans.uv.buffer, result.trans.idx.buffer, result.trans.color.buffer
       ]);
     }
   } catch (err) {

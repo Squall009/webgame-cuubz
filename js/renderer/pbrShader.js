@@ -19,9 +19,11 @@ const PBRVertexShader = `
   varying vec3 vWorldPosition;
   varying vec3 vWorldViewDir;  // View direction in world space
   varying mat3 vTBNWorld;      // Tangent→World space matrix
+  varying vec3 vColor;         // Vertex color (humidity-based tint)
 
   void main() {
     vUv = uv;
+    vColor = color;  // Pass vertex color through (white default if no color attribute)
     
     // World position
     vec4 worldPos = modelMatrix * vec4(position, 1.0);
@@ -87,10 +89,11 @@ const PBRFragmentShader = `
   varying vec3 vWorldPosition;
   varying vec3 vWorldViewDir;
   varying mat3 vTBNWorld;
+  varying vec3 vColor;  // Vertex color (humidity-based tint)
 
   void main() {
     // ── Sample textures ──
-    vec3 albedo = texture2D(uDiffuseMap, vUv).rgb;
+    vec3 albedo = texture2D(uDiffuseMap, vUv).rgb * vColor;
     vec3 packedNormal = texture2D(uNormalMap, vUv).rgb;
     float smoothness = texture2D(uSmoothnessMap, vUv).r;
 
@@ -172,10 +175,11 @@ const PBRFragmentShaderCutout = `
   varying vec3 vWorldPosition;
   varying vec3 vWorldViewDir;
   varying mat3 vTBNWorld;
+  varying vec3 vColor;  // Vertex color (humidity-based tint)
 
   void main() {
     vec4 albedoAlpha = texture2D(uDiffuseMap, vUv);
-    vec3 albedo = albedoAlpha.rgb;
+    vec3 albedo = albedoAlpha.rgb * vColor;
 
     if (albedoAlpha.a < uAlphaCutoff) discard;
 
@@ -249,10 +253,11 @@ const PBRFragmentShaderTransparent = `
   varying vec3 vWorldPosition;
   varying vec3 vWorldViewDir;
   varying mat3 vTBNWorld;
+  varying vec3 vColor;  // Vertex color (humidity-based tint)
 
   void main() {
     vec4 albedoAlpha = texture2D(uDiffuseMap, vUv);
-    vec3 albedo = albedoAlpha.rgb;
+    vec3 albedo = albedoAlpha.rgb * vColor;
 
     vec3 packedNormal = texture2D(uNormalMap, vUv).rgb;
     float smoothness = texture2D(uSmoothnessMap, vUv).r;
@@ -375,6 +380,7 @@ class PBRMaterialFactory {
       uniforms,
       vertexShader: PBRVertexShader,
       fragmentShader: PBRFragmentShader,
+      defines: { USE_COLOR: 1 },
       fog: false,
     });
   }
@@ -387,6 +393,7 @@ class PBRMaterialFactory {
       uniforms,
       vertexShader: PBRVertexShader,
       fragmentShader: PBRFragmentShaderCutout,
+      defines: { USE_COLOR: 1 },
       transparent: true,
       alphaToCoverage: true,
       depthWrite: true,
@@ -403,6 +410,7 @@ class PBRMaterialFactory {
       uniforms,
       vertexShader: PBRVertexShader,
       fragmentShader: PBRFragmentShaderTransparent,
+      defines: { USE_COLOR: 1 },
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,

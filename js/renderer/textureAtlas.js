@@ -70,20 +70,46 @@ class PBRTextureAtlas {
       }
     }
 
-    if (textureBases.size === 0) {
+    // 2b. Collect overlay texture bases (need separate atlas slots for compositing)
+    const overlayBases = new Set();
+    for (const block of manifest) {
+      if (block.overlay) {
+        for (const overlayName of Object.values(block.overlay)) {
+          overlayBases.add(overlayName);
+        }
+      }
+    }
+
+    // 2c. Collect color variant definitions — blocks with color multipliers need unique slots.
+    // Key: "baseName:colorKey" → { base, color, blockId, face }
+    const colorVariantDefs = new Map();
+    for (const block of manifest) {
+      if (!block.color) continue;
+      const colorKey = block.color.join(',');
+      for (const [face, entry] of Object.entries(block.textures)) {
+        if (!entry.exists) continue;
+        const variantKey = `${entry.base}:${face}:${colorKey}`;
+        colorVariantDefs.set(variantKey, { base: entry.base, color: block.color, blockId: block.id, face });
+      }
+    }
+
+    // Total atlas slots needed
+    const totalSlots = textureBases.size + overlayBases.size + colorVariantDefs.size;
+
+    if (totalSlots === 0) {
       console.warn('[PBRTextureAtlas] No textures found in manifest');
       return this;
     }
 
     // 3. Calculate grid size — always square
-    const gridSize = Math.ceil(Math.sqrt(textureBases.size));
+    const gridSize = Math.ceil(Math.sqrt(totalSlots));
     this.gridW = gridSize;
     this.gridH = gridSize;
 
     // 2px gap between tiles so edge replication doesn't overwrite adjacent tiles.
     this._gap = 2;
     const canvasSize = gridSize * this.tileSize + (gridSize + 1) * this._gap;
-    console.log(`[PBRTextureAtlas] ${textureBases.size} unique textures → ${gridSize}×${gridSize} grid, ${canvasSize}×${canvasSize} px atlas (2px gaps, ${canvasSize} ≤ 4096: ${canvasSize <= 4096})`);
+    console.log(`[PBRTextureAtlas] ${textureBases.size} base + ${overlayBases.size} overlay + ${colorVariantDefs.size} color variant textures → ${totalSlots} slots, ${gridSize}×${gridSize} grid, ${canvasSize}×${canvasSize} px atlas (2px gaps, ${canvasSize} ≤ 4096: ${canvasSize <= 4096})`);
 
     // 4. Create 3 canvases
     this.diffuseCanvas = this._createCanvas(canvasSize);
@@ -92,9 +118,12 @@ class PBRTextureAtlas {
 
     // 5. Assign grid slots and load all textures
     const baseToSlot = {}; // texture base name → { col, row }
+    const colorSlotMap = {}; // variantKey → { col, row }
     let slotIndex = 0;
 
     const loadPromises = [];
+
+    // 5a. Load base textures
     for (const [base] of textureBases) {
       const col = slotIndex % gridSize;
       const row = Math.floor(slotIndex / gridSize);
@@ -103,17 +132,61 @@ class PBRTextureAtlas {
       slotIndex++;
     }
 
+    // 5b. Load overlay textures (get their own slots for compositing)
+    for (const base of overlayBases) {
+      const col = slotIndex % gridSize;
+      const row = Math.floor(slotIndex / gridSize);
+      baseToSlot[base] = { col, row };
+      loadPromises.push(this._loadTriple(base, col, row));
+      slotIndex++;
+    }
+
+    // 5c. Load color variant textures (copy of base + color multiplier applied)
+    for (const [variantKey, variant] of colorVariantDefs) {
+      const col = slotIndex % gridSize;
+      const row = Math.floor(slotIndex / gridSize);
+      colorSlotMap[variantKey] = { col, row };
+      loadPromises.push(this._loadTripleColored(variant.base, col, row, variant.color));
+      slotIndex++;
+    }
+
     await Promise.all(loadPromises);
 
-    // 6. Build tileMap from manifest + baseToSlot
+    // 6. Build tileMap from manifest + baseToSlot + color variants
     for (const block of manifest) {
       const tiles = {};
+      const colorKey = block.color ? block.color.join(',') : null;
+
       for (const [face, entry] of Object.entries(block.textures)) {
-        const slot = baseToSlot[entry.base];
-        if (slot) {
-          tiles[face] = { col: slot.col, row: slot.row };
+        // If this block has a color multiplier, use its color variant slot
+        if (colorKey && entry.exists) {
+          const variantKey = `${entry.base}:${face}:${colorKey}`;
+          const variantSlot = colorSlotMap[variantKey];
+          if (variantSlot) {
+            tiles[face] = { col: variantSlot.col, row: variantSlot.row };
+            continue;
+          }
+        }
+        // Fall back to base slot
+        if (entry.exists) {
+          const slot = baseToSlot[entry.base];
+          if (slot) {
+            tiles[face] = { col: slot.col, row: slot.row };
+          }
         }
       }
+
+      // 6b. Apply overlay compositing for blocks with overlay definitions
+      if (block.overlay) {
+        for (const [face, overlayName] of Object.entries(block.overlay)) {
+          const overlaySlot = baseToSlot[overlayName];
+          const targetSlot = tiles[face];
+          if (overlaySlot && targetSlot) {
+            this._compositeOverlay(targetSlot, overlaySlot);
+          }
+        }
+      }
+
       this.tileMap[block.id] = { tiles };
     }
 
@@ -126,7 +199,7 @@ class PBRTextureAtlas {
     this._buildDebugInfo();
 
     this.loaded = true;
-    console.log(`[PBRTextureAtlas] Atlas built: ${textureBases.size} tiles, ${Object.keys(this.tileMap).length} block mappings`);
+    console.log(`[PBRTextureAtlas] Atlas built: ${totalSlots} tiles, ${Object.keys(this.tileMap).length} block mappings`);
     return this;
   }
 
@@ -167,6 +240,84 @@ class PBRTextureAtlas {
   }
 
   /**
+   * Load a texture and apply an RGB color multiplier to the diffuse channel.
+   * Used for blocks like tinted flowers that share a base texture but need different colors.
+   * Normal and smoothness maps are loaded as-is (no color modification).
+   */
+  async _loadTripleColored(base, col, row, color) {
+    const x = this._gap + col * (this.tileSize + this._gap);
+    const y = this._gap + row * (this.tileSize + this._gap);
+
+    try {
+      // Load diffuse with color multiplier
+      await this._loadImageColored(`textures/blocks/${base}.png`, this.diffuseCanvas, x, y, color);
+      // Load normal map (unchanged)
+      await this._loadImage(`textures/blocks/${base}_n.png`, this.normalCanvas, x, y);
+      // Load smoothness map (unchanged)
+      await this._loadImage(`textures/blocks/${base}_s.png`, this.smoothnessCanvas, x, y);
+    } catch (e) {
+      console.error(`[PBRTextureAtlas] Failed to load colored ${base}:`, e.message);
+    }
+  }
+
+  /**
+   * Composite an overlay texture onto a target tile using alpha blending.
+   * The overlay tile is alpha-blended over the target tile in the diffuse atlas.
+   * For normal/smoothness atlases, the overlay replaces the target where alpha > 0.
+   */
+  _compositeOverlay(targetSlot, overlaySlot) {
+    const tx = this._gap + targetSlot.col * (this.tileSize + this._gap);
+    const ty = this._gap + targetSlot.row * (this.tileSize + this._gap);
+    const ox = this._gap + overlaySlot.col * (this.tileSize + this._gap);
+    const oy = this._gap + overlaySlot.row * (this.tileSize + this._gap);
+    const size = this.tileSize;
+
+    // Get pixel data from both tiles
+    const targetDiffuse = this.diffuseCanvas.getContext('2d').getImageData(tx, ty, size, size);
+    const overlayDiffuse = this.diffuseCanvas.getContext('2d').getImageData(ox, oy, size, size);
+
+    // Alpha-composite overlay onto target (diffuse)
+    for (let i = 0; i < targetDiffuse.data.length; i += 4) {
+      const overlayAlpha = overlayDiffuse.data[i + 3] / 255;
+      if (overlayAlpha > 0) {
+        const targetAlpha = targetDiffuse.data[i + 3] / 255;
+        // Standard alpha compositing: result = overlay * overlayAlpha + target * (1 - overlayAlpha)
+        targetDiffuse.data[i]     = overlayDiffuse.data[i]     * overlayAlpha + targetDiffuse.data[i]     * (1 - overlayAlpha * targetAlpha);
+        targetDiffuse.data[i + 1] = overlayDiffuse.data[i + 1] * overlayAlpha + targetDiffuse.data[i + 1] * (1 - overlayAlpha * targetAlpha);
+        targetDiffuse.data[i + 2] = overlayDiffuse.data[i + 2] * overlayAlpha + targetDiffuse.data[i + 2] * (1 - overlayAlpha * targetAlpha);
+        targetDiffuse.data[i + 3] = Math.min(255, (overlayAlpha + targetAlpha * (1 - overlayAlpha)) * 255);
+      }
+    }
+    this.diffuseCanvas.getContext('2d').putImageData(targetDiffuse, tx, ty);
+
+    // For normal map: blend overlay normal where overlay has alpha
+    const targetNormal = this.normalCanvas.getContext('2d').getImageData(tx, ty, size, size);
+    const overlayNormal = this.normalCanvas.getContext('2d').getImageData(ox, oy, size, size);
+    for (let i = 0; i < targetNormal.data.length; i += 4) {
+      const overlayAlpha = overlayNormal.data[i + 3] / 255;
+      if (overlayAlpha > 0.5) {
+        targetNormal.data[i]     = overlayNormal.data[i];
+        targetNormal.data[i + 1] = overlayNormal.data[i + 1];
+        targetNormal.data[i + 2] = overlayNormal.data[i + 2];
+      }
+    }
+    this.normalCanvas.getContext('2d').putImageData(targetNormal, tx, ty);
+
+    // For smoothness: blend overlay smoothness where overlay has alpha
+    const targetSmooth = this.smoothnessCanvas.getContext('2d').getImageData(tx, ty, size, size);
+    const overlaySmooth = this.smoothnessCanvas.getContext('2d').getImageData(ox, oy, size, size);
+    for (let i = 0; i < targetSmooth.data.length; i += 4) {
+      const overlayAlpha = overlaySmooth.data[i + 3] / 255;
+      if (overlayAlpha > 0.5) {
+        targetSmooth.data[i]     = overlaySmooth.data[i];
+        targetSmooth.data[i + 1] = overlaySmooth.data[i + 1];
+        targetSmooth.data[i + 2] = overlaySmooth.data[i + 2];
+      }
+    }
+    this.smoothnessCanvas.getContext('2d').putImageData(targetSmooth, tx, ty);
+  }
+
+  /**
    * Load a single image and draw it onto a canvas at the specified position.
    * Replicates edge pixels outward by 1px so linear filtering doesn't bleed
    * into adjacent atlas tiles (which causes visible seams at tile boundaries).
@@ -197,6 +348,50 @@ class PBRTextureAtlas {
         }
         ctx.fillRect(x, y, this.tileSize, this.tileSize);
         resolve(); // Don't reject — continue with fallback
+      };
+      img.src = url;
+    });
+  }
+
+  /**
+   * Load a single image, apply an RGB color multiplier, and draw it onto a canvas.
+   * color: [r, g, b] array with values 0-1. Each pixel's RGB is multiplied by the color.
+   * Alpha channel is preserved unchanged.
+   */
+  _loadImageColored(url, canvas, x, y, color) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        // Draw the image first
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, x, y, this.tileSize, this.tileSize);
+
+        // Apply color multiplier to the loaded pixels
+        const imageData = ctx.getImageData(x, y, this.tileSize, this.tileSize);
+        const data = imageData.data;
+        const [cr, cg, cb] = color;
+
+        for (let i = 0; i < data.length; i += 4) {
+          // Only modify pixels that have alpha (skip fully transparent)
+          if (data[i + 3] > 0) {
+            data[i]     = Math.min(255, data[i]     * cr);
+            data[i + 1] = Math.min(255, data[i + 1] * cg);
+            data[i + 2] = Math.min(255, data[i + 2] * cb);
+            // Alpha unchanged
+          }
+        }
+        ctx.putImageData(imageData, x, y);
+
+        // Replicate edge pixels to prevent atlas tile bleeding
+        this._replicateEdges(ctx, x, y, this.tileSize);
+        resolve();
+      };
+      img.onerror = () => {
+        // Fill with fallback color
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = `rgb(${Math.floor(100 * color[0])}, ${Math.floor(100 * color[1])}, ${Math.floor(100 * color[2])})`;
+        ctx.fillRect(x, y, this.tileSize, this.tileSize);
+        resolve();
       };
       img.src = url;
     });

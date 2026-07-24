@@ -18,6 +18,7 @@ class Chunk {
     this.cx = chunkX;
     this.cz = chunkZ;
     this.blocks = new Uint8Array(CHUNK_WIDTH * CHUNK_DEPTH * CHUNK_HEIGHT);
+    this.humidityMap = null;  // Float32Array(256) — normalized 0..1 humidity per column, for vertex color tinting
     this.dirty   = false;  // Player modified → needs flush to IndexedDB (every 5s)
     this.changed = false;  // Block changed since last frame → needs mesh rebuild now
   }

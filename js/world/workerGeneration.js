@@ -21,6 +21,8 @@
   // ── Block types (subset used in generation — IDs match blockRegistry.js) ─
   var BLOCK = {
     AIR: 0, BEDROCK: 1, STONE: 2,
+    // Stone variants (IDs 4-7)
+    ANDESITE: 4, DIORITE: 5, GRANITE: 6, TUFF: 7,
     // Surface blocks (IDs 48-60)
     DIRT: 48, GRASS: 49, SAND: 50, GRAVEL: 51,
     // Fluids (IDs 46-47)
@@ -34,35 +36,142 @@
     // CAVE_AIR is now AIR in the new system
     CAVE_AIR: 0,
     // More surface blocks
-    SNOW: 54, SNOW_STONE: 56, // coarse_dirt
-    LAVA: 47, TERRACOTTA: 58, RED_SAND: 52,
-    ICE: 61, CLAY: 53,
+    RED_SAND: 52, CLAY: 53, SNOW: 54,
+    PODZOL: 55, COARSE_DIRT: 56, MYCELIUM: 57, TERRACOTTA: 58,
+    SMOOTH_STONE: 59, CALCITE: 60,
+    // Moss block (ID 20)
+    MOSS_BLOCK: 20,
+    // Ice variants
+    ICE: 61,
+    // LAVA
+    LAVA: 47,
     // Decoration blocks (from registry)
     WOOD_LOG: 65, LEAVES: 104, RED_FLOWER: 179, YELLOW_FLOWER: 180,
     // Additional wood types for biome-specific trees
     SPRUCE_LOG: 66, SPRUCE_LEAVES: 105,
     BIRCH_LOG: 67, BIRCH_LEAVES: 106,
+    DARK_OAK_LOG: 70, DARK_OAK_LEAVES: 109,
+    ACACIA_LOG: 69, ACACIA_LEAVES: 108,
+    PALE_OAK_LOG: 73, PALE_OAK_LEAVES: 112,
+    CHERRY_LOG: 71, CHERRY_LEAVES: 110,
+    MANGROVE_LOG: 72, MANGROVE_LEAVES: 111,
+    BAMBOO_BLOCK: 75,
+    POPLAR_LOG: 74, ORANGE_POPLAR_LEAVES: 113, RED_POPLAR_LEAVES: 114, YELLOW_POPLAR_LEAVES: 115,
+    // Ground cover / plants
+    SHORT_GRASS: 177, TALL_GRASS: 178,
+    BROWN_MUSHROOM: 181, RED_MUSHROOM: 182,
     // Deepslate block (for deep terrain)
     DEEPSLATE: 8
   };
 
   // ── Biome definitions (must match biomeSystem.js) ───────────────────
+  // surfaceVariants: array of [blockId, weight] — noise-driven mixing at the surface layer.
+  // subVariants: array of [blockId, weight] — mixing in the sub-surface dirt layer.
+  // stoneVariants: array of [blockId, weight] — mixing in the deep stone layer.
   var BIOME = {
-    DEEP_OCEAN:   { baseY: 32,  amplitude: 9,  surfaceBlock: BLOCK.GRAVEL,    subBlock: BLOCK.GRAVEL,     color: '#051d3b', name: 'Deep Ocean' },
-    OCEAN:        { baseY: 46,  amplitude: 9,  surfaceBlock: BLOCK.SAND,      subBlock: BLOCK.GRAVEL,     color: '#1565C0', name: 'Ocean' },
-    BEACH:        { baseY: 64,  amplitude: 3,  surfaceBlock: BLOCK.SAND,      subBlock: BLOCK.SAND,       color: '#d4b483', name: 'Beach' },
-    PLAINS:       { baseY: 68,  amplitude: 6,  surfaceBlock: BLOCK.GRASS,     subBlock: BLOCK.DIRT,       color: '#5a8a3c', name: 'Plains' },
-    FOREST:       { baseY: 70,  amplitude: 10, surfaceBlock: BLOCK.GRASS,     subBlock: BLOCK.DIRT,       color: '#2d6e2d', name: 'Forest' },
-    BADLANDS:     { baseY: 74,  amplitude: 14, surfaceBlock: BLOCK.RED_SAND,  subBlock: BLOCK.TERRACOTTA, color: '#b5623e', name: 'Badlands' },
-    TUNDRA:       { baseY: 64,  amplitude: 7,  surfaceBlock: BLOCK.SNOW,      subBlock: BLOCK.DIRT,       color: '#c8dde8', name: 'Tundra' },
-    DESERT:       { baseY: 68,  amplitude: 4,  surfaceBlock: BLOCK.SAND,      subBlock: BLOCK.CLAY,       color: '#d1b247', name: 'Desert' },
-    MOUNTAINS:    { baseY: 90,  amplitude: 20, surfaceBlock: BLOCK.GRASS,     subBlock: BLOCK.STONE,      color: '#607d8b', name: 'Mountains' },
-    FROZEN_PEAKS: { baseY: 100, amplitude: 20, surfaceBlock: BLOCK.SNOW,      subBlock: BLOCK.SNOW_STONE, color: '#e0f7fa', name: 'Frozen Peaks' }
+    DEEP_OCEAN:   {
+      baseY: 32,  amplitude: 9,
+      surfaceBlock: BLOCK.GRAVEL, subBlock: BLOCK.GRAVEL,
+      surfaceVariants: [[BLOCK.GRAVEL, 60], [BLOCK.SAND, 25], [BLOCK.CLAY, 15]],
+      subVariants:     [[BLOCK.GRAVEL, 70], [BLOCK.SAND, 30]],
+      stoneVariants:   [[BLOCK.STONE, 70], [BLOCK.ANDESITE, 10], [BLOCK.DIORITE, 10], [BLOCK.GRANITE, 10]],
+      color: '#051d3b', name: 'Deep Ocean'
+    },
+    OCEAN:        {
+      baseY: 46,  amplitude: 9,
+      surfaceBlock: BLOCK.SAND, subBlock: BLOCK.GRAVEL,
+      surfaceVariants: [[BLOCK.SAND, 65], [BLOCK.GRAVEL, 20], [BLOCK.CLAY, 15]],
+      subVariants:     [[BLOCK.GRAVEL, 60], [BLOCK.SAND, 40]],
+      stoneVariants:   [[BLOCK.STONE, 70], [BLOCK.ANDESITE, 10], [BLOCK.DIORITE, 10], [BLOCK.GRANITE, 10]],
+      color: '#1565C0', name: 'Ocean'
+    },
+    BEACH:        {
+      baseY: 64,  amplitude: 3,
+      surfaceBlock: BLOCK.SAND, subBlock: BLOCK.SAND,
+      surfaceVariants: [[BLOCK.SAND, 85], [BLOCK.GRAVEL, 15]],
+      subVariants:     [[BLOCK.SAND, 90], [BLOCK.CLAY, 10]],
+      stoneVariants:   [[BLOCK.STONE, 70], [BLOCK.ANDESITE, 10], [BLOCK.DIORITE, 10], [BLOCK.GRANITE, 10]],
+      color: '#d4b483', name: 'Beach'
+    },
+    PLAINS:       {
+      baseY: 68,  amplitude: 6,
+      surfaceBlock: BLOCK.GRASS, subBlock: BLOCK.DIRT,
+      surfaceVariants: [[BLOCK.GRASS, 70], [BLOCK.COARSE_DIRT, 15], [BLOCK.MOSS_BLOCK, 8], [BLOCK.MYCELIUM, 7]],
+      subVariants:     [[BLOCK.DIRT, 80], [BLOCK.COARSE_DIRT, 20]],
+      stoneVariants:   [[BLOCK.STONE, 60], [BLOCK.ANDESITE, 13], [BLOCK.DIORITE, 12], [BLOCK.GRANITE, 15]],
+      color: '#5a8a3c', name: 'Plains'
+    },
+    FOREST:       {
+      baseY: 70,  amplitude: 10,
+      surfaceBlock: BLOCK.PODZOL, subBlock: BLOCK.DIRT,
+      surfaceVariants: [[BLOCK.PODZOL, 50], [BLOCK.MYCELIUM, 20], [BLOCK.MOSS_BLOCK, 15], [BLOCK.GRASS, 15]],
+      subVariants:     [[BLOCK.DIRT, 60], [BLOCK.COARSE_DIRT, 25], [BLOCK.PODZOL, 15]],
+      stoneVariants:   [[BLOCK.STONE, 55], [BLOCK.ANDESITE, 15], [BLOCK.DIORITE, 15], [BLOCK.GRANITE, 15]],
+      color: '#2d6e2d', name: 'Forest'
+    },
+    BADLANDS:     {
+      baseY: 74,  amplitude: 14,
+      surfaceBlock: BLOCK.RED_SAND, subBlock: BLOCK.TERRACOTTA,
+      surfaceVariants: [[BLOCK.RED_SAND, 55], [BLOCK.TERRACOTTA, 25], [BLOCK.COARSE_DIRT, 10], [BLOCK.STONE, 10]],
+      subVariants:     [[BLOCK.TERRACOTTA, 60], [BLOCK.RED_SAND, 25], [BLOCK.STONE, 15]],
+      stoneVariants:   [[BLOCK.STONE, 50], [BLOCK.ANDESITE, 15], [BLOCK.DIORITE, 10], [BLOCK.GRANITE, 15], [BLOCK.TUFF, 10]],
+      color: '#b5623e', name: 'Badlands'
+    },
+    TUNDRA:       {
+      baseY: 64,  amplitude: 7,
+      surfaceBlock: BLOCK.SNOW, subBlock: BLOCK.COARSE_DIRT,
+      surfaceVariants: [[BLOCK.SNOW, 70], [BLOCK.GRASS, 10], [BLOCK.COARSE_DIRT, 12], [BLOCK.MOSS_BLOCK, 8]],
+      subVariants:     [[BLOCK.COARSE_DIRT, 60], [BLOCK.DIRT, 40]],
+      stoneVariants:   [[BLOCK.STONE, 60], [BLOCK.ANDESITE, 13], [BLOCK.DIORITE, 12], [BLOCK.GRANITE, 15]],
+      color: '#c8dde8', name: 'Tundra'
+    },
+    DESERT:       {
+      baseY: 68,  amplitude: 4,
+      surfaceBlock: BLOCK.SAND, subBlock: BLOCK.CLAY,
+      surfaceVariants: [[BLOCK.SAND, 80], [BLOCK.CLAY, 10], [BLOCK.GRAVEL, 10]],
+      subVariants:     [[BLOCK.CLAY, 55], [BLOCK.SAND, 30], [BLOCK.GRAVEL, 15]],
+      stoneVariants:   [[BLOCK.STONE, 65], [BLOCK.ANDESITE, 10], [BLOCK.DIORITE, 10], [BLOCK.GRANITE, 15]],
+      color: '#d1b247', name: 'Desert'
+    },
+    MOUNTAINS:    {
+      baseY: 90,  amplitude: 20,
+      surfaceBlock: BLOCK.GRASS, subBlock: BLOCK.STONE,
+      surfaceVariants: [[BLOCK.GRASS, 35], [BLOCK.STONE, 25], [BLOCK.ANDESITE, 12], [BLOCK.DIORITE, 10], [BLOCK.GRANITE, 10], [BLOCK.COARSE_DIRT, 8]],
+      subVariants:     [[BLOCK.STONE, 55], [BLOCK.ANDESITE, 15], [BLOCK.DIORITE, 12], [BLOCK.GRANITE, 10], [BLOCK.DIRT, 8]],
+      stoneVariants:   [[BLOCK.STONE, 40], [BLOCK.ANDESITE, 18], [BLOCK.DIORITE, 15], [BLOCK.GRANITE, 17], [BLOCK.TUFF, 10]],
+      color: '#607d8b', name: 'Mountains'
+    },
+    FROZEN_PEAKS: {
+      baseY: 100, amplitude: 20,
+      surfaceBlock: BLOCK.SNOW, subBlock: BLOCK.COARSE_DIRT,
+      surfaceVariants: [[BLOCK.SNOW, 65], [BLOCK.STONE, 15], [BLOCK.ANDESITE, 8], [BLOCK.DIORITE, 7], [BLOCK.GRANITE, 5]],
+      subVariants:     [[BLOCK.COARSE_DIRT, 50], [BLOCK.STONE, 30], [BLOCK.DIRT, 20]],
+      stoneVariants:   [[BLOCK.STONE, 40], [BLOCK.ANDESITE, 18], [BLOCK.DIORITE, 15], [BLOCK.GRANITE, 17], [BLOCK.TUFF, 10]],
+      color: '#e0f7fa', name: 'Frozen Peaks'
+    }
   };
 
   var CONT_SPLINE = [
     [-1.0, -1.1], [-0.4, -0.6], [-0.1, -0.1], [0.1, 0.2], [0.25, 0.6], [0.5, 0.85], [1.0, 1.1]
   ];
+
+  // ── Weighted random selection from variant arrays ──────────────────
+  // Uses a deterministic per-column noise value to pick from weighted variants.
+  function selectVariant(variants, noiseVal) {
+    // noiseVal: -1..1 → normalize to 0..1
+    var t = (noiseVal + 1) * 0.5;
+    var totalWeight = 0;
+    for (var vi = 0; vi < variants.length; vi++) {
+      totalWeight += variants[vi][1];
+    }
+    var target = t * totalWeight;
+    var accumulated = 0;
+    for (var vi = 0; vi < variants.length; vi++) {
+      accumulated += variants[vi][1];
+      if (target <= accumulated) return variants[vi][0];
+    }
+    return variants[variants.length - 1][0];
+  }
 
   var SEA_LEVEL = 64;
 
@@ -106,19 +215,149 @@
   ];
 
   // ── Tree types per biome ───────────────────────────────────────────
-  // Maps biome name → { log, leaves } block IDs
+  // Maps biome name → weighted array of { log, leaves } tree types.
+  // selectVariant picks based on per-column noise for variety within a biome.
   var TREE_TYPES = {
-    'Forest':       { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
-    'Plains':       { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
-    'Mountains':    { log: BLOCK.SPRUCE_LOG,  leaves: BLOCK.SPRUCE_LEAVES },
-    'Tundra':       { log: BLOCK.SPRUCE_LOG,  leaves: BLOCK.SPRUCE_LEAVES },
-    'Frozen Peaks': { log: BLOCK.SPRUCE_LOG,  leaves: BLOCK.SPRUCE_LEAVES },
-    'Beach':        { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
-    'Desert':       { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
-    'Badlands':     { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
-    'Ocean':        { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES },
-    'Deep Ocean':   { log: BLOCK.WOOD_LOG,    leaves: BLOCK.LEAVES }
+    'Forest':       [
+      { log: BLOCK.BIRCH_LOG,    leaves: BLOCK.BIRCH_LEAVES,    weight: 25 },
+      { log: BLOCK.WOOD_LOG,     leaves: BLOCK.LEAVES,          weight: 20 },
+      { log: BLOCK.SPRUCE_LOG,   leaves: BLOCK.SPRUCE_LEAVES,   weight: 15 },
+      { log: BLOCK.DARK_OAK_LOG, leaves: BLOCK.DARK_OAK_LEAVES, weight: 10 },
+      { log: BLOCK.CHERRY_LOG,   leaves: BLOCK.CHERRY_LEAVES,   weight: 10 },
+      { log: BLOCK.MANGROVE_LOG, leaves: BLOCK.MANGROVE_LEAVES, weight: 10 },
+      { log: BLOCK.BAMBOO_BLOCK, leaves: BLOCK.LEAVES,          weight: 10 }
+    ],
+    'Plains':       [
+      { log: BLOCK.WOOD_LOG,     leaves: BLOCK.LEAVES,          weight: 30 },
+      { log: BLOCK.BIRCH_LOG,    leaves: BLOCK.BIRCH_LEAVES,    weight: 20 },
+      { log: BLOCK.ACACIA_LOG,   leaves: BLOCK.ACACIA_LEAVES,   weight: 15 },
+      { log: BLOCK.POPLAR_LOG,   leaves: BLOCK.ORANGE_POPLAR_LEAVES, weight: 10 },
+      { log: BLOCK.CHERRY_LOG,   leaves: BLOCK.CHERRY_LEAVES,   weight: 10 },
+      { log: BLOCK.PALE_OAK_LOG, leaves: BLOCK.PALE_OAK_LEAVES, weight: 15 }
+    ],
+    'Mountains':    [
+      { log: BLOCK.SPRUCE_LOG,   leaves: BLOCK.SPRUCE_LEAVES,   weight: 40 },
+      { log: BLOCK.WOOD_LOG,     leaves: BLOCK.LEAVES,          weight: 20 },
+      { log: BLOCK.DARK_OAK_LOG, leaves: BLOCK.DARK_OAK_LEAVES, weight: 15 },
+      { log: BLOCK.PALE_OAK_LOG, leaves: BLOCK.PALE_OAK_LEAVES, weight: 15 },
+      { log: BLOCK.BAMBOO_BLOCK, leaves: BLOCK.LEAVES,          weight: 10 }
+    ],
+    'Tundra':       [
+      { log: BLOCK.SPRUCE_LOG,   leaves: BLOCK.SPRUCE_LEAVES,   weight: 40 },
+      { log: BLOCK.PALE_OAK_LOG, leaves: BLOCK.PALE_OAK_LEAVES, weight: 35 },
+      { log: BLOCK.WOOD_LOG,     leaves: BLOCK.LEAVES,          weight: 25 }
+    ],
+    'Frozen Peaks': [
+      { log: BLOCK.SPRUCE_LOG,   leaves: BLOCK.SPRUCE_LEAVES,   weight: 60 },
+      { log: BLOCK.PALE_OAK_LOG, leaves: BLOCK.PALE_OAK_LEAVES, weight: 25 },
+      { log: BLOCK.WOOD_LOG,     leaves: BLOCK.LEAVES,          weight: 15 }
+    ],
+    'Beach':        [
+      { log: BLOCK.MANGROVE_LOG, leaves: BLOCK.MANGROVE_LEAVES, weight: 40 },
+      { log: BLOCK.ACACIA_LOG,   leaves: BLOCK.ACACIA_LEAVES,   weight: 30 },
+      { log: BLOCK.BAMBOO_BLOCK, leaves: BLOCK.LEAVES,          weight: 30 }
+    ],
+    'Desert':       [
+      { log: BLOCK.ACACIA_LOG,   leaves: BLOCK.ACACIA_LEAVES,   weight: 40 },
+      { log: BLOCK.BAMBOO_BLOCK, leaves: BLOCK.LEAVES,          weight: 30 },
+      { log: BLOCK.WOOD_LOG,     leaves: BLOCK.LEAVES,          weight: 30 }
+    ],
+    'Badlands':     [
+      { log: BLOCK.ACACIA_LOG,   leaves: BLOCK.ACACIA_LEAVES,   weight: 50 },
+      { log: BLOCK.WOOD_LOG,     leaves: BLOCK.LEAVES,          weight: 50 }
+    ],
+    'Ocean':        [
+      { log: BLOCK.MANGROVE_LOG, leaves: BLOCK.MANGROVE_LEAVES, weight: 100 }
+    ],
+    'Deep Ocean':   [
+      { log: BLOCK.MANGROVE_LOG, leaves: BLOCK.MANGROVE_LEAVES, weight: 100 }
+    ]
   };
+
+  // ── Ground cover types per biome ───────────────────────────────────
+  // Placed alongside flowers for surface variety.
+  // Each entry: { block, weight } — selected via noise per column.
+  var GROUND_COVER = {
+    'Forest':       [
+      { block: BLOCK.TALL_GRASS,       weight: 30 },
+      { block: BLOCK.SHORT_GRASS,      weight: 25 },
+      { block: BLOCK.BROWN_MUSHROOM,   weight: 15 },
+      { block: BLOCK.RED_MUSHROOM,     weight: 5 },
+      { block: BLOCK.RED_FLOWER,       weight: 15 },
+      { block: BLOCK.YELLOW_FLOWER,    weight: 10 }
+    ],
+    'Plains':       [
+      { block: BLOCK.TALL_GRASS,       weight: 35 },
+      { block: BLOCK.SHORT_GRASS,      weight: 30 },
+      { block: BLOCK.RED_FLOWER,       weight: 20 },
+      { block: BLOCK.YELLOW_FLOWER,    weight: 15 }
+    ],
+    'Mountains':    [
+      { block: BLOCK.SHORT_GRASS,      weight: 40 },
+      { block: BLOCK.TALL_GRASS,       weight: 20 },
+      { block: BLOCK.RED_FLOWER,       weight: 15 },
+      { block: BLOCK.YELLOW_FLOWER,    weight: 10 },
+      { block: BLOCK.BROWN_MUSHROOM,   weight: 15 }
+    ],
+    'Tundra':       [
+      { block: BLOCK.SHORT_GRASS,      weight: 40 },
+      { block: BLOCK.TALL_GRASS,       weight: 20 },
+      { block: BLOCK.BROWN_MUSHROOM,   weight: 25 },
+      { block: BLOCK.RED_MUSHROOM,     weight: 15 }
+    ],
+    'Frozen Peaks': [
+      { block: BLOCK.SHORT_GRASS,      weight: 30 },
+      { block: BLOCK.BROWN_MUSHROOM,   weight: 35 },
+      { block: BLOCK.RED_MUSHROOM,     weight: 35 }
+    ],
+    'Beach':        [
+      { block: BLOCK.SHORT_GRASS,      weight: 50 },
+      { block: BLOCK.TALL_GRASS,       weight: 50 }
+    ],
+    'Desert':       [
+      { block: BLOCK.SHORT_GRASS,      weight: 30 },
+      { block: BLOCK.TALL_GRASS,       weight: 20 }
+    ],
+    'Badlands':     [
+      { block: BLOCK.SHORT_GRASS,      weight: 20 },
+      { block: BLOCK.TALL_GRASS,       weight: 10 }
+    ],
+    'Ocean':        [],
+    'Deep Ocean':   []
+  };
+
+  // Helper: pick a tree type from weighted biome array using noise.
+  function selectTreeType(treeTypes, noiseVal) {
+    var t = (noiseVal + 1) * 0.5; // -1..1 → 0..1
+    var totalWeight = 0;
+    for (var i = 0; i < treeTypes.length; i++) {
+      totalWeight += treeTypes[i].weight;
+    }
+    var target = t * totalWeight;
+    var accumulated = 0;
+    for (var i = 0; i < treeTypes.length; i++) {
+      accumulated += treeTypes[i].weight;
+      if (target <= accumulated) return treeTypes[i];
+    }
+    return treeTypes[treeTypes.length - 1];
+  }
+
+  // Helper: pick a ground cover block from weighted biome array using noise.
+  function selectGroundCover(coverTypes, noiseVal) {
+    if (!coverTypes || coverTypes.length === 0) return null;
+    var t = (noiseVal + 1) * 0.5;
+    var totalWeight = 0;
+    for (var i = 0; i < coverTypes.length; i++) {
+      totalWeight += coverTypes[i].weight;
+    }
+    var target = t * totalWeight;
+    var accumulated = 0;
+    for (var i = 0; i < coverTypes.length; i++) {
+      accumulated += coverTypes[i].weight;
+      if (target <= accumulated) return coverTypes[i].block;
+    }
+    return coverTypes[coverTypes.length - 1].block;
+  }
 
   // ── Noise infrastructure (self-contained for worker) ────────────────
   function mulberry32(seed) {
@@ -209,6 +448,8 @@
   }
 
   // ── Biome selection (matches biomeSystem.js) ────────────────────────
+  // Widened thresholds: lower humidity cutoff for forest, added highlands biome,
+  // reduced plains catch-all area.
   function selectBiome(cont, eros, temp, hum) {
     var isCold = temp < -0.35;
     if (cont < -0.4)  return Object.assign({}, BIOME.DEEP_OCEAN, { frozenWater: isCold });
@@ -223,15 +464,27 @@
       if (cont < -0.15) return BIOME.OCEAN;
       if (cont < 0.02)  return BIOME.BEACH;
     }
+    // Mountain peaks — high continentalness + low erosion
     if (cont > 0.45 && eros < 0) {
       return isCold ? BIOME.FROZEN_PEAKS : BIOME.MOUNTAINS;
     }
+    // Hot biomes (checked before highlands so deserts/badlands aren't overridden)
     if (temp > 0.45) {
       return hum < -0.1 ? BIOME.DESERT : BIOME.BADLANDS;
     }
-    if (isCold) return BIOME.TUNDRA;
-    if (hum > 0.2) return BIOME.FOREST;
-    if (cont > 0.35) return BIOME.PLAINS;
+    // Highlands — elevated continental areas in temperate/cold zones
+    // These get mountain-like terrain with stone exposure but lower height
+    if (cont > 0.35 && eros < 0.05) {
+      return isCold ? BIOME.FROZEN_PEAKS : BIOME.MOUNTAINS;
+    }
+    // Cold land
+    if (isCold) {
+      return BIOME.TUNDRA;
+    }
+    // Default: forest or plains — widened forest range (hum > 0.0 instead of 0.2)
+    if (hum > 0.0) return BIOME.FOREST;
+    // Semi-arid interior: badlands instead of plains
+    if (hum < -0.2) return BIOME.BADLANDS;
     return BIOME.PLAINS;
   }
 
@@ -285,13 +538,13 @@
       }
     }
 
-    return { baseY: sumBase / sumW, amplitude: sumAmp / sumW, biome: dominantBiome, isCold: blendedTemp < -0.35 };
+    return { baseY: sumBase / sumW, amplitude: sumAmp / sumW, biome: dominantBiome, isCold: blendedTemp < -0.35, humidity: blendedHum };
   }
 
   // ── Feature placement (trees + flowers) ─────────────────────────────
   // Called as Phase 4 after terrain, caves, and ores are complete.
   // Receives biomeMap (256 entries, one per column) with biome names from Phase 1.
-  function placeFeatures(chunk, surfaceMap, biomeMap, rng) {
+  function placeFeatures(chunk, surfaceMap, biomeMap, rng, perlin, chunkX, chunkZ) {
     var placedTrees = []; // [{lx, lz}] for exclusion zone checks
     var treeCount = 0, flowerCount = 0;
 
@@ -310,21 +563,24 @@
     // ── Tree placement pass ────────────────────────────────────────
     for (var lx = 0; lx < 16; lx++) {
       for (var lz = 0; lz < 16; lz++) {
+        var wx = chunkX * 16 + lx, wz = chunkZ * 16 + lz;
         var idx = lx * 16 + lz;
         var surfY = surfaceMap[idx];
         if (surfY < 2 || surfY >= CHUNK_H - 10) continue;
 
-        // Trees only on grass blocks.
-        if (chunk[cidx(lx, surfY, lz)] !== BLOCK.GRASS) continue;
+        // Trees on grass-like blocks (grass, podzol, mycelium, moss).
+        var treeSurface = chunk[cidx(lx, surfY, lz)];
+        if (treeSurface !== BLOCK.GRASS && treeSurface !== BLOCK.PODZOL &&
+            treeSurface !== BLOCK.MYCELIUM && treeSurface !== BLOCK.MOSS_BLOCK) continue;
 
         // Look up biome rates.
         var biomeName = biomeMap[idx];
         var rates = FEATURE_RATES[biomeName];
         if (!rates || rates.treeChance <= 0) continue;
 
-        // Look up biome-specific tree type (log + leaves)
-        var treeType = TREE_TYPES[biomeName];
-        if (!treeType) treeType = TREE_TYPES['Plains']; // fallback
+        // Look up biome-specific tree types (weighted array).
+        var treeTypeList = TREE_TYPES[biomeName];
+        if (!treeTypeList || treeTypeList.length === 0) treeTypeList = TREE_TYPES['Plains'];
 
         // Elevation cap.
         if (surfY > rates.treeMaxY) continue;
@@ -344,6 +600,10 @@
           if (Math.abs(dx) < 4 && Math.abs(dz) < 4) { tooClose = true; break; }
         }
         if (tooClose) continue;
+
+        // Pick tree type from weighted variants using per-column noise.
+        var treeNoise = perlin.det.noise2(wx / 12 + lx * 0.7, wz / 12 + lz * 0.7);
+        var treeType = selectTreeType(treeTypeList, treeNoise);
 
         // Place tree: 4-block trunk + 5×5×5 leaf canopy.
         var trunkH = 4;
@@ -389,15 +649,18 @@
       }
     }
 
-    // ── Flower placement pass ──────────────────────────────────────
+    // ── Ground cover placement pass (grass, flowers, mushrooms) ────
     for (var lx = 0; lx < 16; lx++) {
       for (var lz = 0; lz < 16; lz++) {
+        var wx = chunkX * 16 + lx, wz = chunkZ * 16 + lz;
         var idx = lx * 16 + lz;
         var surfY = surfaceMap[idx];
         if (surfY < 1 || surfY >= CHUNK_H - 1) continue;
 
-        // Flowers only on grass blocks.
-        if (chunk[cidx(lx, surfY, lz)] !== BLOCK.GRASS) continue;
+        // Ground cover on grass-like blocks (grass, podzol, mycelium, moss).
+        var surfaceBlock = chunk[cidx(lx, surfY, lz)];
+        if (surfaceBlock !== BLOCK.GRASS && surfaceBlock !== BLOCK.PODZOL &&
+            surfaceBlock !== BLOCK.MYCELIUM && surfaceBlock !== BLOCK.MOSS_BLOCK) continue;
 
         // Look up biome rates.
         var biomeName = biomeMap[idx];
@@ -407,25 +670,26 @@
         // Elevation cap.
         if (surfY > rates.flowerMaxY) continue;
 
-        // Check if a tree is already on this column — skip flowers under trees.
+        // Check if a tree is already on this column — skip ground cover under trees.
         var treeHere = false;
         for (var t = 0; t < placedTrees.length; t++) {
           if (placedTrees[t].lx === lx && placedTrees[t].lz === lz) { treeHere = true; break; }
         }
         if (treeHere) continue;
 
-        // Roll for red flower.
-        var rollR = rng();
-        if (rates.redFlowerChance > 0 && rollR < rates.redFlowerChance) {
-          chunk[cidx(lx, surfY + 1, lz)] = BLOCK.RED_FLOWER;
-          flowerCount++;
-          continue; // Only one flower per column.
-        }
+        // Combined ground cover chance: sum of flower rates + grass rate.
+        var coverChance = (rates.redFlowerChance + rates.yellowFlowerChance) * 1.5;
+        var roll = rng();
+        if (roll > coverChance) continue;
 
-        // Roll for yellow flower.
-        var rollY = rng();
-        if (rates.yellowFlowerChance > 0 && rollY < rates.yellowFlowerChance) {
-          chunk[cidx(lx, surfY + 1, lz)] = BLOCK.YELLOW_FLOWER;
+        // Pick ground cover type from biome's weighted array using per-column noise.
+        var coverTypes = GROUND_COVER[biomeName];
+        if (!coverTypes || coverTypes.length === 0) continue;
+
+        var coverNoise = perlin.c1.noise2(wx / 10 + lx * 1.3, wz / 10 + lz * 1.3);
+        var coverBlock = selectGroundCover(coverTypes, coverNoise);
+        if (coverBlock) {
+          chunk[cidx(lx, surfY + 1, lz)] = coverBlock;
           flowerCount++;
         }
       }
@@ -457,7 +721,11 @@
           var bx = Math.max(0, Math.min(15, ox + Math.floor(rng() * 3) - 1));
           var by = Math.max(0, Math.min(CHUNK_H - 1, oy + Math.floor(rng() * 3) - 1));
           var bz = Math.max(0, Math.min(CHUNK_D - 1, oz + Math.floor(rng() * 3) - 1));
-          if (chunk[cidx(bx, by, bz)] === BLOCK.STONE) {
+          // Place ores in stone and stone variants (andesite, diorite, granite, tuff)
+          var hostBlock = chunk[cidx(bx, by, bz)];
+          if (hostBlock === BLOCK.STONE || hostBlock === BLOCK.ANDESITE ||
+              hostBlock === BLOCK.DIORITE || hostBlock === BLOCK.GRANITE ||
+              hostBlock === BLOCK.TUFF) {
             chunk[cidx(bx, by, bz)] = ore.type;
           }
         }
@@ -478,9 +746,11 @@
           var bx = Math.max(0, Math.min(15, ox + Math.floor(rng() * 3) - 1));
           var by = Math.max(0, Math.min(CHUNK_H - 1, oy + Math.floor(rng() * 3) - 1));
           var bz = Math.max(0, Math.min(CHUNK_D - 1, oz + Math.floor(rng() * 3) - 1));
-          // Place in deepslate or stone (deepslate transition)
+          // Place in deepslate, stone, or stone variants
           var existing = chunk[cidx(bx, by, bz)];
-          if (existing === BLOCK.DEEPSLATE || existing === BLOCK.STONE) {
+          if (existing === BLOCK.DEEPSLATE || existing === BLOCK.STONE ||
+              existing === BLOCK.ANDESITE || existing === BLOCK.DIORITE ||
+              existing === BLOCK.GRANITE || existing === BLOCK.TUFF) {
             chunk[cidx(bx, by, bz)] = ore.type;
           }
         }
@@ -505,6 +775,7 @@
     var chunk      = new Uint8Array(CHUNK_W * CHUNK_H * CHUNK_D);
     var surfaceMap = new Int32Array(256); // Used internally for cave carving phase
     var biomeMap   = new Array(256);      // Biome name string per column, for feature placement
+    var humidityMap = new Float32Array(256); // Normalized 0..1 humidity per column, for vertex color tinting
 
     // ── Phase 1: Terrain + block placement per column ────────────────
     for (var lx = 0; lx < 16; lx++) {
@@ -607,10 +878,17 @@
         var surfY = Math.max(5, Math.min(CHUNK_H - 2, baseTerrainY));
         surfaceMap[lx * 16 + lz] = surfY;
         biomeMap[lx * 16 + lz] = blended.biome.name;
+        // Store normalized humidity (0..1 from -1..1 range) for vertex color tinting
+        humidityMap[lx * 16 + lz] = Math.max(0, Math.min(1, blended.humidity * 0.5 + 0.5));
 
         var isSub = surfY <= SEA_LEVEL + 1;
 
         // ── Block placement for this column (top-down) ────────────────
+        // Per-column noise for deterministic variant selection (same value for all layers).
+        var surfaceNoise = p.det.noise2(wx / 25, wz / 25);
+        var subNoise     = p.c1.noise2(wx / 25 + 500, wz / 25 + 500);
+        var stoneNoise   = p.c2.noise2(wx / 25 + 1000, wz / 25 + 1000);
+
         for (var y = 0; y < CHUNK_H; y++) {
           var block;
           if (y === 0) {
@@ -618,39 +896,73 @@
           } else if (y <= 3 && rngSurface() < (4 - y) * 0.25) {
             block = BLOCK.BEDROCK; // Random bedrock scatter near bottom.
           } else if (y < surfY - 3) {
-            block = (y < DEEPSLATE_DEPTH) ? BLOCK.DEEPSLATE : BLOCK.STONE;
-          } else if (y < surfY) {
-            // Sub-block layer — mountains use stone sub-block (thin soil).
-            if (mountainFactor > 0.5 && blended.isCold) {
-              block = BLOCK.SNOW_STONE;
-            } else if (mountainFactor > 0.5) {
-              block = BLOCK.STONE;
+            // Deep stone layer — use biome's stoneVariants for mix.
+            if (y < DEEPSLATE_DEPTH) {
+              block = BLOCK.DEEPSLATE;
             } else {
-              block = blended.biome.subBlock !== BLOCK.DIRT ? blended.biome.subBlock : BLOCK.DIRT;
+              // Stone variants: andesite, diorite, granite, tuff mixed with stone.
+              var stoneVar = blended.biome.stoneVariants || [[BLOCK.STONE, 100]];
+              // Add vertical variation: deeper layers shift toward granite/tuff.
+              var depthNoise = p.jitter.noise3(wx / 30, y / 20, wz / 30);
+              block = selectVariant(stoneVar, stoneNoise + depthNoise * 0.3);
+            }
+          } else if (y < surfY) {
+            // Sub-block layer — use biome's subVariants for mix.
+            if (mountainFactor > 0.5 && blended.isCold) {
+              block = BLOCK.COARSE_DIRT;
+            } else if (mountainFactor > 0.5) {
+              // Mountain sub-layer: stone variants.
+              var mStoneVar = blended.biome.subVariants || [[BLOCK.STONE, 100]];
+              block = selectVariant(mStoneVar, subNoise);
+            } else {
+              var subVar = blended.biome.subVariants || [[blended.biome.subBlock, 100]];
+              block = selectVariant(subVar, subNoise);
             }
           } else if (y === surfY) {
-            // Surface block — altitude snow + biome logic.
+            // Surface block — altitude snow + biome logic with variant mixing.
             var snowNoiseVal = p.temp.noise3(wx / 60, y / 30, wz / 60);
 
             if (y > 130 && blended.biome.name !== 'Desert' && blended.biome.name !== 'Badlands') {
               // High altitude always gets snow in non-desert biomes.
               if (snowNoiseVal < -0.25) block = BLOCK.STONE;
-              else if (snowNoiseVal < 0.1) block = BLOCK.GRASS;
-              else block = BLOCK.SNOW;
+              else if (snowNoiseVal < 0.1) {
+                // Use surface variants for grassy highlands.
+                var sVar = blended.biome.surfaceVariants || [[BLOCK.GRASS, 100]];
+                block = selectVariant(sVar, surfaceNoise);
+              } else {
+                block = BLOCK.SNOW;
+              }
             } else if (mountainFactor > 0.3 && blended.isCold) {
               // Cold mountain terrain: layered snow transition.
               if (y > 110) block = BLOCK.SNOW;
               else if (y > 85) block = (snowNoiseVal < -0.2) ? BLOCK.STONE : BLOCK.SNOW;
-              else block = BLOCK.GRASS;
+              else {
+                var sVar2 = blended.biome.surfaceVariants || [[BLOCK.GRASS, 100]];
+                block = selectVariant(sVar2, surfaceNoise);
+              }
             } else if ((blended.biome.frozenWater || blended.isCold) && surfY >= SEA_LEVEL) {
-              block = BLOCK.SNOW; // Cold terrain surface.
+              // Cold terrain surface — use variants for snow biome.
+              var sVar3 = blended.biome.surfaceVariants || [[BLOCK.SNOW, 100]];
+              block = selectVariant(sVar3, surfaceNoise);
             } else if ((blended.biome.frozenWater || blended.isCold) && surfY < SEA_LEVEL) {
               block = (surfY < SEA_LEVEL - 35) ? BLOCK.GRAVEL : BLOCK.SAND; // Frozen ocean floor.
             } else if (mountainFactor > 0.5 && y > 120) {
-              // Mountain terrain: stone exposed at high elevation.
-              block = (snowNoiseVal < 0) ? BLOCK.STONE : blended.biome.surfaceBlock;
+              // Mountain terrain: stone exposed at high elevation — use stone variants.
+              if (snowNoiseVal < 0) {
+                var stVar = blended.biome.stoneVariants || [[BLOCK.STONE, 100]];
+                block = selectVariant(stVar, stoneNoise);
+              } else {
+                var sVar4 = blended.biome.surfaceVariants || [[blended.biome.surfaceBlock, 100]];
+                block = selectVariant(sVar4, surfaceNoise);
+              }
             } else {
-              block = (isSub && blended.biome.surfaceBlock === BLOCK.GRASS) ? BLOCK.SAND : blended.biome.surfaceBlock;
+              // Normal surface — use biome's surfaceVariants.
+              if (isSub && blended.biome.name === 'Plains' || isSub && blended.biome.name === 'Forest') {
+                block = BLOCK.SAND; // Shallow water edge.
+              } else {
+                var sVar5 = blended.biome.surfaceVariants || [[blended.biome.surfaceBlock, 100]];
+                block = selectVariant(sVar5, surfaceNoise);
+              }
             }
           } else if (y <= SEA_LEVEL) {
             // Water fill above surface up to sea level.
@@ -677,7 +989,10 @@
 
         for (var y = 5; y < 150; y++) {
           var b = chunk[cidx(lx, y, lz)];
-          if (b !== BLOCK.STONE && b !== BLOCK.DIRT && b !== BLOCK.GRAVEL && b !== BLOCK.SAND) continue;
+          // Cave carving works through stone variants too (andesite, diorite, granite, tuff)
+          if (b !== BLOCK.STONE && b !== BLOCK.ANDESITE && b !== BLOCK.DIORITE &&
+              b !== BLOCK.GRANITE && b !== BLOCK.TUFF &&
+              b !== BLOCK.DIRT && b !== BLOCK.GRAVEL && b !== BLOCK.SAND) continue;
 
           var nx = wx / params.caveScale, ny = y / params.caveScale, nz = wz / params.caveScale;
           var n1 = p.c1.noise3(nx, ny, nz);
@@ -705,13 +1020,16 @@
     placeOres(chunk, rngOre);
 
     // ── Phase 4: Feature placement (trees + flowers) ─────────────────
-    placeFeatures(chunk, surfaceMap, biomeMap, rngFeature);
+    placeFeatures(chunk, surfaceMap, biomeMap, rngFeature, p, chunkX, chunkZ);
 
     // Return result (used by both worker and inline fallback).
+    // humidityMap: 256 floats (one per column), normalized 0..1 from biome humidity.
+    // Used by mesh builder for vertex color tinting (grass/leaves).
     return {
       cx: chunkX - params.baseChunkX,
       cz: chunkZ - params.baseChunkZ,
-      chunkBytes: chunk.buffer       // ArrayBuffer — transferred by worker
+      chunkBytes: chunk.buffer,       // ArrayBuffer — transferred by worker
+      humidityMap: Array.from(humidityMap)  // Float32 values 0..1
     };
   }
 
@@ -726,7 +1044,8 @@
             type: 'result',
             cx: result.cx,
             cz: result.cz,
-            chunkBytes: result.chunkBytes
+            chunkBytes: result.chunkBytes,
+            humidityMap: result.humidityMap  // Float32Array 256 values 0..1
           }, [result.chunkBytes]);
         }
       } catch (err) {

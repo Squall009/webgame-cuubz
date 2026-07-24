@@ -90,7 +90,7 @@ const BLOCK_REGISTRY = [
   // IDs 48–60 — Surface blocks
   // ═══════════════════════════════════════════════════════════
   { id: 48, name: 'dirt',           texture: { all: 'dirt' },                category: 'solid',   hardness: 0.5,  tool: 'shovel' },
-  { id: 49, name: 'grass_block',    texture: { top: 'grass_block_top', side: 'grass_block_side', bottom: 'dirt' }, category: 'solid', hardness: 0.6, tool: 'shovel' },
+  { id: 49, name: 'grass_block',    texture: { top: 'grass_block_top', side: 'grass_block_side', bottom: 'dirt' }, overlay: { side: 'grass_block_side_overlay' }, category: 'solid', hardness: 0.6, tool: 'shovel' },
   { id: 50, name: 'sand',           texture: { all: 'sand' },                category: 'solid',   hardness: 0.5,  tool: 'shovel', gravity: true },
   { id: 51, name: 'gravel',         texture: { all: 'gravel' },              category: 'solid',   hardness: 0.6,  tool: 'shovel', gravity: true },
   { id: 52, name: 'red_sand',       texture: { all: 'red_sand' },            category: 'solid',   hardness: 0.5,  tool: 'shovel', gravity: true },
@@ -171,7 +171,8 @@ const BLOCK_REGISTRY = [
   { id: 111, name: 'mangrove_leaves',  texture: { all: 'mangrove_leaves' },    category: 'cutout',  hardness: 0.2,  tool: 'shears' },
   { id: 112, name: 'pale_oak_leaves',  texture: { all: 'pale_oak_leaves' },    category: 'cutout',  hardness: 0.2,  tool: 'shears' },
   { id: 113, name: 'orange_poplar_leaves', texture: { all: 'orange_poplar_leaves' }, category: 'cutout', hardness: 0.2, tool: 'shears' },
-  { id: 114, name: 'leaf_litter',      texture: { all: 'leaf_litter' },        category: 'cutout',  hardness: 0.1,  tool: 'shears' },
+  { id: 114, name: 'red_poplar_leaves',  texture: { all: 'red_poplar_leaves' }, category: 'cutout',  hardness: 0.2,  tool: 'shears' },
+  { id: 115, name: 'yellow_poplar_leaves', texture: { all: 'yellow_poplar_leaves' }, category: 'cutout', hardness: 0.2, tool: 'shears' },
 
   // ═══════════════════════════════════════════════════════════
   // IDs 115–146 — Colored blocks (16 concrete + 16 wool)
@@ -256,8 +257,8 @@ const BLOCK_REGISTRY = [
   // ═══════════════════════════════════════════════════════════
   { id: 177, name: 'short_grass',      texture: { all: 'short_grass' },          category: 'cutout',  hardness: 0.0 },
   { id: 178, name: 'tall_grass',       texture: { side: 'tall_grass_top', top: 'tall_grass_top', bottom: 'tall_grass_bottom' }, category: 'cutout', hardness: 0.0 },
-  { id: 179, name: 'red_flower',       texture: { all: 'pink_petals' },          category: 'cutout',  hardness: 0.0 },
-  { id: 180, name: 'yellow_flower',    texture: { all: 'pink_petals' },          category: 'cutout',  hardness: 0.0 },
+  { id: 179, name: 'red_flower',       texture: { all: 'pink_petals' }, color: [1, 0.25, 0.25], category: 'cutout',  hardness: 0.0 },
+  { id: 180, name: 'yellow_flower',    texture: { all: 'pink_petals' }, color: [1, 1, 0.25],   category: 'cutout',  hardness: 0.0 },
   { id: 181, name: 'brown_mushroom',   texture: { all: 'brown_mushroom_block' }, category: 'cutout',  hardness: 0.0 },
   { id: 182, name: 'red_mushroom',     texture: { all: 'red_mushroom_block' },   category: 'cutout',  hardness: 0.0 },
   { id: 183, name: 'weeping_vines',    texture: { all: 'weeping_vines' },        category: 'cutout',  hardness: 0.0 },
@@ -383,6 +384,9 @@ const BLOCK_TYPES = {
   CHERRY_LEAVES:   BLOCK_BY_NAME['cherry_leaves'].id,
   MANGROVE_LEAVES: BLOCK_BY_NAME['mangrove_leaves'].id,
   PALE_OAK_LEAVES: BLOCK_BY_NAME['pale_oak_leaves'].id,
+  ORANGE_POPLAR_LEAVES: BLOCK_BY_NAME['orange_poplar_leaves'].id,
+  RED_POPLAR_LEAVES:    BLOCK_BY_NAME['red_poplar_leaves'].id,
+  YELLOW_POPLAR_LEAVES: BLOCK_BY_NAME['yellow_poplar_leaves'].id,
   WHITE_CONCRETE:  BLOCK_BY_NAME['white_concrete'].id,
   ORANGE_CONCRETE: BLOCK_BY_NAME['orange_concrete'].id,
   MAGENTA_CONCRETE:BLOCK_BY_NAME['magenta_concrete'].id,
