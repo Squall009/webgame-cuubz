@@ -786,6 +786,8 @@ class ChunkManager {
       const chunk = ChunkBinaryCodec.decode(binaryData);
       // Chunks loaded from disk are by definition clean (persisted) — never carry dirty flag over reloads
       chunk.dirty = false;
+      // Recompute humidityMap from biome parameters (deterministic from seed + chunk coords)
+      chunk.humidityMap = computeHumidityMap(this.worldSeed, chunk.cx, chunk.cz, this.genParams);
       this.memoryCache.set(key, chunk);
       this.stats.chunksLoadedFromDisk++;
 

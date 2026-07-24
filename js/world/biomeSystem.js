@@ -216,6 +216,119 @@ function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humS
   };
 }
 
+/**
+ * Noise infrastructure (mirrors workerGeneration.js for main-thread humidity recomputation).
+ */
+function _mulberry32(seed) {
+  var s = seed | 0;
+  return function () {
+    s |= 0; s = s + 0x6D2B79F5 | 0;
+    var t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function _hashString(str) {
+  var h = 0x811c9dc5;
+  for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+
+function _createPerlin(seed) {
+  var rng = _mulberry32(seed);
+  var p = new Uint8Array(256);
+  for (var i = 0; i < 256; i++) p[i] = i;
+  for (var i = 255; i > 0; i--) { var j = Math.floor(rng() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+  var perm = new Uint8Array(512);
+  for (var i = 0; i < 512; i++) perm[i] = p[i & 255];
+
+  function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+  function lerp(a, b, t) { return a + t * (b - a); }
+  function grad3(h, x, y, z) {
+    h &= 15; var u = h < 8 ? x : y, v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+    return (h & 1 ? -u : u) + (h & 2 ? -v : v);
+  }
+
+  function noise2(x, y) {
+    var X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+    x -= Math.floor(x); y -= Math.floor(y);
+    var u = fade(x), v = fade(y);
+    var a = perm[X] + Y, aa = perm[a], ab = perm[a + 1];
+    var b = perm[X + 1] + Y, ba = perm[b], bb = perm[b + 1];
+    return lerp(lerp(grad3(perm[aa], x, y, 0), grad3(perm[ba], x - 1, y, 0), u),
+                lerp(grad3(perm[ab], x, y - 1, 0), grad3(perm[bb], x - 1, y - 1, 0), u), v);
+  }
+
+  return { noise2: noise2 };
+}
+
+function _fbm2(perlin, x, y, octaves, persistence, lacunarity) {
+  var val = 0, amp = 1, freq = 1, maxV = 0;
+  for (var i = 0; i < octaves; i++) {
+    val += perlin.noise2(x * freq, y * freq) * amp;
+    maxV += amp; amp *= persistence; freq *= lacunarity;
+  }
+  return val / maxV;
+}
+
+function _applySpline(val, points) {
+  if (val <= points[0][0]) return points[0][1];
+  if (val >= points[points.length - 1][0]) return points[points.length - 1][1];
+  for (var i = 0; i < points.length - 1; i++) {
+    if (val < points[i + 1][0]) {
+      var t = (val - points[i][0]) / (points[i + 1][0] - points[i][0]);
+      return points[i][1] + (points[i + 1][1] - points[i][1]) * t;
+    }
+  }
+}
+
+function _createSharedPerlin(seed) {
+  var sInt = _hashString(String(seed));
+  return {
+    cont:   _createPerlin(sInt ^ 0x1111), eros: _createPerlin(sInt ^ 0x2222),
+    temp:   _createPerlin(sInt ^ 0x3333), hum:  _createPerlin(sInt ^ 0x4444),
+    det:    _createPerlin(sInt ^ 0x5555), c1:   _createPerlin(sInt ^ 0x6666),
+    c2:     _createPerlin(sInt ^ 0x7777), river:_createPerlin(sInt ^ 0x8888),
+    jitter: _createPerlin(sInt ^ 0xBBBB)
+  };
+}
+
+/**
+ * Recompute humidityMap for a chunk (used when loading cached chunks from IndexedDB).
+ * Returns Float32Array(256) with normalized 0..1 humidity per column.
+ */
+function computeHumidityMap(seed, chunkX, chunkZ, params) {
+  var p = _createSharedPerlin(seed);
+  var humidityMap = new Float32Array(256);
+  var RADIUS = 1, STEP = 8, WARP = 120;
+
+  for (var lx = 0; lx < 16; lx++) {
+    for (var lz = 0; lz < 16; lz++) {
+      var wx = chunkX * 16 + lx, wz = chunkZ * 16 + lz;
+
+      var warpGX = p.jitter.noise2(wx / 95 + 142.5, wz / 95 + 398.2) * WARP;
+      var warpGZ = p.jitter.noise2(wx / 95 + 573.1, wz / 95 + 821.6) * WARP;
+
+      var sumHum = 0, sumW = 0;
+      for (var dx = -RADIUS; dx <= RADIUS; dx++) {
+        for (var dz = -RADIUS; dz <= RADIUS; dz++) {
+          var sx = wx + dx * STEP, sz = wz + dz * STEP;
+          var hum = p.hum.noise2((sx + warpGX) / params.humScale, (sz + warpGZ) / params.humScale);
+          hum += _fbm2(p.jitter, sx / 15 + 777, sz / 15 + 777, 3, 0.5, 2.0) * 0.04;
+          var dist2 = dx * dx + dz * dz;
+          var w = Math.exp(-dist2 * 0.6);
+          sumHum += hum * w;
+          sumW += w;
+        }
+      }
+      var blendedHum = sumHum / sumW;
+      humidityMap[lx * 16 + lz] = Math.max(0, Math.min(1, blendedHum * 0.5 + 0.5));
+    }
+  }
+  return humidityMap;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { BIOME_DEFS, CONT_SPLINE, selectBiome, sampleBiomeParams };
+  module.exports = { BIOME_DEFS, CONT_SPLINE, selectBiome, sampleBiomeParams, computeHumidityMap };
 }
