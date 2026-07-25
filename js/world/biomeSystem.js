@@ -3,6 +3,11 @@
  * Ported from voxelgen.html — domain-warped climate sampling, Gaussian blending, spline continentalness.
  */
 
+// Node.js: require BLOCK_TYPES from blockRegistry; browser: use global.
+if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+  global.BLOCK_TYPES = require('./blockRegistry').BLOCK_TYPES;
+}
+
 // Continentalness spline control points — maps raw noise to landmass distribution.
 const CONT_SPLINE = [
   [-1.0, -1.1], [-0.4, -0.6], [-0.1, -0.1], [0.1, 0.2], [0.25, 0.6], [0.5, 0.85], [1.0, 1.1]
@@ -100,22 +105,11 @@ const BIOME_DEFS = {
  * reduced plains catch-all area.
  */
 function selectBiome(cont, eros, temp, hum) {
-  const isCold = temp < -0.35;
+  const isCold = temp < -0.20;
 
   if (cont < -0.4) return Object.assign({}, BIOME_DEFS.DEEP_OCEAN, { frozenWater: isCold });
   if (cont < -0.15) return Object.assign({}, BIOME_DEFS.OCEAN, { frozenWater: isCold });
   if (cont < 0.02) return Object.assign({}, BIOME_DEFS.BEACH, { frozenWater: isCold });
-
-  // Desert ocean band — hot + dry creates inland sea
-  if (!isCold && temp > 0.45 && hum < -0.1) {
-    if (cont < -0.35) return BIOME_DEFS.DEEP_OCEAN;
-    if (cont < 0)     return BIOME_DEFS.OCEAN;
-    if (cont < 0.05)  return BIOME_DEFS.BEACH;
-  } else {
-    if (cont < -0.4)  return BIOME_DEFS.DEEP_OCEAN;
-    if (cont < -0.15) return BIOME_DEFS.OCEAN;
-    if (cont < 0.02)  return BIOME_DEFS.BEACH;
-  }
 
   // Mountain peaks — high continentalness + low erosion
   if (cont > 0.45 && eros < 0) {
@@ -212,7 +206,7 @@ function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humS
     baseY: sumBase / sumW,
     amplitude: sumAmp / sumW,
     biome: dominantBiome,
-    isCold: blendedTemp < -0.35
+    isCold: blendedTemp < -0.20
   };
 }
 
@@ -283,6 +277,10 @@ function _applySpline(val, points) {
   }
 }
 
+// Aliases used by sampleBiomeParams
+var fbm2 = _fbm2;
+var applySpline = _applySpline;
+
 function _createSharedPerlin(seed) {
   var sInt = _hashString(String(seed));
   return {
@@ -331,4 +329,119 @@ function computeHumidityMap(seed, chunkX, chunkZ, params) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { BIOME_DEFS, CONT_SPLINE, selectBiome, sampleBiomeParams, computeHumidityMap };
+}
+
+/**
+ * BiomeSystem — main-thread helper for querying biome at any world position.
+ * Used by main.js to drive fog/sky/particle effects.
+ * Creates its own noise infrastructure so it can be called independently.
+ */
+var BiomeSystem = (function () {
+  // Inline noise helpers (mirror of the private ones above)
+  function _mulberry32(seed) {
+    var s = seed | 0;
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function _hashString(str) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return h >>> 0;
+  }
+  function _createPerlin(seed) {
+    var rng = _mulberry32(seed);
+    var p = new Uint8Array(256);
+    for (var i = 0; i < 256; i++) p[i] = i;
+    for (var i = 255; i > 0; i--) { var j = Math.floor(rng() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+    var perm = new Uint8Array(512);
+    for (var i = 0; i < 512; i++) perm[i] = p[i & 255];
+    function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+    function lerp(a, b, t) { return a + t * (b - a); }
+    function grad3(h, x, y, z) {
+      h &= 15; var u = h < 8 ? x : y, v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+      return (h & 1 ? -u : u) + (h & 2 ? -v : v);
+    }
+    function noise2(x, y) {
+      var X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+      x -= Math.floor(x); y -= Math.floor(y);
+      var u = fade(x), v = fade(y);
+      var a = perm[X] + Y, aa = perm[a], ab = perm[a + 1];
+      var b = perm[X + 1] + Y, ba = perm[b], bb = perm[b + 1];
+      return lerp(lerp(grad3(perm[aa], x, y, 0), grad3(perm[ba], x - 1, y, 0), u),
+                  lerp(grad3(perm[ab], x, y - 1, 0), grad3(perm[bb], x - 1, y - 1, 0), u), v);
+    }
+    return { noise2: noise2 };
+  }
+  function _fbm2(perlin, x, y, octaves, persistence, lacunarity) {
+    var val = 0, amp = 1, freq = 1, maxV = 0;
+    for (var i = 0; i < octaves; i++) {
+      val += perlin.noise2(x * freq, y * freq) * amp;
+      maxV += amp; amp *= persistence; freq *= lacunarity;
+    }
+    return val / maxV;
+  }
+  function _applySpline(val, points) {
+    if (val <= points[0][0]) return points[0][1];
+    if (val >= points[points.length - 1][0]) return points[points.length - 1][1];
+    for (var i = 0; i < points.length - 1; i++) {
+      if (val < points[i + 1][0]) {
+        var t = (val - points[i][0]) / (points[i + 1][0] - points[i][0]);
+        return points[i][1] + (points[i + 1][1] - points[i][1]) * t;
+      }
+    }
+  }
+  function _createSharedPerlin(seed) {
+    var sInt = _hashString(String(seed));
+    return {
+      cont:   _createPerlin(sInt ^ 0x1111), eros: _createPerlin(sInt ^ 0x2222),
+      temp:   _createPerlin(sInt ^ 0x3333), hum:  _createPerlin(sInt ^ 0x4444),
+      det:    _createPerlin(sInt ^ 0x5555), c1:   _createPerlin(sInt ^ 0x6666),
+      c2:     _createPerlin(sInt ^ 0x7777), river:_createPerlin(sInt ^ 0x8888),
+      jitter: _createPerlin(sInt ^ 0xBBBB)
+    };
+  }
+
+  // Default generation params (match chunkmanager.js defaults)
+  var DEFAULT_PARAMS = {
+    continentScale: 4000, contScale: 400, tempScale: 2000, humScale: 2000, erosScale: 280
+  };
+
+  // Map biome display name (e.g. "Tundra") → lowercase id (e.g. "tundra")
+  var NAME_TO_ID = {
+    'Deep Ocean': 'deep_ocean',
+    'Ocean': 'ocean',
+    'Beach': 'beach',
+    'Plains': 'plains',
+    'Forest': 'forest',
+    'Badlands': 'badlands',
+    'Tundra': 'tundra',
+    'Desert': 'desert',
+    'Mountains': 'mountains',
+    'Frozen Peaks': 'frozen_peaks'
+  };
+
+  function getBiomeAtWorldPos(wx, wz, seed) {
+    var p = _createSharedPerlin(seed);
+    var params = DEFAULT_PARAMS;
+    var result = sampleBiomeParams(p, wx, wz,
+      params.continentScale, params.contScale,
+      params.tempScale, params.humScale, params.erosScale);
+    var biomeName = result.biome.name;
+    return {
+      id: NAME_TO_ID[biomeName] || biomeName.toLowerCase().replace(/\s+/g, '_'),
+      name: biomeName,
+      isCold: result.isCold
+    };
+  }
+
+  return { getBiomeAtWorldPos: getBiomeAtWorldPos };
+})();
+
+// Re-export with BiomeSystem included (Node.js)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports.BiomeSystem = BiomeSystem;
 }

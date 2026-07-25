@@ -451,19 +451,10 @@
   // Widened thresholds: lower humidity cutoff for forest, added highlands biome,
   // reduced plains catch-all area.
   function selectBiome(cont, eros, temp, hum) {
-    var isCold = temp < -0.35;
+    var isCold = temp < -0.20;
     if (cont < -0.4)  return Object.assign({}, BIOME.DEEP_OCEAN, { frozenWater: isCold });
     if (cont < -0.15) return Object.assign({}, BIOME.OCEAN,      { frozenWater: isCold });
     if (cont < 0.02)  return Object.assign({}, BIOME.BEACH,       { frozenWater: isCold });
-    if (!isCold && temp > 0.45 && hum < -0.1) {
-      if (cont < -0.35) return BIOME.DEEP_OCEAN;
-      if (cont < 0)     return BIOME.OCEAN;
-      if (cont < 0.05)  return BIOME.BEACH;
-    } else {
-      if (cont < -0.4)  return BIOME.DEEP_OCEAN;
-      if (cont < -0.15) return BIOME.OCEAN;
-      if (cont < 0.02)  return BIOME.BEACH;
-    }
     // Mountain peaks — high continentalness + low erosion
     if (cont > 0.45 && eros < 0) {
       return isCold ? BIOME.FROZEN_PEAKS : BIOME.MOUNTAINS;
@@ -538,7 +529,7 @@
       }
     }
 
-    return { baseY: sumBase / sumW, amplitude: sumAmp / sumW, biome: dominantBiome, isCold: blendedTemp < -0.35, humidity: blendedHum };
+    return { baseY: sumBase / sumW, amplitude: sumAmp / sumW, biome: dominantBiome, isCold: blendedTemp < -0.20, humidity: blendedHum };
   }
 
   // ── Feature placement (trees + flowers) ─────────────────────────────

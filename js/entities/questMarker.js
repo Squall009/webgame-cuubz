@@ -512,11 +512,12 @@ class QuestMarkerManager {
 
   /**
    * Get markers by biome.
-   * @param {string} biome — Biome name to filter by
+   * @param {string} biome — Biome name to filter by (case-insensitive)
    * @returns {Array<QuestMarker>} Markers in the specified biome
    */
   getMarkersByBiome(biome) {
-    return this.markers.filter(m => m.biome === biome);
+    const lower = biome.toLowerCase();
+    return this.markers.filter(m => m.biome.toLowerCase() === lower);
   }
 
   /**
