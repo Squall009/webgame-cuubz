@@ -3067,6 +3067,10 @@
           const btnCloseInventory = document.getElementById('btn-close-inventory');
           let inventoryOpen = false;
 
+          // ─── Inventory Drag State ──────────────────────────────────────────
+          let _invDrag = null; // { fromSlot, typeId, count, ghostEl }
+          let _invClickStart = null; // { slot, x, y } to distinguish click vs drag
+
           function renderInventoryGrid() {
             if (!inventoryGrid) return;
             inventoryGrid.innerHTML = '';
@@ -3102,39 +3106,139 @@
                 div.title = 'Empty slot';
               }
 
-              // Click to move item to hotbar or select
-              div.addEventListener('click', () => {
-                if (slot) {
-                  // If clicking a non-hotbar slot, move to selected hotbar slot
-                  if (!isHotbar) {
-                    const hotbarIdx = inventory.hotbarSlotIndex(inventory.selectedHotbarSlot);
-                    const hotbarSlot = inventory.getSlot(hotbarIdx);
-                    if (!hotbarSlot) {
-                      inventory.setSlot(hotbarIdx, { typeId: slot.typeId, count: slot.count });
-                      inventory.clearSlot(i);
-                    } else if (inventory.itemsMatch(hotbarSlot.typeId, slot.typeId)) {
-                      const maxStack = inventory.getMaxStack(slot.typeId);
-                      const space = maxStack - hotbarSlot.count;
-                      if (space > 0) {
-                        const move = Math.min(space, slot.count);
-                        hotbarSlot.count += move;
-                        slot.count -= move;
-                        if (slot.count <= 0) inventory.clearSlot(i);
-                        inventory._notifySlotChange(hotbarIdx);
-                      }
-                    }
-                  } else {
-                    // Clicking hotbar slot — select it
-                    const hotbarPos = i - inventory.hotbarStart;
-                    inventory.selectHotbarSlot(hotbarPos);
+              // ── Left-click: pick up / swap ──
+              div.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // only left button
+                e.preventDefault();
+                const slotIdx = parseInt(div.dataset.slot);
+                _invClickStart = { slot: slotIdx, x: e.clientX, y: e.clientY };
+              });
+
+              // ── Right-click: split stack / move one ──
+              div.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const fromIdx = parseInt(div.dataset.slot);
+                const fromSlot = inventory.getSlot(fromIdx);
+                if (!fromSlot || fromSlot.count <= 1) return;
+
+                // Find a different slot with matching item that has space, or any empty slot
+                let targetIdx = -1;
+                for (let j = 0; j < inventory.totalSlots; j++) {
+                  if (j === fromIdx) continue;
+                  const target = inventory.getSlot(j);
+                  if (!target) { targetIdx = j; break; }
+                  if (inventory.itemsMatch(target.typeId, fromSlot.typeId)) {
+                    const maxStack = inventory.getMaxStack(fromSlot.typeId);
+                    if (target.count < maxStack) { targetIdx = j; break; }
                   }
                 }
-                renderInventoryGrid();
-                updateHotbarUI();
+                if (targetIdx >= 0) {
+                  const maxStack = inventory.getMaxStack(fromSlot.typeId);
+                  const target = inventory.getSlot(targetIdx);
+                  const space = target ? (maxStack - target.count) : maxStack;
+                  const moveCount = Math.min(1, fromSlot.count, space);
+                  // Move one item
+                  fromSlot.count -= moveCount;
+                  if (fromSlot.count <= 0) inventory.clearSlot(fromIdx);
+                  if (!target) {
+                    inventory.setSlot(targetIdx, { typeId: fromSlot.typeId, count: moveCount });
+                  } else {
+                    target.count += moveCount;
+                    inventory._notifySlotChange(targetIdx);
+                  }
+                  inventory._notifySlotChange(fromIdx);
+                  renderInventoryGrid();
+                  updateHotbarUI();
+                }
               });
 
               inventoryGrid.appendChild(div);
             }
+          }
+
+          // ── Mouseup handler for drag/click on inventory grid ──
+          if (inventoryGrid) {
+            inventoryGrid.addEventListener('mouseup', (e) => {
+              if (!_invClickStart || e.button !== 0) { _invClickStart = null; return; }
+              const dx = e.clientX - _invClickStart.x;
+              const dy = e.clientY - _invClickStart.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const clickFromIdx = _invClickStart.slot;
+              _invClickStart = null;
+
+              // If moved more than 5px, treat as drag (swap with drop target)
+              if (dist > 5) {
+                const targetEl = document.elementFromPoint(e.clientX, e.clientY);
+                if (targetEl && targetEl.classList.contains('inventory-slot')) {
+                  const toIdx = parseInt(targetEl.dataset.slot);
+                  const fromIdx = clickFromIdx;
+                  if (fromIdx >= 0 && fromIdx !== toIdx) {
+                    const fromSlot = inventory.getSlot(fromIdx);
+                    const toSlot = inventory.getSlot(toIdx);
+                    if (!fromSlot) { renderInventoryGrid(); return; } // source emptied during drag
+
+                    if (!toSlot) {
+                      // Drop on empty: move
+                      inventory.setSlot(toIdx, { typeId: fromSlot.typeId, count: fromSlot.count });
+                      inventory.clearSlot(fromIdx);
+                    } else if (inventory.itemsMatch(fromSlot.typeId, toSlot.typeId)) {
+                      // Same item: stack
+                      const maxStack = inventory.getMaxStack(fromSlot.typeId);
+                      const space = maxStack - toSlot.count;
+                      if (space > 0) {
+                        const move = Math.min(space, fromSlot.count);
+                        toSlot.count += move;
+                        fromSlot.count -= move;
+                        if (fromSlot.count <= 0) inventory.clearSlot(fromIdx);
+                        inventory._notifySlotChange(toIdx);
+                      }
+                    } else {
+                      // Different item: swap
+                      inventory.swapSlots(fromIdx, toIdx);
+                    }
+                    renderInventoryGrid();
+                    updateHotbarUI();
+                  }
+                }
+                return;
+              }
+
+              // Treat as click (no drag)
+              const fromIdx = clickFromIdx;
+              const fromSlot = inventory.getSlot(fromIdx);
+              const isHotbar = inventory.isHotbarSlot(fromIdx);
+
+              if (fromSlot) {
+                if (!isHotbar) {
+                  // Main inventory click: move to selected hotbar slot
+                  const hotbarIdx = inventory.hotbarSlotIndex(inventory.selectedHotbarSlot);
+                  const hotbarSlot = inventory.getSlot(hotbarIdx);
+                  if (!hotbarSlot) {
+                    inventory.setSlot(hotbarIdx, { typeId: fromSlot.typeId, count: fromSlot.count });
+                    inventory.clearSlot(fromIdx);
+                  } else if (inventory.itemsMatch(hotbarSlot.typeId, fromSlot.typeId)) {
+                    const maxStack = inventory.getMaxStack(fromSlot.typeId);
+                    const space = maxStack - hotbarSlot.count;
+                    if (space > 0) {
+                      const move = Math.min(space, fromSlot.count);
+                      hotbarSlot.count += move;
+                      fromSlot.count -= move;
+                      if (fromSlot.count <= 0) inventory.clearSlot(fromIdx);
+                      inventory._notifySlotChange(hotbarIdx);
+                    }
+                  } else {
+                    // Different item: swap
+                    inventory.swapSlots(fromIdx, hotbarIdx);
+                  }
+                } else {
+                  // Hotbar slot click: select it
+                  const hotbarPos = fromIdx - inventory.hotbarStart;
+                  inventory.selectHotbarSlot(hotbarPos);
+                }
+                renderInventoryGrid();
+                updateHotbarUI();
+              }
+            });
           }
 
           function toggleInventoryScreen() {
@@ -3153,6 +3257,111 @@
               inventoryScreen.classList.add('hidden');
             });
           }
+
+          // ─── Inventory Drag-and-Drop (global handlers) ─────────────────────
+          document.addEventListener('mousemove', function invDragHandler(e) {
+            if (!_invClickStart) return;
+            const dx = e.clientX - _invClickStart.x;
+            const dy = e.clientY - _invClickStart.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // If moved more than 5px, start a drag
+            if (dist > 5 && !_invDrag) {
+              const fromIdx = _invClickStart.slot;
+              const fromSlot = inventory.getSlot(fromIdx);
+              if (fromSlot) {
+                _invDrag = {
+                  fromSlot: fromIdx,
+                  typeId: fromSlot.typeId,
+                  count: fromSlot.count,
+                };
+                // Clear the source slot visually
+                inventory.setSlot(fromIdx, null);
+                renderInventoryGrid();
+                updateHotbarUI();
+
+                // Create drag ghost
+                const ghost = document.createElement('div');
+                ghost.className = 'inv-drag-ghost';
+                ghost.style.position = 'fixed';
+                ghost.style.pointerEvents = 'none';
+                ghost.style.zIndex = '10000';
+                ghost.style.width = '48px';
+                ghost.style.height = '48px';
+                ghost.style.marginLeft = '-24px';
+                ghost.style.marginTop = '-24px';
+
+                const canvas = document.createElement('canvas');
+                canvas.width = 48; canvas.height = 48;
+                canvas.style.width = '40px'; canvas.style.height = '40px';
+                canvas.style.imageRendering = 'pixelated';
+                renderItemIcon(canvas, _invDrag.typeId);
+                ghost.appendChild(canvas);
+                document.body.appendChild(ghost);
+                _invDrag.ghostEl = ghost;
+              }
+            }
+
+            // Move ghost with cursor
+            if (_invDrag && _invDrag.ghostEl) {
+              _invDrag.ghostEl.style.left = e.clientX + 'px';
+              _invDrag.ghostEl.style.top = e.clientY + 'px';
+            }
+          });
+
+          document.addEventListener('mouseup', function invDropHandler(e) {
+            if (!_invClickStart) return;
+            _invClickStart = null;
+
+            if (!_invDrag) return; // Was just a click, handled by slot's click handler
+
+            // Find the slot under the cursor
+            const ghost = _invDrag.ghostEl;
+            if (ghost) ghost.remove();
+
+            const targetEl = document.elementFromPoint(e.clientX, e.clientY);
+            const targetSlotEl = targetEl ? targetEl.closest('.inventory-slot') : null;
+
+            if (targetSlotEl) {
+              const toIdx = parseInt(targetSlotEl.dataset.slot);
+              const toSlot = inventory.getSlot(toIdx);
+
+              if (toIdx === _invDrag.fromSlot) {
+                // Dropped back on source — restore
+                inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+              } else if (!toSlot) {
+                // Empty slot — move item
+                inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+              } else if (inventory.itemsMatch(toSlot.typeId, _invDrag.typeId)) {
+                // Same item — try to stack
+                const maxStack = inventory.getMaxStack(_invDrag.typeId);
+                const space = maxStack - toSlot.count;
+                if (space > 0) {
+                  const move = Math.min(space, _invDrag.count);
+                  toSlot.count += move;
+                  const left = _invDrag.count - move;
+                  if (left > 0) {
+                    inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: left });
+                  }
+                } else {
+                  // No space — swap
+                  inventory.setSlot(_invDrag.fromSlot, { typeId: toSlot.typeId, count: toSlot.count });
+                  inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+                }
+              } else {
+                // Different item — swap
+                inventory.setSlot(_invDrag.fromSlot, { typeId: toSlot.typeId, count: toSlot.count });
+                inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+              }
+            } else {
+              // Dropped outside inventory — restore to source
+              inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
+            }
+
+            _invDrag = null;
+            renderInventoryGrid();
+            updateHotbarUI();
+          });
 
           // ─── Keyboard Shortcuts ────────────────────────
           document.addEventListener('keydown', function gameKeyHandler(e) {
