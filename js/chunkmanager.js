@@ -232,7 +232,7 @@ class ChunkManager {
   /** Initialize mesh builder worker pool. */
   async _initMeshWorkers() {
     try {
-      const response = await fetch('js/renderer/meshWorker.js?v=20260725-2');
+      const response = await fetch('js/renderer/meshWorker.js?v=20260726-1');
       const source = await response.text();
       const blob = new Blob([source], { type: 'application/javascript' });
       this._meshBlobUrl = URL.createObjectURL(blob);

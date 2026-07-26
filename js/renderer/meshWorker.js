@@ -142,14 +142,18 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
     idxArr.push(vCount, vCount+2, vCount+3);
   }
 
-  // Build a crossbillboard (two criss-cross 1×1 planes forming an X) for grass blocks
+  // Build a crossbillboard (two criss-cross 1×1 planes forming an X) for grass blocks.
+  // Two vertical planes forming an X, centered at block center (0.5, 0, 0.5).
+  // Each plane is a W×1 rectangle rotated 45° apart around Y axis.
+  // Normals point straight up (0,1,0) so both planes receive equal sunlight.
+  // Small depth offset along each plane's horizontal normal prevents z-fighting.
   function addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor) {
     // Get UV info — use 'side' face for crossbillboard planes
     var faceUVs = getUV(blockType, 'side', uvLookup);
 
     var vi = posArr.length / 3;
 
-    // Helper: emit a single-sided 1×1 quad (material is already double-sided)
+    // Helper: emit a single-sided quad (material is already double-sided)
     var emitQuad = function(verts, normal) {
       for (var i = 0; i < 4; i++) {
         posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
@@ -160,17 +164,29 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
       idxArr.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
     };
 
-    // Plane 1: YZ plane at x=0.5, normal along +X
-    // Full 1×1 face: spans z=0..1, y=0..1
-    emitQuad([
-      [0.5, 0, 1], [0.5, 0, 0], [0.5, 1, 0], [0.5, 1, 1]
-    ], [1, 0, 0]);
+    var c = Math.cos(Math.PI / 4); // 0.7071
+    var s = Math.sin(Math.PI / 4); // 0.7071
+    var hw = 0.4;  // half-width (0.8 total, fits within block when rotated)
+    var off = 0.02; // depth offset along horizontal normal
 
-    // Plane 2: XY plane at z=0.5, normal along +Z
-    // Full 1×1 face: spans x=0..1, y=0..1
+    // Plane 1: diagonal / direction, horizontal normal (c, 0, s)
+    // Vertices of a rectangle centered at (0.5, 0, 0.5), rotated 45°
+    var ox1 = off * c, oz1 = off * s;
     emitQuad([
-      [0, 0, 0.5], [1, 0, 0.5], [1, 1, 0.5], [0, 1, 0.5]
-    ], [0, 0, 1]);
+      [0.5 - hw*c + ox1, 0, 0.5 - hw*s + oz1],
+      [0.5 + hw*c + ox1, 0, 0.5 + hw*s + oz1],
+      [0.5 + hw*c + ox1, 1, 0.5 + hw*s + oz1],
+      [0.5 - hw*c + ox1, 1, 0.5 - hw*s + oz1],
+    ], [0, 1, 0]); // Normal points up for even lighting
+
+    // Plane 2: diagonal \ direction, horizontal normal (-s, 0, c)
+    var ox2 = -off * s, oz2 = -off * c;
+    emitQuad([
+      [0.5 + hw*s + ox2, 0, 0.5 - hw*c + oz2],
+      [0.5 - hw*s + ox2, 0, 0.5 + hw*c + oz2],
+      [0.5 - hw*s + ox2, 1, 0.5 + hw*c + oz2],
+      [0.5 + hw*s + ox2, 1, 0.5 - hw*c + oz2],
+    ], [0, 1, 0]); // Normal points up for even lighting
   }
 
   // Build a single 1×1 top face near the ground for flower blocks

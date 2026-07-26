@@ -439,6 +439,9 @@ class Skybox {
       depthWrite: false,
     });
 
+    // Sun and moon sprites (visible celestial bodies in the sky)
+    this._createSunMoonSprites();
+
     // Generate cloud clusters spread across the sky
     for (let i = 0; i < this.cloudTargetCount; i++) {
       this._spawnCloud(cubeGeo, cubeMat, cloudGroup, true);
@@ -485,27 +488,82 @@ class Skybox {
   }
 
   /**
+   * Create sprite-based sun and moon that orbit in the sky.
+   * Sprites always face the camera, are cheap to render, and can carry
+   * a soft glow halo via the generated canvas texture.
+   */
+  _createSunMoonSprites() {
+    if (typeof THREE === 'undefined') return;
+
+    // Generate a radial glow texture on a canvas (no external assets needed)
+    const makeGlowTexture = (coreColor, glowColor, radius) => {
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const center = size / 2;
+
+      // Outer glow
+      const glow = ctx.createRadialGradient(center, center, 0, center, center, center);
+      glow.addColorStop(0, coreColor);
+      glow.addColorStop(0.15, coreColor);
+      glow.addColorStop(0.4, glowColor);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, size, size);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.needsUpdate = true;
+      return tex;
+    };
+
+    // Sun sprite — warm yellow core with orange glow
+    const sunTexture = makeGlowTexture('rgba(255,255,220,1)', 'rgba(255,200,50,0.6)', 128);
+    const sunMat = new THREE.SpriteMaterial({
+      map: sunTexture,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.sunSprite = new THREE.Sprite(sunMat);
+    this.sunSprite.scale.set(40, 40, 1);
+    this.renderer.scene.add(this.sunSprite);
+
+    // Moon sprite — pale white core with soft blue glow
+    const moonTexture = makeGlowTexture('rgba(220,220,240,1)', 'rgba(150,160,220,0.5)', 128);
+    const moonMat = new THREE.SpriteMaterial({
+      map: moonTexture,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.moonSprite = new THREE.Sprite(moonMat);
+    this.moonSprite.scale.set(30, 30, 1);
+    this.renderer.scene.add(this.moonSprite);
+  }
+
+  /**
    * Create a single fluffy cloud cluster from multiple cubes.
    * Uses a layered approach: wider base, narrower top for natural look.
    */
   _createCloudCluster(cubeGeo, cubeMat) {
     const cluster = new THREE.Group();
 
-    // Cloud parameters
-    const length = 4 + Math.floor(Math.random() * 5); // 4-8 cubes long
-    const baseWidth = 2 + Math.floor(Math.random() * 2); // 2-3 cubes wide
+    // Cloud parameters — significantly larger clouds
+    const length = 8 + Math.floor(Math.random() * 8); // 8-15 cubes long (was 4-8)
+    const baseWidth = 4 + Math.floor(Math.random() * 3); // 4-6 cubes wide (was 2-3)
 
     // Layer 1: Bottom layer — widest, forms the base
     for (let x = 0; x < length; x++) {
-      const w = baseWidth + (Math.random() > 0.5 ? 1 : 0);
+      const w = baseWidth + (Math.random() > 0.4 ? 1 : 0);
       for (let z = -Math.floor(w / 2); z <= Math.floor(w / 2); z++) {
         const cube = new THREE.Mesh(cubeGeo, cubeMat);
-        const scale = 1.5 + Math.random() * 1.0;
+        const scale = 3.0 + Math.random() * 2.0; // 3.0-5.0 (was 1.5-2.5)
         cube.scale.set(scale, scale * 0.8, scale);
         cube.position.set(
-          (x - length / 2 + 0.5) * 1.2,
+          (x - length / 2 + 0.5) * 2.5,
           0,
-          z * 1.2
+          z * 2.5
         );
         cluster.add(cube);
       }
@@ -513,30 +571,30 @@ class Skybox {
 
     // Layer 2: Middle layer — slightly narrower, taller
     for (let x = 1; x < length - 1; x++) {
-      const w = Math.max(1, baseWidth - 1 + (Math.random() > 0.6 ? 1 : 0));
+      const w = Math.max(2, baseWidth - 1 + (Math.random() > 0.5 ? 1 : 0));
       for (let z = -Math.floor(w / 2); z <= Math.floor(w / 2); z++) {
         const cube = new THREE.Mesh(cubeGeo, cubeMat);
-        const scale = 1.3 + Math.random() * 0.8;
+        const scale = 2.5 + Math.random() * 1.8; // 2.5-4.3 (was 1.3-2.1)
         cube.scale.set(scale, scale * 0.9, scale);
         cube.position.set(
-          (x - length / 2 + 0.5) * 1.2,
-          1.0,
-          z * 1.2
+          (x - length / 2 + 0.5) * 2.5,
+          2.2,
+          z * 2.5
         );
         cluster.add(cube);
       }
     }
 
     // Layer 3: Top puffs — sparse, creates the fluffy peaks
-    const topCount = 2 + Math.floor(Math.random() * 3);
+    const topCount = 4 + Math.floor(Math.random() * 4); // 4-7 (was 2-4)
     for (let i = 0; i < topCount; i++) {
       const cube = new THREE.Mesh(cubeGeo, cubeMat);
-      const scale = 1.0 + Math.random() * 1.2;
+      const scale = 2.0 + Math.random() * 2.2; // 2.0-4.2 (was 1.0-2.2)
       cube.scale.set(scale, scale * 1.1, scale);
       cube.position.set(
-        (Math.random() - 0.5) * (length - 2) * 1.2,
-        2.0 + Math.random() * 0.5,
-        (Math.random() - 0.5) * baseWidth * 1.2
+        (Math.random() - 0.5) * (length - 2) * 2.5,
+        4.0 + Math.random() * 1.5,
+        (Math.random() - 0.5) * baseWidth * 2.5
       );
       cluster.add(cube);
     }
@@ -572,6 +630,31 @@ class Skybox {
       this.moonLight.position.set(moonX, Math.max(moonY, -10), -50);
 
       this.moonLight.intensity = getMoonIntensity(this.timeOfDay);
+    }
+
+    // Sun sprite — position matches sun light, only visible above horizon
+    if (this.sunSprite) {
+      const sunAngle = getSunAngleForTime(this.timeOfDay);
+      const sunX = Math.cos(sunAngle) * 100;
+      const sunY = Math.sin(sunAngle) * 100;
+      this.sunSprite.position.set(sunX, sunY, 50);
+      // Fade out when below horizon
+      const elevation = getSunElevation(this.timeOfDay);
+      this.sunSprite.material.opacity = Math.max(0, smoothstep(elevation * 3));
+    }
+
+    // Moon sprite — position matches moon light, only visible above horizon
+    if (this.moonSprite) {
+      const moonAngle = getMoonAngleForTime(this.timeOfDay);
+      const moonX = Math.cos(moonAngle) * 100;
+      const moonY = Math.sin(moonAngle) * 100;
+      this.moonSprite.position.set(moonX, moonY, -50);
+      // Fade out when below horizon or when sun is too bright
+      const moonElev = getMoonElevation(this.timeOfDay);
+      const sunElev = getSunElevation(this.timeOfDay);
+      const sunInterference = Math.max(0, sunElev);
+      const moonBase = smoothstep(Math.max(0, moonElev * 2));
+      this.moonSprite.material.opacity = Math.max(0, moonBase * (1 - sunInterference));
     }
 
     // Ambient light intensity
@@ -895,10 +978,22 @@ class Skybox {
     if (this.cloudLayer && this.renderer.scene) {
       this.renderer.scene.remove(this.cloudLayer);
     }
+    if (this.sunSprite && this.renderer.scene) {
+      this.renderer.scene.remove(this.sunSprite);
+      if (this.sunSprite.material.map) this.sunSprite.material.map.dispose();
+      this.sunSprite.material.dispose();
+    }
+    if (this.moonSprite && this.renderer.scene) {
+      this.renderer.scene.remove(this.moonSprite);
+      if (this.moonSprite.material.map) this.moonSprite.material.map.dispose();
+      this.moonSprite.material.dispose();
+    }
     this.sunLight = null;
     this.moonLight = null;
     this.ambientLight = null;
     this.cloudLayer = null;
+    this.sunSprite = null;
+    this.moonSprite = null;
   }
 }
 
