@@ -2219,6 +2219,10 @@
         const textureAtlas = new PBRTextureAtlas({ tileSize });
         await textureAtlas.buildAtlas();
 
+        // Build item texture atlas for hotbar/inventory UI
+        const itemAtlas = new ItemTextureAtlas({ tileSize: 64 });
+        await itemAtlas.buildAtlas();
+
         // Initialize PBR material factory with the triple atlas
         const advancedShading = perfSettings ? perfSettings.get('advancedShading') : true;
         renderer.initPBR(textureAtlas, advancedShading);
@@ -2942,7 +2946,7 @@
             },
           };
 
-          // ─── Block Color Helper ────────────────────────
+          // ─── Block Color Helper (fallback for dropped items) ────────────────
           function getBlockColor(blockType) {
             const colors = {
               0: '#888888', 1: '#333333', 2: '#808080', 3: '#8B4513', 4: '#228B22',
@@ -2965,7 +2969,43 @@
             return colors[blockType] || '#888888';
           }
 
-          // ─── Hotbar UI Update ──────────────────────────
+          // ─── Item Texture Rendering ────────────────────────────────────────
+          // Draw an item icon onto a canvas element using the item texture atlas
+          // or the block texture atlas for block items.
+          function renderItemIcon(canvasEl, typeId) {
+            const ctx = canvasEl.getContext('2d');
+            const w = canvasEl.width;
+            const h = canvasEl.height;
+            ctx.clearRect(0, 0, w, h);
+
+            // Try item atlas first (for named items)
+            if (typeof typeId === 'string' && itemAtlas.slotMap[typeId]) {
+              const src = itemAtlas.canvas;
+              const slot = itemAtlas.slotMap[typeId];
+              const srcCell = itemAtlas.tileSize + itemAtlas._gap;
+              ctx.imageSmoothingEnabled = false;
+              ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
+            } else if (typeof typeId === 'number' && itemAtlas.slotMap[typeId]) {
+              // Block item registered in item atlas
+              const src = itemAtlas.canvas;
+              const slot = itemAtlas.slotMap[typeId];
+              const srcCell = itemAtlas.tileSize + itemAtlas._gap;
+              ctx.imageSmoothingEnabled = false;
+              ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
+            } else if (typeof typeId === 'number' && textureAtlas.tileMap[typeId]) {
+              // Fall back to block atlas — draw the top face texture
+              const blockEntry = textureAtlas.tileMap[typeId];
+              let tile = blockEntry.tiles.top || blockEntry.tiles.side || blockEntry.tiles.all;
+              if (tile) {
+                const src = textureAtlas.diffuseCanvas;
+                const srcCell = textureAtlas.tileSize + textureAtlas._gap;
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(src, textureAtlas._gap + tile.col * srcCell, textureAtlas._gap + tile.row * srcCell, textureAtlas.tileSize, textureAtlas.tileSize, 0, 0, w, h);
+              }
+            }
+          }
+
+          // ─── Hotbar UI Update ──────────────────────────────────────────────
           function updateHotbarUI() {
             const hotbarSlots = document.querySelectorAll('.hotbar-slot');
             for (let i = 0; i < 9; i++) {
@@ -2977,16 +3017,33 @@
               // Update active state
               el.classList.toggle('active', i === inventory.selectedHotbarSlot);
 
+              // Remove old canvas if present
+              const oldCanvas = el.querySelector('canvas.item-icon');
+              if (oldCanvas) oldCanvas.remove();
+              const oldCount = el.querySelector('.hotbar-item-count');
+              if (oldCount) oldCount.remove();
+
               if (slot) {
-                const color = getBlockColor(slot.typeId);
                 const name = inventory.getDisplayName(slot.typeId);
-                el.style.background = 'linear-gradient(135deg, ' + color + ' 0%, rgba(0,0,0,0.4) 100%)';
-                el.style.border = '2px solid rgba(255,255,255,0.2)';
-                el.innerHTML = '<span class="hotbar-item-count">' + (slot.count > 1 ? slot.count : '') + '</span>';
-                el.title = name;
+
+                // Create canvas for item icon
+                const canvas = document.createElement('canvas');
+                canvas.className = 'item-icon';
+                canvas.width = 48;
+                canvas.height = 48;
+                renderItemIcon(canvas, slot.typeId);
+                el.appendChild(canvas);
+
+                // Show count badge if > 1
+                if (slot.count > 1) {
+                  const countEl = document.createElement('span');
+                  countEl.className = 'hotbar-item-count';
+                  countEl.textContent = slot.count;
+                  el.appendChild(countEl);
+                }
+
+                el.title = name + (slot.count > 1 ? ' (x' + slot.count + ')' : '');
               } else {
-                el.style.background = 'rgba(255,255,255,0.06)';
-                el.style.border = '2px solid rgba(255,255,255,0.1)';
                 el.innerHTML = '';
                 el.title = '';
               }
@@ -3022,10 +3079,24 @@
               div.dataset.slot = i;
 
               if (slot) {
-                const color = getBlockColor(slot.typeId);
                 const name = inventory.getDisplayName(slot.typeId);
-                div.style.background = 'linear-gradient(135deg, ' + color + ' 0%, rgba(0,0,0,0.3) 100%)';
-                div.innerHTML = '<span class="item-count">' + (slot.count > 1 ? slot.count : '') + '</span>';
+
+                // Create canvas for item icon
+                const canvas = document.createElement('canvas');
+                canvas.className = 'item-icon';
+                canvas.width = 48;
+                canvas.height = 48;
+                renderItemIcon(canvas, slot.typeId);
+                div.appendChild(canvas);
+
+                // Show count badge if > 1
+                if (slot.count > 1) {
+                  const countEl = document.createElement('span');
+                  countEl.className = 'item-count';
+                  countEl.textContent = slot.count;
+                  div.appendChild(countEl);
+                }
+
                 div.title = name + (slot.count > 1 ? ' (x' + slot.count + ')' : '');
               } else {
                 div.title = 'Empty slot';
@@ -3590,6 +3661,9 @@
           // Pause game
           game.paused = true;
           pauseMenu.classList.remove('hidden');
+          // Hide hotbar when paused
+          const hotbarContainer = document.getElementById('hotbar-container');
+          if (hotbarContainer) hotbarContainer.classList.add('hidden');
           document.exitPointerLock();
           // Stop all timers while paused
           if (game.chunkManager) {
@@ -3606,6 +3680,9 @@
     function resumeGame() {
       game.paused = false;
       pauseMenu.classList.add('hidden');
+      // Show hotbar when resuming
+      const hotbarContainer = document.getElementById('hotbar-container');
+      if (hotbarContainer) hotbarContainer.classList.remove('hidden');
       game.renderer.domElement.requestPointerLock();
       // Restart all timers on resume
       if (game.chunkManager) {
