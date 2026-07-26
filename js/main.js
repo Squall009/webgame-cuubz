@@ -3276,10 +3276,21 @@
 
           function toggleInventoryScreen() {
             inventoryOpen = !inventoryOpen;
+            const hotbarContainer = document.getElementById('hotbar-container');
             if (inventoryOpen) {
+              // Unlock mouse so player can use inventory UI
+              if (document.pointerLockElement) {
+                document.exitPointerLock();
+              }
+              // Hide hotbar when inventory screen is open
+              if (hotbarContainer) hotbarContainer.classList.add('hidden');
               renderInventoryGrid();
               inventoryScreen.classList.remove('hidden');
             } else {
+              // Re-lock mouse when closing inventory
+              game.renderer.domElement.requestPointerLock();
+              // Show hotbar when inventory screen is closed
+              if (hotbarContainer) hotbarContainer.classList.remove('hidden');
               inventoryScreen.classList.add('hidden');
             }
           }
@@ -3287,6 +3298,10 @@
           if (btnCloseInventory) {
             btnCloseInventory.addEventListener('click', () => {
               inventoryOpen = false;
+              // Re-lock mouse when closing inventory via button
+              game.renderer.domElement.requestPointerLock();
+              const hotbarContainer = document.getElementById('hotbar-container');
+              if (hotbarContainer) hotbarContainer.classList.remove('hidden');
               inventoryScreen.classList.add('hidden');
             });
           }
@@ -3374,6 +3389,9 @@
 
           setTimeout(() => {
             game.start(mode);
+            // Show HUD (contains hotbar) when game starts
+            const hud = document.getElementById('hud');
+            if (hud) hud.classList.remove('hidden');
 
             // Main render loop
             function renderLoop() {
