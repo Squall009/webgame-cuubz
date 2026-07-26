@@ -603,8 +603,8 @@ class VoxelRenderer {
     while (steps < maxSteps) {
       const blockType = chunkManager.getVoxel(x, y, z);
 
-      // Stop on any non-air block
-      if (blockType !== 0) {
+      // Stop on any non-air block (treat both AIR(0) and CAVE_AIR(12) as empty)
+      if (blockType !== 0 && blockType !== 12) {
         // Hit! `t` is the distance to the face we entered through.
         // For the starting voxel (t=0), hit point is at the camera.
         if (t <= maxDistance) {

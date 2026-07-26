@@ -27,6 +27,7 @@ class MouseInput {
     this._onMouseUpBound = null;
     this._onWheelBound = null;
     this._onContextMenuBound = null;
+    this._onPointerLockChangeBound = null;
     
     if (typeof window !== 'undefined') {
       this._bindEvents();
@@ -39,6 +40,9 @@ class MouseInput {
     this._onMouseUpBound = (e) => this._onMouseUp(e);
     this._onWheelBound = (e) => this._onWheel(e);
     this._onContextMenuBound = (e) => e.preventDefault();
+    this._onPointerLockChangeBound = () => {
+      this.locked = !!document.pointerLockElement;
+    };
     
     this.canvas.addEventListener('mousedown', this._onMouseDownBound);
     this.canvas.addEventListener('mouseup', this._onMouseUpBound);
@@ -46,6 +50,11 @@ class MouseInput {
     
     // Prevent context menu on right click
     this.canvas.addEventListener('contextmenu', this._onContextMenuBound);
+    
+    // Track pointer lock state
+    if (typeof document !== 'undefined') {
+      document.addEventListener('pointerlockchange', this._onPointerLockChangeBound);
+    }
   }
 
   _onMouseDown(e) {
@@ -126,6 +135,10 @@ class MouseInput {
     this._onMouseUpBound = null;
     this._onWheelBound = null;
     this._onContextMenuBound = null;
+    if (typeof document !== 'undefined' && this._onPointerLockChangeBound) {
+      document.removeEventListener('pointerlockchange', this._onPointerLockChangeBound);
+    }
+    this._onPointerLockChangeBound = null;
     this.canvas = null;
   }
 }

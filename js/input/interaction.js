@@ -262,6 +262,9 @@ class BlockInteraction {
     // Mark chunk as dirty for saving
     this.chunkManager.markChunkDirty(chunkX, chunkZ);
 
+    // Also mark adjacent chunks for mesh rebuild (newly exposed faces)
+    this._markAdjacentChunksDirty(x, y, z, chunkX, chunkZ);
+
     // Remove crack overlay
     this._removeCrackOverlay();
 
@@ -351,33 +354,69 @@ class BlockInteraction {
     const px = Math.floor(this.player.position.x);
     const py = Math.floor(this.player.position.y);
     const pz = Math.floor(this.player.position.z);
-    if (placeX === px && (placeY === py || placeY === py + 1) && placeZ === pz) return;
+    if (placeX === px && (placeY === py || placeY === py + 1) && placeZ === pz) {
+      // If we can't place on the targeted face (inside player), try default upward placement
+      if (faceNormal) {
+        return;
+      }
+      // No faceNormal (started inside a block) — try placing above player
+      const altPlaceY = py + 2;
+      this._placeAt(placeX, altPlaceY, placeZ, placeType);
+      return;
+    }
+
+    // If faceNormal is null (started inside a block), use upward placement
+    if (!faceNormal) {
+      const altPlaceY = py + 2;
+      this._placeAt(placeX, altPlaceY, placeZ, placeType);
+      return;
+    }
 
     // Determine block type to place
-    let placeType = this.selectedBlockType;
+    let finalPlaceType = this.selectedBlockType;
 
     // If inventory exists, use selected hotbar slot
     if (this.inventory) {
       const selectedItem = this.inventory.getSelectedItem();
       if (selectedItem && typeof selectedItem.typeId === 'number') {
-        placeType = selectedItem.typeId;
+        finalPlaceType = selectedItem.typeId;
       }
     }
 
+    this._placeAt(placeX, placeY, placeZ, finalPlaceType);
+  }
+
+  /**
+   * Place a block at the given world coordinates.
+   * Handles chunk lookup, inventory consumption, and mesh rebuild.
+   * @param {number} wx - World X
+   * @param {number} wy - World Y
+   * @param {number} wz - World Z
+   * @param {number} placeType - Block type ID to place
+   */
+  _placeAt(wx, wy, wz, placeType) {
+    // Check distance to player
+    const dx = wx - this.player.position.x;
+    const dy = wy - this.player.position.y;
+    const dz = wz - this.player.position.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    if (dist > this.placeRange) return;
+
     // Find which chunk contains the placement position
-    const targetChunkX = Math.floor(placeX / 16);
-    const targetChunkZ = Math.floor(placeZ / 16);
+    const targetChunkX = Math.floor(wx / 16);
+    const targetChunkZ = Math.floor(wz / 16);
 
     // Get chunk data
     let chunkData = this.chunkManager.getChunkData(targetChunkX, targetChunkZ);
     if (!chunkData) return;
 
     // Convert to local coords
-    const lx = ((placeX % 16) + 16) % 16;
-    const lz = ((placeZ % 16) + 16) % 16;
+    const lx = ((wx % 16) + 16) % 16;
+    const lz = ((wz % 16) + 16) % 16;
 
-    // Don't overwrite non-air blocks
-    const existingBlock = chunkData.getBlock(lx, placeY, lz);
+    // Don't overwrite non-air blocks (check both AIR and CAVE_AIR)
+    const existingBlock = chunkData.getBlock(lx, wy, lz);
     if (existingBlock !== BLOCK_TYPES.AIR && existingBlock !== BLOCK_TYPES.CAVE_AIR) return;
 
     // Consume from inventory if available
@@ -387,15 +426,33 @@ class BlockInteraction {
     }
 
     // Place the block
-    chunkData.setBlock(lx, placeY, lz, placeType);
+    chunkData.setBlock(lx, wy, lz, placeType);
 
     // Mark chunk as dirty for saving
     this.chunkManager.markChunkDirty(targetChunkX, targetChunkZ);
 
-    _log('[BlockInteraction] Placed block ' + placeType + ' at (' + placeX + ', ' + placeY + ', ' + placeZ + ')');
+    // Also mark adjacent chunks for mesh rebuild (face culling may change)
+    this._markAdjacentChunksDirty(wx, wy, wz, targetChunkX, targetChunkZ);
+
+    _log('[BlockInteraction] Placed block ' + placeType + ' at (' + wx + ', ' + wy + ', ' + wz + ')');
 
     // Multiplayer: track for network sync
-    this._lastPlaced = { x: placeX, y: placeY, z: placeZ, blockType: placeType };
+    this._lastPlaced = { x: wx, y: wy, z: wz, blockType: placeType };
+  }
+
+  /**
+   * Mark adjacent chunks for mesh rebuild when a block is placed/broken.
+   * This ensures face culling is updated for neighboring chunks.
+   */
+  _markAdjacentChunksDirty(wx, wy, wz, cx, cz) {
+    const lx = ((wx % 16) + 16) % 16;
+    const lz = ((wz % 16) + 16) % 16;
+
+    // Check each face — if on chunk boundary, mark neighbor chunk
+    if (lx === 0) this.chunkManager.markChunkDirty(cx - 1, cz);
+    if (lx === 15) this.chunkManager.markChunkDirty(cx + 1, cz);
+    if (lz === 0) this.chunkManager.markChunkDirty(cx, cz - 1);
+    if (lz === 15) this.chunkManager.markChunkDirty(cx, cz + 1);
   }
 
   // ─── Crack Overlay ────────────────────────────────────
