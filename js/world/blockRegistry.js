@@ -104,12 +104,12 @@ const BLOCK_REGISTRY = [
   { id: 60, name: 'calcite',        texture: { all: 'calcite' },             category: 'solid',   hardness: 0.5,  tool: 'shovel' },
 
   // ═══════════════════════════════════════════════════════════
-  // IDs 61–64 — Ice variants
+  // IDs 61–64 — Ice variants (solid: true so player can stand on them)
   // ═══════════════════════════════════════════════════════════
-  { id: 61, name: 'ice',            texture: { all: 'ice' },                 category: 'transparent', hardness: 0.5,  opacity: 0.4 },
-  { id: 62, name: 'packed_ice',     texture: { all: 'packed_ice' },          category: 'transparent', hardness: 0.5,  opacity: 0.3 },
-  { id: 63, name: 'blue_ice',       texture: { all: 'blue_ice' },            category: 'transparent', hardness: 0.5,  opacity: 0.2 },
-  { id: 64, name: 'frosted_ice',    texture: { all: 'frosted_ice_0' },       category: 'transparent', hardness: 0.5,  opacity: 0.4 },
+  { id: 61, name: 'ice',            texture: { all: 'ice' },                 category: 'transparent', hardness: 0.5,  opacity: 0.4, solid: true },
+  { id: 62, name: 'packed_ice',     texture: { all: 'packed_ice' },          category: 'transparent', hardness: 0.5,  opacity: 0.3, solid: true },
+  { id: 63, name: 'blue_ice',       texture: { all: 'blue_ice' },            category: 'transparent', hardness: 0.5,  opacity: 0.2, solid: true },
+  { id: 64, name: 'frosted_ice',    texture: { all: 'frosted_ice_0' },       category: 'transparent', hardness: 0.5,  opacity: 0.4, solid: true },
 
   // ═══════════════════════════════════════════════════════════
   // IDs 65–90 — Wood logs + tops
@@ -255,10 +255,10 @@ const BLOCK_REGISTRY = [
   // ═══════════════════════════════════════════════════════════
   // IDs 177–187 — Plants
   // ═══════════════════════════════════════════════════════════
-  { id: 177, name: 'short_grass',      texture: { all: 'short_grass' },          category: 'cutout',  hardness: 0.0 },
-  { id: 178, name: 'tall_grass',       texture: { side: 'tall_grass_top', top: 'tall_grass_top', bottom: 'tall_grass_bottom' }, category: 'cutout', hardness: 0.0 },
-  { id: 179, name: 'red_flower',       texture: { all: 'pink_petals' }, color: [1, 0.25, 0.25], category: 'cutout',  hardness: 0.0 },
-  { id: 180, name: 'yellow_flower',    texture: { all: 'pink_petals' }, color: [1, 1, 0.25],   category: 'cutout',  hardness: 0.0 },
+  { id: 177, name: 'short_grass',      texture: { all: 'short_grass' },          category: 'cutout',  hardness: 0.0, meshType: 'crossbillboard', meshHeight: 1 },
+  { id: 178, name: 'tall_grass',       texture: { side: 'tall_grass_top', top: 'tall_grass_top', bottom: 'tall_grass_bottom' }, category: 'cutout', hardness: 0.0, meshType: 'crossbillboard_stacked', meshHeight: 2 },
+  { id: 179, name: 'red_flower',       texture: { all: 'pink_petals' }, color: [1, 0.25, 0.25], category: 'cutout',  hardness: 0.0, meshType: 'topface' },
+  { id: 180, name: 'yellow_flower',    texture: { all: 'pink_petals' }, color: [1, 1, 0.25],   category: 'cutout',  hardness: 0.0, meshType: 'topface' },
   { id: 181, name: 'brown_mushroom',   texture: { all: 'brown_mushroom_block' }, category: 'cutout',  hardness: 0.0 },
   { id: 182, name: 'red_mushroom',     texture: { all: 'red_mushroom_block' },   category: 'cutout',  hardness: 0.0 },
   { id: 183, name: 'weeping_vines',    texture: { all: 'weeping_vines' },        category: 'cutout',  hardness: 0.0 },
@@ -295,7 +295,7 @@ const BLOCK_PROPERTIES = {};
 for (const block of BLOCK_REGISTRY) {
   BLOCK_PROPERTIES[block.id] = {
     name: block.name,
-    solid: block.category === 'solid',
+    solid: block.solid !== undefined ? block.solid : block.category === 'solid',
     hardness: block.hardness || 0,
     tool: block.tool || null,
     category: block.category,

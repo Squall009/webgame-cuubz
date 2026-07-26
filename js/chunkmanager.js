@@ -232,7 +232,7 @@ class ChunkManager {
   /** Initialize mesh builder worker pool. */
   async _initMeshWorkers() {
     try {
-      const response = await fetch('js/renderer/meshWorker.js');
+      const response = await fetch('js/renderer/meshWorker.js?v=20260725-2');
       const source = await response.text();
       const blob = new Blob([source], { type: 'application/javascript' });
       this._meshBlobUrl = URL.createObjectURL(blob);
@@ -1342,6 +1342,21 @@ class ChunkManager {
     this.renderDistance = Math.max(2, Math.min(16, distance));
     if (this.onRenderDistanceChange && this.renderDistance !== old) {
       this.onRenderDistanceChange(this.renderDistance);
+    }
+  }
+
+  /**
+   * Rebuild all loaded chunk meshes with new materials.
+   * Called when texture resolution or advanced shading changes.
+   * Marks all chunks as changed so they get rebuilt in the next render tick.
+   */
+  rebuildAllMeshes() {
+    console.log(`[ChunkManager] Rebuilding all meshes (${this.loadedMeshes.size} loaded)`);
+    for (const [key] of this.loadedMeshes) {
+      const chunk = this.memoryCache.get(key);
+      if (chunk) {
+        chunk.changed = true;
+      }
     }
   }
 

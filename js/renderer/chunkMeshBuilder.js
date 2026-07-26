@@ -47,6 +47,22 @@ class ChunkMeshBuilder {
       BLOCK_TYPES.CHERRY_LEAVES, BLOCK_TYPES.MANGROVE_LEAVES, BLOCK_TYPES.PALE_OAK_LEAVES,
       BLOCK_TYPES.ORANGE_POPLAR_LEAVES, BLOCK_TYPES.RED_POPLAR_LEAVES, BLOCK_TYPES.YELLOW_POPLAR_LEAVES,
     ]);
+
+    // Special mesh types: block ID → { type, height }
+    // 'crossbillboard' = two vertical planes forming an X (grass)
+    // 'topface' = single top face near the ground (flowers)
+    this.specialMeshTypes = new Map(
+      Object.values(BLOCK_BY_ID)
+        .filter(b => b.meshType)
+        .map(b => [b.id, { type: b.meshType, height: b.meshHeight || 0.5 }])
+    );
+
+    // Block color map: block ID → [r, g, b] for blocks with explicit color multipliers
+    this.colorMap = new Map(
+      Object.values(BLOCK_BY_ID)
+        .filter(b => b.color && Array.isArray(b.color))
+        .map(b => [b.id, b.color])
+    );
   }
 
   /**
@@ -142,6 +158,23 @@ class ChunkMeshBuilder {
           } else if (fluidBlockType && hasWaterLevels && isSourceFluid) {
             this._buildSourceFluidFace(x, y, z, blockType, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup);
           } */
+
+          // Special mesh types: crossbillboard (grass X-shape) and topface (flowers)
+          const meshInfo = this.specialMeshTypes.get(blockType);
+          if (meshInfo) {
+            const colorArr = isCutout ? cutoutColors : (isSelfTransparent ? transparentColors : colors);
+            const vColor = getVertexColor(x, z, blockType);
+            if (meshInfo.type === 'crossbillboard') {
+              this._addCrossbillboard(x, y, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor, 'side');
+            } else if (meshInfo.type === 'crossbillboard_stacked') {
+              // Bottom layer uses 'bottom' face texture, top layer uses 'side'
+              this._addCrossbillboard(x, y, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor, 'bottom');
+              this._addCrossbillboard(x, y + 1, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor, 'side');
+            } else if (meshInfo.type === 'topface') {
+              this._addTopFace(x, y, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor);
+            }
+            continue; // Skip standard face loop
+          }
 
           // Standard solid/transparent/cutout block rendering — all blocks use this path now
             // Check each face for exposure (face culling)
@@ -548,6 +581,126 @@ class ChunkMeshBuilder {
    */
   _isTransparent(blockType) {
     return this.transparentIds.has(blockType);
+  }
+
+  /**
+   * Build a crossbillboard (two vertical 1×1 planes forming an X) for grass blocks.
+   * Two planes, each double-sided, crossing at the block center.
+   * Each plane is full cube-face size (1×1 units).
+   * @param {number} x - Block X
+   * @param {number} y - Block Y
+   * @param {number} z - Block Z
+   * @param {number} blockType - Block ID for texture lookup
+   * @param {object} atlas - Texture atlas
+   * @param {array} posArr - Position array
+   * @param {array} normArr - Normal array
+   * @param {array} uvArr - UV array
+   * @param {array} colorArr - Color array
+   * @param {array} idxArr - Index array
+   * @param {array} vColor - Vertex color [r, g, b]
+   */
+  _addCrossbillboard(x, y, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor, faceName = 'side') {
+    // Get UV info — use specified face (default 'side') for crossbillboard planes
+    let uvU = 0, uvV = 0, uvSize = 1;
+    if (atlas && atlas.loaded) {
+      const faceUV = atlas.getFaceUV(blockType, faceName);
+      uvU = faceUV.u || 0;
+      uvV = faceUV.v || 0;
+      uvSize = faceUV.size || (1.0 / 16);
+    }
+
+    const vi = posArr.length / 3;
+    const quadUVs = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+    // Helper: emit a single-sided quad (material is already double-sided)
+    const emitQuad = (verts, normal) => {
+      for (let i = 0; i < 4; i++) {
+        posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
+        normArr.push(normal[0], normal[1], normal[2]);
+        uvArr.push(uvU + quadUVs[i][0] * uvSize, uvV + quadUVs[i][1] * uvSize);
+        colorArr.push(vColor[0], vColor[1], vColor[2]);
+      }
+      idxArr.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
+    };
+
+    // Two vertical planes forming an X (criss-cross), centered at block center (0.5, 0.5, 0.5).
+    // Each plane is a W×1 rectangle rotated 45° apart around Y axis.
+    // Normals point straight up (0,1,0) so both planes receive equal sunlight.
+    // Small depth offset along each plane's horizontal normal prevents z-fighting.
+    const c = Math.cos(Math.PI / 4); // 0.7071
+    const s = Math.sin(Math.PI / 4); // 0.7071
+    const hw = 0.4;  // half-width (0.8 total, fits within block when rotated)
+    const off = 0.02; // depth offset along horizontal normal
+
+    // Plane 1: diagonal / direction, horizontal normal (c, 0, s)
+    // Vertices of a rectangle centered at (0.5, 0, 0.5), rotated 45°
+    const ox1 = off * c, oz1 = off * s;
+    emitQuad([
+      [0.5 - hw*c + ox1, 0, 0.5 - hw*s + oz1],
+      [0.5 + hw*c + ox1, 0, 0.5 + hw*s + oz1],
+      [0.5 + hw*c + ox1, 1, 0.5 + hw*s + oz1],
+      [0.5 - hw*c + ox1, 1, 0.5 - hw*s + oz1],
+    ], [0, 1, 0]); // Normal points up for even lighting
+
+    // Plane 2: diagonal \ direction, horizontal normal (-s, 0, c)
+    const ox2 = -off * s, oz2 = -off * c;
+    emitQuad([
+      [0.5 + hw*s + ox2, 0, 0.5 - hw*c + oz2],
+      [0.5 - hw*s + ox2, 0, 0.5 + hw*c + oz2],
+      [0.5 - hw*s + ox2, 1, 0.5 + hw*c + oz2],
+      [0.5 + hw*s + ox2, 1, 0.5 - hw*c + oz2],
+    ], [0, 1, 0]); // Normal points up for even lighting
+  }
+
+  /**
+   * Build a single top face near the ground for flower blocks.
+   * @param {number} x - Block X
+   * @param {number} y - Block Y
+   * @param {number} z - Block Z
+   * @param {number} blockType - Block ID for texture lookup
+   * @param {object} atlas - Texture atlas
+   * @param {array} posArr - Position array
+   * @param {array} normArr - Normal array
+   * @param {array} uvArr - UV array
+   * @param {array} colorArr - Color array
+   * @param {array} idxArr - Index array
+   * @param {array} vColor - Vertex color [r, g, b]
+   */
+  _addTopFace(x, y, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor) {
+    const flowerY = 0.05; // Slightly above ground
+
+    // Get UV info — use 'top' face for the flower
+    let uvU = 0, uvV = 0, uvSize = 1;
+    if (atlas && atlas.loaded) {
+      const faceUV = atlas.getFaceUV(blockType, 'top');
+      uvU = faceUV.u || 0;
+      uvV = faceUV.v || 0;
+      uvSize = faceUV.size || (1.0 / 16);
+    }
+
+    // Apply block color (e.g. red_flower → [1, 0.25, 0.25], yellow_flower → [1, 1, 0.25])
+    const blockColor = this.colorMap.get(blockType);
+    const finalColor = blockColor
+      ? [vColor[0] * blockColor[0], vColor[1] * blockColor[1], vColor[2] * blockColor[2]]
+      : vColor;
+
+    const vi = posArr.length / 3;
+    const quadUVs = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+    // Full 1×1 top face (+Y normal), counter-clockwise winding
+    const verts = [
+      [0, flowerY, 0], [1, flowerY, 0],
+      [1, flowerY, 1], [0, flowerY, 1]
+    ];
+    const normal = [0, 1, 0];
+
+    for (let i = 0; i < 4; i++) {
+      posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
+      normArr.push(normal[0], normal[1], normal[2]);
+      uvArr.push(uvU + quadUVs[i][0] * uvSize, uvV + quadUVs[i][1] * uvSize);
+      colorArr.push(finalColor[0], finalColor[1], finalColor[2]);
+    }
+    idxArr.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
   }
 
   /**

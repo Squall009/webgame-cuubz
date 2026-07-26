@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Cuubz — Voxel Survival</title>
-  <link rel="stylesheet" href="css/style.css?v=20260720-1">
+  <link rel="stylesheet" href="css/style.css?v=20260725-1">
   <!-- Three.js r134 — local copy (CDN gets blocked by Firefox ETP / ad blockers) -->
   <script src="js/three.min.js" onerror="window.__THREE_LOAD_FAILED=true;console.error('Failed to load Three.js from js/three.min.js')"></script>
 </head>
@@ -182,11 +182,6 @@
   <div id="settings-screen" class="screen hidden">
     <h2>Settings</h2>
     <div class="settings-group">
-      <label for="render-distance">Render Distance (chunks):</label>
-      <input type="range" id="render-distance" min="3" max="12" value="6">
-      <span id="render-distance-value">6</span>
-    </div>
-    <div class="settings-group">
       <label for="volume-slider">Volume:</label>
       <input type="range" id="volume-slider" min="0" max="100" value="50">
       <span id="volume-value">50%</span>
@@ -201,6 +196,44 @@
       <p><strong>Desktop:</strong> WASD move, Space jump, Shift sprint, E interact, Mouse look/click</p>
       <p><strong>Mobile:</strong> Left joystick move, Right swipe look, Tap break/place</p>
     </div>
+
+    <!-- Performance Settings -->
+    <div class="settings-group performance-section">
+      <h4>Performance</h4>
+
+      <label for="perf-render-distance">Render Distance:</label>
+      <select id="perf-render-distance">
+        <option value="2">2 (Minimum)</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6 (Recommended)</option>
+        <option value="8">8</option>
+        <option value="10">10</option>
+        <option value="12">12 (Maximum)</option>
+      </select>
+
+      <label for="perf-shadows">Shadows:</label>
+      <select id="perf-shadows">
+        <option value="off">Off</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
+
+      <label for="perf-texture-res">Texture Resolution:</label>
+      <select id="perf-texture-res">
+        <option value="low">Low (32×32)</option>
+        <option value="medium">Medium (64×64)</option>
+        <option value="high">High (128×128)</option>
+      </select>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="perf-advanced-shading" checked>
+        Advanced Shading (Normal + Specular Maps)
+      </label>
+    </div>
+
     <div class="menu-buttons">
       <button id="btn-back-settings" class="menu-btn secondary">Back</button>
     </div>
@@ -354,9 +387,50 @@
       <label for="setting-chunks-per-tick">Chunks Per Tick: <span id="chunks-val">3</span></label>
       <input type="range" id="setting-chunks-per-tick" min="1" max="10" step="1" value="3">
 
-      <label for="setting-render-distance">Render Distance (chunks): <span id="distance-val">8</span></label>
-      <input type="range" id="setting-render-distance" min="2" max="16" step="1" value="8">
     </div>
+
+    <!-- Performance Settings (Pause Menu) -->
+    <div class="settings-group performance-section">
+      <h4>Performance</h4>
+
+      <label for="pause-perf-render-distance">Render Distance:</label>
+      <select id="pause-perf-render-distance">
+        <option value="2">2 (Minimum)</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6 (Recommended)</option>
+        <option value="8">8</option>
+        <option value="10">10</option>
+        <option value="12">12 (Maximum)</option>
+      </select>
+
+      <label for="pause-perf-shadows">Shadows:</label>
+      <select id="pause-perf-shadows">
+        <option value="off">Off</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
+
+      <label for="pause-perf-texture-res">Texture Resolution:</label>
+      <select id="pause-perf-texture-res">
+        <option value="low">Low (32×32)</option>
+        <option value="medium">Medium (64×64)</option>
+        <option value="high">High (128×128)</option>
+      </select>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="pause-perf-advanced-shading" checked>
+        Advanced Shading
+      </label>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="pause-pause-time" checked>
+        Pause Time of Day
+      </label>
+    </div>
+
     <button id="btn-resume-game" class="menu-btn primary">Resume</button>
     <button id="btn-exit-menu" class="menu-btn secondary">Exit to Menu</button>
   </div>
@@ -392,7 +466,7 @@
   <script src="js/util/logger.js?v=20260714-1"></script>
 
   <!-- World Generation (VoxelGen Overhaul) -->
-  <script src="js/world/blockRegistry.js?v=20260722-5"></script>
+  <script src="js/world/blockRegistry.js?v=20260725-2"></script>
   <script src="js/world/noise.js?v=vgen-1"></script>
   <script src="js/world/chunkData.js?v=20260722-2"></script>
   <script src="js/world/biomeSystem.js?v=vgen-1"></script>
@@ -401,20 +475,21 @@
   <!-- REMOVED: featurePlacer, caveGenerator, oreGenerator — in workerGeneration.js -->
   <!-- New monolithic chunk manager (workers + IndexedDB + flush + region tracking) -->
   <script src="js/world/chunkBinaryCodec.js?v=20260714-1"></script>
-  <script src="js/chunkmanager.js?v=20260722-2"></script>
+  <script src="js/chunkmanager.js?v=20260725-2"></script>
   <!-- REMOVED: chunkStore, dirtyFlushManager, worldGenerator, chunkGrid → merged into chunkmanager.js -->
   <script src="js/world/persistence.js?v=20260714-1"></script>
   <script src="js/world/spawnManager.js?v=20260714-1"></script>
 
   <!-- Renderer (PBR shader before texture atlas) -->
-  <script src="js/renderer/pbrShader.js?v=20260722-7"></script>
-  <script src="js/renderer/textureAtlas.js?v=20260722-7"></script>
-  <script src="js/renderer/chunkMeshBuilder.js?v=20260722-2"></script>
+  <script src="js/renderer/pbrShader.js?v=20260725-5"></script>
+  <script src="js/renderer/textureAtlas.js?v=20260725-2"></script>
+  <script src="js/renderer/chunkMeshBuilder.js?v=20260725-5"></script>
   <!-- REMOVED: renderer/chunkManager.js → merged into js/chunkmanager.js -->
-  <script src="js/renderer/voxelRenderer.js?v=20260722-3"></script>
+  <script src="js/renderer/voxelRenderer.js?v=20260725-1"></script>
   <script src="js/renderer/crosshair.js?v=20260714-1"></script>
-  <script src="js/renderer/skybox.js?v=20260714-1"></script>
-  <script src="js/renderer/biomeEffects.js?v=20260714-1"></script>
+  <script src="js/renderer/skybox.js?v=20260725-2"></script>
+  <script src="js/renderer/biomeEffects.js?v=20260725-1"></script>
+  <script src="js/renderer/performanceSettings.js?v=20260725-2"></script>
   <script src="js/renderer/performanceOptimizer.js?v=20260714-1"></script>
 
   <!-- Input -->
@@ -453,6 +528,6 @@
   <script src="js/game.js?v=20260714-1"></script>
 
   <!-- Main Entry (menu system, screen management) -->
-<script src="js/main.js?v=20260722-2"></script>
+<script src="js/main.js?v=20260725-3"></script>
 </body>
 </html>

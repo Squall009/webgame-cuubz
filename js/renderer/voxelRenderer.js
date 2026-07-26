@@ -49,10 +49,14 @@ class VoxelRenderer {
       `,
       side: THREE.BackSide
     });
-    this.scene.add(new THREE.Mesh(skyGeo, skyMat));
+    const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+    this.scene.add(skyMesh);
+    
+    // Expose sky mesh so it can follow the player
+    this.skyMesh = skyMesh;
     
     // Fog matches sky gradient bottom color
-    this.scene.fog = new THREE.Fog(0xaaddff, 50, 120);
+    this.scene.fog = new THREE.FogExp2(0xaaddff, 0.008);
     
     // Camera — first-person perspective
     this.camera = new THREE.PerspectiveCamera(
@@ -152,6 +156,10 @@ class VoxelRenderer {
     // PBR material factory — initialized after atlas is built
     this.pbrFactory = null;
     
+    // Shadow state
+    this._shadowsEnabled = true;
+    this._shadowQuality = 'medium';
+    
     // Texture loader for pre-baked textures
     this.textureLoader = new THREE.TextureLoader();
     this.textures = {};
@@ -225,6 +233,40 @@ class VoxelRenderer {
   }
 
   /**
+   * Update the sky dome to follow the player's camera position.
+   * This prevents the player from seeing through the skybox at the world edge.
+   */
+  updateSkyPosition(cameraPosition) {
+    if (this.skyMesh && cameraPosition) {
+      this.skyMesh.position.set(cameraPosition.x, cameraPosition.y, cameraPosition.z);
+    }
+  }
+
+  /**
+   * Update the sky dome gradient shader with dynamic colors.
+   * Creates a subtle gradient: top is slightly darker than the horizon.
+   * @param {THREE.Color} horizonColor - Sky color at horizon level
+   * @param {THREE.Color} [topColor] - Sky color at zenith (defaults to darker horizon)
+   */
+  updateSkyColors(horizonColor, topColor) {
+    if (!this.skyMesh || !this.skyMesh.material) return;
+    const uniforms = this.skyMesh.material.uniforms;
+    if (!uniforms || !uniforms.topColor || !uniforms.bottomColor) return;
+
+    if (topColor) {
+      uniforms.topColor.value.copy(topColor);
+    } else {
+      // Derive a slightly darker top color from the horizon color for gradient
+      const darkened = horizonColor.clone();
+      darkened.r = Math.max(0, darkened.r * 0.6);
+      darkened.g = Math.max(0, darkened.g * 0.6);
+      darkened.b = Math.max(0, darkened.b * 0.85);
+      uniforms.topColor.value.copy(darkened);
+    }
+    uniforms.bottomColor.value.copy(horizonColor);
+  }
+
+  /**
    * Get the shadow map texture and matrix for PBR materials.
    */
   getShadowData() {
@@ -246,9 +288,53 @@ class VoxelRenderer {
   }
 
   /**
+   * Set shadow quality: 'off' | 'low' | 'medium' | 'high'
+   * Recreates shadow render target at new resolution.
+   */
+  setShadowQuality(quality) {
+    const sizes = { off: 0, low: 1024, medium: 2048, high: 4096 };
+    const size = sizes[quality] || 2048;
+
+    if (quality === 'off') {
+      this._shadowsEnabled = false;
+      this.renderer.shadowMap.enabled = false;
+      // Dispose old render target
+      if (this.shadowRenderTarget) {
+        this.shadowRenderTarget.dispose();
+        this.shadowRenderTarget = null;
+      }
+      console.log('[Shadow] Shadows disabled');
+      return;
+    }
+
+    this._shadowsEnabled = true;
+    this.renderer.shadowMap.enabled = true;
+
+    // Recreate render target at new size
+    if (this.shadowRenderTarget) {
+      this.shadowRenderTarget.dispose();
+    }
+    this.shadowRenderTarget = new THREE.WebGLRenderTarget(size, size, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+      depthBuffer: true,
+    });
+
+    // Update shadow light map size
+    this.shadowLight.shadow.mapSize.width = size;
+    this.shadowLight.shadow.mapSize.height = size;
+
+    console.log(`[Shadow] Shadow quality: ${quality} (${size}×${size})`);
+  }
+
+  /**
    * Render the shadow depth map into our manual render target.
    */
   _renderShadowMap() {
+    if (!this._shadowsEnabled) return;
+
     const shadowCam = this.shadowLight.shadow.camera;
     const target = this.shadowRenderTarget;
 
@@ -313,17 +399,39 @@ class VoxelRenderer {
   /**
    * Initialize PBR material factory from the triple atlas.
    * Call after textureAtlas.buildAtlas() resolves.
+   * @param {PBRTextureAtlas} atlas
+   * @param {boolean} [advancedShading=true] - Use full PBR or albedo-only
    */
-  initPBR(atlas) {
+  initPBR(atlas, advancedShading = true) {
     this.pbrFactory = new PBRMaterialFactory(
       atlas.diffuseTexture,
       atlas.normalTexture,
       atlas.smoothnessTexture,
-      this.sunDirection
+      this.sunDirection,
+      advancedShading
     );
     // Wire the diffuse atlas into the shadow depth shader so it can alpha-test cutout blocks
     this._shadowDepthMaterial.uniforms.uDiffuseMap.value = atlas.diffuseTexture;
-    console.log('[VoxelRenderer] PBR material factory initialized');
+    console.log(`[VoxelRenderer] PBR material factory initialized (advancedShading: ${advancedShading})`);
+    return this.pbrFactory;
+  }
+
+  /**
+   * Rebuild the PBR material factory with new settings.
+   * Call when texture resolution or advanced shading changes.
+   * @param {PBRTextureAtlas} newAtlas - The newly built atlas
+   * @param {boolean} advancedShading - Whether to use full PBR or albedo-only
+   */
+  rebuildPBRFactory(newAtlas, advancedShading) {
+    this.pbrFactory = new PBRMaterialFactory(
+      newAtlas.diffuseTexture,
+      newAtlas.normalTexture,
+      newAtlas.smoothnessTexture,
+      this.sunDirection,
+      advancedShading
+    );
+    this._shadowDepthMaterial.uniforms.uDiffuseMap.value = newAtlas.diffuseTexture;
+    console.log(`[VoxelRenderer] PBR factory rebuilt (advancedShading: ${advancedShading})`);
     return this.pbrFactory;
   }
 
@@ -358,9 +466,40 @@ class VoxelRenderer {
     if (!this.chunkGroup) return;
     
     mesh.position.set(chunkX * 16, 0, chunkZ * 16);
-    mesh.receiveShadow = true;
-    mesh.castShadow = true;
+    mesh.receiveShadow = this._shadowsEnabled;
+    mesh.castShadow = this._shadowsEnabled;
     this.chunkGroup.add(mesh);
+  }
+
+  /**
+   * Rebuild the texture atlas and PBR materials with new settings.
+   * Called when texture resolution or advanced shading changes.
+   * @param {PBRTextureAtlas} newAtlas - The newly built atlas
+   * @param {boolean} advancedShading - Whether to use full PBR or albedo-only
+   */
+  rebuildAtlasAndMaterials(newAtlas, advancedShading) {
+    // Dispose old textures
+    if (this.pbrFactory) {
+      // Dispose old shadow placeholder
+      if (this.pbrFactory._shadowMapValue && this.pbrFactory._shadowMapValue.value) {
+        // Don't dispose — it's shared
+      }
+    }
+
+    // Re-initialize PBR factory with new textures and shading mode
+    this.pbrFactory = new PBRMaterialFactory(
+      newAtlas.diffuseTexture,
+      newAtlas.normalTexture,
+      newAtlas.smoothnessTexture,
+      this.sunDirection,
+      advancedShading
+    );
+
+    // Wire the diffuse atlas into the shadow depth shader
+    this._shadowDepthMaterial.uniforms.uDiffuseMap.value = newAtlas.diffuseTexture;
+
+    console.log(`[VoxelRenderer] Atlas + materials rebuilt (advancedShading: ${advancedShading})`);
+    return this.pbrFactory;
   }
 
   /**

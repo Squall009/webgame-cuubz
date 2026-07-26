@@ -202,6 +202,8 @@
   // Global reference for game engine access
   let characterManager = null;
   let worldManager = null;
+  let perfSettings = null; // PerformanceSettings instance
+  let game = null; // CuubzGame instance (set in startGame)
 
   // ============================================================
   // Character UI Rendering
@@ -704,6 +706,90 @@
   }
 
   // ============================================================
+  // Performance Settings Helpers
+  // ============================================================
+
+  /**
+   * Sync all performance UI controls to current settings values.
+   * Called on init and whenever settings change.
+   */
+  function syncPerfSettingsUI() {
+    if (!perfSettings) return;
+    const s = perfSettings.get();
+
+    // Main menu settings screen
+    const menuRenderDist = document.getElementById('perf-render-distance');
+    const menuShadows = document.getElementById('perf-shadows');
+    const menuTextureRes = document.getElementById('perf-texture-res');
+    const menuAdvShading = document.getElementById('perf-advanced-shading');
+
+    if (menuRenderDist) menuRenderDist.value = String(s.renderDistance);
+    if (menuShadows) menuShadows.value = s.shadowQuality;
+    if (menuTextureRes) menuTextureRes.value = s.textureResolution;
+    if (menuAdvShading) menuAdvShading.checked = s.advancedShading;
+
+    // Pause menu
+    const pauseRenderDist = document.getElementById('pause-perf-render-distance');
+    const pauseShadows = document.getElementById('pause-perf-shadows');
+    const pauseTextureRes = document.getElementById('pause-perf-texture-res');
+    const pauseAdvShading = document.getElementById('pause-perf-advanced-shading');
+
+    if (pauseRenderDist) pauseRenderDist.value = String(s.renderDistance);
+    if (pauseShadows) pauseShadows.value = s.shadowQuality;
+    if (pauseTextureRes) pauseTextureRes.value = s.textureResolution;
+    if (pauseAdvShading) pauseAdvShading.checked = s.advancedShading;
+  }
+
+  /**
+   * Apply performance settings to the live game engine.
+   * @param {VoxelRenderer} renderer
+   * @param {ChunkManager} chunkManager
+   * @param {PBRTextureAtlas} textureAtlas
+   */
+  function applyPerfSettings(renderer, chunkManager, textureAtlas) {
+    if (!perfSettings || !renderer) return;
+    const s = perfSettings.get();
+
+    // 1. Render distance (cheap)
+    if (chunkManager) {
+      chunkManager.setRenderDistance(s.renderDistance);
+    }
+
+    // 2. Shadow quality (cheap)
+    renderer.setShadowQuality(s.shadowQuality);
+
+    console.log(`[PerfSettings] Applied: rd=${s.renderDistance}, shadows=${s.shadowQuality}, tex=${s.textureResolution}, shading=${s.advancedShading}`);
+  }
+
+  /**
+   * Rebuild texture atlas and materials when expensive settings change.
+   * @param {VoxelRenderer} renderer
+   * @param {ChunkManager} chunkManager
+   * @returns {Promise<PBRTextureAtlas>}
+   */
+  async function rebuildAtlasAndMaterials(renderer, chunkManager) {
+    if (!perfSettings || !renderer) return null;
+    const s = perfSettings.get();
+
+    const tileSize = PerformanceSettings.getTileSize(s.textureResolution);
+
+    // Build new atlas with new tile size
+    const newAtlas = new PBRTextureAtlas({ tileSize });
+    await newAtlas.buildAtlas();
+
+    // Rebuild PBR factory with new atlas + shading mode
+    renderer.rebuildPBRFactory(newAtlas, s.advancedShading);
+
+    // Mark all chunks for mesh rebuild
+    if (chunkManager) {
+      chunkManager.rebuildAllMeshes();
+    }
+
+    console.log(`[PerfSettings] Atlas rebuilt: tileSize=${tileSize}, advancedShading=${s.advancedShading}`);
+    return newAtlas;
+  }
+
+  // ============================================================
   // Menu Navigation
   // ============================================================
 
@@ -877,12 +963,53 @@
       showScreen('mainMenu');
     });
 
-    // Render distance slider
-    const renderSlider = document.getElementById('render-distance');
-    const renderValue = document.getElementById('render-distance-value');
-    if (renderSlider && renderValue) {
-      renderSlider.addEventListener('input', () => {
-        renderValue.textContent = renderSlider.value;
+    // ─── Main Menu Performance Settings ──────────────────────
+    const menuPerfRenderDist = document.getElementById('perf-render-distance');
+    const menuPerfShadows = document.getElementById('perf-shadows');
+    const menuPerfTextureRes = document.getElementById('perf-texture-res');
+    const menuPerfAdvShading = document.getElementById('perf-advanced-shading');
+
+    if (menuPerfRenderDist && perfSettings) {
+      menuPerfRenderDist.addEventListener('change', () => {
+        const val = parseInt(menuPerfRenderDist.value, 10);
+        perfSettings.set('renderDistance', val);
+        syncPerfSettingsUI();
+        if (game && game.chunkManager) {
+          game.chunkManager.setRenderDistance(val);
+        }
+      });
+    }
+
+    if (menuPerfShadows && perfSettings) {
+      menuPerfShadows.addEventListener('change', () => {
+        const val = menuPerfShadows.value;
+        perfSettings.set('shadowQuality', val);
+        syncPerfSettingsUI();
+        if (game && game.renderer) {
+          game.renderer.setShadowQuality(val);
+        }
+      });
+    }
+
+    if (menuPerfTextureRes && perfSettings) {
+      menuPerfTextureRes.addEventListener('change', async () => {
+        const val = menuPerfTextureRes.value;
+        perfSettings.set('textureResolution', val);
+        syncPerfSettingsUI();
+        if (game && game.renderer && game.chunkManager) {
+          await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+        }
+      });
+    }
+
+    if (menuPerfAdvShading && perfSettings) {
+      menuPerfAdvShading.addEventListener('change', async () => {
+        const val = menuPerfAdvShading.checked;
+        perfSettings.set('advancedShading', val);
+        syncPerfSettingsUI();
+        if (game && game.renderer && game.chunkManager) {
+          await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+        }
       });
     }
 
@@ -2086,11 +2213,34 @@
         loadingStatus.textContent = 'Loading textures...';
         if (loadingProgress) loadingProgress.style.width = '60%';
 
-        const textureAtlas = new PBRTextureAtlas();
+        // Determine tile size from settings
+        const perfTexRes = perfSettings ? perfSettings.get('textureResolution') : 'high';
+        const tileSize = PerformanceSettings.getTileSize(perfTexRes);
+        const textureAtlas = new PBRTextureAtlas({ tileSize });
         await textureAtlas.buildAtlas();
 
         // Initialize PBR material factory with the triple atlas
-        renderer.initPBR(textureAtlas);
+        const advancedShading = perfSettings ? perfSettings.get('advancedShading') : true;
+        renderer.initPBR(textureAtlas, advancedShading);
+
+        // Apply shadow quality from settings
+        if (perfSettings) {
+          renderer.setShadowQuality(perfSettings.get('shadowQuality'));
+        }
+
+        // ─── Initialize Day/Night Cycle (Skybox) ─────────
+        let skybox = null;
+        if (typeof Skybox !== 'undefined') {
+          skybox = new Skybox(renderer, { startTime: 8, cycleDuration: 300 });
+          skybox.init();
+          // Wire up the HUD day-night indicator
+          const dayNightEl = document.getElementById('day-night-indicator');
+          if (dayNightEl) {
+            skybox.setNightIndicatorElement(dayNightEl);
+          }
+          _log('[Cuubz] Day/night cycle initialized (5-min cycle, starting at 8:00)');
+        }
+        // (game.skybox is set later, after game is instantiated)
 
         // Wire up texture atlas to debug overlay (top-right corner)
         const atlasOverlay = document.getElementById('atlas-overlay');
@@ -2165,12 +2315,13 @@
         if (loadingProgress) loadingProgress.style.width = '85%';
 
         const worldName = currentWorld.id;
+        const renderDist = perfSettings ? perfSettings.get('renderDistance') : 8;
         let chunkManager = new ChunkManager({
           renderer: renderer,
           worldName: worldName,
           worldSeed: currentWorld.seed,
           genParams: {}, // Use defaults from ChunkManager
-          renderDistance: 8,
+          renderDistance: renderDist,
           regionRadius: 16,   // 32×32 pre-generation range
           textureAtlas: textureAtlas,
           workerScriptPath: 'js/world/workerGeneration.js',
@@ -2391,11 +2542,12 @@
           loadingStatus.textContent = 'Starting game loop...';
           if (loadingProgress) loadingProgress.style.width = '90%';
 
-          const game = new CuubzGame();
+          game = new CuubzGame();
           game.player = player;
           game.setMode(mode || 'survival');
           game.renderer = renderer;
           game.chunkManager = chunkManager;
+          game.skybox = skybox; // Expose for pause menu access
           game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
           game.frameCount = 0; // Frame counter for debug logging
 
@@ -3188,10 +3340,18 @@
               const camPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
               renderer.updateCamera(camPos, player.yaw, player.pitch);
 
+              // Update sky dome to follow the player (prevents seeing through the skybox)
+              renderer.updateSkyPosition(camPos);
+
               // Update shadow camera to follow the player
               renderer.updateShadowCamera(player.position);
 
-              // Update PBR materials with shadow data
+              // Update day/night cycle (advances time, updates sky color, sun/moon, fog, clouds)
+              if (skybox) {
+                skybox.update(game.delta, player.position);
+              }
+
+              // Update PBR materials with shadow data + day/night lighting
               const pbrFactory = renderer.getPBRFactory();
               if (pbrFactory) {
                 const shadowData = renderer.getShadowData();
@@ -3205,6 +3365,11 @@
                     console.warn('[Shadow] getShadowData returned null (frame', game.frameCount, ')');
                   }
                 }
+
+                // Update PBR lighting uniforms from skybox (sun direction, color, intensity, ambient)
+                if (skybox) {
+                  skybox.updatePBRFactory(pbrFactory);
+                }
               } else {
                 if (typeof game._noPbrCount === 'undefined') game._noPbrCount = 0;
                 game._noPbrCount++;
@@ -3213,7 +3378,7 @@
                 }
               }
 
-              // Update Biome Effects (fog, sky color, UV animation offsets, particles)
+              // Update Biome Effects (particles only — sky/fog handled by day/night cycle)
               if (biomeEffects && chunkManager) {
                 // Determine current biome using biomeSystem at player position
                 const wx = Math.floor(player.position.x);
@@ -3247,7 +3412,21 @@
                 }
 
                 // Update animation timers & particles
-                biomeEffects.update(game.delta);
+                // Pass skybox base color so biome tint blends with day/night cycle
+                biomeEffects.update(game.delta, skybox ? skybox._baseSkyColor : null, skybox ? skybox.getFogDensity() : undefined);
+
+                // Update the sky dome shader with the final blended sky color.
+                // The sky dome (gradient sphere) was hardcoded to blue and never
+                // received day/night or biome color updates — this fixes that.
+                const finalSky = biomeEffects.getFinalSkyColor();
+                if (finalSky) {
+                  // Create gradient: top slightly darker than horizon
+                  const topColor = finalSky.clone();
+                  topColor.r = Math.max(0, topColor.r * 0.6);
+                  topColor.g = Math.max(0, topColor.g * 0.6);
+                  topColor.b = Math.max(0, topColor.b * 0.85);
+                  renderer.updateSkyColors(finalSky, topColor);
+                }
               }
 
               // Render scene
@@ -3518,16 +3697,62 @@
       });
     }
 
-    // Settings: Render Distance
-    if (distanceSlider && distanceVal) {
-      distanceSlider.value = game.chunkManager.renderDistance;
-      distanceVal.textContent = distanceSlider.value;
-      distanceSlider.addEventListener('input', () => {
-        const val = parseInt(distanceSlider.value);
-        distanceVal.textContent = val;
+    // ─── Pause Menu Performance Settings ─────────────────────
+    // Sync UI with current settings on pause
+    if (perfSettings) syncPerfSettingsUI();
+
+    const pausePerfRenderDist = document.getElementById('pause-perf-render-distance');
+    const pausePerfShadows = document.getElementById('pause-perf-shadows');
+    const pausePerfTextureRes = document.getElementById('pause-perf-texture-res');
+    const pausePerfAdvShading = document.getElementById('pause-perf-advanced-shading');
+
+    if (pausePerfRenderDist && perfSettings) {
+      pausePerfRenderDist.addEventListener('change', () => {
+        const val = parseInt(pausePerfRenderDist.value, 10);
+        perfSettings.set('renderDistance', val);
+        syncPerfSettingsUI();
         if (game.chunkManager) {
           game.chunkManager.setRenderDistance(val);
         }
+      });
+    }
+
+    if (pausePerfShadows && perfSettings) {
+      pausePerfShadows.addEventListener('change', () => {
+        const val = pausePerfShadows.value;
+        perfSettings.set('shadowQuality', val);
+        syncPerfSettingsUI();
+        if (game.renderer) {
+          game.renderer.setShadowQuality(val);
+        }
+      });
+    }
+
+    if (pausePerfTextureRes && perfSettings) {
+      pausePerfTextureRes.addEventListener('change', async () => {
+        const val = pausePerfTextureRes.value;
+        perfSettings.set('textureResolution', val);
+        syncPerfSettingsUI();
+        await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+      });
+    }
+
+    if (pausePerfAdvShading && perfSettings) {
+      pausePerfAdvShading.addEventListener('change', async () => {
+        const val = pausePerfAdvShading.checked;
+        perfSettings.set('advancedShading', val);
+        syncPerfSettingsUI();
+        await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+      });
+    }
+
+    // Pause Time of Day checkbox
+    const pauseTimeCheckbox = document.getElementById('pause-pause-time');
+    if (pauseTimeCheckbox && game && game.skybox) {
+      pauseTimeCheckbox.checked = !game.skybox.timePaused; // checked = time running
+      pauseTimeCheckbox.addEventListener('change', () => {
+        game.skybox.timePaused = !pauseTimeCheckbox.checked;
+        _log(`[Cuubz] Time of day ${game.skybox.timePaused ? 'PAUSED' : 'RESUMED'}`);
       });
     }
   }
@@ -3570,12 +3795,25 @@
       await worldManager.init();
       _log(`[Cuubz] Loaded ${worldManager.getAllWorlds().length} worlds`);
 
+      // Initialize Performance Settings (before menu nav so handlers have it)
+      try {
+        perfSettings = new PerformanceSettings();
+        perfSettings.load();
+        _log(`[Cuubz] Performance settings loaded: ${JSON.stringify(perfSettings.get())}`);
+      } catch (e) {
+        console.error('[Cuubz] Performance settings init error:', e);
+        perfSettings = null;
+      }
+
       _log('[Cuubz] Calling initMenuNavigation');
       try {
         initMenuNavigation();
       } catch (e) {
         console.error('[Cuubz] initMenuNavigation ERROR:', e);
       }
+
+      // Sync UI after menu handlers are wired
+      if (perfSettings) syncPerfSettingsUI();
 
       try {
         detectMobile();

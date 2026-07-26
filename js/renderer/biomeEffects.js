@@ -39,14 +39,18 @@ class BiomeEffects {
     
     // Biome-specific configuration
     this.biomeConfigs = {
-      ocean:     { fogColor: 0x8bb5d4, skyColor: 0x7fb3d3, fogNear: 40,  fogFar: 280 },
-      plains:    { fogColor: 0xc4d8e8, skyColor: 0x87ceeb, fogNear: 50,  fogFar: 300 },
-      forest:    { fogColor: 0x6b8f5e, skyColor: 0x5a8c6a, fogNear: 40,  fogFar: 250 },
-      desert:    { fogColor: 0xd4b97a, skyColor: 0xf4a460, fogNear: 60,  fogFar: 350 },
-      tundra:    { fogColor: 0xc8dce8, skyColor: 0xb0c4de, fogNear: 45,  fogFar: 270 },
-      mountains: { fogColor: 0x9a9a9a, skyColor: 0xa0b0c0, fogNear: 35,  fogFar: 220 },
-      lava:      { fogColor: 0x4a1a0a, skyColor: 0x8b2500, fogNear: 30,  fogFar: 180 },
-      corrupt:   { fogColor: 0x2a3a2a, skyColor: 0x3a2a4a, fogNear: 25,  fogFar: 160 }
+      deep_ocean:  { fogColor: 0x051d3b, skyColor: 0x0a1628, fogNear: 20,  fogFar: 150 },
+      ocean:       { fogColor: 0x8bb5d4, skyColor: 0x7fb3d3, fogNear: 40,  fogFar: 280 },
+      beach:       { fogColor: 0xc4d8e8, skyColor: 0x87ceeb, fogNear: 50,  fogFar: 300 },
+      plains:      { fogColor: 0xc4d8e8, skyColor: 0x87ceeb, fogNear: 50,  fogFar: 300 },
+      forest:      { fogColor: 0x6b8f5e, skyColor: 0x5a8c6a, fogNear: 40,  fogFar: 250 },
+      badlands:    { fogColor: 0xc4a06a, skyColor: 0xf4a460, fogNear: 55,  fogFar: 320 },
+      tundra:      { fogColor: 0xc8dce8, skyColor: 0xb0c4de, fogNear: 45,  fogFar: 270 },
+      desert:      { fogColor: 0xd4b97a, skyColor: 0xf4a460, fogNear: 60,  fogFar: 350 },
+      mountains:   { fogColor: 0x9a9a9a, skyColor: 0xa0b0c0, fogNear: 35,  fogFar: 220 },
+      frozen_peaks:{ fogColor: 0xd0e8f0, skyColor: 0xc0d8e8, fogNear: 30,  fogFar: 200 },
+      lava:        { fogColor: 0x4a1a0a, skyColor: 0x8b2500, fogNear: 30,  fogFar: 180 },
+      corrupt:     { fogColor: 0x2a3a2a, skyColor: 0x3a2a4a, fogNear: 25,  fogFar: 160 }
     };
     
     // Particle pool (reusable objects)
@@ -55,22 +59,20 @@ class BiomeEffects {
   
   /**
    * Initialize with Three.js scene and renderer.
+   * NOTE: Does NOT set sky/fog colors — those are managed by the Skybox class.
+   * This only sets up particle systems.
    */
   init(scene, renderer) {
     this.scene = scene;
     this.renderer = renderer;
     
-    // Apply initial fog/sky
-    if (this.scene && THREE.FogExp2) {
-      const fog = new THREE.FogExp2(0x87ceeb, 0.005);
-      this.scene.fog = fog;
+    // Don't set fog/sky colors here — Skybox (day/night cycle) handles that
+    // Just ensure scene.background is set so the Skybox can update it
+    if (this.scene && !this.scene.background) {
+      this.scene.background = new THREE.Color(0x87ceeb);
     }
     
-    if (this.renderer) {
-      this.renderer.setClearColor(0x87ceeb);
-    }
-    
-    console.log('[BiomeEffects] Initialized with scene and renderer');
+    console.log('[BiomeEffects] Initialized (particles only, sky/fog managed by Skybox)');
   }
   
   /**
@@ -163,34 +165,55 @@ class BiomeEffects {
   
   /**
    * Update loop — called every frame with delta time in seconds.
-   * Handles fog/sky interpolation and particle animation.
+   * Blends biome tint with day/night base colors, then updates particles.
+   * @param {number} deltaTime
+   * @param {THREE.Color} [baseSkyColor] — Sky color from Skybox (day/night cycle)
+   * @param {number} [baseFogDensity] — Fog density from Skybox
    */
-  update(deltaTime) {
+  update(deltaTime, baseSkyColor, baseFogDensity) {
     if (!this.scene || !this.renderer) return;
-    
-    // Lerp fog color toward target
+
+    // ── Blend biome tint with day/night base colors ──
+    // Lerp our internal biome color targets toward configured values
     this._lerpColor(this.currentFogColor, this.targetFogColor, deltaTime);
     this._lerpColor(this.currentSkyColor, this.targetSkyColor, deltaTime);
-    
-    // Smoothly transition fog density range
-    const nearDiff = this.targetFogNear - this.currentFogNear;
-    const farDiff = this.targetFogFar - this.currentFogFar;
-    if (Math.abs(nearDiff) > 0.5) this.currentFogNear += nearDiff * this.lerpSpeed * deltaTime;
-    if (Math.abs(farDiff) > 0.5) this.currentFogFar += farDiff * this.lerpSpeed * deltaTime;
-    
-    // Apply fog to scene using FogExp2 for smooth falloff
-    const density = 1 / (this.currentFogNear + (this.currentFogFar - this.currentFogNear));
-    if (!this.scene.fog || !(this.scene.fog instanceof THREE.FogExp2)) {
-      this.scene.fog = new THREE.FogExp2(this.currentFogColor.getHex(), density);
-    } else {
-      this.scene.fog.color.copy(this.currentFogColor);
-      // Recalculate density based on near/far range
-      this.scene.fog.density = Math.max(0.001, 1 / (this.currentFogFar - this.currentFogNear) * Math.log(5));
+
+    if (baseSkyColor) {
+      // Multiply biome tint onto the day/night base color.
+      // Uses Math.pow(biome, blend) so the tint is subtle.
+      // Keeps night dark (base is dark → result is dark)
+      // while still tinting the sky with biome hue during day.
+      const blend = 0.5; // Biome tint strength (0 = none, 1 = full biome)
+      const finalSkyR = baseSkyColor.r * Math.pow(this.currentSkyColor.r, blend);
+      const finalSkyG = baseSkyColor.g * Math.pow(this.currentSkyColor.g, blend);
+      const finalSkyB = baseSkyColor.b * Math.pow(this.currentSkyColor.b, blend);
+      const finalSky = new THREE.Color(finalSkyR, finalSkyG, finalSkyB);
+
+      const finalFogR = baseSkyColor.r * Math.pow(this.currentFogColor.r, blend);
+      const finalFogG = baseSkyColor.g * Math.pow(this.currentFogColor.g, blend);
+      const finalFogB = baseSkyColor.b * Math.pow(this.currentFogColor.b, blend);
+      const finalFog = new THREE.Color(finalFogR, finalFogG, finalFogB);
+
+      // Apply blended colors
+      this.scene.background = finalSky;
+      if (this.scene.fog) {
+        this.scene.fog.color.copy(finalFog);
+
+        // Fog density: scale base density by biome range factor
+        if (baseFogDensity !== undefined) {
+          const nearDiff = this.targetFogNear - this.currentFogNear;
+          const farDiff = this.targetFogFar - this.currentFogFar;
+          if (Math.abs(nearDiff) > 0.5) this.currentFogNear += nearDiff * this.lerpSpeed * deltaTime;
+          if (Math.abs(farDiff) > 0.5) this.currentFogFar += farDiff * this.lerpSpeed * deltaTime;
+          // Narrower biome range = thicker fog (more atmospheric)
+          const biomeRange = this.currentFogFar - this.currentFogNear;
+          const defaultRange = 250; // plains default
+          const rangeFactor = defaultRange / Math.max(biomeRange, 1);
+          this.scene.fog.density = baseFogDensity * rangeFactor;
+        }
+      }
     }
-    
-    // Apply sky color to renderer background
-    this.renderer.setClearColor(this.currentSkyColor);
-    
+
     // Update particles
     this._updateParticles(deltaTime);
   }
@@ -300,6 +323,17 @@ class BiomeEffects {
     }
   }
   
+  /**
+   * Get the final blended sky color (biome tint × day/night base).
+   * Returns the color currently applied to scene.background, or the
+   * biome target color if no base was provided.
+   * @returns {THREE.Color|null}
+   */
+  getFinalSkyColor() {
+    if (!this.scene || !this.scene.background) return null;
+    return this.scene.background.clone();
+  }
+
   /**
    * Cleanup: remove all particles and release resources.
    */

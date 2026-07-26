@@ -88,6 +88,23 @@ var TINTABLE_IDS = {
   115: true, // YELLOW_POPLAR_LEAVES
 };
 
+// Special mesh types: block ID → { type, height }
+// 'crossbillboard' = two vertical 1×1 planes forming an X (grass)
+// 'crossbillboard_stacked' = two crossbillboards stacked (tall grass)
+// 'topface' = single 1×1 top face near the ground (flowers)
+var SPECIAL_MESH_TYPES = {
+  177: { type: 'crossbillboard' },              // short_grass
+  178: { type: 'crossbillboard_stacked' },      // tall_grass
+  179: { type: 'topface' },                     // red_flower
+  180: { type: 'topface' },                     // yellow_flower
+};
+
+// Block color multipliers: block ID → [r, g, b]
+var BLOCK_COLORS = {
+  179: [1, 0.25, 0.25],  // red_flower
+  180: [1, 1, 0.25],     // yellow_flower
+};
+
 function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
   var solidPos = [], solidNorm = [], solidUV = [], solidIdx = [], solidColor = [];
   var cutoutPos = [], cutoutNorm = [], cutoutUV = [], cutoutIdx = [], cutoutColor = [];
@@ -125,6 +142,68 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
     idxArr.push(vCount, vCount+2, vCount+3);
   }
 
+  // Build a crossbillboard (two criss-cross 1×1 planes forming an X) for grass blocks
+  function addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor) {
+    // Get UV info — use 'side' face for crossbillboard planes
+    var faceUVs = getUV(blockType, 'side', uvLookup);
+
+    var vi = posArr.length / 3;
+
+    // Helper: emit a single-sided 1×1 quad (material is already double-sided)
+    var emitQuad = function(verts, normal) {
+      for (var i = 0; i < 4; i++) {
+        posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
+        normArr.push(normal[0], normal[1], normal[2]);
+        uvArr.push(faceUVs[i][0], faceUVs[i][1]);
+        colorArr.push(vColor[0], vColor[1], vColor[2]);
+      }
+      idxArr.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+    };
+
+    // Plane 1: YZ plane at x=0.5, normal along +X
+    // Full 1×1 face: spans z=0..1, y=0..1
+    emitQuad([
+      [0.5, 0, 1], [0.5, 0, 0], [0.5, 1, 0], [0.5, 1, 1]
+    ], [1, 0, 0]);
+
+    // Plane 2: XY plane at z=0.5, normal along +Z
+    // Full 1×1 face: spans x=0..1, y=0..1
+    emitQuad([
+      [0, 0, 0.5], [1, 0, 0.5], [1, 1, 0.5], [0, 1, 0.5]
+    ], [0, 0, 1]);
+  }
+
+  // Build a single 1×1 top face near the ground for flower blocks
+  function addTopFace(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor) {
+    var flowerY = 0.05; // Slightly above ground
+
+    // Get UV info — use 'top' face for the flower
+    var faceUVs = getUV(blockType, 'top', uvLookup);
+
+    // Apply block color (e.g. red_flower → [1, 0.25, 0.25], yellow_flower → [1, 1, 0.25])
+    var blockColor = BLOCK_COLORS[blockType];
+    var finalColor = blockColor
+      ? [vColor[0] * blockColor[0], vColor[1] * blockColor[1], vColor[2] * blockColor[2]]
+      : vColor;
+
+    var vi = posArr.length / 3;
+
+    // Full 1×1 top face (+Y normal), counter-clockwise winding
+    var verts = [
+      [0, flowerY, 0], [1, flowerY, 0],
+      [1, flowerY, 1], [0, flowerY, 1]
+    ];
+    var normal = [0, 1, 0];
+
+    for (var i = 0; i < 4; i++) {
+      posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
+      normArr.push(normal[0], normal[1], normal[2]);
+      uvArr.push(faceUVs[i][0], faceUVs[i][1]);
+      colorArr.push(finalColor[0], finalColor[1], finalColor[2]);
+    }
+    idxArr.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+  }
+
   for (var x = 0; x < CHUNK_W; x++) {
     for (var z = 0; z < CHUNK_D; z++) {
       for (var y = 0; y < CHUNK_H; y++) {
@@ -143,6 +222,22 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
           posArr = transPos; normArr = transNorm; uvArr = transUV; idxArr = transIdx;
         } else {
           posArr = solidPos; normArr = solidNorm; uvArr = solidUV; idxArr = solidIdx;
+        }
+
+        // Special mesh types: crossbillboard (grass X-shape) and topface (flowers)
+        var meshInfo = SPECIAL_MESH_TYPES[blockType];
+        if (meshInfo) {
+          var colorArr = isCutout ? cutoutColor : (isTransparent ? transColor : solidColor);
+          var vColor = getVertexColor(x, y, z, blockType);
+          if (meshInfo.type === 'crossbillboard') {
+            addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
+          } else if (meshInfo.type === 'crossbillboard_stacked') {
+            addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
+            addCrossbillboard(x, y + 1, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
+          } else if (meshInfo.type === 'topface') {
+            addTopFace(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
+          }
+          continue; // Skip standard face loop
         }
 
         for (var f = 0; f < 6; f++) {

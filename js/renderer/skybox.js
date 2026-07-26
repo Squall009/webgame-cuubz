@@ -12,11 +12,11 @@
 /** Full day/night cycle duration in seconds (default: 5 minutes) */
 const DEFAULT_CYCLE_DURATION = 300;
 
-/** Fog density at full daylight */
-const FOG_DENSITY_DAY = 0.008;
+/** Fog density at full daylight (FogExp2 with squared distance) */
+const FOG_DENSITY_DAY = 0.001;
 
 /** Fog density at full night (thicker for reduced visibility) */
-const FOG_DENSITY_NIGHT = 0.025;
+const FOG_DENSITY_NIGHT = 0.003;
 
 /** Smoothstep transition ranges for dawn/dusk (fraction of cycle: 0-1) */
 const DAWN_START = 0.20, DAWN_END = 0.30;   // ~6:00 - 7:20 in game hours
@@ -43,7 +43,7 @@ const SUN_COLORS = {
 /** Ambient light intensity range */
 const AMBIENT_LIGHT = {
   dayIntensity:  0.45,
-  nightIntensity: 0.08,
+  nightIntensity: 0.25,
 };
 
 // ============================================================
@@ -303,7 +303,7 @@ function getMoonIntensity(hour) {
   const sunInterference = Math.max(0, sunElev);
   const moonBase = smoothstep(moonElev * 2);
 
-  return Math.max(0, moonBase * 0.4 * (1 - sunInterference));
+  return Math.max(0, moonBase * 0.6 * (1 - sunInterference));
 }
 
 /**
@@ -352,6 +352,14 @@ class Skybox {
     this.ambientLight = null;
     this.cloudLayer = null;
 
+    // Cloud system configuration
+    this.cloudMinAltitude = 160; // Minimum cloud altitude (above terrain)
+    this.cloudMaxAltitude = 220; // Maximum cloud altitude
+    this.cloudSpreadRadius = 250; // How far clouds spread from player
+    this.cloudWrapDistance = 180; // Wrap clouds when they drift this far
+    this.cloudCount = 0;
+    this.cloudTargetCount = 20 + Math.floor(Math.random() * 8); // 20-27 clouds
+
     // Sky dome
     this.skyDome = null;
 
@@ -363,6 +371,9 @@ class Skybox {
 
     // Callbacks
     this.onPhaseChange = null; // Called when sky phase changes: (newPhase, oldPhase) => void
+    
+    // Time pause control
+    this.timePaused = false;
   }
 
   /**
@@ -392,8 +403,8 @@ class Skybox {
     this.sunLight = new THREE.DirectionalLight(0xffffff, 1);
     scene.add(this.sunLight);
 
-    // Moon — dimmer blue-ish directional light
-    this.moonLight = new THREE.DirectionalLight(0x8888cc, 0.3);
+    // Moon — dimmer blue-ish directional light (visible at night)
+    this.moonLight = new THREE.DirectionalLight(0x8888cc, 0.5);
     scene.add(this.moonLight);
 
     // Ambient light — fills in shadows, varies with time of day
@@ -408,39 +419,129 @@ class Skybox {
   }
 
   /**
-   * Create cloud billboard layer
+   * Create cloud layer from white fluffy cubes.
+   * Each cloud is a cluster of cubes arranged in a natural-looking puffy shape.
+   * Clouds are placed at high altitude (150+) and drift slowly.
+   * Managed by _updateClouds() for wrapping and distance culling.
    */
   _createClouds() {
     if (typeof THREE === 'undefined') return;
 
     const cloudGroup = new THREE.Group();
+    cloudGroup.userData.cloudSpeed = 0.4 + Math.random() * 0.3; // blocks/sec drift
 
-    // Simple flat planes as clouds
-    const cloudGeometry = new THREE.PlaneGeometry(20, 20);
-    const cloudMaterial = new THREE.MeshBasicMaterial({
+    // Shared geometry and material for all cloud cubes (efficient)
+    const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+    const cubeMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.4,
-      side: THREE.DoubleSide,
+      opacity: 0.75,
+      depthWrite: false,
     });
 
-    // Place several cloud planes at varying heights and positions
-    for (let i = 0; i < 20; i++) {
-      const cloud = new THREE.Mesh(cloudGeometry, cloudMaterial.clone());
-      cloud.position.set(
-        (Math.random() - 0.5) * 300,
-        60 + Math.random() * 20,
-        (Math.random() - 0.5) * 300
-      );
-      cloud.rotation.x = -Math.PI / 2;
-      cloudGroup.add(cloud);
+    // Generate cloud clusters spread across the sky
+    for (let i = 0; i < this.cloudTargetCount; i++) {
+      this._spawnCloud(cubeGeo, cubeMat, cloudGroup, true);
     }
+    this.cloudCount = this.cloudTargetCount;
 
     if (this.renderer.scene) {
       this.renderer.scene.add(cloudGroup);
     }
 
     this.cloudLayer = cloudGroup;
+  }
+
+  /**
+   * Spawn a single cloud cluster at a random position.
+   * @param {THREE.Group} cloudGroup - Parent group
+   * @param {boolean} initial - If true, spread evenly; if false, spawn at edge for wrapping
+   */
+  _spawnCloud(cubeGeo, cubeMat, cloudGroup, initial = false) {
+    const cluster = this._createCloudCluster(cubeGeo, cubeMat);
+    
+    if (initial) {
+      // Spread clouds evenly around origin for initial placement
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 30 + Math.random() * this.cloudSpreadRadius;
+      cluster.position.set(
+        Math.cos(angle) * radius,
+        this.cloudMinAltitude + Math.random() * (this.cloudMaxAltitude - this.cloudMinAltitude),
+        Math.sin(angle) * radius
+      );
+    } else {
+      // Spawn at the trailing edge (negative X relative to layer) for wrapping
+      const zOffset = (Math.random() - 0.5) * this.cloudSpreadRadius * 1.5;
+      cluster.position.set(
+        -this.cloudWrapDistance,
+        this.cloudMinAltitude + Math.random() * (this.cloudMaxAltitude - this.cloudMinAltitude),
+        zOffset
+      );
+    }
+    
+    cluster.rotation.y = Math.random() * Math.PI;
+    cluster.userData.driftSpeed = 0.3 + Math.random() * 0.4;
+    cloudGroup.add(cluster);
+  }
+
+  /**
+   * Create a single fluffy cloud cluster from multiple cubes.
+   * Uses a layered approach: wider base, narrower top for natural look.
+   */
+  _createCloudCluster(cubeGeo, cubeMat) {
+    const cluster = new THREE.Group();
+
+    // Cloud parameters
+    const length = 4 + Math.floor(Math.random() * 5); // 4-8 cubes long
+    const baseWidth = 2 + Math.floor(Math.random() * 2); // 2-3 cubes wide
+
+    // Layer 1: Bottom layer — widest, forms the base
+    for (let x = 0; x < length; x++) {
+      const w = baseWidth + (Math.random() > 0.5 ? 1 : 0);
+      for (let z = -Math.floor(w / 2); z <= Math.floor(w / 2); z++) {
+        const cube = new THREE.Mesh(cubeGeo, cubeMat);
+        const scale = 1.5 + Math.random() * 1.0;
+        cube.scale.set(scale, scale * 0.8, scale);
+        cube.position.set(
+          (x - length / 2 + 0.5) * 1.2,
+          0,
+          z * 1.2
+        );
+        cluster.add(cube);
+      }
+    }
+
+    // Layer 2: Middle layer — slightly narrower, taller
+    for (let x = 1; x < length - 1; x++) {
+      const w = Math.max(1, baseWidth - 1 + (Math.random() > 0.6 ? 1 : 0));
+      for (let z = -Math.floor(w / 2); z <= Math.floor(w / 2); z++) {
+        const cube = new THREE.Mesh(cubeGeo, cubeMat);
+        const scale = 1.3 + Math.random() * 0.8;
+        cube.scale.set(scale, scale * 0.9, scale);
+        cube.position.set(
+          (x - length / 2 + 0.5) * 1.2,
+          1.0,
+          z * 1.2
+        );
+        cluster.add(cube);
+      }
+    }
+
+    // Layer 3: Top puffs — sparse, creates the fluffy peaks
+    const topCount = 2 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < topCount; i++) {
+      const cube = new THREE.Mesh(cubeGeo, cubeMat);
+      const scale = 1.0 + Math.random() * 1.2;
+      cube.scale.set(scale, scale * 1.1, scale);
+      cube.position.set(
+        (Math.random() - 0.5) * (length - 2) * 1.2,
+        2.0 + Math.random() * 0.5,
+        (Math.random() - 0.5) * baseWidth * 1.2
+      );
+      cluster.add(cube);
+    }
+
+    return cluster;
   }
 
   /**
@@ -484,9 +585,10 @@ class Skybox {
     // Cloud visibility — clouds dim at night
     if (this.cloudLayer) {
       const isDay = isDaytime(this.timeOfDay);
-      const cloudOpacity = isDay ? 0.4 : 0.1;
-      this.cloudLayer.children.forEach(child => {
-        if (child.material) {
+      const cloudOpacity = isDay ? 0.75 : 0.15;
+      // Cloud layer children are Groups (clusters), traverse to find meshes
+      this.cloudLayer.traverse((child) => {
+        if (child.isMesh && child.material) {
           child.material.opacity = cloudOpacity;
         }
       });
@@ -507,24 +609,84 @@ class Skybox {
   }
 
   /**
-   * Update sky based on time of day
+   * Update sky based on time of day.
+   * Advances the clock, updates lighting/colors, drifts clouds.
+   * @param {number} deltaTime — Seconds since last frame
+   * @param {THREE.Vector3} [playerPos] — Optional player position for following clouds/sky
    */
-  update(deltaTime) {
+  update(deltaTime, playerPos) {
     // Advance time: speed is hours/second, deltaTime is seconds
-    this.timeOfDay += this.speed * deltaTime;
-    if (this.timeOfDay >= 24) this.timeOfDay -= 24;
+    if (!this.timePaused) {
+      this.timeOfDay += this.speed * deltaTime;
+      if (this.timeOfDay >= 24) this.timeOfDay -= 24;
+    }
 
     this._updateSkyState();
+
+    // Drift clouds and manage wrapping/culling
+    if (this.cloudLayer) {
+      const baseSpeed = this.cloudLayer.userData.cloudSpeed || 0.4;
+      let needsRespawn = [];
+      
+      for (let i = 0; i < this.cloudLayer.children.length; i++) {
+        const cluster = this.cloudLayer.children[i];
+        const speed = cluster.userData.driftSpeed || baseSpeed;
+        cluster.position.x += speed * deltaTime;
+        
+        // Mark clouds that have drifted too far for removal
+        if (cluster.position.x > this.cloudWrapDistance) {
+          needsRespawn.push(i);
+        }
+      }
+      
+      // Remove old clouds (iterate backwards to avoid index issues)
+      for (let i = needsRespawn.length - 1; i >= 0; i--) {
+        const cluster = this.cloudLayer.children[needsRespawn[i]];
+        this.cloudLayer.remove(cluster);
+        // Dispose geometry references (material is shared, don't dispose)
+        cluster.traverse(child => {
+          if (child.isMesh) {
+            // Don't dispose geometry/material — they're shared
+          }
+        });
+        this.cloudCount--;
+      }
+      
+      // Spawn new clouds to maintain target count
+      const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+      const cubeMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false,
+      });
+      while (this.cloudCount < this.cloudTargetCount) {
+        this._spawnCloud(cubeGeo, cubeMat, this.cloudLayer, false);
+        this.cloudCount++;
+      }
+    }
+
+    // Move clouds to follow player (infinite sky illusion)
+    if (playerPos && this.cloudLayer) {
+      this.cloudLayer.position.x = playerPos.x;
+      this.cloudLayer.position.z = playerPos.z;
+      // Keep cloud layer Y at 0 so cloud altitudes are absolute world Y
+      this.cloudLayer.position.y = 0;
+    }
   }
 
   /**
-   * Update sky gradient based on time of day
+   * Update sky gradient based on time of day.
+   * Stores the raw base color so BiomeEffects can blend on top.
    */
   _updateSkyColor() {
     if (!this.renderer || !this.renderer.scene) return;
 
     const skyColorHex = getSkyColorForTime(this.timeOfDay);
     const skyColor = new THREE.Color(skyColorHex);
+
+    // Store raw base color for biome blending
+    this._baseSkyColor = skyColor.clone();
 
     this.renderer.scene.background = skyColor;
 
@@ -624,6 +786,78 @@ class Skybox {
    */
   getAmbientIntensity() {
     return getAmbientIntensityForTime(this.timeOfDay);
+  }
+
+  /**
+   * Get current sun intensity (0 when below horizon).
+   */
+  getSunIntensity() {
+    return getSunIntensity(this.timeOfDay);
+  }
+
+  /**
+   * Get current sun color as a THREE.Color.
+   */
+  getSunColor() {
+    const hex = getSunColorForTime(this.timeOfDay);
+    return new THREE.Color(hex);
+  }
+
+  /**
+   * Get current sun direction as a normalized THREE.Vector3.
+   */
+  getSunDirection() {
+    const sunAngle = getSunAngleForTime(this.timeOfDay);
+    const sunX = Math.cos(sunAngle);
+    const sunY = Math.sin(sunAngle);
+    const dir = new THREE.Vector3(sunX, Math.max(sunY, -0.1), 0.5).normalize();
+    return dir;
+  }
+
+  /**
+   * Update the PBR material factory's lighting uniforms to match the current time of day.
+   * Call this each frame after skybox.update().
+   * @param {PBRMaterialFactory} pbrFactory
+   */
+  updatePBRFactory(pbrFactory) {
+    if (!pbrFactory) return;
+
+    // Update sun direction
+    const sunDir = this.getSunDirection();
+    if (pbrFactory.updateSunDirection) {
+      pbrFactory.updateSunDirection(sunDir);
+    }
+
+    // Update sun color
+    const sunColor = this.getSunColor();
+    if (pbrFactory.updateSunColor) {
+      pbrFactory.updateSunColor(sunColor);
+    }
+
+    // Update sun intensity
+    const sunIntensity = this.getSunIntensity();
+    if (pbrFactory.updateSunIntensity) {
+      pbrFactory.updateSunIntensity(sunIntensity);
+    }
+
+    // Update ambient intensity
+    const ambientIntensity = this.getAmbientIntensity();
+    if (pbrFactory.updateAmbientIntensity) {
+      pbrFactory.updateAmbientIntensity(ambientIntensity);
+    }
+
+    // Update sky color for hemisphere lighting
+    if (this._baseSkyColor && pbrFactory.updateSkyColor) {
+      pbrFactory.updateSkyColor(this._baseSkyColor);
+    }
+
+    // Update fog color and density
+    if (this._baseSkyColor && pbrFactory.updateFogColor) {
+      pbrFactory.updateFogColor(this._baseSkyColor);
+    }
+    if (pbrFactory.updateFogDensity) {
+      pbrFactory.updateFogDensity(this.getFogDensity());
+    }
   }
 
   /**

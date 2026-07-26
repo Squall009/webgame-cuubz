@@ -113,11 +113,11 @@ class BlockInteraction {
     const hit = this.renderer.raycast(this.breakRange, this.chunkManager);
     if (!hit || !hit.point) {
       // Debug: log raycast failure
-      if (!hit) {
-        console.log('[BREAK] Raycast returned null (no hit)');
-      } else {
-        console.log('[BREAK] Raycast hit has no point:', hit);
-      }
+      // if (!hit) {
+      //   console.log('[BREAK] Raycast returned null (no hit)');
+      // } else {
+      //   console.log('[BREAK] Raycast hit has no point:', hit);
+      // }
       return null;
     }
 
@@ -141,10 +141,10 @@ class BlockInteraction {
    * Start breaking a block.
    */
   _startBreak() {
-    console.log('[BREAK] _startBreak called');
+    // console.log('[BREAK] _startBreak called');
     const target = this._getTargetBlock();
     if (!target) {
-      console.log('[BREAK] No target block (raycast failed)');
+      // console.log('[BREAK] No target block (raycast failed)');
       return;
     }
 
@@ -153,7 +153,7 @@ class BlockInteraction {
     // Get chunk data
     const chunkData = this.chunkManager.getChunkData(chunkX, chunkZ);
     if (!chunkData) {
-      console.log(`[BREAK] No chunk data at (${chunkX},${chunkZ}) — chunk not in memoryCache`);
+      // console.log(`[BREAK] No chunk data at (${chunkX},${chunkZ}) — chunk not in memoryCache`);
       return;
     }
 
@@ -164,7 +164,7 @@ class BlockInteraction {
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
     if (dist > this.breakRange) {
-      console.log(`[BREAK] Too far: dist=${dist.toFixed(1)} > ${this.breakRange}`);
+      // console.log(`[BREAK] Too far: dist=${dist.toFixed(1)} > ${this.breakRange}`);
       return;
     }
 
@@ -175,18 +175,18 @@ class BlockInteraction {
 
     if ((blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) ||
         this.unbreakableBlocks.has(blockType)) {
-      console.log(`[BREAK] Block type ${blockType} is air/unbreakable`);
+      // console.log(`[BREAK] Block type ${blockType} is air/unbreakable`);
       return;
     }
 
     // Get block properties
     const props = BLOCK_PROPERTIES[blockType];
     if (!props) {
-      console.log(`[BREAK] No BLOCK_PROPERTIES for block type ${blockType}`);
+      // console.log(`[BREAK] No BLOCK_PROPERTIES for block type ${blockType}`);
       return;
     }
     if (props.hardness === -1) {
-      console.log(`[BREAK] Block type ${blockType} is unbreakable (hardness=-1)`);
+      // console.log(`[BREAK] Block type ${blockType} is unbreakable (hardness=-1)`);
       return;
     }
 
@@ -200,7 +200,7 @@ class BlockInteraction {
     this.breakProgress = 0;
     this.breakStartTime = performance.now();
 
-    console.log(`[BREAK] Started breaking block ${blockType} at (${blockPos.x},${blockPos.y},${blockPos.z}) hardness=${hardness}`);
+    // console.log(`[BREAK] Started breaking block ${blockType} at (${blockPos.x},${blockPos.y},${blockPos.z}) hardness=${hardness}`);
 
     // Create crack overlay
     this._createCrackOverlay(blockPos.x, blockPos.y, blockPos.z, blockType);

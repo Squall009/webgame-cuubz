@@ -15,8 +15,9 @@
  */
 
 class PBRTextureAtlas {
-  constructor() {
-    this.tileSize = 128; // Source textures are 128×128, baked at 1:1
+  constructor(options = {}) {
+    // Configurable tile size: 128 (high), 64 (medium), 32 (low)
+    this.tileSize = options.tileSize || 128;
 
     // Three canvases — identical grid layout
     this.diffuseCanvas = null;
@@ -327,6 +328,8 @@ class PBRTextureAtlas {
       const img = new Image();
       img.onload = () => {
         const ctx = canvas.getContext('2d');
+        // Disable smoothing for clean nearest-neighbor downscaling
+        ctx.imageSmoothingEnabled = false;
         // Draw the image
         ctx.drawImage(img, x, y, this.tileSize, this.tileSize);
         // Replicate edge pixels outward by 1px to prevent atlas tile bleeding
@@ -364,6 +367,7 @@ class PBRTextureAtlas {
       img.onload = () => {
         // Draw the image first
         const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(img, x, y, this.tileSize, this.tileSize);
 
         // Apply color multiplier to the loaded pixels
@@ -465,8 +469,11 @@ class PBRTextureAtlas {
     // Resolve face name to tile
     let tile = entry.tiles[faceName];
     if (!tile) {
-      // Fallback chain: face → side → top → first available
+      // Fallback chain: face → side/bottom → top → first available
       if (faceName === 'front' || faceName === 'back' || faceName === 'left' || faceName === 'right') {
+        tile = entry.tiles.side;
+      }
+      if (!tile && faceName === 'bottom') {
         tile = entry.tiles.side;
       }
       if (!tile) {
