@@ -112,12 +112,6 @@ class BlockInteraction {
   _getTargetBlock() {
     const hit = this.renderer.raycast(this.breakRange, this.chunkManager);
     if (!hit || !hit.point) {
-      // Debug: log raycast failure
-      // if (!hit) {
-      //   console.log('[BREAK] Raycast returned null (no hit)');
-      // } else {
-      //   console.log('[BREAK] Raycast hit has no point:', hit);
-      // }
       return null;
     }
 
@@ -355,20 +349,6 @@ class BlockInteraction {
     const py = Math.floor(this.player.position.y);
     const pz = Math.floor(this.player.position.z);
     if (placeX === px && (placeY === py || placeY === py + 1) && placeZ === pz) {
-      // If we can't place on the targeted face (inside player), try default upward placement
-      if (faceNormal) {
-        return;
-      }
-      // No faceNormal (started inside a block) — try placing above player
-      const altPlaceY = py + 2;
-      this._placeAt(placeX, altPlaceY, placeZ, placeType);
-      return;
-    }
-
-    // If faceNormal is null (started inside a block), use upward placement
-    if (!faceNormal) {
-      const altPlaceY = py + 2;
-      this._placeAt(placeX, altPlaceY, placeZ, placeType);
       return;
     }
 
