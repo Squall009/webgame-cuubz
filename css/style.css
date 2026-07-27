@@ -162,10 +162,10 @@ html, body {
   display: none !important;
 }
 
-/* Survival Meters */
+/* Survival Meters — bottom-left corner */
 #meters-container {
   position: absolute;
-  top: 12px;
+  bottom: 12px;
   left: 12px;
   display: flex;
   flex-direction: column;
@@ -1201,7 +1201,7 @@ html, body {
   /* === SURVIVAL METERS — Visible on mobile viewport === */
   #meters-container {
     width: min(180px, 50vw);
-    top: 4px;
+    bottom: 80px;
     left: 4px;
     gap: 2px;
   }

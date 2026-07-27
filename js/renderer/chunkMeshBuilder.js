@@ -609,18 +609,18 @@ class ChunkMeshBuilder {
       uvSize = faceUV.size || (1.0 / 16);
     }
 
-    const vi = posArr.length / 3;
     const quadUVs = [[0, 0], [1, 0], [1, 1], [0, 1]];
 
     // Helper: emit a single-sided quad (material is already double-sided)
     const emitQuad = (verts, normal) => {
+      const startIdx = posArr.length / 3;
       for (let i = 0; i < 4; i++) {
         posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
         normArr.push(normal[0], normal[1], normal[2]);
         uvArr.push(uvU + quadUVs[i][0] * uvSize, uvV + quadUVs[i][1] * uvSize);
         colorArr.push(vColor[0], vColor[1], vColor[2]);
       }
-      idxArr.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
+      idxArr.push(startIdx, startIdx + 1, startIdx + 2, startIdx, startIdx + 2, startIdx + 3);
     };
 
     // Two vertical planes forming an X (criss-cross), centered at block center (0.5, 0.5, 0.5).

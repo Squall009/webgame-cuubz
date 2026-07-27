@@ -147,21 +147,21 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
   // Each plane is a W×1 rectangle rotated 45° apart around Y axis.
   // Normals point straight up (0,1,0) so both planes receive equal sunlight.
   // Small depth offset along each plane's horizontal normal prevents z-fighting.
-  function addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor) {
-    // Get UV info — use 'side' face for crossbillboard planes
-    var faceUVs = getUV(blockType, 'side', uvLookup);
-
-    var vi = posArr.length / 3;
+  function addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor, faceName) {
+    faceName = faceName || 'side';
+    // Get UV info — use specified face for crossbillboard planes
+    var faceUVs = getUV(blockType, faceName, uvLookup);
 
     // Helper: emit a single-sided quad (material is already double-sided)
     var emitQuad = function(verts, normal) {
+      var startIdx = posArr.length / 3;
       for (var i = 0; i < 4; i++) {
         posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
         normArr.push(normal[0], normal[1], normal[2]);
         uvArr.push(faceUVs[i][0], faceUVs[i][1]);
         colorArr.push(vColor[0], vColor[1], vColor[2]);
       }
-      idxArr.push(vi, vi+1, vi+2, vi, vi+2, vi+3);
+      idxArr.push(startIdx, startIdx+1, startIdx+2, startIdx, startIdx+2, startIdx+3);
     };
 
     var c = Math.cos(Math.PI / 4); // 0.7071
@@ -248,8 +248,9 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
           if (meshInfo.type === 'crossbillboard') {
             addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
           } else if (meshInfo.type === 'crossbillboard_stacked') {
-            addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
-            addCrossbillboard(x, y + 1, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
+            // Bottom layer uses 'bottom' face texture, top layer uses 'side'
+            addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor, 'bottom');
+            addCrossbillboard(x, y + 1, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor, 'side');
           } else if (meshInfo.type === 'topface') {
             addTopFace(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor);
           }
