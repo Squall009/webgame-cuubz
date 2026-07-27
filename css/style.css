@@ -605,17 +605,6 @@ html, body {
   display: none !important;
 }
 
-#inventory-grid {
-  display: grid;
-  grid-template-columns: repeat(9, 56px);
-  grid-template-rows: repeat(4, 56px);
-  gap: 4px;
-  padding: 12px;
-  background: rgba(30,30,46,0.95);
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.1);
-}
-
 .inventory-slot {
   width: 56px;
   height: 56px;
@@ -1257,19 +1246,6 @@ html, body {
     background: rgba(0,0,0,0.95);
   }
 
-  #inventory-grid {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    align-content: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 20px;
-    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
-    max-width: 100%;
-  }
-
   .inventory-slot {
     width: 56px; /* Larger touch targets on mobile */
     height: 56px;
@@ -1731,4 +1707,228 @@ html, body {
 
 #pause-menu .menu-btn.primary:hover {
   background: #3a6aa0;
+}
+
+/* ─── Crafting Screen ─────────────────────────────────────── */
+#crafting-screen .crafting-container {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  background: rgba(30, 30, 46, 0.95);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  max-width: 90vw;
+  max-height: 80vh;
+  position: relative;
+}
+
+.crafting-header {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.crafting-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e0e0e0;
+  text-shadow: 0 0 8px rgba(0,0,0,0.8);
+}
+
+.crafting-station {
+  display: block;
+  font-size: 12px;
+  color: #4CAF50;
+  margin-top: 2px;
+}
+
+/* Recipe list — left panel */
+.crafting-recipes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 8px;
+  min-width: 260px;
+  max-width: 320px;
+}
+
+.recipe-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.recipe-card:hover {
+  background: rgba(76, 175, 80, 0.15);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.recipe-card:active {
+  transform: scale(0.98);
+}
+
+.recipe-ingredients {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.recipe-ing-slot {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recipe-ing-slot .item-icon {
+  width: 28px;
+  height: 28px;
+  image-rendering: pixelated;
+}
+
+.ing-count {
+  position: absolute;
+  bottom: 0;
+  right: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
+}
+
+.recipe-plus {
+  font-size: 14px;
+  color: #888;
+}
+
+.recipe-arrow {
+  font-size: 16px;
+  color: #4CAF50;
+  flex-shrink: 0;
+}
+
+.recipe-output {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  background: rgba(76, 175, 80, 0.1);
+  border: 2px solid rgba(76, 175, 80, 0.3);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.recipe-output .item-icon {
+  width: 36px;
+  height: 36px;
+  image-rendering: pixelated;
+}
+
+.output-count {
+  position: absolute;
+  bottom: 0;
+  right: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #4CAF50;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
+}
+
+.recipe-name {
+  font-size: 12px;
+  color: #ccc;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+
+/* Inventory grid — right panel */
+.crafting-inventory {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.crafting-inventory-label {
+  font-size: 13px;
+  color: #aaa;
+}
+
+#crafting-inv-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 48px);
+  grid-template-rows: repeat(4, 48px);
+  gap: 3px;
+}
+
+#crafting-inv-grid .inventory-slot {
+  width: 48px;
+  height: 48px;
+  cursor: pointer;
+}
+
+#crafting-inv-grid .inventory-slot:hover {
+  border-color: rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.1);
+}
+
+#crafting-inv-grid .inventory-slot.hotbar {
+  border-color: #4CAF50;
+  background: rgba(76, 175, 80, 0.08);
+}
+
+#crafting-inv-grid .inventory-slot.hotbar:hover {
+  border-color: #66BB6A;
+  background: rgba(76, 175, 80, 0.15);
+}
+
+/* Empty state */
+.crafting-empty-msg {
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+  padding: 40px 20px;
+}
+
+/* Crafting mobile */
+@media (max-width: 600px) {
+  #crafting-screen .crafting-container {
+    flex-direction: column;
+    max-height: 90vh;
+    padding: 16px;
+  }
+  .crafting-recipes {
+    max-height: 40vh;
+    min-width: unset;
+    max-width: unset;
+  }
+  #crafting-inv-grid {
+    grid-template-columns: repeat(9, 36px);
+    grid-template-rows: repeat(4, 36px);
+  }
+  #crafting-inv-grid .inventory-slot {
+    width: 36px;
+    height: 36px;
+  }
+  .recipe-name {
+    font-size: 11px;
+  }
 }

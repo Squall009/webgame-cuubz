@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Cuubz — Voxel Survival</title>
-  <link rel="stylesheet" href="css/style.css?v=20260725-1">
+  <link rel="stylesheet" href="css/style.css?v=20260727-1">
   <!-- Three.js r134 — local copy (CDN gets blocked by Firefox ETP / ad blockers) -->
   <script src="js/three.min.js" onerror="window.__THREE_LOAD_FAILED=true;console.error('Failed to load Three.js from js/three.min.js')"></script>
 </head>
@@ -362,11 +362,28 @@
     <div id="player-list-items"></div>
   </div>
 
-  <!-- Inventory Screen (toggleable in-game) -->
-  <div id="inventory-screen" class="overlay hidden">
-    <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);font-size:18px;font-weight:700;color:#e0e0e0;pointer-events:none;text-shadow:0 0 8px rgba(0,0,0,0.8);">Inventory</div>
-    <div id="inventory-grid"></div>
-    <button id="btn-close-inventory" class="overlay-close">✕</button>
+  <!-- Inventory + Crafting Screen (toggleable with E key) -->
+  <div id="crafting-screen" class="overlay hidden">
+    <div class="crafting-container">
+      <!-- Title + station indicator -->
+      <div class="crafting-header">
+        <span class="crafting-title">Inventory</span>
+        <span id="crafting-station-indicator" class="crafting-station hidden">🔨 At Crafting Table</span>
+      </div>
+
+      <!-- Left: Recipe List (scrollable) -->
+      <div class="crafting-recipes" id="crafting-recipe-list">
+        <!-- Populated dynamically -->
+      </div>
+
+      <!-- Right: Player Inventory Grid -->
+      <div class="crafting-inventory">
+        <div class="crafting-inventory-label">Inventory</div>
+        <div id="crafting-inv-grid"></div>
+      </div>
+    </div>
+
+    <button id="btn-close-crafting" class="overlay-close">✕</button>
   </div>
 
   <!-- Debug Stats Overlay (top-left, always visible in-game) -->
@@ -450,6 +467,7 @@
       <button id="btn-break-mobile" class="action-btn action-break">⛏</button>
       <button id="btn-place-mobile" class="action-btn action-place">🧱</button>
       <button id="btn-inventory-mobile" class="action-btn action-inv">🎒</button>
+      <button id="btn-crafting-mobile" class="action-btn action-craft">🔨</button>
     </div>
   </div>
 
@@ -483,7 +501,7 @@
   <!-- Renderer (PBR shader before texture atlas) -->
   <script src="js/renderer/pbrShader.js?v=20260725-5"></script>
   <script src="js/renderer/textureAtlas.js?v=20260725-2"></script>
-  <script src="js/renderer/itemTextureAtlas.js?v=20260726-1"></script>
+  <script src="js/renderer/itemTextureAtlas.js?v=20260727-1"></script>
   <script src="js/renderer/chunkMeshBuilder.js?v=20260725-5"></script>
   <!-- REMOVED: renderer/chunkManager.js → merged into js/chunkmanager.js -->
   <script src="js/renderer/voxelRenderer.js?v=20260725-1"></script>
@@ -507,8 +525,8 @@
   <script src="js/entities/questMarker.js?v=20260714-1"></script>
 
   <!-- Systems -->
-  <script src="js/systems/inventory.js?v=20260714-1"></script>
-  <script src="js/systems/crafting.js?v=20260714-1"></script>
+  <script src="js/systems/inventory.js?v=20260727-2"></script>
+  <script src="js/systems/crafting.js?v=20260727-2"></script>
   <script src="js/systems/survival.js?v=20260714-1"></script>
   <script src="js/systems/damageSystem.js?v=20260714-1"></script>
   <script src="js/systems/questSystem.js?v=20260714-1"></script>
@@ -529,6 +547,6 @@
   <script src="js/game.js?v=20260714-1"></script>
 
   <!-- Main Entry (menu system, screen management) -->
-<script src="js/main.js?v=20260725-3"></script>
+<script src="js/main.js?v=20260727-2"></script>
 </body>
 </html>

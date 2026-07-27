@@ -1,86 +1,166 @@
 /**
  * Cuubz — Crafting System
- * Recipe-based crafting with grid matching, inventory integration, and recipe discovery.
+ * Recipe-based crafting with inventory integration and recipe discovery.
  * 
- * Features:
- * - Recipe registry with ingredient/output definitions
- * - Grid-based pattern matching (1x1, 2x2, 3x3 grids)
- * - Inventory integration: consume ingredients, add output items
- * - Recipe discovery system (learn recipes as you progress)
- * - Callback system for UI integration
+ * Two tiers:
+ *   - Hand crafting (requiresTable: false) — always available
+ *   - Crafting table (requiresTable: true) — requires standing within 4 blocks of block ID 162
  */
-
-// Use global BLOCK_TYPES from chunkData.js
 
 // ============================================================
 // Recipe Definitions
 // ============================================================
 
 const RECIPES = {
-  // Basic: Wood Log → 4 Planks
-  planks: {
-    id: 'planks',
-    name: 'Planks',
-    description: 'Convert wood logs into wooden planks for building.',
-    size: 1, // 1x1 grid
+  // ── Hand-craftable recipes ────────────────────────────────
+  planks_oak: {
+    id: 'planks_oak', name: 'Oak Planks', description: 'Convert oak logs into wooden planks.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_LOG, count: 1 } ],
+    output: { typeId: BLOCK_TYPES.OAK_PLANKS, count: 4 },
+    requiresTable: false, discoveryStage: 1,
+  },
+  planks_spruce: {
+    id: 'planks_spruce', name: 'Spruce Planks', description: 'Convert spruce logs into wooden planks.',
+    ingredients: [ { typeId: BLOCK_TYPES.SPRUCE_LOG, count: 1 } ],
+    output: { typeId: BLOCK_TYPES.SPRUCE_PLANKS, count: 4 },
+    requiresTable: false, discoveryStage: 1,
+  },
+  planks_birch: {
+    id: 'planks_birch', name: 'Birch Planks', description: 'Convert birch logs into wooden planks.',
+    ingredients: [ { typeId: BLOCK_TYPES.BIRCH_LOG, count: 1 } ],
+    output: { typeId: BLOCK_TYPES.BIRCH_PLANKS, count: 4 },
+    requiresTable: false, discoveryStage: 1,
+  },
+  planks_jungle: {
+    id: 'planks_jungle', name: 'Jungle Planks', description: 'Convert jungle logs into wooden planks.',
+    ingredients: [ { typeId: BLOCK_TYPES.JUNGLE_LOG, count: 1 } ],
+    output: { typeId: BLOCK_TYPES.JUNGLE_PLANKS, count: 4 },
+    requiresTable: false, discoveryStage: 1,
+  },
+  // Any plank type → sticks
+  sticks: {
+    id: 'sticks', name: 'Sticks', description: 'Craft sticks from any wooden planks.',
+    ingredients: [ {
+      typeIds: [
+        BLOCK_TYPES.OAK_PLANKS, BLOCK_TYPES.SPRUCE_PLANKS,
+        BLOCK_TYPES.BIRCH_PLANKS, BLOCK_TYPES.JUNGLE_PLANKS,
+        BLOCK_TYPES.ACACIA_PLANKS, BLOCK_TYPES.DARK_OAK_PLANKS,
+        BLOCK_TYPES.CHERRY_PLANKS, BLOCK_TYPES.MANGROVE_PLANKS,
+        BLOCK_TYPES.PALE_OAK_PLANKS, BLOCK_TYPES.POPLAR_PLANKS,
+        BLOCK_TYPES.BAMBOO_PLANKS, BLOCK_TYPES.CRIMSON_PLANKS,
+        BLOCK_TYPES.WARPED_PLANKS,
+      ],
+      count: 2,
+    } ],
+    output: { typeId: 'stick', count: 4 },
+    requiresTable: false, discoveryStage: 1,
+  },
+  torch: {
+    id: 'torch', name: 'Torches', description: 'A placeable light source.',
     ingredients: [
-      { typeId: BLOCK_TYPES.WOOD_LOG, count: 1 },
+      { typeId: BLOCK_TYPES.OAK_PLANKS, count: 1 },
+      { typeId: 'coal', count: 1 },
     ],
-    output: { typeId: BLOCK_TYPES.PLANKS, count: 4 },
-    discoveryStage: 1, // Available from the start
+    output: { typeId: BLOCK_TYPES.TORCH, count: 4 },
+    requiresTable: false, discoveryStage: 1,
+  },
+  crafting_table: {
+    id: 'crafting_table', name: 'Crafting Table', description: 'Unlock advanced recipes.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 4 } ],
+    output: { typeId: BLOCK_TYPES.CRAFTING_TABLE, count: 1 },
+    requiresTable: false, discoveryStage: 1,
   },
 
-  // Bed: 3 Planks → 1 Bed (simple recipe, no wool needed)
-  bed: {
-    id: 'bed',
-    name: 'Bed',
-    description: 'A placeable bed that restores sleep and sets spawn point.',
-    size: 2, // 2x2 grid
-    ingredients: [
-      { typeId: BLOCK_TYPES.PLANKS, count: 3 },
-    ],
-    output: { typeId: BLOCK_TYPES.BED, count: 1 },
-    discoveryStage: 4, // Discovered after quest 4 (A Safe Place)
+  // ── Crafting-table only recipes ───────────────────────────
+  wooden_pickaxe: {
+    id: 'wooden_pickaxe', name: 'Wooden Pickaxe', description: 'Mine stone and ore blocks.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 3 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'wooden_pickaxe', count: 1 },
+    requiresTable: true, discoveryStage: 1,
   },
-
-  // Craftable Torch: Planks + Coal → Cave Torches
-  cave_torch: {
-    id: 'cave_torch',
-    name: 'Cave Torch',
-    description: 'A placeable light source for dark caves.',
-    size: 1,
-    ingredients: [
-      { typeId: BLOCK_TYPES.PLANKS, count: 1 },
-    ],
-    output: { typeId: BLOCK_TYPES.CAVE_TORCH, count: 4 },
-    discoveryStage: 5, // Discovered after exploring caves
+  wooden_axe: {
+    id: 'wooden_axe', name: 'Wooden Axe', description: 'Chop wood faster.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 3 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'wooden_axe', count: 1 },
+    requiresTable: true, discoveryStage: 1,
   },
-
-  // Obsidian from Lava + Water (special recipe)
-  obsidian: {
-    id: 'obsidian',
-    name: 'Obsidian',
-    description: 'Ultra-hard block formed by lava cooling.',
-    size: 1,
-    ingredients: [
-      { typeId: BLOCK_TYPES.STONE, count: 4 },
-    ],
-    output: { typeId: BLOCK_TYPES.OBSIDIAN, count: 1 },
-    discoveryStage: 7, // Discovered when entering lava biome
+  wooden_sword: {
+    id: 'wooden_sword', name: 'Wooden Sword', description: 'A basic weapon.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 2 }, { typeId: 'stick', count: 1 } ],
+    output: { typeId: 'wooden_sword', count: 1 },
+    requiresTable: true, discoveryStage: 1,
   },
-
-  // Blackstone (deep cave material)
-  blackstone: {
-    id: 'blackstone',
-    name: 'Blackstone',
-    description: 'Dark stone found in deep caves.',
-    size: 1,
-    ingredients: [
-      { typeId: BLOCK_TYPES.STONE, count: 2 },
-      { typeId: BLOCK_TYPES.COAL_ORE, count: 1 },
-    ],
-    output: { typeId: BLOCK_TYPES.BLACKSTONE, count: 2 },
-    discoveryStage: 13, // Discovered in corrupt biome
+  wooden_shovel: {
+    id: 'wooden_shovel', name: 'Wooden Shovel', description: 'Dig dirt and sand faster.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 1 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'wooden_shovel', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  wooden_hoe: {
+    id: 'wooden_hoe', name: 'Wooden Hoe', description: 'Till soil for farming.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 2 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'wooden_hoe', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  wooden_spear: {
+    id: 'wooden_spear', name: 'Wooden Spear', description: 'A ranged melee weapon.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 2 }, { typeId: 'stick', count: 1 } ],
+    output: { typeId: 'wooden_spear', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  stone_pickaxe: {
+    id: 'stone_pickaxe', name: 'Stone Pickaxe', description: 'Mine stone and ore blocks faster.',
+    ingredients: [ { typeId: BLOCK_TYPES.COBBLESTONE, count: 3 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'stone_pickaxe', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  stone_axe: {
+    id: 'stone_axe', name: 'Stone Axe', description: 'Chop wood much faster.',
+    ingredients: [ { typeId: BLOCK_TYPES.COBBLESTONE, count: 3 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'stone_axe', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  stone_sword: {
+    id: 'stone_sword', name: 'Stone Sword', description: 'A sturdy weapon.',
+    ingredients: [ { typeId: BLOCK_TYPES.COBBLESTONE, count: 2 }, { typeId: 'stick', count: 1 } ],
+    output: { typeId: 'stone_sword', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  stone_shovel: {
+    id: 'stone_shovel', name: 'Stone Shovel', description: 'Dig dirt and sand much faster.',
+    ingredients: [ { typeId: BLOCK_TYPES.COBBLESTONE, count: 1 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'stone_shovel', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  stone_hoe: {
+    id: 'stone_hoe', name: 'Stone Hoe', description: 'Till soil for farming faster.',
+    ingredients: [ { typeId: BLOCK_TYPES.COBBLESTONE, count: 2 }, { typeId: 'stick', count: 2 } ],
+    output: { typeId: 'stone_hoe', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  stone_spear: {
+    id: 'stone_spear', name: 'Stone Spear', description: 'A ranged melee weapon.',
+    ingredients: [ { typeId: BLOCK_TYPES.COBBLESTONE, count: 2 }, { typeId: 'stick', count: 1 } ],
+    output: { typeId: 'stone_spear', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  ladder: {
+    id: 'ladder', name: 'Ladders', description: 'Climb vertical surfaces.',
+    ingredients: [ { typeId: 'stick', count: 7 } ],
+    output: { typeId: BLOCK_TYPES.LADDER, count: 4 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  chest: {
+    id: 'chest', name: 'Chest', description: 'Store extra items.',
+    ingredients: [ { typeId: BLOCK_TYPES.OAK_PLANKS, count: 8 } ],
+    output: { typeId: BLOCK_TYPES.CHEST, count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  furnace: {
+    id: 'furnace', name: 'Furnace', description: 'Smelt ores and cook food.',
+    ingredients: [ { typeId: BLOCK_TYPES.COBBLESTONE, count: 8 } ],
+    output: { typeId: BLOCK_TYPES.FURNACE, count: 1 },
+    requiresTable: true, discoveryStage: 1,
   },
 };
 
@@ -89,282 +169,130 @@ const RECIPES = {
 // ============================================================
 
 class CraftingSystem {
-  /**
-   * @param {object} inventory — Reference to the player's inventory
-   */
   constructor(inventory = null) {
     this.recipes = RECIPES;
-    
-    // Set of discovered recipe IDs
+    this.inventory = inventory;
     this.discoveredRecipes = new Set();
-    
-    // Auto-discover stage 1 recipes (available from start)
+
+    // Auto-discover stage 1 recipes
     for (const [id, recipe] of Object.entries(RECIPES)) {
       if (recipe.discoveryStage <= 1) {
         this.discoveredRecipes.add(id);
       }
     }
-    
-    // Crafting grid: 9 slots (3x3), each slot is { typeId, count } or null
-    this.craftingGrid = new Array(9).fill(null);
-    
-    // Inventory reference
-    this.inventory = inventory;
-    
-    // Callback system
-    this.onCraftComplete = null;   // Called with output item after successful craft
-    this.onRecipeDiscovered = null; // Called when a new recipe is discovered
+
+    this.onCraftComplete = null;
+    this.onRecipeDiscovered = null;
   }
 
-  /**
-   * Discover a recipe by ID.
-   * @param {string} recipeId — Recipe identifier (e.g., 'planks')
-   */
   discoverRecipe(recipeId) {
     if (!this.recipes[recipeId]) return;
-    
     const wasDiscovered = this.discoveredRecipes.has(recipeId);
     this.discoveredRecipes.add(recipeId);
-    
     if (!wasDiscovered && this.onRecipeDiscovered) {
       this.onRecipeDiscovered(recipeId, this.recipes[recipeId]);
     }
   }
 
-  /**
-   * Check if a recipe has been discovered.
-   * @param {string} recipeId
-   * @returns {boolean}
-   */
   isRecipeDiscovered(recipeId) {
     return this.discoveredRecipes.has(recipeId);
   }
 
   /**
-   * Get all available (discovered) recipes.
-   * @returns {object[]} Array of discovered recipe objects
+   * Get all craftable recipes given current inventory and crafting station.
    */
-  getAvailableRecipes() {
-    return Array.from(this.discoveredRecipes)
-      .map(id => this.recipes[id])
-      .filter(r => r !== undefined);
+  getCraftableRecipes(inventory, atCraftingTable = false) {
+    const results = [];
+    for (const [id, recipe] of Object.entries(this.recipes)) {
+      if (!this.discoveredRecipes.has(id)) continue;
+      if (recipe.requiresTable && !atCraftingTable) continue;
+      if (!this._hasAllIngredients(inventory, recipe)) continue;
+      results.push({ id, ...recipe });
+    }
+    return results;
   }
 
   /**
-   * Find a matching recipe for the current crafting grid.
-   * @returns {object|null} Matched recipe or null if no match
+   * Craft a recipe — consume ingredients, add output to inventory.
    */
-  findMatchingRecipe() {
-    // Get non-null items in the grid
-    const gridItems = this.craftingGrid.filter(slot => slot !== null);
-    
-    if (gridItems.length === 0) return null;
-    
-    // Check each discovered recipe
-    for (const recipeId of this.discoveredRecipes) {
-      const recipe = this.recipes[recipeId];
-      if (!recipe) continue;
-      
-      if (this._matchesRecipe(recipe, gridItems)) {
-        return { ...recipe, id: recipeId };
-      }
-    }
-    
-    // Also check undiscovered recipes for matching (but don't allow crafting)
-    for (const [recipeId, recipe] of Object.entries(this.recipes)) {
-      if (this.discoveredRecipes.has(recipeId)) continue; // Already checked
-      
-      if (this._matchesRecipe(recipe, gridItems)) {
-        return null; // Match found but not discovered — don't reveal
-      }
-    }
-    
-    return null;
-  }
-
-  /**
-   * Check if grid items match a recipe's ingredients.
-   * Uses ingredient counting (order-independent).
-   * @param {object} recipe — Recipe definition
-   * @param {object[]} gridItems — Non-null items in the crafting grid
-   * @returns {boolean}
-   */
-  _matchesRecipe(recipe, gridItems) {
-    // Build ingredient count map from grid
-    const gridCounts = {};
-    for (const item of gridItems) {
-      if (!item || typeof item.typeId !== 'number') continue;
-      gridCounts[item.typeId] = (gridCounts[item.typeId] || 0) + (item.count || 1);
-    }
-    
-    // Build ingredient count map from recipe
-    const recipeCounts = {};
-    for (const ing of recipe.ingredients) {
-      recipeCounts[ing.typeId] = (recipeCounts[ing.typeId] || 0) + ing.count;
-    }
-    
-    // Check that grid has exactly the right ingredients
-    const gridKeys = Object.keys(gridCounts).sort();
-    const recipeKeys = Object.keys(recipeCounts).sort();
-    
-    if (gridKeys.length !== recipeKeys.length) return false;
-    
-    for (let i = 0; i < gridKeys.length; i++) {
-      if (gridKeys[i] !== recipeKeys[i]) return false;
-      if (gridCounts[gridKeys[i]] !== recipeCounts[recipeKeys[i]]) return false;
-    }
-    
-    return true;
-  }
-
-  /**
-   * Check if the current grid can be crafted (has matching recipe + sufficient inventory).
-   * @returns {boolean}
-   */
-  canCraft() {
-    if (!this.inventory) return false;
-    
-    const recipe = this.findMatchingRecipe();
-    if (!recipe) return false;
-    
-    // Check if player has enough ingredients in inventory
-    for (const ing of recipe.ingredients) {
-      if (!this._hasInInventory(ing.typeId, ing.count)) {
-        return false;
-      }
-    }
-    
-    return true;
-  }
-
-  /**
-   * Execute the craft operation.
-   * Consumes ingredients from inventory and adds output items.
-   * @returns {object|null} Craft result with recipeId and output, or null on failure
-   */
-  craft() {
-    if (!this.inventory) return null;
-    
-    const recipe = this.findMatchingRecipe();
+  craftRecipe(recipeId, inventory) {
+    const recipe = this.recipes[recipeId];
     if (!recipe) return null;
-    
-    // Check inventory has enough ingredients
+    if (!this._hasAllIngredients(inventory, recipe)) return null;
+
     for (const ing of recipe.ingredients) {
-      if (!this._hasInInventory(ing.typeId, ing.count)) {
-        return null;
+      const resolution = this._resolveIngredient(inventory, ing);
+      if (!resolution) return null;
+      for (const { typeId, count } of resolution) {
+        inventory.removeItem(typeId, count);
       }
     }
-    
-    // Consume ingredients from inventory
-    for (const ing of recipe.ingredients) {
-      this._removeFromInventory(ing.typeId, ing.count);
-    }
-    
-    // Add output to inventory
-    const output = {
-      typeId: recipe.output.typeId,
-      count: recipe.output.count || 1,
-    };
-    this._addToInventory(output.typeId, output.count);
-    
-    // Clear crafting grid
-    this.craftingGrid = new Array(9).fill(null);
-    
-    // Fire callback
+
+    const outputCount = recipe.output.count || 1;
+    inventory.addItem(recipe.output.typeId, outputCount);
+
     if (this.onCraftComplete) {
-      this.onCraftComplete({ recipeId: recipe.id, ...output });
+      this.onCraftComplete({ recipeId, typeId: recipe.output.typeId, count: outputCount });
     }
-    
-    return { recipeId: recipe.id, ...output };
+
+    return { recipeId, typeId: recipe.output.typeId, count: outputCount };
   }
 
-  /**
-   * Check if inventory has enough of a specific item type.
-   * @param {number} typeId — Item/block type ID
-   * @param {number} count — Required count
-   * @returns {boolean}
-   */
-  _hasInInventory(typeId, count) {
-    if (!this.inventory) return false;
-    
-    let total = 0;
-    for (const slot of this.inventory.slots || []) {
-      if (slot && slot.typeId === typeId) {
-        total += slot.count;
+  _hasAllIngredients(inventory, recipe) {
+    if (!inventory) return false;
+    for (const ing of recipe.ingredients) {
+      const typeIds = ing.typeIds || [ing.typeId]; // support array or single
+      let total = 0;
+      for (const tid of typeIds) {
+        total += inventory.countItem(tid);
       }
+      if (total < ing.count) return false;
     }
-    return total >= count;
+    return true;
   }
 
   /**
-   * Remove items from inventory.
-   * @param {number} typeId — Item/block type ID
-   * @param {number} count — Count to remove
+   * Find which typeId(s) to consume for an ingredient (supports typeIds array).
+   * Returns [{ typeId, count }] — which types to remove and how many of each.
    */
-  _removeFromInventory(typeId, count) {
-    if (!this.inventory) return;
-    
-    let remaining = count;
-    for (let i = 0; i < this.inventory.slots.length && remaining > 0; i++) {
-      const slot = this.inventory.slots[i];
-      if (!slot || slot.typeId !== typeId) continue;
-      
-      const removeAmount = Math.min(slot.count, remaining);
-      slot.count -= removeAmount;
-      remaining -= removeAmount;
-      
-      if (slot.count <= 0) {
-        this.inventory.slots[i] = null;
-      }
-    }
-  }
+  _resolveIngredient(inventory, ingredient) {
+    const typeIds = ingredient.typeIds || [ingredient.typeId];
+    const needed = ingredient.count;
+    let remaining = needed;
+    const result = [];
 
-  /**
-   * Add items to inventory.
-   * @param {number} typeId — Item/block type ID
-   * @param {number} count — Count to add
-   */
-  _addToInventory(typeId, count) {
-    if (!this.inventory) return;
-    
-    // Try to stack in existing slots first
-    let remaining = count;
-    for (const slot of this.inventory.slots) {
-      if (!slot || slot.typeId !== typeId) continue;
-      if (slot.count >= 64) continue; // Already at max stack
-      
-      const addAmount = Math.min(remaining, 64 - slot.count);
-      slot.count += addAmount;
-      remaining -= addAmount;
-      
+    for (const tid of typeIds) {
+      const available = inventory.countItem(tid);
+      if (available <= 0) continue;
+      const take = Math.min(available, remaining);
+      result.push({ typeId: tid, count: take });
+      remaining -= take;
       if (remaining <= 0) break;
     }
-    
-    // Place remaining in empty slots
-    if (remaining > 0) {
-      for (let i = 0; i < this.inventory.slots.length && remaining > 0; i++) {
-        if (this.inventory.slots[i] !== null) continue;
-        
-        const addAmount = Math.min(remaining, 64);
-        this.inventory.slots[i] = { typeId, count: addAmount };
-        remaining -= addAmount;
-      }
-    }
+
+    return remaining <= 0 ? result : null;
   }
 
   /**
-   * Get recipe info for a given ID (even if undiscovered).
-   * @param {string} recipeId
-   * @returns {object|null}
+   * Get the actual typeId used for an ingredient (for UI display).
+   * Returns the first matching typeId the player has enough of.
    */
+  _getIngredientType(inventory, ingredient) {
+    const typeIds = ingredient.typeIds || [ingredient.typeId];
+    for (const tid of typeIds) {
+      if (inventory.countItem(tid) >= ingredient.count) return tid;
+    }
+    // If no single type has enough, return the first type they have any of
+    for (const tid of typeIds) {
+      if (inventory.countItem(tid) > 0) return tid;
+    }
+    return typeIds[0];
+  }
+
   getRecipeInfo(recipeId) {
     return this.recipes[recipeId] || null;
   }
 
-  /**
-   * Get all recipes (discovered and undiscovered).
-   * @returns {object} Full recipe registry
-   */
   getAllRecipes() {
     return { ...this.recipes };
   }
@@ -375,9 +303,5 @@ class CraftingSystem {
 // ============================================================
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    RECIPES,
-    CraftingSystem,
-  };
-
+  module.exports = { RECIPES, CraftingSystem };
 }

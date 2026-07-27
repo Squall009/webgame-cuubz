@@ -93,6 +93,20 @@ const RECIPES = {
 stick: { name: 'Stick', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
 ```
 
+Texture: ✅ Generated `textures/items/stick.png` (128×128 pixel art, diagonal wooden stick)
+
+### 1E. Coal texture
+
+`coal` is already a named item (`ITEM_CATEGORIES.RESOURCE`) but has no item texture.
+The ItemTextureAtlas loads named items from `textures/items/${key}.png`, so we need to
+add a texture. Per request: use the existing `textures/blocks/coal_block.png` as the coal item icon.
+
+**Action:** Copy or symlink `textures/blocks/coal_block.png` → `textures/items/coal.png`
+
+### 1F. Bed recipe removed
+
+No bed texture exists. Removing the bed recipe from the plan.
+
 ### 1E. New method on CraftingSystem: `getCraftableRecipes(inventory, atCraftingTable)`
 
 Returns only recipes where:
@@ -670,3 +684,20 @@ This is a follow-up — for now, crafting works locally only.
 4. **`css/style.css`** — Add crafting UI styles
 5. **`main.js`** — Wire everything together (C key, toggle, render, proximity check)
 6. **Test** — Verify hand crafting, table crafting, filtering, close/open behavior
+
+---
+
+## Item Flags / Categories Reference
+
+Item behavior is controlled by `category` + `typeId` type:
+
+| Category | typeId type | Placeable? | Usable? | Stackable? |
+|----------|-------------|------------|---------|------------|
+| `BLOCK` | number | ✅ Yes (`consumeSelectedBlock()` checks `typeof typeId === 'number'`) | N/A | Up to 64 |
+| `RESOURCE` | string | ❌ No | ❌ No (crafting material only) | Per-item (usually 64) |
+| `FOOD` | string | ❌ No | ✅ Consumable (`foodRestore`, `foodSaturation`) | Per-item |
+| `TOOL` | string | ❌ No | ✅ Equippable (`durability`, `damage`, `attackSpeed`) | Always 1 |
+
+**Key insight:** `consumeSelectedBlock()` (inventory.js:542) explicitly blocks placement of anything that isn't a numeric typeId. Named items (strings) are **never placeable as blocks**.
+
+**Stick** = `ITEM_CATEGORIES.RESOURCE` — crafting material only, not placeable or usable.

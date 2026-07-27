@@ -2491,9 +2491,21 @@
           if (loadingProgress) loadingProgress.style.width = '90%';
 
           const player = new Player();
-          player.position.x = bestSpawnX + 0.5; // Center in chunk column
-          player.position.y = spawnHeight;
-          player.position.z = bestSpawnZ + 0.5;
+
+          // Check if character has a saved position for this world
+          const savedSpawn = (selected.spawnPoints && selected.spawnPoints[currentWorld.id]) || null;
+          if (savedSpawn) {
+            // Restore last saved position
+            player.position.x = savedSpawn.x;
+            player.position.y = savedSpawn.y;
+            player.position.z = savedSpawn.z;
+            _log(`[Cuubz] Restored saved position: ${savedSpawn.x.toFixed(1)}, ${savedSpawn.y.toFixed(1)}, ${savedSpawn.z.toFixed(1)}`);
+          } else {
+            // No saved position — use calculated terrain spawn
+            player.position.x = bestSpawnX + 0.5; // Center in chunk column
+            player.position.y = spawnHeight;
+            player.position.z = bestSpawnZ + 0.5;
+          }
           player.pitch = -Math.PI / 8; // Sync with initial camera pitch
 
           // Player placed — position logged only on error
@@ -2792,6 +2804,10 @@
           player.inventory = inventory;
           game.inventory = inventory;
 
+          // ─── Initialize Crafting System ─────────────────
+          const crafting = new CraftingSystem(inventory);
+          game.crafting = crafting;
+
           // ─── Multiplayer: Inventory Sync ────────────────
           let inventorySync = null;
           if (typeof InventorySync !== 'undefined' && sessionManager && sessionManager.client) {
@@ -3053,6 +3069,7 @@
           // Wire inventory callbacks for hotbar updates
           inventory.onSlotChange = (index, slot) => {
             updateHotbarUI();
+            if (inventoryOpen) renderInventoryCraftingUI();
           };
           inventory.onSelectionChange = () => {
             updateHotbarUI();
@@ -3061,19 +3078,42 @@
           // Initial hotbar render
           updateHotbarUI();
 
-          // ─── Inventory Screen ──────────────────────────
-          const inventoryScreen = document.getElementById('inventory-screen');
-          const inventoryGrid = document.getElementById('inventory-grid');
-          const btnCloseInventory = document.getElementById('btn-close-inventory');
+          // ─── Inventory + Crafting Screen ────────────────
           let inventoryOpen = false;
+          const craftingScreen = document.getElementById('crafting-screen');
+          const btnCloseCrafting = document.getElementById('btn-close-crafting');
 
           // ─── Inventory Drag State (document-level handlers) ────────────────
           let _invDrag = null; // { fromSlot, typeId, count, ghostEl }
           let _invClickStart = null; // { slot, x, y } to distinguish click vs drag
 
-          function renderInventoryGrid() {
-            if (!inventoryGrid) return;
-            inventoryGrid.innerHTML = '';
+          /**
+           * Check if player is within 4 blocks of a crafting table (block ID 162).
+           */
+          function checkNearCraftingTable(player, chunkManager) {
+            const px = Math.floor(player.position.x);
+            const py = Math.floor(player.position.y);
+            const pz = Math.floor(player.position.z);
+            const range = 4;
+
+            for (let dx = -range; dx <= range; dx++) {
+              for (let dy = -range; dy <= range; dy++) {
+                for (let dz = -range; dz <= range; dz++) {
+                  const wx = px + dx, wy = py + dy, wz = pz + dz;
+                  const block = chunkManager.getVoxel(wx, wy, wz);
+                  if (block === BLOCK_TYPES.CRAFTING_TABLE) return true;
+                }
+              }
+            }
+            return false;
+          }
+
+          /**
+           * Render the interactive inventory grid with drag-and-drop support.
+           */
+          function renderInventoryGrid(container) {
+            if (!container) return;
+            container.innerHTML = '';
 
             for (let i = 0; i < inventory.totalSlots; i++) {
               const slot = inventory.getSlot(i);
@@ -3138,12 +3178,12 @@
                     inventory._notifySlotChange(targetIdx);
                   }
                   inventory._notifySlotChange(fromIdx);
-                  renderInventoryGrid();
+                  renderInventoryCraftingUI();
                   updateHotbarUI();
                 }
               });
 
-              inventoryGrid.appendChild(div);
+              container.appendChild(div);
             }
           }
 
@@ -3171,7 +3211,7 @@
               if (fromSlot) {
                 _invDrag = { fromSlot: fromIdx, typeId: fromSlot.typeId, count: fromSlot.count };
                 inventory.setSlot(fromIdx, null);
-                renderInventoryGrid();
+                renderInventoryCraftingUI();
                 updateHotbarUI();
 
                 // Create drag ghost
@@ -3236,7 +3276,7 @@
                 inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
               }
               _invDrag = null;
-              renderInventoryGrid();
+              renderInventoryCraftingUI();
               updateHotbarUI();
               return;
             }
@@ -3268,15 +3308,97 @@
                 } else {
                   inventory.selectHotbarSlot(fromIdx - inventory.hotbarStart);
                 }
-                renderInventoryGrid();
+                renderInventoryCraftingUI();
                 updateHotbarUI();
               }
             }
           });
 
+          /**
+           * Render the combined inventory + crafting UI — recipe list + interactive inventory grid.
+           */
+          function renderInventoryCraftingUI() {
+            const recipeList = document.getElementById('crafting-recipe-list');
+            const invGrid = document.getElementById('crafting-inv-grid');
+            const stationIndicator = document.getElementById('crafting-station-indicator');
+
+            if (!recipeList || !invGrid) return;
+
+            // Check crafting table proximity
+            const atTable = checkNearCraftingTable(player, game.chunkManager);
+            if (stationIndicator) {
+              stationIndicator.classList.toggle('hidden', !atTable);
+            }
+
+            // Get craftable recipes
+            const recipes = crafting.getCraftableRecipes(inventory, atTable);
+
+            // Render recipe list
+            recipeList.innerHTML = '';
+            if (recipes.length === 0) {
+              recipeList.innerHTML = '<div class="crafting-empty-msg">No recipes available. Gather materials or find a crafting table.</div>';
+            } else {
+              for (const recipe of recipes) {
+                const card = document.createElement('div');
+                card.className = 'recipe-card';
+                card.dataset.recipeId = recipe.id;
+
+                // Ingredients
+                let cardHTML = '<div class="recipe-ingredients">';
+                for (let i = 0; i < recipe.ingredients.length; i++) {
+                  if (i > 0) cardHTML += '<span class="recipe-plus">+</span>';
+                  const ing = recipe.ingredients[i];
+                  // Resolve actual typeId to display (handles typeIds array)
+                  const displayTypeId = crafting._getIngredientType(inventory, ing);
+                  cardHTML += `<div class="recipe-ing-slot">
+                    <canvas class="item-icon" width="32" height="32" data-typeid="${displayTypeId}"></canvas>
+                    <span class="ing-count">${ing.count}</span>
+                  </div>`;
+                }
+                cardHTML += '</div>';
+
+                // Output
+                const outCount = recipe.output.count || 1;
+                cardHTML += `<div class="recipe-arrow">→</div>
+                  <div class="recipe-output">
+                    <canvas class="item-icon" width="40" height="40" data-typeid="${recipe.output.typeId}"></canvas>
+                    ${outCount > 1 ? `<span class="output-count">${outCount}</span>` : ''}
+                  </div>`;
+
+                // Name
+                cardHTML += `<div class="recipe-name">${recipe.name}</div>`;
+
+                card.innerHTML = cardHTML;
+
+                // Click → craft
+                card.addEventListener('click', () => {
+                  crafting.craftRecipe(recipe.id, inventory);
+                  renderInventoryCraftingUI();
+                  updateHotbarUI();
+                });
+
+                recipeList.appendChild(card);
+
+                // Draw icons after DOM insertion
+                card.querySelectorAll('canvas[data-typeid]').forEach(canvas => {
+                  const typeId = canvas.dataset.typeid;
+                  // Preserve type: numeric strings that are pure numbers → parseInt, otherwise keep as string
+                  renderItemIcon(canvas, /^\d+$/.test(typeId) ? parseInt(typeId, 10) : typeId);
+                });
+              }
+            }
+
+            // Render interactive inventory grid
+            renderInventoryGrid(invGrid);
+          }
+
+          /**
+           * Toggle inventory + crafting screen open/closed.
+           */
           function toggleInventoryScreen() {
             inventoryOpen = !inventoryOpen;
             const hotbarContainer = document.getElementById('hotbar-container');
+
             if (inventoryOpen) {
               // Unlock mouse so player can use inventory UI
               if (document.pointerLockElement) {
@@ -3284,25 +3406,33 @@
               }
               // Hide hotbar when inventory screen is open
               if (hotbarContainer) hotbarContainer.classList.add('hidden');
-              renderInventoryGrid();
-              inventoryScreen.classList.remove('hidden');
+              renderInventoryCraftingUI();
+              craftingScreen.classList.remove('hidden');
             } else {
               // Re-lock mouse when closing inventory
               game.renderer.domElement.requestPointerLock();
               // Show hotbar when inventory screen is closed
               if (hotbarContainer) hotbarContainer.classList.remove('hidden');
-              inventoryScreen.classList.add('hidden');
+              craftingScreen.classList.add('hidden');
             }
           }
 
-          if (btnCloseInventory) {
-            btnCloseInventory.addEventListener('click', () => {
+          if (btnCloseCrafting) {
+            btnCloseCrafting.addEventListener('click', () => {
               inventoryOpen = false;
-              // Re-lock mouse when closing inventory via button
               game.renderer.domElement.requestPointerLock();
               const hotbarContainer = document.getElementById('hotbar-container');
               if (hotbarContainer) hotbarContainer.classList.remove('hidden');
-              inventoryScreen.classList.add('hidden');
+              craftingScreen.classList.add('hidden');
+            });
+          }
+
+          // Mobile crafting button
+          const mobileCraftBtn = document.getElementById('btn-crafting-mobile');
+          if (mobileCraftBtn) {
+            mobileCraftBtn.addEventListener('touchstart', (e) => {
+              e.preventDefault();
+              if (!inventoryOpen) toggleInventoryScreen();
             });
           }
 
@@ -3317,7 +3447,7 @@
               updateHotbarUI();
             }
 
-            // E for inventory screen
+            // E for inventory + crafting screen
             if (e.key === 'e' || e.key === 'E') {
               e.preventDefault();
               toggleInventoryScreen();
@@ -3813,6 +3943,11 @@
         const isPaused = !pauseMenu.classList.contains('hidden');
 
         if (!isPaused) {
+          // Close inventory if open
+          if (typeof inventoryOpen !== 'undefined' && inventoryOpen) {
+            inventoryOpen = false;
+            document.getElementById('crafting-screen').classList.add('hidden');
+          }
           // Pause game
           game.paused = true;
           pauseMenu.classList.remove('hidden');
@@ -3873,8 +4008,8 @@
         if (pauseMenuEl) pauseMenuEl.classList.add('hidden');
         const debugStatsEl = document.getElementById('debug-stats');
         if (debugStatsEl) debugStatsEl.classList.add('hidden');
-        const inventoryScreenEl = document.getElementById('inventory-screen');
-        if (inventoryScreenEl) inventoryScreenEl.classList.add('hidden');
+        const craftingScreenEl = document.getElementById('crafting-screen');
+        if (craftingScreenEl) craftingScreenEl.classList.add('hidden');
         const touchControlsEl = document.getElementById('touch-controls');
         if (touchControlsEl) touchControlsEl.classList.add('hidden');
         const crosshairEl = document.getElementById('crosshair');

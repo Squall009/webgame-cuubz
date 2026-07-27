@@ -99,6 +99,8 @@ class ItemTextureAtlas {
     // Only items with textures that actually exist are mapped
     const namedItems = [
       // Resources
+      { key: 'coal', name: 'Coal', texture: 'coal' },
+      { key: 'stick', name: 'Stick', texture: 'stick' },
       { key: 'redstone', name: 'Redstone', texture: 'redstone' },
       { key: 'gunpowder', name: 'Gunpowder', texture: 'gunpowder' },
       { key: 'glowstone_dust', name: 'Glowstone Dust', texture: 'glowstone_dust' },

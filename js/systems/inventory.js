@@ -34,6 +34,7 @@ const MAX_STACKS = {
 const NAMED_ITEMS = {
   // ── Resources ──────────────────────────────────────────────
   coal:            { name: 'Coal', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
+  stick:           { name: 'Stick', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   iron_ore:        { name: 'Iron Ore', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   gold_ore:        { name: 'Gold Ore', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   diamond:         { name: 'Diamond', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
@@ -239,20 +240,13 @@ class Inventory {
       const named = NAMED_ITEMS[typeId];
       return named ? named.name : typeId;
     }
-    // Block names lookup (VoxelGen-aligned IDs)
-    const blockNames = {
-      0: 'Air', 1: 'Bedrock', 2: 'Stone', 3: 'Dirt', 4: 'Grass',
-      5: 'Sand', 6: 'Gravel', 7: 'Water', 8: 'Coal Ore', 9: 'Iron Ore',
-      10: 'Gold Ore', 11: 'Diamond Ore', 12: 'Cave Air', 13: 'Snow',
-      14: 'Snow Stone', 15: 'Lava', 16: 'Terracotta', 17: 'Red Sand',
-      18: 'Ice', 19: 'Clay',
-      // Cuubz decorations (32+)
-      32: 'Wood Log', 33: 'Leaves', 34: 'Planks', 35: 'Obsidian',
-      36: 'Blackstone', 37: 'Toxic Slime', 38: 'Corrupt Crystal',
-      39: 'Bed', 40: 'Apple', 41: 'Quest Key',
-      42: 'Red Flower', 43: 'Yellow Flower', 44: 'Cave Torch', 45: 'Glowstone',
-    };
-    return blockNames[typeId] || `Block ${typeId}`;
+    // Look up from block registry (single source of truth)
+    const block = BLOCK_BY_ID[typeId];
+    if (block) {
+      // Convert 'oak_planks' → 'Oak Planks', 'coal_ore' → 'Coal Ore'
+      return block.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+    return `Block ${typeId}`;
   }
 
   /**
