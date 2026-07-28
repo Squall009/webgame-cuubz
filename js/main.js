@@ -2571,6 +2571,13 @@
           const initCamPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
           renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
 
+          // ─── Initialize First-Person Hand ──────────────
+          let firstPersonHand = null;
+          if (typeof FirstPersonHand !== 'undefined') {
+            firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas });
+            _log('[Cuubz] First-person hand initialized');
+          }
+
           // ─── Initialize Multiplayer Player Sync ─────────
           let playerSync = null;
           if (typeof PlayerSyncManager !== 'undefined' && sessionManager && sessionManager.client) {
@@ -2867,6 +2874,11 @@
             droppedItems.addDrop(dropType, worldPos);
           };
 
+          // Wire break-started callback to trigger first-person hand swing
+          blockInteraction.onBreakStarted = () => {
+            if (firstPersonHand) firstPersonHand.swing();
+          };
+
           // ─── Dropped Items System ──────────────────────
           const droppedItems = {
             drops: [],
@@ -3073,6 +3085,11 @@
           };
           inventory.onSelectionChange = () => {
             updateHotbarUI();
+            // Update first-person hand to show the selected item
+            if (firstPersonHand) {
+              const item = inventory.getSelectedItem();
+              firstPersonHand.setItem(item ? item.typeId : null);
+            }
           };
 
           // Initial hotbar render
@@ -3608,6 +3625,11 @@
               // Update block interaction (break/place)
               if (blockInteraction) {
                 blockInteraction.update(game.delta);
+              }
+
+              // Update first-person hand animation
+              if (firstPersonHand) {
+                firstPersonHand.update(game.delta);
               }
 
               // Update mouse input (clears just-clicked flags) — AFTER blockInteraction reads them

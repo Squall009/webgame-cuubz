@@ -62,84 +62,84 @@ const NAMED_ITEMS = {
   egg:            { name: 'Egg', category: ITEM_CATEGORIES.FOOD, maxStack: 16, foodRestore: 3, foodSaturation: 0.8 },
   snowball:       { name: 'Snowball', category: ITEM_CATEGORIES.RESOURCE, maxStack: 16 },
   // ── Tools: Wooden ──────────────────────────────────────────
-  wooden_sword:   { name: 'Wooden Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 60, damage: 4, attackSpeed: -2.4 },
-  wooden_pickaxe: { name: 'Wooden Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 60, damage: 2, attackSpeed: -2.0 },
-  wooden_axe:     { name: 'Wooden Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 60, damage: 4, attackSpeed: -3.0 },
-  wooden_shovel:  { name: 'Wooden Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 60, damage: 1, attackSpeed: -1.0 },
-  wooden_hoe:     { name: 'Wooden Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 60, damage: 0, attackSpeed: 0 },
-  wooden_spear:   { name: 'Wooden Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 60, damage: 5, attackSpeed: -1.8 },
+  wooden_sword:   { name: 'Wooden Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 4, attackSpeed: -2.4 },
+  wooden_pickaxe: { name: 'Wooden Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 2, attackSpeed: -2.0, miningSpeed: 2.0 },
+  wooden_axe:     { name: 'Wooden Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 4, attackSpeed: -3.0, miningSpeed: 2.0 },
+  wooden_shovel:  { name: 'Wooden Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 1, attackSpeed: -1.0, miningSpeed: 2.0 },
+  wooden_hoe:     { name: 'Wooden Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
+  wooden_spear:   { name: 'Wooden Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 5, attackSpeed: -1.8 },
   // ── Tools: Stone ───────────────────────────────────────────
-  stone_sword:    { name: 'Stone Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 132, damage: 5, attackSpeed: -2.4 },
-  stone_pickaxe:  { name: 'Stone Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 132, damage: 3, attackSpeed: -2.0 },
-  stone_axe:      { name: 'Stone Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 132, damage: 7, attackSpeed: -3.0 },
-  stone_shovel:   { name: 'Stone Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 132, damage: 1, attackSpeed: -1.0 },
-  stone_hoe:      { name: 'Stone Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 132, damage: 0, attackSpeed: 0 },
-  stone_spear:    { name: 'Stone Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 132, damage: 6, attackSpeed: -1.8 },
+  stone_sword:    { name: 'Stone Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 5, attackSpeed: -2.4 },
+  stone_pickaxe:  { name: 'Stone Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 3, attackSpeed: -2.0, miningSpeed: 4.0 },
+  stone_axe:      { name: 'Stone Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 7, attackSpeed: -3.0, miningSpeed: 4.0 },
+  stone_shovel:   { name: 'Stone Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 1, attackSpeed: -1.0, miningSpeed: 4.0 },
+  stone_hoe:      { name: 'Stone Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
+  stone_spear:    { name: 'Stone Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 6, attackSpeed: -1.8 },
   // ── Tools: Copper ──────────────────────────────────────────
-  copper_sword:   { name: 'Copper Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 100, damage: 4, attackSpeed: -2.4 },
-  copper_pickaxe: { name: 'Copper Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 100, damage: 2, attackSpeed: -2.0 },
-  copper_axe:     { name: 'Copper Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 100, damage: 6, attackSpeed: -3.0 },
-  copper_shovel:  { name: 'Copper Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 100, damage: 1, attackSpeed: -1.0 },
-  copper_hoe:     { name: 'Copper Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 100, damage: 0, attackSpeed: 0 },
-  copper_spear:   { name: 'Copper Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 100, damage: 5, attackSpeed: -1.8 },
+  copper_sword:   { name: 'Copper Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 4, attackSpeed: -2.4 },
+  copper_pickaxe: { name: 'Copper Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 2, attackSpeed: -2.0, miningSpeed: 3.0 },
+  copper_axe:     { name: 'Copper Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 6, attackSpeed: -3.0, miningSpeed: 3.0 },
+  copper_shovel:  { name: 'Copper Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 1, attackSpeed: -1.0, miningSpeed: 3.0 },
+  copper_hoe:     { name: 'Copper Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
+  copper_spear:   { name: 'Copper Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 5, attackSpeed: -1.8 },
   // ── Tools: Iron ────────────────────────────────────────────
-  iron_sword:     { name: 'Iron Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 251, damage: 6, attackSpeed: -2.4 },
-  iron_pickaxe:   { name: 'Iron Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 251, damage: 3, attackSpeed: -2.0 },
-  iron_axe:       { name: 'Iron Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 251, damage: 9, attackSpeed: -3.0 },
-  iron_shovel:    { name: 'Iron Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 251, damage: 2, attackSpeed: -1.0 },
-  iron_hoe:       { name: 'Iron Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 251, damage: 0, attackSpeed: 0 },
-  iron_spear:     { name: 'Iron Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 251, damage: 7, attackSpeed: -1.8 },
+  iron_sword:     { name: 'Iron Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 6, attackSpeed: -2.4 },
+  iron_pickaxe:   { name: 'Iron Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 3, attackSpeed: -2.0, miningSpeed: 6.0 },
+  iron_axe:       { name: 'Iron Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 9, attackSpeed: -3.0, miningSpeed: 6.0 },
+  iron_shovel:    { name: 'Iron Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 2, attackSpeed: -1.0, miningSpeed: 6.0 },
+  iron_hoe:       { name: 'Iron Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
+  iron_spear:     { name: 'Iron Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 7, attackSpeed: -1.8 },
   // ── Tools: Gold ────────────────────────────────────────────
-  golden_sword:   { name: 'Golden Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 33, damage: 4, attackSpeed: -1.6 },
-  golden_pickaxe: { name: 'Golden Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 33, damage: 2, attackSpeed: -1.0 },
-  golden_axe:     { name: 'Golden Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 33, damage: 7, attackSpeed: -2.0 },
-  golden_shovel:  { name: 'Golden Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 33, damage: 1, attackSpeed: -1.0 },
-  golden_hoe:     { name: 'Golden Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 33, damage: 0, attackSpeed: 0 },
-  golden_spear:   { name: 'Golden Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 33, damage: 5, attackSpeed: -1.4 },
+  golden_sword:   { name: 'Golden Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 4, attackSpeed: -1.6 },
+  golden_pickaxe: { name: 'Golden Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 2, attackSpeed: -1.0, miningSpeed: 12.0 },
+  golden_axe:     { name: 'Golden Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 7, attackSpeed: -2.0, miningSpeed: 12.0 },
+  golden_shovel:  { name: 'Golden Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 1, attackSpeed: -1.0, miningSpeed: 12.0 },
+  golden_hoe:     { name: 'Golden Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
+  golden_spear:   { name: 'Golden Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 5, attackSpeed: -1.4 },
   // ── Tools: Diamond ─────────────────────────────────────────
-  diamond_sword:  { name: 'Diamond Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 1562, damage: 7, attackSpeed: -2.4 },
-  diamond_pickaxe:{ name: 'Diamond Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 1562, damage: 4, attackSpeed: -2.0 },
-  diamond_axe:    { name: 'Diamond Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 1562, damage: 9, attackSpeed: -3.0 },
-  diamond_shovel: { name: 'Diamond Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 1562, damage: 3, attackSpeed: -1.0 },
-  diamond_hoe:    { name: 'Diamond Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 1562, damage: 0, attackSpeed: 0 },
-  diamond_spear:  { name: 'Diamond Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 1562, damage: 8, attackSpeed: -1.8 },
+  diamond_sword:  { name: 'Diamond Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 7, attackSpeed: -2.4 },
+  diamond_pickaxe:{ name: 'Diamond Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 4, attackSpeed: -2.0, miningSpeed: 8.0 },
+  diamond_axe:    { name: 'Diamond Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 9, attackSpeed: -3.0, miningSpeed: 8.0 },
+  diamond_shovel: { name: 'Diamond Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 3, attackSpeed: -1.0, miningSpeed: 8.0 },
+  diamond_hoe:    { name: 'Diamond Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
+  diamond_spear:  { name: 'Diamond Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 8, attackSpeed: -1.8 },
   // ── Tools: Netherite ───────────────────────────────────────
-  netherite_sword:  { name: 'Netherite Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 2032, damage: 8, attackSpeed: -2.4 },
-  netherite_pickaxe:{ name: 'Netherite Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 2032, damage: 5, attackSpeed: -2.0 },
-  netherite_axe:    { name: 'Netherite Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 2032, damage: 10, attackSpeed: -3.0 },
-  netherite_shovel: { name: 'Netherite Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 2032, damage: 4, attackSpeed: -1.0 },
-  netherite_hoe:    { name: 'Netherite Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 2032, damage: 0, attackSpeed: 0 },
-  netherite_spear:  { name: 'Netherite Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 2032, damage: 9, attackSpeed: -1.8 },
+  netherite_sword:  { name: 'Netherite Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 8, attackSpeed: -2.4 },
+  netherite_pickaxe:{ name: 'Netherite Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 5, attackSpeed: -2.0, miningSpeed: 10.0 },
+  netherite_axe:    { name: 'Netherite Axe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 10, attackSpeed: -3.0, miningSpeed: 10.0 },
+  netherite_shovel: { name: 'Netherite Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 4, attackSpeed: -1.0, miningSpeed: 10.0 },
+  netherite_hoe:    { name: 'Netherite Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
+  netherite_spear:  { name: 'Netherite Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 9, attackSpeed: -1.8 },
   // ── Armor: Leather ─────────────────────────────────────────
-  leather_helmet:    { name: 'Leather Cap', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 55, armorValue: 1, armorToughness: 0 },
-  leather_chestplate:{ name: 'Leather Tunic', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 80, armorValue: 3, armorToughness: 0 },
-  leather_leggings:  { name: 'Leather Pants', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 75, armorValue: 2, armorToughness: 0 },
-  leather_boots:     { name: 'Leather Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 45, armorValue: 1, armorToughness: 0 },
+  leather_helmet:    { name: 'Leather Cap', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 1, armorToughness: 0 },
+  leather_chestplate:{ name: 'Leather Tunic', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 3, armorToughness: 0 },
+  leather_leggings:  { name: 'Leather Pants', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 2, armorToughness: 0 },
+  leather_boots:     { name: 'Leather Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 1, armorToughness: 0 },
   // ── Armor: Chainmail ───────────────────────────────────────
-  chainmail_helmet:    { name: 'Chainmail Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 165, armorValue: 2, armorToughness: 0 },
-  chainmail_chestplate:{ name: 'Chainmail Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 240, armorValue: 5, armorToughness: 0 },
-  chainmail_leggings:  { name: 'Chainmail Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 225, armorValue: 4, armorToughness: 0 },
-  chainmail_boots:     { name: 'Chainmail Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 105, armorValue: 1, armorToughness: 0 },
+  chainmail_helmet:    { name: 'Chainmail Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 2, armorToughness: 0 },
+  chainmail_chestplate:{ name: 'Chainmail Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 5, armorToughness: 0 },
+  chainmail_leggings:  { name: 'Chainmail Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 4, armorToughness: 0 },
+  chainmail_boots:     { name: 'Chainmail Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 1, armorToughness: 0 },
   // ── Armor: Iron ────────────────────────────────────────────
-  iron_helmet:    { name: 'Iron Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 195, armorValue: 2, armorToughness: 0 },
-  iron_chestplate:{ name: 'Iron Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 270, armorValue: 6, armorToughness: 0 },
-  iron_leggings:  { name: 'Iron Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 255, armorValue: 5, armorToughness: 0 },
-  iron_boots:     { name: 'Iron Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 165, armorValue: 2, armorToughness: 0 },
+  iron_helmet:    { name: 'Iron Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 2, armorToughness: 0 },
+  iron_chestplate:{ name: 'Iron Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 6, armorToughness: 0 },
+  iron_leggings:  { name: 'Iron Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 5, armorToughness: 0 },
+  iron_boots:     { name: 'Iron Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 2, armorToughness: 0 },
   // ── Armor: Gold ────────────────────────────────────────────
-  golden_helmet:    { name: 'Golden Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 77, armorValue: 2, armorToughness: 0 },
-  golden_chestplate:{ name: 'Golden Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 112, armorValue: 5, armorToughness: 0 },
-  golden_leggings:  { name: 'Golden Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 105, armorValue: 3, armorToughness: 0 },
-  golden_boots:     { name: 'Golden Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 61, armorValue: 1, armorToughness: 0 },
+  golden_helmet:    { name: 'Golden Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 2, armorToughness: 0 },
+  golden_chestplate:{ name: 'Golden Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 5, armorToughness: 0 },
+  golden_leggings:  { name: 'Golden Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 3, armorToughness: 0 },
+  golden_boots:     { name: 'Golden Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 1, armorToughness: 0 },
   // ── Armor: Diamond ─────────────────────────────────────────
-  diamond_helmet:    { name: 'Diamond Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 363, armorValue: 3, armorToughness: 0 },
-  diamond_chestplate:{ name: 'Diamond Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 528, armorValue: 8, armorToughness: 0 },
-  diamond_leggings:  { name: 'Diamond Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 495, armorValue: 6, armorToughness: 0 },
-  diamond_boots:     { name: 'Diamond Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 297, armorValue: 2, armorToughness: 0 },
+  diamond_helmet:    { name: 'Diamond Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 3, armorToughness: 0 },
+  diamond_chestplate:{ name: 'Diamond Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 8, armorToughness: 0 },
+  diamond_leggings:  { name: 'Diamond Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 6, armorToughness: 0 },
+  diamond_boots:     { name: 'Diamond Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 2, armorToughness: 0 },
   // ── Armor: Netherite ───────────────────────────────────────
-  netherite_helmet:    { name: 'Netherite Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 481, armorValue: 3, armorToughness: 3 },
-  netherite_chestplate:{ name: 'Netherite Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 692, armorValue: 8, armorToughness: 3 },
-  netherite_leggings:  { name: 'Netherite Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 656, armorValue: 6, armorToughness: 3 },
-  netherite_boots:     { name: 'Netherite Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, durability: 391, armorValue: 3, armorToughness: 3 },
+  netherite_helmet:    { name: 'Netherite Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 3, armorToughness: 3 },
+  netherite_chestplate:{ name: 'Netherite Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 8, armorToughness: 3 },
+  netherite_leggings:  { name: 'Netherite Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 6, armorToughness: 3 },
+  netherite_boots:     { name: 'Netherite Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 3, armorToughness: 3 },
 };
 
 // ============================================================
@@ -307,6 +307,30 @@ class Inventory {
   getSelectedTypeId() {
     const item = this.getSelectedItem();
     return item ? item.typeId : null;
+  }
+
+  /**
+   * Get tool info for the currently selected item.
+   * Returns { toolType, miningSpeed } or null if no tool is held.
+   * toolType is one of: 'pickaxe', 'axe', 'shovel', 'hoe'
+   */
+  getToolInfo() {
+    const item = this.getSelectedItem();
+    if (!item) return null;
+
+    const def = NAMED_ITEMS[item.typeId];
+    if (!def) return null;
+
+    // Determine tool type from item key
+    const key = item.typeId;
+    if (typeof key !== 'string') return null; // Block items aren't tools
+
+    if (key.includes('_pickaxe')) return { toolType: 'pickaxe', miningSpeed: def.miningSpeed || 1.0 };
+    if (key.includes('_axe') && !key.includes('pickaxe')) return { toolType: 'axe', miningSpeed: def.miningSpeed || 1.0 };
+    if (key.includes('_shovel')) return { toolType: 'shovel', miningSpeed: def.miningSpeed || 1.0 };
+    if (key.includes('_hoe')) return { toolType: 'hoe', miningSpeed: def.miningSpeed || 1.0 };
+
+    return null; // It's a tool but not a mining tool (sword, spear, armor, etc.)
   }
 
   // ============================================================

@@ -194,6 +194,11 @@ class BlockInteraction {
     this.breakProgress = 0;
     this.breakStartTime = performance.now();
 
+    // Trigger swing animation callback (for first-person hand)
+    if (this.onBreakStarted) {
+      this.onBreakStarted();
+    }
+
     // console.log(`[BREAK] Started breaking block ${blockType} at (${blockPos.x},${blockPos.y},${blockPos.z}) hardness=${hardness}`);
 
     // Create crack overlay
@@ -224,9 +229,23 @@ class BlockInteraction {
       return;
     }
 
-    // Progress break based on hardness
+    // ─── Tool Efficiency ──────────────────────────────────
+    // Check if the player is holding a tool that matches this block's required tool
+    const blockProps = BLOCK_PROPERTIES[this.breakingBlock.blockType];
+    const requiredTool = blockProps ? blockProps.tool : null;
+
+    let miningSpeedMultiplier = 1.0;
+    if (requiredTool && this.inventory) {
+      const toolInfo = this.inventory.getToolInfo();
+      if (toolInfo && toolInfo.toolType === requiredTool) {
+        miningSpeedMultiplier = toolInfo.miningSpeed || 1.0;
+      }
+    }
+
+    // Progress break based on hardness and tool efficiency
     // Base break time = hardness * 1.5 seconds (dirt=0.75s, stone=4.5s, etc.)
-    const breakSpeed = 1 / (this.breakingBlock.hardness * 1.5);
+    // Tool multiplier: wooden=2x, stone=4x, iron=6x, gold=12x, diamond=8x, netherite=10x
+    const breakSpeed = (1 / (this.breakingBlock.hardness * 1.5)) * miningSpeedMultiplier;
     this.breakProgress += breakSpeed * delta;
 
     // Update crack overlay
