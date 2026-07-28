@@ -188,6 +188,10 @@ class ChunkManager {
     this._renderFrameCount = 0;        // Throttle voxel unload to every N frames
     this._voxelRegionRadius = Math.max(this.renderDistance + 2, Math.min(32, options.regionRadius ?? 16));
 
+    // ─── Mesh worker queue (dispatch coalescing) ────────────────
+    this._meshBuildQueue = [];         // pending mesh builds waiting for a free worker
+    this._uvLookupCache = null;        // precomputed UV lookup, rebuilt once
+
     // ─── Stats ──────────────────────────────────────────────────
     this.stats = {
       chunksGenerated: 0,
@@ -1117,7 +1121,8 @@ class ChunkManager {
     };
 
     if (this.meshWorkerPool) {
-      // Dispatch to mesh worker pool
+      // Dispatch to mesh worker pool — UV lookup and neighbor transfers are
+      // optimized inside _dispatchMeshBuild (cached UVs, sliced + transferred buffers)
       const promise = this._dispatchMeshBuild(cx, cz, chunk.blocks, neighbors, chunk.humidityMap);
       this._pendingMeshBuilds.set(key, promise);
       promise.then(geoResult => {
@@ -1138,94 +1143,148 @@ class ChunkManager {
     }
   }
 
-  /** Dispatch mesh build to worker. Returns Promise<geometry>. */
+  /** Ensure UV lookup cache is built — computed once from texture atlas, not per-chunk. */
+  _ensureUVLookupCache() {
+    if (this._uvLookupCache) return;
+    if (!this.textureAtlas || !this.textureAtlas.loaded) {
+      this._uvLookupCache = null;
+      return;
+    }
+    // Flat array: index = blockType, value = [topU, topV, botU, botV, sideU, sideV, size]
+    const cache = new Array(256);
+    for (let bid = 0; bid < 256; bid++) {
+      try {
+        const topF = this.textureAtlas.getFaceUV(bid, 'top');
+        const botF = this.textureAtlas.getFaceUV(bid, 'bottom');
+        const sideF = this.textureAtlas.getFaceUV(bid, 'front');
+        cache[bid] = [
+          topF.u || 0, topF.v || 0,
+          botF.u || 0, botF.v || 0,
+          sideF.u || 0, sideF.v || 0,
+          (topF.size || botF.size || sideF.size) || (1.0 / 6)
+        ];
+      } catch(e) {
+        cache[bid] = [0, 0, 0, 0, 0, 0, 1.0/6];
+      }
+    }
+    this._uvLookupCache = cache;
+  }
+
+  /**
+   * Return a worker to the idle pool, or dispatch queued work if any.
+   * This avoids setTimeout(0) polling when all workers are busy — the
+   * next queued task is dispatched immediately on the same microtask.
+   */
+  _returnWorkerOrProcessQueue(w) {
+    if (this._meshBuildQueue.length > 0) {
+      const next = this._meshBuildQueue.shift();
+      this._doMeshBuild(w, next.cx, next.cz, next.blocks, next.neighbors, next.humidityMap,
+                        this._uvLookupCache, next.resolve, next.reject);
+    } else {
+      this.meshWorkerPool.idleWorkers.push(w);
+    }
+  }
+
+  /**
+   * Dispatch mesh build to worker.
+   * Returns Promise<geometry>.
+   *
+   * PERFORMANCE:
+   *   - UV lookup table is cached once, not rebuilt per chunk (256×3 = 768
+   *     atlas lookups saved per mesh build).
+   *   - Neighbor arrays use TypedArray.slice() instead of Array.from().
+   *     slice() is a native operation ~100x faster than JS-level iteration
+   *     over 4 × 65,536 elements.
+   *   - Humidity map uses Float32Array.slice() instead of Array.from().
+   *   - All buffers are transferred (zero-copy) to avoid structured clone
+   *     duplication on postMessage.
+   *   - When all workers are busy, tasks are queued and dispatched on the
+   *     same microtask when a worker frees up — no setTimeout(0) polling.
+   */
   _dispatchMeshBuild(cx, cz, blocks, neighbors, humidityMap) {
     return new Promise((resolve, reject) => {
-      // Build UV lookup table from texture atlas for this chunk's block types
-      let uvLookup = null;  // Use 'let' since we reassign below if atlas is loaded
-      if (this.textureAtlas && this.textureAtlas.loaded) {
-        // Flat array: index = blockType, value = [topU, topV, botU, botV, sideU, sideV, size]
-        // This avoids nested object cloning issues with postMessage
-        uvLookup = new Array(256);
-        for (let bid = 0; bid < 256; bid++) {
-          try {
-            const topF = this.textureAtlas.getFaceUV(bid, 'top');
-            const botF = this.textureAtlas.getFaceUV(bid, 'bottom');
-            const sideF = this.textureAtlas.getFaceUV(bid, 'front');
-            uvLookup[bid] = [
-              topF.u || 0, topF.v || 0,
-              botF.u || 0, botF.v || 0,
-              sideF.u || 0, sideF.v || 0,
-              (topF.size || botF.size || sideF.size) || (1.0 / 6)
-            ];
-          } catch(e) {
-            uvLookup[bid] = [0, 0, 0, 0, 0, 0, 1.0/6];
-          }
-        }
-      }
+      // Use cached UV lookup table — built once
+      this._ensureUVLookupCache();
+      const uvLookup = this._uvLookupCache;
 
-      // Find an idle worker from the pool
-      const workers = this.meshWorkerPool.workers;
+      // Find an idle worker or queue for later
       const idleWorkers = this.meshWorkerPool.idleWorkers;
-
       let w = idleWorkers.pop();
       if (!w) {
-        setTimeout(() => {
-          this._dispatchMeshBuild(cx, cz, blocks, neighbors, humidityMap).then(resolve).catch(reject);
-        }, 0);
+        this._meshBuildQueue.push({ cx, cz, blocks, neighbors, humidityMap, resolve, reject });
         return;
       }
 
-      const handler = (e) => {
-        w.removeEventListener('message', handler);
-        w.removeEventListener('error', errorHandler);
-        clearTimeout(timeoutId);
-        idleWorkers.push(w);
-        if (e.data && e.data.type === 'error') {
-          reject(new Error(e.data.error || 'Mesh build failed'));
-        } else {
-          resolve(e.data);
-        }
-      };
-
-      const errorHandler = (e) => {
-        w.removeEventListener('message', handler);
-        w.removeEventListener('error', errorHandler);
-        clearTimeout(timeoutId);
-        idleWorkers.push(w);
-        reject(new Error('Mesh worker error: ' + e.message));
-      };
-
-      const timeoutId = setTimeout(() => {
-        w.removeEventListener('message', handler);
-        w.removeEventListener('error', errorHandler);
-        idleWorkers.push(w);
-        reject(new Error(`Mesh build timeout for chunk [${cx},${cz}]`));
-      }, 5000);
-
-      w.addEventListener('message', handler);
-      w.addEventListener('error', errorHandler);
-
-      // Transfer blocks buffer, send neighbor references by copy (they're shared)
-      const blocksBuffer = new Uint8Array(blocks); // Copy to avoid transfer issues
-      w.postMessage({
-        type: 'build',
-        cx, cz,
-        blocks: blocksBuffer.buffer,
-        neighbors: {
-          positiveX: neighbors.positiveX ? Array.from(neighbors.positiveX) : null,
-          negativeX: neighbors.negativeX ? Array.from(neighbors.negativeX) : null,
-          positiveZ: neighbors.positiveZ ? Array.from(neighbors.positiveZ) : null,
-          negativeZ: neighbors.negativeZ ? Array.from(neighbors.negativeZ) : null,
-        },
-        uvLookup: uvLookup, // Texture atlas UV lookup table
-        humidityMap: humidityMap ? Array.from(humidityMap) : null  // 256 floats 0..1 for vertex color tinting
-      }, [blocksBuffer.buffer]);
-      // Debug: log humidityMap presence
-      if (!humidityMap) {
-        console.warn('[ChunkManager] Mesh build for', cx, cz, 'has no humidityMap');
-      }
+      this._doMeshBuild(w, cx, cz, blocks, neighbors, humidityMap, uvLookup, resolve, reject);
     });
+  }
+
+  /** Internal: send work to a specific worker with optimized data transfer. */
+  _doMeshBuild(w, cx, cz, blocks, neighbors, humidityMap, uvLookup, resolve, reject) {
+    const handler = (e) => {
+      w.removeEventListener('message', handler);
+      w.removeEventListener('error', errorHandler);
+      clearTimeout(timeoutId);
+      this._returnWorkerOrProcessQueue(w);
+      if (e.data && e.data.type === 'error') {
+        reject(new Error(e.data.error || 'Mesh build failed'));
+      } else {
+        resolve(e.data);
+      }
+    };
+
+    const errorHandler = (e) => {
+      w.removeEventListener('message', handler);
+      w.removeEventListener('error', errorHandler);
+      clearTimeout(timeoutId);
+      this._returnWorkerOrProcessQueue(w);
+      reject(new Error('Mesh worker error: ' + e.message));
+    };
+
+    const timeoutId = setTimeout(() => {
+      w.removeEventListener('message', handler);
+      w.removeEventListener('error', errorHandler);
+      this._returnWorkerOrProcessQueue(w);
+      reject(new Error(`Mesh build timeout for chunk [${cx},${cz}]`));
+    }, 5000);
+
+    w.addEventListener('message', handler);
+    w.addEventListener('error', errorHandler);
+
+    // Efficient data transfer
+    //   - TypedArray.slice() is a native copy (~100x faster than Array.from())
+    //   - All buffers are transferred (zero-copy to worker)
+    const blocksCopy = new Uint8Array(blocks);
+    const transferList = [blocksCopy.buffer];
+
+    // Slice neighbor Uint8Arrays — native, avoids JS iteration over 4×65K elements
+    const neighborBuffers = {};
+    for (const dir of ['positiveX', 'negativeX', 'positiveZ', 'negativeZ']) {
+      if (neighbors[dir]) {
+        const slice = neighbors[dir].slice();
+        neighborBuffers[dir] = slice.buffer;
+        transferList.push(slice.buffer);
+      } else {
+        neighborBuffers[dir] = null;
+      }
+    }
+
+    // Slice humidity map Float32Array
+    let humidityBuffer = null;
+    if (humidityMap) {
+      const slice = humidityMap.slice();
+      humidityBuffer = slice.buffer;
+      transferList.push(slice.buffer);
+    }
+
+    w.postMessage({
+      type: 'build',
+      cx, cz,
+      blocks: blocksCopy.buffer,
+      neighbors: neighborBuffers,
+      uvLookup: uvLookup,
+      humidityMap: humidityBuffer
+    }, transferList);
   }
 
   /** Inline mesh build fallback (main thread). */
