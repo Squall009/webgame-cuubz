@@ -1931,4 +1931,177 @@ html, body {
   .recipe-name {
     font-size: 11px;
   }
+
+  /* Equipment panel — mobile: stack below inventory */
+  .equipment-panel {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    min-width: unset;
+  }
+
+  .equipment-slots {
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .equipment-slot {
+    width: 56px;
+    height: 64px;
+  }
+
+  .equipment-slot .equip-slot-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .equip-slot-label {
+    font-size: 8px;
+  }
+
+  .equipment-stats {
+    font-size: 11px;
+  }
+}
+
+/* ─── Equipment Panel (Crafting Screen) ──────────────────── */
+.equipment-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 160px;
+  max-width: 180px;
+  padding: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+}
+
+.equipment-label {
+  font-size: 13px;
+  color: #aaa;
+  font-weight: 600;
+}
+
+.equipment-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #ccc;
+  text-align: center;
+}
+
+.defense-stat {
+  color: #4CAF50;
+  font-weight: 600;
+}
+
+.toughness-stat {
+  color: #f1c40f;
+  font-weight: 600;
+}
+
+.equipment-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.equipment-slot {
+  position: relative;
+  width: 100%;
+  height: 72px;
+  background: rgba(255,255,255,0.05);
+  border: 2px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.equipment-slot:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.3);
+}
+
+.equipment-slot.occupied {
+  border-color: rgba(76, 175, 80, 0.4);
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.equipment-slot.occupied:hover {
+  border-color: #4CAF50;
+  background: rgba(76, 175, 80, 0.15);
+}
+
+.equipment-slot .equip-slot-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.equipment-slot .equip-slot-icon canvas.item-icon {
+  width: 36px;
+  height: 36px;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+.equip-slot-label {
+  font-size: 9px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.equipment-slot .equip-stat-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #4CAF50;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
+  pointer-events: none;
+}
+
+.equipment-help {
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+  font-style: italic;
+}
+
+/* ─── Armor Indicator (HUD) ──────────────────────────────── */
+#armor-indicator {
+  position: fixed;
+  top: 44px;
+  right: 50%;
+  transform: translateX(50%);
+  z-index: 150;
+  background: rgba(0,0,0,0.6);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #4CAF50;
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  letter-spacing: 0.5px;
+}
+
+#armor-indicator.hidden {
+  display: none !important;
 }

@@ -85,6 +85,9 @@
     <!-- Fly Mode Indicator -->
     <div id="fly-mode-indicator" class="hidden">🚀 FLY MODE — Space=Up, Shift/S=Down</div>
 
+    <!-- Armor Indicator (HUD) -->
+    <div id="armor-indicator" class="hidden">🛡️ <span id="hud-defense">0</span></div>
+
     <!-- Damage Flash -->
     <div id="damage-flash"></div>
   </div>
@@ -381,6 +384,34 @@
         <div class="crafting-inventory-label">Inventory</div>
         <div id="crafting-inv-grid"></div>
       </div>
+
+      <!-- Far Right: Equipment Panel -->
+      <div class="equipment-panel">
+        <div class="equipment-label">Equipment</div>
+        <div class="equipment-stats">
+          <span class="defense-stat">🛡️ Defense: <span id="defense-value">0</span></span>
+          <span class="toughness-stat">✦ Toughness: <span id="toughness-value">0</span></span>
+        </div>
+        <div class="equipment-slots" id="equipment-slots">
+          <div class="equipment-slot" data-slot="helmet">
+            <div class="equip-slot-icon"></div>
+            <div class="equip-slot-label">Helmet</div>
+          </div>
+          <div class="equipment-slot" data-slot="chestplate">
+            <div class="equip-slot-icon"></div>
+            <div class="equip-slot-label">Chestplate</div>
+          </div>
+          <div class="equipment-slot" data-slot="leggings">
+            <div class="equip-slot-icon"></div>
+            <div class="equip-slot-label">Leggings</div>
+          </div>
+          <div class="equipment-slot" data-slot="boots">
+            <div class="equip-slot-icon"></div>
+            <div class="equip-slot-label">Boots</div>
+          </div>
+        </div>
+        <div class="equipment-help">Drag armor here to equip</div>
+      </div>
     </div>
 
     <button id="btn-close-crafting" class="overlay-close">✕</button>
@@ -504,8 +535,8 @@
   <script src="js/renderer/itemTextureAtlas.js?v=20260727-1"></script>
   <script src="js/renderer/chunkMeshBuilder.js?v=20260725-5"></script>
   <!-- REMOVED: renderer/chunkManager.js → merged into js/chunkmanager.js -->
-  <script src="js/renderer/voxelRenderer.js?v=20260725-1"></script>
-  <script src="js/renderer/firstPersonHand.js?v=20260728-1"></script>
+  <script src="js/renderer/voxelRenderer.js?v=20260728-1"></script>
+  <script src="js/renderer/firstPersonHand.js?v=20260728-4"></script>
   <script src="js/renderer/crosshair.js?v=20260714-1"></script>
   <script src="js/renderer/skybox.js?v=20260725-2"></script>
   <script src="js/renderer/biomeEffects.js?v=20260725-1"></script>
@@ -516,7 +547,7 @@
   <script src="js/input/keyboard.js?v=20260714-1"></script>
   <script src="js/input/mouse.js?v=20260714-1"></script>
   <script src="js/input/touch.js?v=20260712-1"></script>
-  <script src="js/input/interaction.js?v=20260728-1"></script>
+  <script src="js/input/interaction.js?v=20260728-4"></script>
 
   <!-- Entities -->
   <script src="js/entities/player.js?v=20260714-1"></script>
@@ -548,6 +579,6 @@
   <script src="js/game.js?v=20260714-1"></script>
 
   <!-- Main Entry (menu system, screen management) -->
-<script src="js/main.js?v=20260728-1"></script>
+<script src="js/main.js?v=20260728-3"></script>
 </body>
 </html>

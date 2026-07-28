@@ -29,6 +29,33 @@ const MAX_STACKS = {
   [ITEM_CATEGORIES.TOOL]: 1,
 };
 
+// ============================================================
+// Equipment Slot Definitions
+// ============================================================
+
+const EQUIPMENT_SLOTS = {
+  HELMET: 'helmet',
+  CHESTPLATE: 'chestplate',
+  LEGGINGS: 'leggings',
+  BOOTS: 'boots',
+};
+
+const EQUIPMENT_SLOT_ORDER = ['helmet', 'chestplate', 'leggings', 'boots'];
+
+/**
+ * Map an item typeId to its equipment slot, or null if not equippable.
+ * An item is equippable armor if it has armorValue in NAMED_ITEMS.
+ */
+function getEquipmentSlotForItem(typeId) {
+  if (typeof typeId !== 'string') return null;
+  if (!NAMED_ITEMS[typeId] || NAMED_ITEMS[typeId].armorValue === undefined) return null;
+  if (typeId.endsWith('_helmet')) return EQUIPMENT_SLOTS.HELMET;
+  if (typeId.endsWith('_chestplate')) return EQUIPMENT_SLOTS.CHESTPLATE;
+  if (typeId.endsWith('_leggings')) return EQUIPMENT_SLOTS.LEGGINGS;
+  if (typeId.endsWith('_boots')) return EQUIPMENT_SLOTS.BOOTS;
+  return null;
+}
+
 // Named item definitions (non-block items)
 // Each entry: { name, category, maxStack [, durability, damage, attackSpeed, armorValue, armorToughness, foodRestore, foodSaturation ] }
 const NAMED_ITEMS = {
@@ -44,6 +71,7 @@ const NAMED_ITEMS = {
   netherite_ingot: { name: 'Netherite Ingot', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   redstone:        { name: 'Redstone', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   gunpowder:       { name: 'Gunpowder', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
+  leather:         { name: 'Leather', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   glowstone_dust:  { name: 'Glowstone Dust', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   sugar:           { name: 'Sugar', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   corrupt_crystal: { name: 'Corrupt Crystal', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
@@ -140,6 +168,14 @@ const NAMED_ITEMS = {
   netherite_chestplate:{ name: 'Netherite Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 8, armorToughness: 3 },
   netherite_leggings:  { name: 'Netherite Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 6, armorToughness: 3 },
   netherite_boots:     { name: 'Netherite Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 3, armorToughness: 3 },
+
+  // ── Mob Drops ────────────────────────────────────────────────
+  rotten_flesh:   { name: 'Rotten Flesh', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
+  bone:           { name: 'Bone', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
+  rabbit_hide:    { name: 'Rabbit Hide', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
+  rabbit_meat:    { name: 'Raw Rabbit', category: ITEM_CATEGORIES.FOOD, maxStack: 64, foodRestore: 2, foodSaturation: 1.2 },
+  raw_venison:    { name: 'Raw Venison', category: ITEM_CATEGORIES.FOOD, maxStack: 64, foodRestore: 4, foodSaturation: 2.4 },
+  corrupt_fang:   { name: 'Corrupt Fang', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
 };
 
 // ============================================================
@@ -164,9 +200,19 @@ class Inventory {
     // Currently selected hotbar slot index (0-8 within hotbar)
     this.selectedHotbarSlot = 0;
 
+    // Equipment slots: helmet, chestplate, leggings, boots
+    // Each slot: { typeId, count } or null if empty
+    this.equipment = {
+      helmet: null,
+      chestplate: null,
+      leggings: null,
+      boots: null,
+    };
+
     // Callbacks for UI/game integration
     this.onSlotChange = null;
     this.onSelectionChange = null;
+    this.onEquipmentChange = null;
   }
 
   // ============================================================
@@ -672,6 +718,110 @@ class Inventory {
   }
 
   // ============================================================
+  // Equipment (Armor Slots)
+  // ============================================================
+
+  /**
+   * Check if an item type is equippable armor.
+   */
+  isEquippable(typeId) {
+    return getEquipmentSlotForItem(typeId) !== null;
+  }
+
+  /**
+   * Get the equipment slot for an item type, or null.
+   */
+  getEquipmentSlot(typeId) {
+    return getEquipmentSlotForItem(typeId);
+  }
+
+  /**
+   * Equip an item into an equipment slot.
+   * If the slot is already occupied, the old item is returned so the caller
+   * can place it back into the inventory.
+   * @param {string} slot - One of 'helmet', 'chestplate', 'leggings', 'boots'
+   * @param {string} typeId - The armor item typeId
+   * @returns {object|null} The previously equipped item { typeId, count } or null if slot was empty
+   */
+  equipItem(slot, typeId) {
+    if (!EQUIPMENT_SLOT_ORDER.includes(slot)) return null;
+    if (!this.isEquippable(typeId)) return null;
+    if (getEquipmentSlotForItem(typeId) !== slot) return null;
+
+    const oldItem = this.equipment[slot];
+    this.equipment[slot] = { typeId, count: 1 };
+
+    if (this.onEquipmentChange) {
+      this.onEquipmentChange(slot, this.equipment[slot]);
+    }
+
+    return oldItem;
+  }
+
+  /**
+   * Unequip an item from an equipment slot.
+   * @param {string} slot - One of 'helmet', 'chestplate', 'leggings', 'boots'
+   * @returns {object|null} The removed item { typeId, count } or null if slot was empty
+   */
+  unequipItem(slot) {
+    if (!EQUIPMENT_SLOT_ORDER.includes(slot)) return null;
+    const item = this.equipment[slot];
+    if (!item) return null;
+
+    this.equipment[slot] = null;
+
+    if (this.onEquipmentChange) {
+      this.onEquipmentChange(slot, null);
+    }
+
+    return item;
+  }
+
+  /**
+   * Get the equipped item in a slot.
+   */
+  getEquippedItem(slot) {
+    if (!EQUIPMENT_SLOT_ORDER.includes(slot)) return null;
+    return this.equipment[slot];
+  }
+
+  /**
+   * Calculate total defensive stats from all equipped armor.
+   * @returns {{ totalArmor: number, totalToughness: number }}
+   */
+  getEquipmentStats() {
+    let totalArmor = 0;
+    let totalToughness = 0;
+
+    for (const slot of EQUIPMENT_SLOT_ORDER) {
+      const item = this.equipment[slot];
+      if (item) {
+        const def = NAMED_ITEMS[item.typeId];
+        if (def) {
+          totalArmor += def.armorValue || 0;
+          totalToughness += def.armorToughness || 0;
+        }
+      }
+    }
+
+    return { totalArmor, totalToughness };
+  }
+
+  /**
+   * Get all equipped items as a flat array.
+   */
+  getEquippedItems() {
+    const items = [];
+    for (const slot of EQUIPMENT_SLOT_ORDER) {
+      const item = this.equipment[slot];
+      if (item) {
+        items.push({ slot, typeId: item.typeId, count: item.count });
+      }
+    }
+    return items;
+  }
+
+  // ============================================================
   // Serialization
   // ============================================================
 
@@ -686,11 +836,21 @@ class Inventory {
         slots.push({ index: i, typeId: slot.typeId, count: slot.count });
       }
     }
+
+    // Serialize equipment
+    const eq = {};
+    for (const slot of EQUIPMENT_SLOT_ORDER) {
+      if (this.equipment[slot]) {
+        eq[slot] = { typeId: this.equipment[slot].typeId, count: this.equipment[slot].count };
+      }
+    }
+
     return {
       rows: this.rows,
       cols: this.cols,
       selectedHotbarSlot: this.selectedHotbarSlot,
       slots: slots,
+      equipment: eq,
     };
   }
 
@@ -712,6 +872,18 @@ class Inventory {
           typeId: slotData.typeId,
           count: Math.max(1, slotData.count),
         };
+      }
+    }
+
+    // Deserialize equipment
+    if (data.equipment) {
+      for (const slot of EQUIPMENT_SLOT_ORDER) {
+        if (data.equipment[slot]) {
+          inv.equipment[slot] = {
+            typeId: data.equipment[slot].typeId,
+            count: Math.max(1, data.equipment[slot].count),
+          };
+        }
       }
     }
 
@@ -849,6 +1021,6 @@ const _INLINE_BLOCK_PROPERTIES = {
 };
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS };
+  module.exports = { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS, EQUIPMENT_SLOTS, EQUIPMENT_SLOT_ORDER, getEquipmentSlotForItem };
 
 }

@@ -162,6 +162,157 @@ const RECIPES = {
     output: { typeId: BLOCK_TYPES.FURNACE, count: 1 },
     requiresTable: true, discoveryStage: 1,
   },
+
+  // ── Armor: Leather ─────────────────────────────────────────
+  leather_helmet: {
+    id: 'leather_helmet', name: 'Leather Cap', description: 'A basic leather helmet.',
+    ingredients: [ { typeId: 'leather', count: 5 } ],
+    output: { typeId: 'leather_helmet', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  leather_chestplate: {
+    id: 'leather_chestplate', name: 'Leather Tunic', description: 'A basic leather chestplate.',
+    ingredients: [ { typeId: 'leather', count: 8 } ],
+    output: { typeId: 'leather_chestplate', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  leather_leggings: {
+    id: 'leather_leggings', name: 'Leather Pants', description: 'Basic leather leggings.',
+    ingredients: [ { typeId: 'leather', count: 7 } ],
+    output: { typeId: 'leather_leggings', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  leather_boots: {
+    id: 'leather_boots', name: 'Leather Boots', description: 'Basic leather boots.',
+    ingredients: [ { typeId: 'leather', count: 4 } ],
+    output: { typeId: 'leather_boots', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  // ── Armor: Chainmail ───────────────────────────────────────
+  chainmail_helmet: {
+    id: 'chainmail_helmet', name: 'Chainmail Helmet', description: 'Chainmail head protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 5 } ],
+    output: { typeId: 'chainmail_helmet', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  chainmail_chestplate: {
+    id: 'chainmail_chestplate', name: 'Chainmail Chestplate', description: 'Chainmail body protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 8 } ],
+    output: { typeId: 'chainmail_chestplate', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  chainmail_leggings: {
+    id: 'chainmail_leggings', name: 'Chainmail Leggings', description: 'Chainmail leg protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 7 } ],
+    output: { typeId: 'chainmail_leggings', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  chainmail_boots: {
+    id: 'chainmail_boots', name: 'Chainmail Boots', description: 'Chainmail foot protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 4 } ],
+    output: { typeId: 'chainmail_boots', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  // ── Armor: Iron ────────────────────────────────────────────
+  iron_helmet: {
+    id: 'iron_helmet', name: 'Iron Helmet', description: 'Iron head protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 5 } ],
+    output: { typeId: 'iron_helmet', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  iron_chestplate: {
+    id: 'iron_chestplate', name: 'Iron Chestplate', description: 'Iron body protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 8 } ],
+    output: { typeId: 'iron_chestplate', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  iron_leggings: {
+    id: 'iron_leggings', name: 'Iron Leggings', description: 'Iron leg protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 7 } ],
+    output: { typeId: 'iron_leggings', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  iron_boots: {
+    id: 'iron_boots', name: 'Iron Boots', description: 'Iron foot protection.',
+    ingredients: [ { typeId: 'iron_ingot', count: 4 } ],
+    output: { typeId: 'iron_boots', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  // ── Armor: Gold ────────────────────────────────────────────
+  golden_helmet: {
+    id: 'golden_helmet', name: 'Golden Helmet', description: 'Golden head protection.',
+    ingredients: [ { typeId: 'gold_ingot', count: 5 } ],
+    output: { typeId: 'golden_helmet', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  golden_chestplate: {
+    id: 'golden_chestplate', name: 'Golden Chestplate', description: 'Golden body protection.',
+    ingredients: [ { typeId: 'gold_ingot', count: 8 } ],
+    output: { typeId: 'golden_chestplate', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  golden_leggings: {
+    id: 'golden_leggings', name: 'Golden Leggings', description: 'Golden leg protection.',
+    ingredients: [ { typeId: 'gold_ingot', count: 7 } ],
+    output: { typeId: 'golden_leggings', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  golden_boots: {
+    id: 'golden_boots', name: 'Golden Boots', description: 'Golden foot protection.',
+    ingredients: [ { typeId: 'gold_ingot', count: 4 } ],
+    output: { typeId: 'golden_boots', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  // ── Armor: Diamond ─────────────────────────────────────────
+  diamond_helmet: {
+    id: 'diamond_helmet', name: 'Diamond Helmet', description: 'Diamond head protection.',
+    ingredients: [ { typeId: 'diamond', count: 5 } ],
+    output: { typeId: 'diamond_helmet', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  diamond_chestplate: {
+    id: 'diamond_chestplate', name: 'Diamond Chestplate', description: 'Diamond body protection.',
+    ingredients: [ { typeId: 'diamond', count: 8 } ],
+    output: { typeId: 'diamond_chestplate', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  diamond_leggings: {
+    id: 'diamond_leggings', name: 'Diamond Leggings', description: 'Diamond leg protection.',
+    ingredients: [ { typeId: 'diamond', count: 7 } ],
+    output: { typeId: 'diamond_leggings', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  diamond_boots: {
+    id: 'diamond_boots', name: 'Diamond Boots', description: 'Diamond foot protection.',
+    ingredients: [ { typeId: 'diamond', count: 4 } ],
+    output: { typeId: 'diamond_boots', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  // ── Armor: Netherite ───────────────────────────────────────
+  netherite_helmet: {
+    id: 'netherite_helmet', name: 'Netherite Helmet', description: 'Netherite head protection.',
+    ingredients: [ { typeId: 'netherite_ingot', count: 5 } ],
+    output: { typeId: 'netherite_helmet', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  netherite_chestplate: {
+    id: 'netherite_chestplate', name: 'Netherite Chestplate', description: 'Netherite body protection.',
+    ingredients: [ { typeId: 'netherite_ingot', count: 8 } ],
+    output: { typeId: 'netherite_chestplate', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  netherite_leggings: {
+    id: 'netherite_leggings', name: 'Netherite Leggings', description: 'Netherite leg protection.',
+    ingredients: [ { typeId: 'netherite_ingot', count: 7 } ],
+    output: { typeId: 'netherite_leggings', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
+  netherite_boots: {
+    id: 'netherite_boots', name: 'Netherite Boots', description: 'Netherite foot protection.',
+    ingredients: [ { typeId: 'netherite_ingot', count: 4 } ],
+    output: { typeId: 'netherite_boots', count: 1 },
+    requiresTable: true, discoveryStage: 2,
+  },
 };
 
 // ============================================================

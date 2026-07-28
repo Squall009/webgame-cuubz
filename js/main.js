@@ -2848,20 +2848,41 @@
 
           // Load saved inventory from character data
           const selectedChar = characterManager ? characterManager.getSelectedCharacter() : null;
-          if (selectedChar && selectedChar.inventory && selectedChar.inventory.length > 0) {
+          if (selectedChar) {
             try {
               const savedInv = Inventory.deserialize({
                 rows: 4, cols: 9,
                 selectedHotbarSlot: 0,
-                slots: selectedChar.inventory,
+                slots: selectedChar.inventory || [],
+                equipment: selectedChar.equipment || {},
               });
               // Copy saved slots into our inventory
               for (let i = 0; i < savedInv.totalSlots; i++) {
                 inventory.slots[i] = savedInv.slots[i];
               }
-              _log('[Cuubz] Loaded saved inventory with ' + savedInv.getItems().length + ' items');
+              // Copy saved equipment
+              if (typeof EQUIPMENT_SLOT_ORDER !== 'undefined') {
+                for (const slot of EQUIPMENT_SLOT_ORDER) {
+                  if (savedInv.equipment[slot]) {
+                    inventory.equipment[slot] = { ...savedInv.equipment[slot] };
+                  }
+                }
+              }
+              _log('[Cuubz] Loaded saved inventory with ' + savedInv.getItems().length + ' items' +
+                (Object.keys(savedInv.equipment || {}).length > 0 ? ' and equipment' : ''));
             } catch(e) {
               _log('[Cuubz] Failed to load saved inventory: ' + e.message);
+            }
+
+            // Initialize HUD armor indicator from loaded equipment
+            const armorStats = inventory.getEquipmentStats();
+            const armorIndicatorHud = document.getElementById('armor-indicator');
+            const hudDefense = document.getElementById('hud-defense');
+            if (armorIndicatorHud && hudDefense) {
+              if (armorStats.totalArmor > 0) {
+                hudDefense.textContent = armorStats.totalArmor;
+                armorIndicatorHud.classList.remove('hidden');
+              }
             }
           }
 
@@ -3203,15 +3224,84 @@
             }
           }
 
+          /**
+           * Render the equipment panel UI (4 armor slots + stats).
+           */
+          function renderEquipmentUI() {
+            const container = document.getElementById('equipment-slots');
+            const defenseEl = document.getElementById('defense-value');
+            const toughnessEl = document.getElementById('toughness-value');
+            if (!container) return;
+
+            // Update stats
+            const stats = inventory.getEquipmentStats();
+            if (defenseEl) defenseEl.textContent = stats.totalArmor;
+            if (toughnessEl) toughnessEl.textContent = stats.totalToughness;
+
+            // Update HUD armor indicator
+            const armorIndicator = document.getElementById('armor-indicator');
+            const hudDefense = document.getElementById('hud-defense');
+            if (armorIndicator && hudDefense) {
+              if (stats.totalArmor > 0) {
+                hudDefense.textContent = stats.totalArmor;
+                armorIndicator.classList.remove('hidden');
+              } else {
+                armorIndicator.classList.add('hidden');
+              }
+            }
+
+            // Render each slot
+            const slots = container.querySelectorAll('.equipment-slot');
+            for (const slotEl of slots) {
+              const slotName = slotEl.dataset.slot;
+              const iconContainer = slotEl.querySelector('.equip-slot-icon');
+              const item = inventory.getEquippedItem(slotName);
+
+              // Clear previous content
+              iconContainer.innerHTML = '';
+
+              if (item) {
+                slotEl.classList.add('occupied');
+
+                // Draw item icon
+                const canvas = document.createElement('canvas');
+                canvas.className = 'item-icon';
+                canvas.width = 48;
+                canvas.height = 48;
+                renderItemIcon(canvas, item.typeId);
+                iconContainer.appendChild(canvas);
+
+                // Show armor value badge
+                const def = NAMED_ITEMS[item.typeId];
+                if (def) {
+                  const badge = document.createElement('span');
+                  badge.className = 'equip-stat-badge';
+                  badge.textContent = '🛡' + (def.armorValue || 0);
+                  slotEl.appendChild(badge);
+                }
+
+                slotEl.title = inventory.getDisplayName(item.typeId);
+              } else {
+                slotEl.classList.remove('occupied');
+                slotEl.title = 'Empty - drag armor here';
+              }
+            }
+          }
+
           // ── Document-level drag-and-drop handlers (only active when inventory is open) ──
           // These handle the full drag lifecycle: mousedown → mousemove (start drag) → mouseup (drop or click)
 
           document.addEventListener('mousedown', function invMouseDown(e) {
             if (!inventoryOpen || e.button !== 0) return;
             const slotEl = e.target.closest('.inventory-slot');
-            if (!slotEl) return;
-            e.preventDefault();
-            _invClickStart = { slot: parseInt(slotEl.dataset.slot), x: e.clientX, y: e.clientY };
+            const equipEl = e.target.closest('.equipment-slot');
+            if (slotEl) {
+              e.preventDefault();
+              _invClickStart = { slot: parseInt(slotEl.dataset.slot), x: e.clientX, y: e.clientY };
+            } else if (equipEl) {
+              e.preventDefault();
+              _invClickStart = { equipSlot: equipEl.dataset.slot, x: e.clientX, y: e.clientY };
+            }
           });
 
           document.addEventListener('mousemove', function invMouseMove(e) {
@@ -3222,11 +3312,33 @@
 
             // Start drag
             if (!_invDrag) {
-              const fromIdx = _invClickStart.slot;
-              const fromSlot = inventory.getSlot(fromIdx);
-              if (fromSlot) {
-                _invDrag = { fromSlot: fromIdx, typeId: fromSlot.typeId, count: fromSlot.count };
-                inventory.setSlot(fromIdx, null);
+              let typeId = null;
+              let count = 0;
+              let fromSlot = null;
+              let fromEquipSlot = null;
+
+              if (_invClickStart.slot !== undefined) {
+                // Dragging from inventory slot
+                const slot = inventory.getSlot(_invClickStart.slot);
+                if (slot) {
+                  fromSlot = _invClickStart.slot;
+                  typeId = slot.typeId;
+                  count = slot.count;
+                  inventory.setSlot(fromSlot, null);
+                }
+              } else if (_invClickStart.equipSlot) {
+                // Dragging from equipment slot
+                const item = inventory.getEquippedItem(_invClickStart.equipSlot);
+                if (item) {
+                  fromEquipSlot = _invClickStart.equipSlot;
+                  typeId = item.typeId;
+                  count = item.count;
+                  inventory.unequipItem(fromEquipSlot);
+                }
+              }
+
+              if (typeId) {
+                _invDrag = { fromSlot, fromEquipSlot, typeId, count };
                 renderInventoryCraftingUI();
                 updateHotbarUI();
 
@@ -3236,7 +3348,7 @@
                 const canvas = document.createElement('canvas');
                 canvas.width = 48; canvas.height = 48;
                 canvas.style.cssText = 'width:40px;height:40px;image-rendering:pixelated;';
-                renderItemIcon(canvas, _invDrag.typeId);
+                renderItemIcon(canvas, typeId);
                 ghost.appendChild(canvas);
                 document.body.appendChild(ghost);
                 _invDrag.ghostEl = ghost;
@@ -3261,12 +3373,67 @@
               if (_invDrag.ghostEl) _invDrag.ghostEl.remove();
               const targetEl = document.elementFromPoint(e.clientX, e.clientY);
               const slotEl = targetEl ? targetEl.closest('.inventory-slot') : null;
+              const equipEl = targetEl ? targetEl.closest('.equipment-slot') : null;
 
-              if (slotEl) {
+              // ── Dropped on equipment slot ──
+              if (equipEl) {
+                const equipSlotName = equipEl.dataset.slot;
+
+                if (inventory.isEquippable(_invDrag.typeId) && inventory.getEquipmentSlot(_invDrag.typeId) === equipSlotName) {
+                  // Equip the item — if slot was occupied, return old item to inventory
+                  const oldItem = inventory.equipItem(equipSlotName, _invDrag.typeId);
+                  if (oldItem) {
+                    // Try to add old item to inventory; if full, drop it
+                    const result = inventory.addItem(oldItem.typeId, oldItem.count);
+                    if (result.remaining > 0) {
+                      // Inventory full — put old item back in equipment slot
+                      inventory.equipItem(equipSlotName, oldItem.typeId);
+                      // Restore dragged item to its origin
+                      if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
+                        inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
+                      } else if (_invDrag.fromEquipSlot) {
+                        inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
+                      }
+                    }
+                  }
+                } else {
+                  // Can't equip this item — restore to origin
+                  if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
+                    inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
+                  } else if (_invDrag.fromEquipSlot) {
+                    inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
+                  }
+                }
+              } else if (slotEl) {
+                // ── Dropped on inventory slot ──
                 const toIdx = parseInt(slotEl.dataset.slot);
                 const toSlot = inventory.getSlot(toIdx);
 
-                if (toIdx === _invDrag.fromSlot) {
+                // If dragging from equipment slot, just place into inventory
+                if (_invDrag.fromEquipSlot) {
+                  if (!toSlot) {
+                    // Empty slot — place the item
+                    inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+                  } else if (inventory.itemsMatch(toSlot.typeId, _invDrag.typeId)) {
+                    // Same type — try to stack
+                    const maxStack = inventory.getMaxStack(_invDrag.typeId);
+                    const space = maxStack - toSlot.count;
+                    if (space > 0) {
+                      const move = Math.min(space, _invDrag.count);
+                      toSlot.count += move;
+                      if (_invDrag.count - move > 0) {
+                        inventory.addItem(_invDrag.typeId, _invDrag.count - move);
+                      }
+                    } else {
+                      // No space — put the dragged item elsewhere, keep the slotted item
+                      inventory.addItem(_invDrag.typeId, _invDrag.count);
+                    }
+                  } else {
+                    // Different type — swap: place dragged item, move slotted item elsewhere
+                    inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+                    inventory.addItem(toSlot.typeId, toSlot.count);
+                  }
+                } else if (toIdx === _invDrag.fromSlot) {
                   inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
                 } else if (!toSlot) {
                   inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
@@ -3288,8 +3455,12 @@
                   inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
                 }
               } else {
-                // Dropped outside — restore
-                inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
+                // Dropped outside — restore to origin
+                if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
+                  inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
+                } else if (_invDrag.fromEquipSlot) {
+                  inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
+                }
               }
               _invDrag = null;
               renderInventoryCraftingUI();
@@ -3299,9 +3470,38 @@
 
             // ── Simple click (no drag) ──
             if (dist <= 5 && e.button === 0) {
+              // Click on equipment slot → unequip to hotbar
+              if (_invClickStart && _invClickStart.equipSlot) {
+                const equipSlotName = _invClickStart.equipSlot;
+                const item = inventory.unequipItem(equipSlotName);
+                if (item) {
+                  const result = inventory.addItem(item.typeId, item.count);
+                  if (result.remaining > 0) {
+                    // Inventory full — re-equip
+                    inventory.equipItem(equipSlotName, item.typeId);
+                  }
+                }
+                renderInventoryCraftingUI();
+                updateHotbarUI();
+                return;
+              }
+
+              // Click on inventory slot
               const fromSlot = inventory.getSlot(fromIdx);
               const isHotbar = inventory.isHotbarSlot(fromIdx);
               if (fromSlot) {
+                // Quick-equip armor: if item is equippable and target equipment slot is empty, equip directly
+                if (inventory.isEquippable(fromSlot.typeId)) {
+                  const equipSlot = inventory.getEquipmentSlot(fromSlot.typeId);
+                  if (equipSlot && !inventory.getEquippedItem(equipSlot)) {
+                    inventory.setSlot(fromIdx, null);
+                    inventory.equipItem(equipSlot, fromSlot.typeId);
+                    renderInventoryCraftingUI();
+                    updateHotbarUI();
+                    return;
+                  }
+                }
+
                 if (!isHotbar) {
                   const hotbarIdx = inventory.hotbarSlotIndex(inventory.selectedHotbarSlot);
                   const hotbarSlot = inventory.getSlot(hotbarIdx);
@@ -3406,6 +3606,9 @@
 
             // Render interactive inventory grid
             renderInventoryGrid(invGrid);
+
+            // Render equipment panel
+            renderEquipmentUI();
           }
 
           /**
@@ -3486,6 +3689,7 @@
             // Save inventory
             const serialized = inventory.serialize();
             selected.inventory = serialized.slots;
+            selected.equipment = serialized.equipment;
 
             // Save spawn point
             selected.spawnPoints = selected.spawnPoints || {};
@@ -3617,6 +3821,21 @@
                 if (flyIndicator) flyIndicator.classList.remove('hidden');
               } else {
                 if (flyIndicator) flyIndicator.classList.add('hidden');
+              }
+
+              // Update HUD armor indicator periodically
+              if (game.frameCount % 10 === 0) {
+                const armorStats = inventory.getEquipmentStats();
+                const armorHud = document.getElementById('armor-indicator');
+                const hudDefense = document.getElementById('hud-defense');
+                if (armorHud && hudDefense) {
+                  if (armorStats.totalArmor > 0) {
+                    hudDefense.textContent = armorStats.totalArmor;
+                    armorHud.classList.remove('hidden');
+                  } else {
+                    armorHud.classList.add('hidden');
+                  }
+                }
               }
               
               // Debug: log player state every 60 frames (disabled — too verbose)
@@ -4041,6 +4260,8 @@
         if (connectionHudEl) connectionHudEl.classList.add('hidden');
         const playerListOverlayEl = document.getElementById('player-list-overlay');
         if (playerListOverlayEl) playerListOverlayEl.classList.add('hidden');
+        const armorIndicatorEl = document.getElementById('armor-indicator');
+        if (armorIndicatorEl) armorIndicatorEl.classList.add('hidden');
 
         // Clean up Three.js renderer
         if (game.renderer) {

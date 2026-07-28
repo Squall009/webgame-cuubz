@@ -12,7 +12,8 @@ const DAMAGE_SOURCES = {
   POISON: 'poison',
   FALL: 'fall',
   BOSS: 'boss',
-  HUNGER: 'hunger',    // Starvation damage when hunger reaches 0
+  MOB: 'mob',           // Regular mob attacks
+  HUNGER: 'hunger',     // Starvation damage when hunger reaches 0
   THIRST: 'thirst',     // Dehydration damage when thirst reaches 0
 };
 
@@ -344,10 +345,62 @@ class SurvivalSystem {
    * Take damage from a source. Clamps health to 0 minimum.
    * Calls death handler if health reaches 0.
    */
+  /**
+   * Set the player's inventory reference for armor damage reduction.
+   * Called when the game initializes.
+   */
+  setInventory(inventory) {
+    this._inventory = inventory;
+  }
+
+  /**
+   * Apply armor damage reduction using a Minecraft-inspired formula.
+   * Damage types like hunger, thirst, and fall bypass armor.
+   * @param {number} damage - Raw incoming damage
+   * @param {number} armor - Total armor value from all equipped pieces
+   * @param {number} toughness - Total toughness value
+   * @returns {number} Reduced damage (minimum 1)
+   */
+  _applyArmorReduction(damage, armor, toughness) {
+    if (damage <= 0) return 0;
+
+    // Minecraft-style: armor points capped at 30, toughness at 20
+    const armorPoints = Math.min(30, armor);
+    const toughnessPoints = Math.min(20, toughness);
+
+    // Base reduction = armor / 5 (full armor bar = 20 points → 4 armor points reduction)
+    const baseReduction = armorPoints / 5;
+
+    // Scaled reduction accounts for high damage punching through armor
+    // Formula: armor - damage / (2 + toughness/4)
+    const scaledReduction = armorPoints - (4 * damage) / (8 + toughnessPoints);
+
+    // Use the higher of the two (armor is less effective against big hits)
+    const effectiveArmor = Math.max(baseReduction, scaledReduction);
+
+    // Clamp and convert to percentage reduction (divide by 25, max ~80% at 20 armor)
+    const clampedArmor = Math.min(armorPoints, effectiveArmor);
+    const reductionPercent = clampedArmor / 25;
+
+    // Apply reduction, minimum 1 damage so you always take at least a little
+    return Math.max(1, Math.round(damage * (1 - reductionPercent)));
+  }
+
   takeDamage(amount, source = DAMAGE_SOURCES.NONE) {
     if (this.isDead) return;
 
-    this.meters.health -= amount;
+    // Apply armor reduction for physical/environmental damage (not hunger/thirst)
+    let finalDamage = amount;
+    if (source !== DAMAGE_SOURCES.HUNGER && source !== DAMAGE_SOURCES.THIRST) {
+      if (this._inventory && typeof this._inventory.getEquipmentStats === 'function') {
+        const stats = this._inventory.getEquipmentStats();
+        if (stats.totalArmor > 0) {
+          finalDamage = this._applyArmorReduction(amount, stats.totalArmor, stats.totalToughness);
+        }
+      }
+    }
+
+    this.meters.health -= finalDamage;
     this.lastDamageSource = source;
 
     // Clamp to 0
@@ -358,7 +411,7 @@ class SurvivalSystem {
 
     // Notify damage callback
     if (this.onDamage) {
-      this.onDamage({ amount, source, remaining: this.meters.health });
+      this.onDamage({ amount: finalDamage, rawAmount: amount, source, remaining: this.meters.health });
     }
   }
 
