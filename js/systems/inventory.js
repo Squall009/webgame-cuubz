@@ -316,20 +316,34 @@ class Inventory {
    */
   getToolInfo() {
     const item = this.getSelectedItem();
-    if (!item) return null;
+    if (!item) {
+      if (typeof this._toolDebugCount === 'undefined') this._toolDebugCount = 0;
+      if (this._toolDebugCount < 5) { this._toolDebugCount++; console.log('[Inventory.getToolInfo] no item selected'); }
+      return null;
+    }
 
     const def = NAMED_ITEMS[item.typeId];
-    if (!def) return null;
+    if (!def) {
+      if (typeof this._toolDebugCount === 'undefined') this._toolDebugCount = 0;
+      if (this._toolDebugCount < 5) { this._toolDebugCount++; console.log('[Inventory.getToolInfo] no NAMED_ITEMS for', item.typeId); }
+      return null;
+    }
 
     // Determine tool type from item key
     const key = item.typeId;
-    if (typeof key !== 'string') return null; // Block items aren't tools
+    if (typeof key !== 'string') {
+      if (typeof this._toolDebugCount === 'undefined') this._toolDebugCount = 0;
+      if (this._toolDebugCount < 5) { this._toolDebugCount++; console.log('[Inventory.getToolInfo] key not string:', key); }
+      return null; // Block items aren't tools
+    }
 
     if (key.includes('_pickaxe')) return { toolType: 'pickaxe', miningSpeed: def.miningSpeed || 1.0 };
     if (key.includes('_axe') && !key.includes('pickaxe')) return { toolType: 'axe', miningSpeed: def.miningSpeed || 1.0 };
     if (key.includes('_shovel')) return { toolType: 'shovel', miningSpeed: def.miningSpeed || 1.0 };
     if (key.includes('_hoe')) return { toolType: 'hoe', miningSpeed: def.miningSpeed || 1.0 };
 
+    if (typeof this._toolDebugCount === 'undefined') this._toolDebugCount = 0;
+    if (this._toolDebugCount < 5) { this._toolDebugCount++; console.log('[Inventory.getToolInfo] not a mining tool:', key); }
     return null; // It's a tool but not a mining tool (sword, spear, armor, etc.)
   }
 

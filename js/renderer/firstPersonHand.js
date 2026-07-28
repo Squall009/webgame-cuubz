@@ -19,12 +19,14 @@ class FirstPersonHand {
    * @param {ItemTextureAtlas} options.itemAtlas - Atlas for item textures
    */
   constructor(camera, options = {}) {
+    console.log('[FirstPersonHand] Constructor called', { camera: !!camera, itemAtlas: !!options.itemAtlas });
     this.camera = camera;
     this.itemAtlas = options.itemAtlas || null;
 
     // Arm group — pivots from shoulder position
     this.group = new THREE.Group();
     camera.add(this.group);
+    console.log('[FirstPersonHand] Group added to camera, camera children:', camera.children.length);
 
     // Skin color (neutral medium tone, adjustable later for character creator)
     const skinColor = 0xC68642;
@@ -91,6 +93,7 @@ class FirstPersonHand {
    * @param {string|number|null} itemKey - Item type ID (string name or block number)
    */
   setItem(itemKey) {
+    console.log('[FirstPersonHand] setItem called with:', itemKey);
     if (itemKey === this.currentItemKey) return;
     this.currentItemKey = itemKey;
 
@@ -137,6 +140,7 @@ class FirstPersonHand {
    * Trigger a swing animation.
    */
   swing() {
+    console.log('[FirstPersonHand] swing triggered');
     this.swingProgress = 0;
     this.swingActive = true;
   }
@@ -149,6 +153,12 @@ class FirstPersonHand {
     // ─── Idle bob ─────────────────────────────────────────
     this.idlePhase += delta * 1.5;
     const bobY = Math.sin(this.idlePhase) * 0.003;
+
+    // Debug: log position periodically
+    if (Math.floor(this.idlePhase) !== this._lastDebug) {
+      this._lastDebug = Math.floor(this.idlePhase);
+      console.log('[FirstPersonHand] update', { visible: this.group.visible, pos: this.group.position.toArray(), swingActive: this.swingActive });
+    }
 
     // ─── Swing animation ──────────────────────────────────
     if (this.swingActive) {

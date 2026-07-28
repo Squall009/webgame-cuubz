@@ -240,6 +240,12 @@ class BlockInteraction {
       if (toolInfo && toolInfo.toolType === requiredTool) {
         miningSpeedMultiplier = toolInfo.miningSpeed || 1.0;
       }
+      // Debug logging (first 5 breaks)
+      if (typeof this._toolDebugCount === 'undefined') this._toolDebugCount = 0;
+      if (this._toolDebugCount < 5) {
+        this._toolDebugCount++;
+        console.log('[ToolEfficiency] blockType:', this.breakingBlock.blockType, 'requiredTool:', requiredTool, 'toolInfo:', toolInfo, 'multiplier:', miningSpeedMultiplier);
+      }
     }
 
     // Progress break based on hardness and tool efficiency
