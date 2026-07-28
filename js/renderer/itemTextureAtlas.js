@@ -164,6 +164,11 @@ class ItemTextureAtlas {
       { key: 'netherite_shovel', name: 'Netherite Shovel', texture: 'netherite_shovel' },
       { key: 'netherite_hoe', name: 'Netherite Hoe', texture: 'netherite_hoe' },
       { key: 'netherite_spear', name: 'Netherite Spear', texture: 'netherite_spear' },
+      // Armor — Wooden
+      { key: 'wooden_helmet', name: 'Wooden Helmet', texture: 'wooden_helmet' },
+      { key: 'wooden_chestplate', name: 'Wooden Chestplate', texture: 'wooden_chestplate' },
+      { key: 'wooden_leggings', name: 'Wooden Leggings', texture: 'wooden_leggings' },
+      { key: 'wooden_boots', name: 'Wooden Boots', texture: 'wooden_boots' },
       // Armor — Leather
       { key: 'leather_helmet', name: 'Leather Helmet', texture: 'leather_helmet' },
       { key: 'leather_chestplate', name: 'Leather Chestplate', texture: 'leather_chestplate' },
@@ -194,6 +199,13 @@ class ItemTextureAtlas {
       { key: 'netherite_chestplate', name: 'Netherite Chestplate', texture: 'netherite_chestplate' },
       { key: 'netherite_leggings', name: 'Netherite Leggings', texture: 'netherite_leggings' },
       { key: 'netherite_boots', name: 'Netherite Boots', texture: 'netherite_boots' },
+      // Mob Drops
+      { key: 'rotten_flesh', name: 'Rotten Flesh', texture: 'rotten_flesh' },
+      { key: 'bone', name: 'Bone', texture: 'bone' },
+      { key: 'rabbit_hide', name: 'Rabbit Hide', texture: 'rabbit_hide' },
+      { key: 'rabbit_meat', name: 'Raw Rabbit', texture: 'rabbit_meat' },
+      { key: 'raw_venison', name: 'Raw Venison', texture: 'raw_venison' },
+      { key: 'corrupt_fang', name: 'Corrupt Fang', texture: 'corrupt_fang' },
       // Misc
       { key: 'compass', name: 'Compass', texture: 'compass_00' },
       { key: 'firework_rocket', name: 'Firework Rocket', texture: 'firework_rocket' },

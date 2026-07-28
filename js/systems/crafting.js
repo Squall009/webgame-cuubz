@@ -163,6 +163,75 @@ const RECIPES = {
     requiresTable: true, discoveryStage: 1,
   },
 
+  // ── Armor: Wooden ──────────────────────────────────────────
+  wooden_helmet: {
+    id: 'wooden_helmet', name: 'Wooden Helmet', description: 'Basic wooden head protection.',
+    ingredients: [ {
+      typeIds: [
+        BLOCK_TYPES.OAK_PLANKS, BLOCK_TYPES.SPRUCE_PLANKS,
+        BLOCK_TYPES.BIRCH_PLANKS, BLOCK_TYPES.JUNGLE_PLANKS,
+        BLOCK_TYPES.ACACIA_PLANKS, BLOCK_TYPES.DARK_OAK_PLANKS,
+        BLOCK_TYPES.CHERRY_PLANKS, BLOCK_TYPES.MANGROVE_PLANKS,
+        BLOCK_TYPES.PALE_OAK_PLANKS, BLOCK_TYPES.POPLAR_PLANKS,
+        BLOCK_TYPES.BAMBOO_PLANKS, BLOCK_TYPES.CRIMSON_PLANKS,
+        BLOCK_TYPES.WARPED_PLANKS,
+      ],
+      count: 5,
+    } ],
+    output: { typeId: 'wooden_helmet', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  wooden_chestplate: {
+    id: 'wooden_chestplate', name: 'Wooden Chestplate', description: 'Basic wooden body protection.',
+    ingredients: [ {
+      typeIds: [
+        BLOCK_TYPES.OAK_PLANKS, BLOCK_TYPES.SPRUCE_PLANKS,
+        BLOCK_TYPES.BIRCH_PLANKS, BLOCK_TYPES.JUNGLE_PLANKS,
+        BLOCK_TYPES.ACACIA_PLANKS, BLOCK_TYPES.DARK_OAK_PLANKS,
+        BLOCK_TYPES.CHERRY_PLANKS, BLOCK_TYPES.MANGROVE_PLANKS,
+        BLOCK_TYPES.PALE_OAK_PLANKS, BLOCK_TYPES.POPLAR_PLANKS,
+        BLOCK_TYPES.BAMBOO_PLANKS, BLOCK_TYPES.CRIMSON_PLANKS,
+        BLOCK_TYPES.WARPED_PLANKS,
+      ],
+      count: 8,
+    } ],
+    output: { typeId: 'wooden_chestplate', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  wooden_leggings: {
+    id: 'wooden_leggings', name: 'Wooden Leggings', description: 'Basic wooden leg protection.',
+    ingredients: [ {
+      typeIds: [
+        BLOCK_TYPES.OAK_PLANKS, BLOCK_TYPES.SPRUCE_PLANKS,
+        BLOCK_TYPES.BIRCH_PLANKS, BLOCK_TYPES.JUNGLE_PLANKS,
+        BLOCK_TYPES.ACACIA_PLANKS, BLOCK_TYPES.DARK_OAK_PLANKS,
+        BLOCK_TYPES.CHERRY_PLANKS, BLOCK_TYPES.MANGROVE_PLANKS,
+        BLOCK_TYPES.PALE_OAK_PLANKS, BLOCK_TYPES.POPLAR_PLANKS,
+        BLOCK_TYPES.BAMBOO_PLANKS, BLOCK_TYPES.CRIMSON_PLANKS,
+        BLOCK_TYPES.WARPED_PLANKS,
+      ],
+      count: 7,
+    } ],
+    output: { typeId: 'wooden_leggings', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  wooden_boots: {
+    id: 'wooden_boots', name: 'Wooden Boots', description: 'Basic wooden foot protection.',
+    ingredients: [ {
+      typeIds: [
+        BLOCK_TYPES.OAK_PLANKS, BLOCK_TYPES.SPRUCE_PLANKS,
+        BLOCK_TYPES.BIRCH_PLANKS, BLOCK_TYPES.JUNGLE_PLANKS,
+        BLOCK_TYPES.ACACIA_PLANKS, BLOCK_TYPES.DARK_OAK_PLANKS,
+        BLOCK_TYPES.CHERRY_PLANKS, BLOCK_TYPES.MANGROVE_PLANKS,
+        BLOCK_TYPES.PALE_OAK_PLANKS, BLOCK_TYPES.POPLAR_PLANKS,
+        BLOCK_TYPES.BAMBOO_PLANKS, BLOCK_TYPES.CRIMSON_PLANKS,
+        BLOCK_TYPES.WARPED_PLANKS,
+      ],
+      count: 4,
+    } ],
+    output: { typeId: 'wooden_boots', count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
   // ── Armor: Leather ─────────────────────────────────────────
   leather_helmet: {
     id: 'leather_helmet', name: 'Leather Cap', description: 'A basic leather helmet.',

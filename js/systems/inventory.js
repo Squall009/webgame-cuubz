@@ -96,6 +96,11 @@ const NAMED_ITEMS = {
   wooden_shovel:  { name: 'Wooden Shovel', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 1, attackSpeed: -1.0, miningSpeed: 2.0 },
   wooden_hoe:     { name: 'Wooden Hoe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 0, attackSpeed: 0 },
   wooden_spear:   { name: 'Wooden Spear', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 5, attackSpeed: -1.8 },
+  // ── Armor: Wooden ──────────────────────────────────────────
+  wooden_helmet:    { name: 'Wooden Helmet', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 1, armorToughness: 0 },
+  wooden_chestplate:{ name: 'Wooden Chestplate', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 2, armorToughness: 0 },
+  wooden_leggings:  { name: 'Wooden Leggings', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 1, armorToughness: 0 },
+  wooden_boots:     { name: 'Wooden Boots', category: ITEM_CATEGORIES.TOOL, maxStack: 1, armorValue: 1, armorToughness: 0 },
   // ── Tools: Stone ───────────────────────────────────────────
   stone_sword:    { name: 'Stone Sword', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 5, attackSpeed: -2.4 },
   stone_pickaxe:  { name: 'Stone Pickaxe', category: ITEM_CATEGORIES.TOOL, maxStack: 1, damage: 3, attackSpeed: -2.0, miningSpeed: 4.0 },
@@ -377,6 +382,24 @@ class Inventory {
     if (key.includes('_hoe')) return { toolType: 'hoe', miningSpeed: def.miningSpeed || 1.0 };
 
     return null; // It's a tool but not a mining tool (sword, spear, armor, etc.)
+  }
+
+  /**
+   * Get attack damage from the currently selected item.
+   * Defaults to 2 (fist damage) if no weapon held.
+   * @returns {number}
+   */
+  getAttackDamage() {
+    const item = this.getSelectedItem();
+    if (!item) return 2; // Fist damage
+
+    if (typeof item.typeId === 'string') {
+      const def = NAMED_ITEMS[item.typeId];
+      if (def && def.damage !== undefined) {
+        return def.damage;
+      }
+    }
+    return 2; // Default fist damage
   }
 
   // ============================================================
