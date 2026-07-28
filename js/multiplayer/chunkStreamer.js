@@ -172,7 +172,8 @@ class ChunkStreamEntry {
     };
 
     if (this.compressedData) {
-      payload.data = Array.from(this.compressedData);
+      // Send as Uint8Array directly — structured clone handles it
+      payload.data = this.compressedData;
       payload.compressed = true;
     } else if (this.data) {
       payload.data = this.data;
@@ -351,8 +352,9 @@ class ChunkStreamer {
 
       for (let dx = -this._options.loadRadius; dx <= this._options.loadRadius; dx++) {
         for (let dz = -this._options.loadRadius; dz <= this._options.loadRadius; dz++) {
-          // Use Manhattan distance for efficiency
-          if (Math.abs(dx) + Math.abs(dz) > this._options.loadRadius * 1.5) continue;
+          // Use squared distance for efficiency (avoids Math.sqrt)
+          const radSq = this._options.loadRadius * this._options.loadRadius;
+          if (dx * dx + dz * dz > radSq * 2.25) continu
 
           const cx = pcx + dx;
           const cz = pcz + dz;
@@ -589,7 +591,8 @@ class ChunkStreamer {
             ? this._chunkGrid.getChunk(cx, cz, null)
             : null;
         if (chunk && chunk.blocks) {
-          return Array.from(chunk.blocks);
+          // Return the Uint8Array directly — no Array.from() conversion
+          return chunk.blocks;
         }
         // Chunk not in memoryCache — trigger async generation in background
         if (this._chunkGrid._ensureChunkInMemory) {

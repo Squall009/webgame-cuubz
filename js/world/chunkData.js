@@ -13,6 +13,9 @@ const MIN_Y = 0;
 const MAX_Y = 256;
 const SEA_LEVEL = 64;
 
+/** Size of a 1-deep edge strip (16 × 256) used for virtual neighbor data in multiplayer. */
+const EDGE_STRIP_SIZE = CHUNK_WIDTH * CHUNK_HEIGHT; // 16 × 256 = 4096
+
 class Chunk {
   constructor(chunkX, chunkZ) {
     this.cx = chunkX;
@@ -21,6 +24,21 @@ class Chunk {
     this.humidityMap = null;  // Float32Array(256) — normalized 0..1 humidity per column, for vertex color tinting
     this.dirty   = false;  // Player modified → needs flush to IndexedDB (every 5s)
     this.changed = false;  // Block changed since last frame → needs mesh rebuild now
+
+    // ── Multiplayer: virtual neighbor edge strips ────────────────────────
+    // When a chunk is received from the host without its real neighbors,
+    // these 1-deep edge strips (16 × 256 each) provide boundary data so
+    // the mesh builder can correctly cull faces at chunk edges.
+    // Each strip is a Uint8Array(4096) or null if unavailable.
+    // Format per direction:
+    //   positiveX/negativeX: strip[z * 256 + y]
+    //   positiveZ/negativeZ: strip[x * 256 + y]
+    this.neighborEdges = {
+      positiveX: null,
+      negativeX: null,
+      positiveZ: null,
+      negativeZ: null,
+    };
   }
 
   _idx(x, y, z) {
@@ -64,5 +82,5 @@ class Chunk {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { Chunk, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, MIN_Y, MAX_Y, SEA_LEVEL };
+  module.exports = { Chunk, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, MIN_Y, MAX_Y, SEA_LEVEL, EDGE_STRIP_SIZE };
 }

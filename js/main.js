@@ -204,6 +204,9 @@
   let worldManager = null;
   let perfSettings = null; // PerformanceSettings instance
   let game = null; // CuubzGame instance (set in startGame)
+  let _renderRafId = null;      // Track render loop rAF for cleanup on exit
+  let _cleanupPauseMenu = null; // Cleanup function returned by setupPauseMenu()
+  let mobIntegration = null; // Mob system instance
 
   // ============================================================
   // Character UI Rendering
@@ -780,8 +783,13 @@
     // Rebuild PBR factory with new atlas + shading mode
     renderer.rebuildPBRFactory(newAtlas, s.advancedShading);
 
-    // Mark all chunks for mesh rebuild
+    // CRITICAL: Update chunk manager's atlas reference AND invalidate UV cache.
+    // Without this, mesh rebuilds will compute UV coordinates against the OLD
+    // atlas layout, causing UV mismatch with the new atlas textures → black
+    // seam lines and corner dots from sampling gap pixels.
     if (chunkManager) {
+      chunkManager.textureAtlas = newAtlas;
+      chunkManager._uvLookupCache = null; // Force UV cache rebuild on next mesh build
       chunkManager.rebuildAllMeshes();
     }
 
@@ -2567,6 +2575,26 @@
           game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
           game.frameCount = 0; // Frame counter for debug logging
 
+          // ─── Initialize Mob System ─────────────────────────
+          try {
+            mobIntegration = new MobIntegration();
+            const deps = {
+              scene: renderer.scene,
+              player: player,
+              inventory: inventory,
+              survivalSystem: survivalSystem || null,
+              worldSeed: currentWorld.seed,
+              onMobDeath: (mob, drops) => {
+                _log(`[Cuubz] Mob died: ${mob.mobType}, drops:`, drops);
+                // Drops are auto-looted via playerInventory reference in mobManager
+              },
+            };
+            mobIntegration.init(deps);
+            _log('[Cuubz] Mob system initialized');
+          } catch (e) {
+            console.warn('[Cuubz] Failed to init mob system:', e.message);
+          }
+
            // Set up camera at player eye level — looking slightly downward to see terrain
           const initCamPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
           renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
@@ -2730,15 +2758,50 @@
             // Don't include targetPlayers — let server broadcast to all non-host players
             chunkStreamer.onChunkStreamed = (payload) => {
               if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
+                const cx = payload.chunkX;
+                const cz = payload.chunkZ;
+
+                // Extract 1-deep edge strips from neighbor chunks for correct
+                // water face culling at chunk boundaries on the client side.
+                // Each edge strip is 16 × 256 = 4096 bytes, RLE-compressed.
+                const neighborEdges = {};
+                const edgeConfigs = [
+                  { dir: 'positiveX', dx: 1, dz: 0, edgeX: 0, edgeZ: null, stripIdx: (z, y) => z * 256 + y },
+                  { dir: 'negativeX', dx: -1, dz: 0, edgeX: 15, edgeZ: null, stripIdx: (z, y) => z * 256 + y },
+                  { dir: 'positiveZ', dx: 0, dz: 1, edgeX: null, edgeZ: 0, stripIdx: (x, y) => x * 256 + y },
+                  { dir: 'negativeZ', dx: 0, dz: -1, edgeX: null, edgeZ: 15, stripIdx: (x, y) => x * 256 + y },
+                ];
+
+                for (const ec of edgeConfigs) {
+                  const neighbor = chunkManager.getChunkData(cx + ec.dx, cz + ec.dz);
+                  if (neighbor && neighbor.blocks) {
+                    const strip = new Uint8Array(16 * 256);
+                    if (ec.edgeX !== null) {
+                      for (let z = 0; z < 16; z++) {
+                        for (let y = 0; y < 256; y++) {
+                          strip[ec.stripIdx(z, y)] = neighbor.blocks[ec.edgeX + z * 16 + y * 256];
+                        }
+                      }
+                    } else {
+                      for (let x = 0; x < 16; x++) {
+                        for (let y = 0; y < 256; y++) {
+                          strip[ec.stripIdx(x, y)] = neighbor.blocks[x + ec.edgeZ * 16 + y * 256];
+                        }
+                      }
+                    }
+                    neighborEdges[ec.dir] = ChunkCompressor.compress(strip).data;
+                  }
+                }
+
                 const msg = {
                   type: 'CHUNK_DATA',
-                  chunkX: payload.chunkX,
-                  chunkZ: payload.chunkZ,
+                  chunkX: cx,
+                  chunkZ: cz,
                   data: payload.data,
                   compressed: payload.compressed,
                   dirty: payload.dirty,
+                  neighborEdges: Object.keys(neighborEdges).length > 0 ? neighborEdges : undefined,
                 };
-                // console.log(`[CHUNK_STREAM] → ${payload.chunkX},${payload.chunkZ} (${payload.compressed ? 'compressed' : 'raw'}), ${payload.data ? payload.data.length : 0} bytes`);
                 sessionManager.client._gameSessionConn?.send(msg);
               }
             };
@@ -2756,16 +2819,17 @@
             sessionManager.client.onGame('CHUNK_DATA', (data) => {
               try {
                 if (!data || data.chunkX === undefined || data.chunkZ === undefined) return;
-                if (!data.data || !Array.isArray(data.data)) return;
+                if (!data.data) return;
 
                 const cx = data.chunkX;
                 const cz = data.chunkZ;
                 const key = ChunkManager.key(cx, cz);
 
-                // Decompress if needed
+                // Decompress if needed — data may be Uint8Array or Array
+                const rawData = data.data instanceof Uint8Array ? data.data : new Uint8Array(data.data);
                 const blockData = data.compressed
-                  ? ChunkCompressor.decompress({ method: 'rle', data: new Uint8Array(data.data) })
-                  : data.data;
+                  ? ChunkCompressor.decompress({ method: 'rle', data: rawData, originalLength: 16 * 16 * 256 })
+                  : rawData;
 
                 if (!blockData || blockData.length === 0) return;
 
@@ -2786,6 +2850,26 @@
                   }
                   newChunk.dirty = false; // Host data is authoritative
                   newChunk.changed = true; // Trigger mesh rebuild
+
+                  // Store virtual neighbor edge strips (if provided by host)
+                  // These prevent false water side faces at chunk boundaries
+                  if (data.neighborEdges) {
+                    const edgeDirs = ['positiveX', 'negativeX', 'positiveZ', 'negativeZ'];
+                    for (const dir of edgeDirs) {
+                      if (data.neighborEdges[dir]) {
+                        const edgeRaw = data.neighborEdges[dir] instanceof Uint8Array
+                          ? data.neighborEdges[dir]
+                          : new Uint8Array(data.neighborEdges[dir]);
+                        const decompressed = ChunkCompressor.decompress({
+                          method: 'rle',
+                          data: edgeRaw,
+                          originalLength: 16 * 256
+                        });
+                        newChunk.neighborEdges[dir] = decompressed;
+                      }
+                    }
+                  }
+
                   chunkManager.memoryCache.set(key, newChunk);
                   _log(`[Cuubz] Received streamed chunk: ${key} (${blockData.length} blocks)`);
                 }
@@ -3743,9 +3827,12 @@
             const hud = document.getElementById('hud');
             if (hud) hud.classList.remove('hidden');
 
-            // Main render loop
+            // Main render loop — captures game, renderer, chunkManager etc via closure.
+            // Cancel any old render loop from a previous session before starting fresh.
+            if (_renderRafId) { cancelAnimationFrame(_renderRafId); _renderRafId = null; }
+
             function renderLoop() {
-              requestAnimationFrame(renderLoop); // Always schedule next frame first
+              _renderRafId = requestAnimationFrame(renderLoop); // Always schedule next frame first
               if (!game.running) return;
 
               // When paused, just render the scene (don't update game logic)
@@ -4089,15 +4176,36 @@
                 game.chunkManager.updateRenderChunks(player.position.x, player.position.z);
               }
 
+              // ─── Update Mob System ──────────────────────
+              if (mobIntegration) {
+                try {
+                  const wx = Math.floor(player.position.x);
+                  const wz = Math.floor(player.position.z);
+                  let biomeId = undefined;
+                  try {
+                    const biomeData = BiomeSystem.getBiomeAtWorldPos(wx, wz, chunkManager.worldSeed);
+                    if (biomeData) biomeId = biomeData.id;
+                  } catch(e) { /* ignore */ }
+                  mobIntegration.update(game.delta, chunkWorld, player.position, chunkManager.renderDistance || 6, biomeId);
+                } catch(e) {
+                  if (game.frameCount < 10) console.warn('[Cuubz] Mob update error:', e.message);
+                }
+              }
+
               // ─── Debug Stats Overlay Update ──────────────
               updateDebugStats(game);
             }
 
             // ─── Wire up Pause Menu & Settings ────────────
-            setupPauseMenu(game);
+            // Clean up any previous session's pause menu listeners before setting up fresh
+            if (typeof _cleanupPauseMenu === 'function') {
+              _cleanupPauseMenu();
+              _cleanupPauseMenu = null;
+            }
+            _cleanupPauseMenu = setupPauseMenu(game);
 
             game.lastTime = performance.now();
-            requestAnimationFrame(renderLoop);
+            _renderRafId = requestAnimationFrame(renderLoop);
 
             _log('[Cuubz] Game started successfully in ' + mode + ' mode');
           }, 500);
@@ -4169,15 +4277,15 @@
     const chunksVal = document.getElementById('chunks-val');
     const distanceVal = document.getElementById('distance-val');
 
-    if (!pauseMenu || !resumeBtn) return;
+    if (!pauseMenu || !resumeBtn) return function() {};
 
     // Show debug stats overlay when game starts
     if (debugStats) {
       debugStats.classList.remove('hidden');
     }
 
-    // Toggle pause on Escape key
-    document.addEventListener('keydown', function onPause(e) {
+    // ── Escape key handler ──
+    const onPause = function(e) {
       if (e.key === 'Escape') {
         e.preventDefault();
         const isPaused = !pauseMenu.classList.contains('hidden');
@@ -4205,7 +4313,7 @@
           resumeGame();
         }
       }
-    });
+    };
 
     function resumeGame() {
       game.paused = false;
@@ -4221,62 +4329,72 @@
       }
     }
 
+    const onExit = function() {
+      // Stop the game loop
+      game.running = false;
+      game.paused = false;
+
+      // Cancel render loop animation frame
+      if (_renderRafId) {
+        cancelAnimationFrame(_renderRafId);
+        _renderRafId = null;
+      }
+
+      // Stop chunk manager timers and dispose resources
+      if (game.chunkManager) {
+        game.chunkManager.dispose();
+      }
+
+      // Exit pointer lock
+      if (document.pointerLockElement) {
+        document.exitPointerLock();
+      }
+
+      // Hide in-game HUD overlays
+      const hud = document.getElementById('hud');
+      if (hud) hud.classList.add('hidden');
+      const pauseMenuEl = document.getElementById('pause-menu');
+      if (pauseMenuEl) pauseMenuEl.classList.add('hidden');
+      const debugStatsEl = document.getElementById('debug-stats');
+      if (debugStatsEl) debugStatsEl.classList.add('hidden');
+      const craftingScreenEl = document.getElementById('crafting-screen');
+      if (craftingScreenEl) craftingScreenEl.classList.add('hidden');
+      const touchControlsEl = document.getElementById('touch-controls');
+      if (touchControlsEl) touchControlsEl.classList.add('hidden');
+      const crosshairEl = document.getElementById('crosshair');
+      if (crosshairEl) crosshairEl.classList.add('hidden');
+      const flyIndicatorEl = document.getElementById('fly-mode-indicator');
+      if (flyIndicatorEl) flyIndicatorEl.classList.add('hidden');
+      const connectionHudEl = document.getElementById('connection-hud');
+      if (connectionHudEl) connectionHudEl.classList.add('hidden');
+      const playerListOverlayEl = document.getElementById('player-list-overlay');
+      if (playerListOverlayEl) playerListOverlayEl.classList.add('hidden');
+      const armorIndicatorEl = document.getElementById('armor-indicator');
+      if (armorIndicatorEl) armorIndicatorEl.classList.add('hidden');
+
+      // Clean up Three.js renderer
+      if (game.renderer) {
+        const container = document.getElementById('game-container');
+        if (container) container.innerHTML = '';
+        if (game.renderer.renderer) {
+          game.renderer.renderer.dispose();
+        }
+      }
+
+      // Clean up event listeners from this session
+      if (typeof _cleanupPauseMenu === 'function') {
+        _cleanupPauseMenu();
+        _cleanupPauseMenu = null;
+      }
+
+      // Show main menu
+      showScreen('mainMenu');
+      _log('[Cuubz] Exited to main menu');
+    };
+
+    document.addEventListener('keydown', onPause);
     resumeBtn.addEventListener('click', resumeGame);
-
-    // Exit to Menu button
-    const exitBtn = document.getElementById('btn-exit-menu');
-    if (exitBtn) {
-      exitBtn.addEventListener('click', () => {
-        // Stop the game loop
-        game.running = false;
-        game.paused = false;
-
-        // Stop chunk manager timers and dispose resources
-        if (game.chunkManager) {
-          game.chunkManager.dispose();
-        }
-
-        // Exit pointer lock
-        if (document.pointerLockElement) {
-          document.exitPointerLock();
-        }
-
-        // Hide in-game HUD overlays
-        const hud = document.getElementById('hud');
-        if (hud) hud.classList.add('hidden');
-        const pauseMenuEl = document.getElementById('pause-menu');
-        if (pauseMenuEl) pauseMenuEl.classList.add('hidden');
-        const debugStatsEl = document.getElementById('debug-stats');
-        if (debugStatsEl) debugStatsEl.classList.add('hidden');
-        const craftingScreenEl = document.getElementById('crafting-screen');
-        if (craftingScreenEl) craftingScreenEl.classList.add('hidden');
-        const touchControlsEl = document.getElementById('touch-controls');
-        if (touchControlsEl) touchControlsEl.classList.add('hidden');
-        const crosshairEl = document.getElementById('crosshair');
-        if (crosshairEl) crosshairEl.classList.add('hidden');
-        const flyIndicatorEl = document.getElementById('fly-mode-indicator');
-        if (flyIndicatorEl) flyIndicatorEl.classList.add('hidden');
-        const connectionHudEl = document.getElementById('connection-hud');
-        if (connectionHudEl) connectionHudEl.classList.add('hidden');
-        const playerListOverlayEl = document.getElementById('player-list-overlay');
-        if (playerListOverlayEl) playerListOverlayEl.classList.add('hidden');
-        const armorIndicatorEl = document.getElementById('armor-indicator');
-        if (armorIndicatorEl) armorIndicatorEl.classList.add('hidden');
-
-        // Clean up Three.js renderer
-        if (game.renderer) {
-          const container = document.getElementById('game-container');
-          if (container) container.innerHTML = '';
-          if (game.renderer.renderer) {
-            game.renderer.renderer.dispose();
-          }
-        }
-
-        // Show main menu
-        showScreen('mainMenu');
-        _log('[Cuubz] Exited to main menu');
-      });
-    }
+    exitBtn.addEventListener('click', onExit);
 
     // Settings: Region Check Interval (was Chunk Tick Interval)
     if (tickSlider && tickVal) {
@@ -4364,6 +4482,13 @@
         _log(`[Cuubz] Time of day ${game.skybox.timePaused ? 'PAUSED' : 'RESUMED'}`);
       });
     }
+
+    // Return cleanup function so listeners can be removed on exit or re-init
+    return function cleanup() {
+      document.removeEventListener('keydown', onPause);
+      resumeBtn.removeEventListener('click', resumeGame);
+      exitBtn.removeEventListener('click', onExit);
+    };
   }
 
   // ============================================================

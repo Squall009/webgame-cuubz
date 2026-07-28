@@ -1112,12 +1112,18 @@ class ChunkManager {
     if (this._rebuilding.has(key)) return; // Already in pipeline
     this._rebuilding.add(key);
 
-    // Gather neighbor block arrays for face culling at boundaries
+    // Gather neighbor block arrays for face culling at boundaries.
+    // If a real neighbor isn't loaded, fall back to virtual neighbor edge strips
+    // (sent by the host in multiplayer for correct water face culling).
     const neighbors = {
-      positiveX: this.memoryCache.get(ChunkManager.key(cx + 1, cz))?.blocks ?? null,
-      negativeX: this.memoryCache.get(ChunkManager.key(cx - 1, cz))?.blocks ?? null,
-      positiveZ: this.memoryCache.get(ChunkManager.key(cx, cz + 1))?.blocks ?? null,
-      negativeZ: this.memoryCache.get(ChunkManager.key(cx, cz - 1))?.blocks ?? null,
+      positiveX: this.memoryCache.get(ChunkManager.key(cx + 1, cz))?.blocks
+        ?? this._virtualNeighborFromEdge(chunk, 'positiveX'),
+      negativeX: this.memoryCache.get(ChunkManager.key(cx - 1, cz))?.blocks
+        ?? this._virtualNeighborFromEdge(chunk, 'negativeX'),
+      positiveZ: this.memoryCache.get(ChunkManager.key(cx, cz + 1))?.blocks
+        ?? this._virtualNeighborFromEdge(chunk, 'positiveZ'),
+      negativeZ: this.memoryCache.get(ChunkManager.key(cx, cz - 1))?.blocks
+        ?? this._virtualNeighborFromEdge(chunk, 'negativeZ'),
     };
 
     if (this.meshWorkerPool) {
@@ -1285,6 +1291,42 @@ class ChunkManager {
       uvLookup: uvLookup,
       humidityMap: humidityBuffer
     }, transferList);
+  }
+
+  /**
+   * Create a full-sized virtual neighbor chunk array from a 1-deep edge strip.
+   * Used in multiplayer when the real neighbor hasn't been received yet.
+   * The edge strip is 16 × 256 = 4096 bytes; the virtual array is 16 × 16 × 256 = 65536 bytes
+   * with the boundary column populated and the rest filled with AIR (0).
+   * Returns null if no edge data is available.
+   */
+  _virtualNeighborFromEdge(chunk, dir) {
+    const edge = chunk.neighborEdges?.[dir];
+    if (!edge) return null;
+
+    const full = new Uint8Array(16 * 16 * 256); // all zeros = AIR
+
+    if (dir === 'positiveX' || dir === 'negativeX') {
+      // Edge strip is 16(z) × 256(y), stored as strip[z * 256 + y]
+      // Virtual chunk index: x + z*16 + y*256
+      const edgeX = dir === 'positiveX' ? 0 : 15;
+      for (let z = 0; z < 16; z++) {
+        for (let y = 0; y < 256; y++) {
+          full[edgeX + z * 16 + y * 256] = edge[z * 256 + y];
+        }
+      }
+    } else {
+      // Edge strip is 16(x) × 256(y), stored as strip[x * 256 + y]
+      // Virtual chunk index: x + z*16 + y*256
+      const edgeZ = dir === 'positiveZ' ? 0 : 15;
+      for (let x = 0; x < 16; x++) {
+        for (let y = 0; y < 256; y++) {
+          full[x + edgeZ * 16 + y * 256] = edge[x * 256 + y];
+        }
+      }
+    }
+
+    return full;
   }
 
   /** Inline mesh build fallback (main thread). */
