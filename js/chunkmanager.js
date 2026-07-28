@@ -521,6 +521,13 @@ class ChunkManager {
 
     // Process queue in batches
     await this._processGenQueue();
+
+    // Immediately flush all generated chunks to disk — don't wait for the
+    // 5s flush timer. This ensures the initial world data is persisted
+    // quickly, reducing perceived save time on mobile / low-power devices.
+    if (this._flushQueue.size > 0) {
+      await this.flushDirty();
+    }
   }
 
   /** Add chunk to generation queue. Returns Promise when done. */
@@ -601,7 +608,21 @@ class ChunkManager {
     this._flushQueue.add(key);
   }
 
-  /** Flush all dirty chunks to IndexedDB with writeback verification. */
+  /**
+   * Flush all dirty chunks to IndexedDB with batched operations.
+   *
+   * PERFORMANCE: The old approach saved each dirty chunk sequentially with its
+   * own IndexedDB transaction, readback verification, and manifest update —
+   * totalling ~3N transactions for N dirty chunks. On mobile / low-power
+   * devices with IndexedDB, this could take minutes to flush a full world.
+   *
+   * This batched version:
+   *   1. Encodes all chunks upfront (CPU work, no I/O waits between)
+   *   2. Writes ALL chunks in a SINGLE IndexedDB transaction
+   *   3. Updates the manifest in a SINGLE write (not N writes)
+   *   4. Skips per-chunk readback verification — checksum is embedded in
+   *      the binary header and will be verified when the chunk is loaded.
+   */
   async flushDirty() {
     if (this._disposed || this._flushQueue.size === 0 || this._flushing) return;
     this._flushing = true;
@@ -609,42 +630,114 @@ class ChunkManager {
     const keysToFlush = [...this._flushQueue];
     this._flushQueue.clear();
 
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 1: Encode all dirty chunks (CPU work, parallel-friendly)
+    // ═══════════════════════════════════════════════════════════════
+    const entries = [];
     for (const key of keysToFlush) {
       const chunk = this.memoryCache.get(key);
       if (!chunk || !chunk.dirty) continue;
 
       try {
-        // Encode full in-memory blocks array to binary
         const binaryData = ChunkBinaryCodec.encode(chunk);
-        const expectedChecksum = ChunkBinaryCodec.computeChecksum(binaryData);
-
-        // Save to IndexedDB
-        await this.saveChunk(key, binaryData);
-
-        // Immediate readback + checksum verification
-        const readBack = await this.loadChunk(key);
-        if (!readBack) {
-          // Readback failed — keep dirty for retry next cycle
-          continue;
-        }
-
-        if (ChunkBinaryCodec.computeChecksum(readBack) !== expectedChecksum) {
-          console.warn(`[ChunkManager] Flush verify failed for ${key} — will retry`);
-          this._flushQueue.add(key); // Re-queue for retry
-          continue;
-        }
-
-        // Success: writeback verified → add/update manifest with checksum
-        await this.addVerifiedChunk(key, expectedChecksum);
-        chunk.dirty = false;  // Clear dirty AFTER successful flush+verify
-        this.stats.chunksFlushed++;
-
+        // Read checksum from encoded buffer instead of recomputing —
+        // ChunkBinaryCodec.encode() embeds the FNV-1a hash at offset 16
+        const checksum = new DataView(binaryData).getUint32(16, true);
+        entries.push({ key, binaryData, checksum, chunk });
       } catch (err) {
-        console.warn(`[ChunkManager] Flush error for ${key}:`, err.message);
-        // Re-queue for retry on next cycle
+        console.warn(`[ChunkManager] Encode error for ${key}:`, err.message);
         const stillDirty = this.memoryCache.get(key);
         if (stillDirty && stillDirty.dirty) this._flushQueue.add(key);
       }
+    }
+
+    if (entries.length === 0) {
+      this._flushing = false;
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 2: Write chunks in batched IndexedDB transactions
+    // ═══════════════════════════════════════════════════════════════
+    // Split into batches of 500 to avoid IndexedDB transaction size limits.
+    // Most browsers handle thousands of puts per transaction, but keeping
+    // batches modest avoids edge cases on mobile / low-memory devices.
+    const BATCH_SIZE = 500;
+    await this._openDB();
+
+    for (let batchStart = 0; batchStart < entries.length; batchStart += BATCH_SIZE) {
+      const batch = entries.slice(batchStart, batchStart + BATCH_SIZE);
+
+      try {
+        const tx = this._db.transaction([STORE_CHUNKS], 'readwrite');
+        const store = tx.objectStore(STORE_CHUNKS);
+
+        for (const { key, binaryData } of batch) {
+          store.put({ chunkKey: key, worldName: this.worldName, data: binaryData, savedAt: Date.now() });
+        }
+
+        await new Promise((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error('Batch write transaction failed'));
+          tx.onabort = () => reject(new Error('Batch write transaction aborted'));
+        });
+      } catch (err) {
+        console.warn(`[ChunkManager] Batch flush write failed (batch ${batchStart / BATCH_SIZE}):`, err.message);
+        // Re-queue all entries in this batch whose chunks are still dirty
+        for (const { key, chunk } of batch) {
+          if (chunk.dirty) this._flushQueue.add(key);
+        }
+        continue; // Try remaining batches
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 3: Update manifest in a SINGLE write
+    // ═══════════════════════════════════════════════════════════════
+    try {
+      let manifest = this._manifest || await this.loadManifest();
+      if (!manifest) {
+        manifest = {
+          worldName: this.worldName,
+          seed: this.worldSeed,
+          createdAt: Date.now(),
+          lastPlayed: Date.now(),
+          playerCount: 1,
+          spawnPoint: { x: 0, y: 68, z: 0 },
+          generatedChunks: []
+        };
+      }
+      if (!manifest.generatedChunks) manifest.generatedChunks = [];
+
+      // Normalize legacy entries (plain strings → objects with checksum)
+      const normalized = manifest.generatedChunks.map(entry =>
+        typeof entry === 'string' ? { key: entry, checksum: null } : entry
+      );
+
+      for (const { key, checksum } of entries) {
+        const existingIdx = normalized.findIndex(e => e.key === key);
+        if (existingIdx >= 0) {
+          normalized[existingIdx] = { key, checksum };
+        } else {
+          normalized.push({ key, checksum });
+        }
+      }
+
+      manifest.generatedChunks = normalized;
+      manifest.lastPlayed = Date.now();
+      await this.saveManifest(manifest);
+      this._manifest = manifest;
+    } catch (err) {
+      console.warn(`[ChunkManager] Manifest batch update failed:`, err.message);
+      // Chunks are saved even if manifest update fails — not critical
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 4: Mark all chunks clean
+    // ═══════════════════════════════════════════════════════════════
+    for (const { key, chunk } of entries) {
+      chunk.dirty = false;
+      this.stats.chunksFlushed++;
     }
 
     this._flushing = false;
@@ -654,20 +747,24 @@ class ChunkManager {
   _setupGracefulShutdown() {
     const self = this;
 
+    // Use sendBeacon-style synchronous IndexedDB flush for beforeunload.
+    // This is best-effort — we batch as much as possible into one transaction.
     window.addEventListener('beforeunload', () => {
       if (self._flushQueue.size === 0) return;
-      // Synchronous IndexedDB writes during beforeunload
       try {
         const db = self._db;
         if (!db) return;
+        const keys = [...self._flushQueue];
+        self._flushQueue.clear();
         const tx = db.transaction([STORE_CHUNKS], 'readwrite');
         const store = tx.objectStore(STORE_CHUNKS);
-        for (const key of self._flushQueue) {
+        for (const key of keys) {
           const chunk = self.memoryCache.get(key);
           if (!chunk || !chunk.dirty) continue;
           try {
             const data = ChunkBinaryCodec.encode(chunk);
             store.put({ chunkKey: key, worldName: self.worldName, data, savedAt: Date.now() });
+            chunk.dirty = false;
           } catch (_) {}
         }
       } catch (_) {}
@@ -713,32 +810,21 @@ class ChunkManager {
     const pcz = Math.floor(playerZ / CHUNK_D);
     const radius = this.regionRadius;
 
-    // console.log('[ChunkManager] checkRegion:', pcx, pcz, 'radius:', radius);
-
-    // Track which chunks should be in memory
-    const shouldBeLoaded = new Set();
-    const pendingPromises = [];
-
+    // Collect keys that should be in memory but aren't yet
+    const missing = [];
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dz = -radius; dz <= radius; dz++) {
         const cx = pcx + dx;
         const cz = pcz + dz;
         const key = ChunkManager.key(cx, cz);
-
-        shouldBeLoaded.add(key);
-
-        // Already in memory? Skip.
-        if (this.memoryCache.has(key)) continue;
-
-        pendingPromises.push(this._ensureChunkInMemory(cx, cz).catch(e => {
-          console.warn('[ChunkManager] Region load failed for', key, ':', e.message);
-        }));
+        if (!this.memoryCache.has(key)) {
+          missing.push({ key, cx, cz });
+        }
       }
     }
 
-    // Wait for all async loads/generations to start (they may still be in-flight)
-    await Promise.all(pendingPromises);
-    // console.log(`[ChunkManager] checkRegion done — memoryCache: ${this.memoryCache.size}, queue: ${this._genQueue.length}`);
+    // Batch-load all missing chunks — single manifest check + single IDB transaction
+    await this._batchEnsureChunks(missing);
 
     // Unload chunks far outside region to bound memory
     const unloadRadius = radius + 2;
@@ -757,46 +843,123 @@ class ChunkManager {
     this.lastPlayerZ = playerZ;
   }
 
-  /** Ensure a single chunk is loaded into memory cache. */
+  /**
+   * Load multiple chunks from IndexedDB in a single transaction.
+   * Returns Map<chunkKey, ArrayBuffer|null>.
+   */
+  async _batchLoadChunks(keys) {
+    if (keys.length === 0) return new Map();
+    await this._openDB();
+
+    const results = new Map();
+    const tx = this._db.transaction([STORE_CHUNKS], 'readonly');
+    const store = tx.objectStore(STORE_CHUNKS);
+
+    // Queue all gets, then wait for the transaction to complete.
+    // Each callback sets its slot in the results map.
+    await new Promise((resolve, reject) => {
+      for (const key of keys) {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          results.set(key, request.result ? request.result.data : null);
+        };
+        request.onerror = () => {
+          results.set(key, null);
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('Batch load transaction failed'));
+      tx.onabort = () => reject(new Error('Batch load transaction aborted'));
+    });
+
+    return results;
+  }
+
+  /**
+   * Batch-ensure multiple chunks are in memory cache.
+   *
+   * PERFORMANCE: Old approach called _ensureChunkInMemory per chunk, which
+   * did a manifest check + data load in separate IndexedDB transactions.
+   * This batch version:
+   *   1. Caches the manifest once (in-memory Set for O(1) lookups)
+   *   2. Separates keys into "exists in storage" vs "needs generation"
+   *   3. Loads all existing chunks in a SINGLE IndexedDB transaction
+   *   4. Queues all remaining chunks for background generation
+   */
+  async _batchEnsureChunks(entries) {
+    if (this._disposed || entries.length === 0) return;
+
+    // Filter to only keys not already in memory
+    const missing = entries.filter(({ key }) => !this.memoryCache.has(key));
+    if (missing.length === 0) return;
+
+    // Cache manifest for O(1) lookup
+    const manifest = this._manifest || await this.loadManifest();
+    this._manifest = manifest;
+
+    // Build a Set of known chunk keys from manifest
+    const manifestKeys = new Set();
+    if (manifest && manifest.generatedChunks) {
+      for (const entry of manifest.generatedChunks) {
+        manifestKeys.add(typeof entry === 'string' ? entry : entry.key);
+      }
+    }
+
+    // Separate: those in storage (load from DB) vs those needing generation
+    const toLoad = [];
+    const toGenerate = [];
+
+    for (const { key, cx, cz } of missing) {
+      if (manifestKeys.has(key)) {
+        toLoad.push({ key, cx, cz });
+      } else {
+        toGenerate.push({ cx, cz });
+      }
+    }
+
+    // Batch-load existing chunks from IndexedDB (single transaction)
+    if (toLoad.length > 0) {
+      const loadedData = await this._batchLoadChunks(toLoad.map(e => e.key));
+      for (const { key, cx, cz } of toLoad) {
+        const binaryData = loadedData.get(key);
+        if (binaryData) {
+          try {
+            const chunk = ChunkBinaryCodec.decode(binaryData);
+            chunk.dirty = false;
+            chunk.humidityMap = computeHumidityMap(this.worldSeed, cx, cz, this.genParams);
+            this.memoryCache.set(key, chunk);
+            this.stats.chunksLoadedFromDisk++;
+          } catch (e) {
+            console.warn('[ChunkManager] Batch decode failed for', key, ':', e.message);
+            try { await this.removeChunk(key); } catch (_) {}
+            toGenerate.push({ cx, cz });
+          }
+        } else {
+          // Manifest says it exists but data is missing — clean up
+          try { await this.removeChunk(key); } catch (_) {}
+          toGenerate.push({ cx, cz });
+        }
+      }
+    }
+
+    // Queue generation for the rest
+    for (const { cx, cz } of toGenerate) {
+      this._queueGeneration(cx, cz);
+    }
+  }
+
+  /**
+   * Ensure a single chunk is loaded into memory cache.
+   * Kept for backward compatibility (chunkStreamer calls this).
+   * Prefer _batchEnsureChunks when loading multiple chunks.
+   */
   async _ensureChunkInMemory(cx, cz) {
     if (this._disposed) return;
     const key = ChunkManager.key(cx, cz);
     if (this.memoryCache.has(key)) return;
 
-    try {
-      // Check manifest: does this chunk exist in persistent storage?
-      const existsInManifest = await this.isChunkGenerated(key);
-
-      if (!existsInManifest) {
-        // Queue for worker generation → returns raw blocks → creates Chunk → marks dirty
-        this._queueGeneration(cx, cz);
-        return;
-      }
-
-      // Load from IndexedDB into memory cache
-      const binaryData = await this.loadChunk(key);
-      if (!binaryData) {
-        // Manifest says it exists but data is missing — clean up stale entry
-        try { await this.removeChunk(key); } catch (_) {}
-        // Re-generate instead
-        this._queueGeneration(cx, cz);
-        return;
-      }
-
-      const chunk = ChunkBinaryCodec.decode(binaryData);
-      // Chunks loaded from disk are by definition clean (persisted) — never carry dirty flag over reloads
-      chunk.dirty = false;
-      // Recompute humidityMap from biome parameters (deterministic from seed + chunk coords)
-      chunk.humidityMap = computeHumidityMap(this.worldSeed, chunk.cx, chunk.cz, this.genParams);
-      this.memoryCache.set(key, chunk);
-      this.stats.chunksLoadedFromDisk++;
-
-    } catch (e) {
-      console.warn('[ChunkManager] Load failed for', key, ':', e.message);
-      // Decode failed (corruption?) → remove and regenerate
-      try { await this.removeChunk(key); } catch (_) {}
-      this._queueGeneration(cx, cz);
-    }
+    // Delegate to the batch implementation for consistency
+    await this._batchEnsureChunks([{ key, cx, cz }]);
   }
 
   // ============================================================
@@ -897,38 +1060,26 @@ class ChunkManager {
     const radius = this._voxelRegionRadius;
     const unloadRadius = radius + 2;
 
-    // Build set of keys that should be in memory for the voxel region
-    const shouldBeLoaded = new Set();
-    const pendingPromises = [];
-
+    // Collect keys that should be in memory but aren't yet
+    const missing = [];
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dz = -radius; dz <= radius; dz++) {
         const cx = pcx + dx;
         const cz = pcz + dz;
         const key = ChunkManager.key(cx, cz);
-
-        shouldBeLoaded.add(key);
-
-        // Already in memory? Skip.
-        if (this.memoryCache.has(key)) continue;
-
-        pendingPromises.push(this._ensureChunkInMemory(cx, cz).catch(e => {
-          console.warn('[ChunkManager] Voxel load failed for', key, ':', e.message);
-        }));
+        if (!this.memoryCache.has(key)) {
+          missing.push({ key, cx, cz });
+        }
       }
     }
 
-    // Log when new chunks are being queued
-    if (pendingPromises.length > 0) {
-      // console.log(`[Cuubz] _updateVoxelRegion: queuing ${pendingPromises.length} new voxels around (${pcx},${pcz}) — memoryCache: ${this.memoryCache.size}, radius: ${radius}`);
+    // Batch-load all missing chunks — single manifest check + single IDB transaction
+    // Fire off asynchronously without blocking the frame loop
+    if (missing.length > 0) {
+      this._batchEnsureChunks(missing).catch(e => {
+        console.warn('[ChunkManager] Voxel batch load error:', e.message);
+      });
     }
-
-    // Fire off async loads/generations without blocking the frame loop
-    Promise.all(pendingPromises).then(() => {
-      if (!this._disposed && pendingPromises.length > 0) {
-        // console.log(`[ChunkManager] Voxel region updated — memoryCache: ${this.memoryCache.size}`);
-      }
-    });
 
     // Unload chunks far outside voxel region to bound memory
     let unloaded = 0;
