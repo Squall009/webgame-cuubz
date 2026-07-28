@@ -2573,16 +2573,8 @@
 
           // ─── Initialize First-Person Hand ──────────────
           let firstPersonHand = null;
-          console.log('[Cuubz] FirstPersonHand class available:', typeof FirstPersonHand !== 'undefined');
-          console.log('[Cuubz] renderer.camera available:', !!renderer.camera);
-          console.log('[Cuubz] itemAtlas available:', !!itemAtlas);
           if (typeof FirstPersonHand !== 'undefined') {
-            try {
-              firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas });
-              console.log('[Cuubz] First-person hand initialized, group:', firstPersonHand.group);
-            } catch(e) {
-              console.error('[Cuubz] Failed to create FirstPersonHand:', e);
-            }
+            firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas });
           }
 
           // ─── Initialize Multiplayer Player Sync ─────────
@@ -2883,7 +2875,6 @@
 
           // Wire break-started callback to trigger first-person hand swing
           blockInteraction.onBreakStarted = () => {
-            console.log('[Cuubz] onBreakStarted fired, firstPersonHand:', !!firstPersonHand);
             if (firstPersonHand) firstPersonHand.swing();
           };
 
@@ -3096,7 +3087,6 @@
             // Update first-person hand to show the selected item
             if (firstPersonHand) {
               const item = inventory.getSelectedItem();
-              console.log('[Cuubz] Selection changed, item:', item);
               firstPersonHand.setItem(item ? item.typeId : null);
             }
           };

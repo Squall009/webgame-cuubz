@@ -19,32 +19,30 @@ class FirstPersonHand {
    * @param {ItemTextureAtlas} options.itemAtlas - Atlas for item textures
    */
   constructor(camera, options = {}) {
-    console.log('[FirstPersonHand] Constructor called', { camera: !!camera, itemAtlas: !!options.itemAtlas });
     this.camera = camera;
     this.itemAtlas = options.itemAtlas || null;
 
     // Arm group — pivots from shoulder position
     this.group = new THREE.Group();
     camera.add(this.group);
-    console.log('[FirstPersonHand] Group added to camera, camera children:', camera.children.length);
 
     // Skin color (neutral medium tone, adjustable later for character creator)
     const skinColor = 0xC68642;
 
     // ─── Forearm ──────────────────────────────────────────
-    // Thin box extending from shoulder toward bottom-right of view
-    const forearmGeo = new THREE.BoxGeometry(0.04, 0.35, 0.04);
+    // Thick box extending from shoulder toward bottom-right of view
+    const forearmGeo = new THREE.BoxGeometry(0.08, 0.7, 0.08);
     const forearmMat = new THREE.MeshLambertMaterial({ color: skinColor });
     this.forearm = new THREE.Mesh(forearmGeo, forearmMat);
-    this.forearm.position.set(0, -0.125, 0);
+    this.forearm.position.set(0, -0.25, 0);
     this.group.add(this.forearm);
 
     // ─── Hand ─────────────────────────────────────────────
-    // Slightly wider box at the end of the forearm
-    const handGeo = new THREE.BoxGeometry(0.055, 0.08, 0.045);
+    // Wider box at the end of the forearm
+    const handGeo = new THREE.BoxGeometry(0.12, 0.16, 0.1);
     const handMat = new THREE.MeshLambertMaterial({ color: skinColor });
     this.hand = new THREE.Mesh(handGeo, handMat);
-    this.hand.position.set(0, -0.32, 0);
+    this.hand.position.set(0, -0.6, 0);
     this.group.add(this.hand);
 
     // ─── Item Plane ───────────────────────────────────────
@@ -59,7 +57,7 @@ class FirstPersonHand {
       this.itemTexture.minFilter = THREE.NearestFilter;
       this.itemTexture.generateMipmaps = false;
 
-      const itemGeo = new THREE.PlaneGeometry(0.22, 0.22);
+      const itemGeo = new THREE.PlaneGeometry(0.5, 0.5);
       const itemMat = new THREE.MeshBasicMaterial({
         map: this.itemTexture,
         transparent: true,
@@ -67,20 +65,21 @@ class FirstPersonHand {
         depthTest: true,
       });
       this.itemMesh = new THREE.Mesh(itemGeo, itemMat);
-      this.itemMesh.position.set(0, -0.38, -0.06);
+      this.itemMesh.position.set(0, -0.7, -0.12);
       this.itemMesh.visible = false;
       this.group.add(this.itemMesh);
     }
 
     // ─── Position and rotate the entire arm group ─────────
     // Move to bottom-right of viewport, angled naturally
-    this.group.position.set(0.32, -0.28, -0.55);
-    this.group.rotation.set(0.15, -0.15, -0.3);
+    // z=-0.3 keeps it just in front of near clip plane
+    this.group.position.set(0.45, -0.35, -0.3);
+    this.group.rotation.set(0.2, -0.2, -0.35);
 
     // ─── Animation State ──────────────────────────────────
     this.swingProgress = 0;    // 0-1-0 swing cycle
     this.swingActive = false;
-    this.swingDuration = 0.3;  // total swing time (s)
+    this.swingDuration = 0.35;  // total swing time (s)
     this.idlePhase = Math.random() * Math.PI * 2;
 
     // Rest rotation for the arm group
@@ -93,7 +92,6 @@ class FirstPersonHand {
    * @param {string|number|null} itemKey - Item type ID (string name or block number)
    */
   setItem(itemKey) {
-    console.log('[FirstPersonHand] setItem called with:', itemKey);
     if (itemKey === this.currentItemKey) return;
     this.currentItemKey = itemKey;
 
@@ -140,7 +138,6 @@ class FirstPersonHand {
    * Trigger a swing animation.
    */
   swing() {
-    console.log('[FirstPersonHand] swing triggered');
     this.swingProgress = 0;
     this.swingActive = true;
   }
@@ -150,15 +147,12 @@ class FirstPersonHand {
    * @param {number} delta - Time delta in seconds
    */
   update(delta) {
+    // Clamp delta to avoid huge jumps when tab is backgrounded
+    delta = Math.min(delta, 0.05);
+
     // ─── Idle bob ─────────────────────────────────────────
     this.idlePhase += delta * 1.5;
-    const bobY = Math.sin(this.idlePhase) * 0.003;
-
-    // Debug: log position periodically
-    if (Math.floor(this.idlePhase) !== this._lastDebug) {
-      this._lastDebug = Math.floor(this.idlePhase);
-      console.log('[FirstPersonHand] update', { visible: this.group.visible, pos: this.group.position.toArray(), swingActive: this.swingActive });
-    }
+    const bobY = Math.sin(this.idlePhase) * 0.005;
 
     // ─── Swing animation ──────────────────────────────────
     if (this.swingActive) {
@@ -172,8 +166,8 @@ class FirstPersonHand {
       } else {
         // Smooth swing curve: forward then return
         const t = this.swingProgress;
-        const swingAngle = Math.sin(t * Math.PI) * 0.5; // Max 0.5 rad forward
-        const swingForward = Math.sin(t * Math.PI) * 0.1;
+        const swingAngle = Math.sin(t * Math.PI) * 0.6; // Max 0.6 rad forward
+        const swingForward = Math.sin(t * Math.PI) * 0.15;
 
         this.group.rotation.x = this.restRotation.x - swingAngle + bobY;
         this.group.rotation.z = this.restRotation.z - swingAngle * 0.3;
