@@ -2789,7 +2789,8 @@
                         }
                       }
                     }
-                    neighborEdges[ec.dir] = ChunkCompressor.compress(strip).data;
+                    // Convert to regular Array for JSON serialization (WebSocket uses JSON.stringify)
+                    neighborEdges[ec.dir] = Array.from(ChunkCompressor.compress(strip).data);
                   }
                 }
 
@@ -2820,16 +2821,18 @@
               try {
                 if (!data || data.chunkX === undefined || data.chunkZ === undefined) return;
                 if (!data.data) return;
+                // Must be a valid Array (JSON-deserialized from WebSocket)
+                if (!Array.isArray(data.data)) return;
 
                 const cx = data.chunkX;
                 const cz = data.chunkZ;
                 const key = ChunkManager.key(cx, cz);
 
-                // Decompress if needed — data may be Uint8Array or Array
-                const rawData = data.data instanceof Uint8Array ? data.data : new Uint8Array(data.data);
+                // Decompress if needed — data arrives as a regular Array (JSON serialized via WebSocket)
+                const rawArr = data.data;
                 const blockData = data.compressed
-                  ? ChunkCompressor.decompress({ method: 'rle', data: rawData, originalLength: 16 * 16 * 256 })
-                  : rawData;
+                  ? ChunkCompressor.decompress({ method: 'rle', data: new Uint8Array(rawArr), originalLength: 16 * 16 * 256 })
+                  : new Uint8Array(rawArr);
 
                 if (!blockData || blockData.length === 0) return;
 
@@ -2853,16 +2856,17 @@
 
                   // Store virtual neighbor edge strips (if provided by host)
                   // These prevent false water side faces at chunk boundaries
+                  // Edge data arrives as regular Arrays (JSON serialized)
                   if (data.neighborEdges) {
                     const edgeDirs = ['positiveX', 'negativeX', 'positiveZ', 'negativeZ'];
                     for (const dir of edgeDirs) {
                       if (data.neighborEdges[dir]) {
-                        const edgeRaw = data.neighborEdges[dir] instanceof Uint8Array
+                        const edgeArr = Array.isArray(data.neighborEdges[dir])
                           ? data.neighborEdges[dir]
-                          : new Uint8Array(data.neighborEdges[dir]);
+                          : Array.from(data.neighborEdges[dir]);
                         const decompressed = ChunkCompressor.decompress({
                           method: 'rle',
-                          data: edgeRaw,
+                          data: new Uint8Array(edgeArr),
                           originalLength: 16 * 256
                         });
                         newChunk.neighborEdges[dir] = decompressed;
@@ -4176,6 +4180,32 @@
                 game.chunkManager.updateRenderChunks(player.position.x, player.position.z);
               }
 
+              // ─── Player Attack Mobs ─────────────────────
+              // Check left-click against mob AABBs, damage nearest mob hit
+              if (mobIntegration && mouse && mouse.justClickedLeft && renderer.camera) {
+                try {
+                  const mobManager = mobIntegration.getManager();
+                  if (mobManager) {
+                    const origin = renderer.camera.position;
+                    const direction = new THREE.Vector3();
+                    renderer.camera.getWorldDirection(direction);
+                    const maxDist = 7;
+                    const hit = mobManager.raycastMobs(origin, direction, maxDist);
+                    if (hit) {
+                      const damage = inventory.getAttackDamage();
+                      hit.mob.takeDamage(damage, 'player_attack');
+                      // Apply knockback away from player
+                      const dx = hit.mob.position.x - player.position.x;
+                      const dz = hit.mob.position.z - player.position.z;
+                      const dist = Math.sqrt(dx*dx + dz*dz) || 1;
+                      hit.mob.knockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
+                    }
+                  }
+                } catch(e) {
+                  if (game.frameCount < 10) console.warn('[Cuubz] Mob attack error:', e.message);
+                }
+              }
+
               // ─── Update Mob System ──────────────────────
               if (mobIntegration) {
                 try {
@@ -4392,9 +4422,11 @@
       _log('[Cuubz] Exited to main menu');
     };
 
+    const exitBtn = document.getElementById('btn-exit-menu');
+
     document.addEventListener('keydown', onPause);
     resumeBtn.addEventListener('click', resumeGame);
-    exitBtn.addEventListener('click', onExit);
+    if (exitBtn) exitBtn.addEventListener('click', onExit);
 
     // Settings: Region Check Interval (was Chunk Tick Interval)
     if (tickSlider && tickVal) {
@@ -4487,7 +4519,7 @@
     return function cleanup() {
       document.removeEventListener('keydown', onPause);
       resumeBtn.removeEventListener('click', resumeGame);
-      exitBtn.removeEventListener('click', onExit);
+      if (exitBtn) exitBtn.removeEventListener('click', onExit);
     };
   }
 

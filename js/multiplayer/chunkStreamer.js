@@ -172,11 +172,11 @@ class ChunkStreamEntry {
     };
 
     if (this.compressedData) {
-      // Send as Uint8Array directly — structured clone handles it
-      payload.data = this.compressedData;
+      // Convert to regular Array for JSON serialization (WebSocket uses JSON.stringify)
+      payload.data = Array.from(this.compressedData);
       payload.compressed = true;
     } else if (this.data) {
-      payload.data = this.data;
+      payload.data = this.data instanceof Uint8Array ? Array.from(this.data) : this.data;
       payload.compressed = false;
     }
 
