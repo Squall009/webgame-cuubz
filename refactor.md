@@ -602,7 +602,21 @@ The second shape matters because all three PR 3 collisions (`getBossDefinition`,
 - **The four relay tests call `http.listen()` on a fixed port with no `'error'` handler** — `test_serverIntegration` 18765, `test_multiplayerSync` 18770, `test_maxPlayerAndDisconnect` 18780, `test_sessionDiscovery` 18790. All four are free on a fresh runner and the tests run sequentially in separate processes, so this is fine in practice; but if one is ever occupied, the test dies on an unhandled `EADDRINUSE` and CI goes red with a misleading message instead of a clear one. Worth an `on('error')` for whoever next touches those files.
 - **`on: push` with no branch filter plus `on: pull_request` double-runs a same-repo PR branch.** Kept literal to the plan ("on every push and PR"); `push: branches: [main]` is the one-line fix if the duplicate runs become annoying.
 
-**Not yet proven:** the workflow has never executed on GitHub. `actionlint 1.7.7` validates it clean (exit 0 — schema, expression syntax, and `shellcheck` over the `run:` blocks), and the fresh-clone simulation covers every step except the kernel, so **"`check-globals` fails when a duplicate is deliberately introduced" is proven and "CI green on a PR" is not.** Nothing has been pushed — `main` is 6 commits ahead of `origin` and the `pre-refactor-baseline` tag is still local. The **Phase 0 gate checkbox "CI runs on push" therefore stays unchecked** until the first push lands a green run.
+**Both halves of the accept criterion are now proven.** `actionlint 1.7.7` validated the workflow clean before it ever ran (schema, expression syntax, and `shellcheck` over the `run:` blocks). PR 1–5 were then pushed as branch **`refactor/phase-0`**, and the `push` trigger produced a **green run in 22 s** — [run 30494532166](https://github.com/Squall009/webgame-cuubz/actions/runs/30494532166). The portability audit held on the real runner:
+
+```
+Results: 50/50 passed, 0 failed, 4 skipped
+⏭️  SKIP — test_mobileViewports / test_pageLoad / test_responsiveHUD / test_textureAssets
+Scanned 65 script-tagged files from index.html
+Found 368 unique top-level symbols
+shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+```
+
+The four skips are the load-bearing detail: `run_tests.sh`'s `grep -E` + `sed -E` pass over the first column of the `QUARANTINE.md` table selected exactly the right four files under GNU sed on `ubuntu-latest`, which was the specific doubt about running a bash test runner authored in Windows Git Bash. `npm ci` installed 40 packages in 2 s with no `EBADENGINE`, confirming `node-version: '22'` resolved above `jsdom`'s 22.22.2 floor.
+
+**The first real run found one defect in the workflow itself: `actions/checkout@v4` and `actions/setup-node@v4` target the deprecated Node 20 action runtime.** The runner forces them onto Node 24 and emits a warning annotation on every run; the shim is scheduled to go away, at which point this becomes a hard failure. Both are now pinned to the current latest major — **`checkout@v7`, `setup-node@v7`**. Every documented breaking change across v5/v6/v7 was checked against this workflow's actual usage and none applies: setup-node v5's automatic caching keys off a `packageManager` field that `package.json` does not have (and `cache: npm` is the explicit form), v6 only narrowed that same auto-detection, and checkout v7's fork-PR block only affects `pull_request_target` / `workflow_run`, neither of which is used. v5+ requires runner ≥ v2.327.1, which is noted in the workflow for the self-hosted case. Re-verified green after the bump.
+
+**Still not pushed:** `main` itself (still at the PR 1 baseline `27959d3` on the remote — the six commits live only on `refactor/phase-0`) and the `pre-refactor-baseline` tag, which remains local. The **Phase 0 gate checkbox "CI runs on push" is satisfied in substance**; the gate list is left untouched because four of its seven items are still open and mixed ticking would obscure which.
 
 ### PR 6 — Write down the invariants
 Add to this file (or `DEPLOY.md`):

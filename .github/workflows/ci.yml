@@ -46,13 +46,23 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      # Both actions are pinned to the current latest major. @v4 targets the
+      # deprecated Node 20 action runtime and the runner forces it onto Node 24
+      # with a warning annotation on every run; that shim goes away eventually.
+      # v5+ requires runner >= v2.327.1 — fine on GitHub-hosted, worth knowing if
+      # this ever runs on a self-hosted runner.
+      #
       # Full checkout. Do NOT sparse-checkout textures/ to save the 118 MB:
       # test_manifestGenerator runs scripts/generate-manifest.js, which
       # readdirSync()s textures/blocks/ and cross-checks it against the block
       # registry. That is the test that found the duplicate block id in PR 4.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      # setup-node v5 added automatic caching driven by a `packageManager` field
+      # in package.json, and v6 narrowed it to npm. package.json has no such
+      # field and `cache: npm` below is the explicit form, so none of that
+      # applies here either way.
+      - uses: actions/setup-node@v7
         with:
           # Resolves to the latest 22.x. jsdom@30 requires >=22.22.2, so do not pin
           # this to an exact older 22.x patch without checking that floor.
