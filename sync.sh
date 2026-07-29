@@ -22,12 +22,16 @@ fi
 echo "Starting sync to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}..."
 
 # Create a tar archive of the project (excluding node_modules and .git)
+# NOTE: `--exclude='dist'` is a landmine once a build step lands — see DEPLOY.md §4.3.
+#       Everything not excluded here is extracted into a PUBLIC web root and chmod 644'd,
+#       so `.env` must stay excluded: shipping it would publish credentials. DEPLOY.md §4.2.
 ARCHIVE="/tmp/${PROJECT_NAME}-sync.tar.gz"
 cd "$SOURCE_DIR"
 tar czf "$ARCHIVE" \
     --exclude='node_modules' \
     --exclude='.git' \
     --exclude='dist' \
+    --exclude='.env' \
     .
 
 # Upload and extract on remote, then fix permissions

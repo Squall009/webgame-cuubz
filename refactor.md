@@ -92,6 +92,8 @@ Problems:
 
 → The first `./sync.sh` after Phase 1 would ship **a site with no JavaScript at all**. PR 10 must land a build-then-sync `sync.sh` in the same PR as the Vite switch, and confirm the systemd unit's `WorkingDirectory` still resolves after the layout change.
 
+> **PR 6 consolidated this section into [`DEPLOY.md`](./DEPLOY.md) — read that before deploying.** It documents the full deploy path line by line and adds nine defects this section does not mention, of which the three that matter most are: **`sync.sh` never restarts the relay** (no `systemctl` anywhere in the repo, so `server/` changes are silently inert), **`tar xzf` never deletes** (the stale `js/` tree stays live next to `src/` after PR 9), and **there is no rollback mechanism at all** — extraction is in-place with no backup retained. PR 10 owns all three. `DEPLOY.md` §8 is the defect table with owners.
+
 ### 1.5 Player data must survive byte-for-byte.
 
 Hard invariants — never change these strings or the schema behind them:
@@ -104,6 +106,8 @@ Hard invariants — never change these strings or the schema behind them:
 | localStorage | `js/main.js:1272,1284,1593,1768,1785` | `'cuubz_last_session'` |
 
 → **Manual save/load test at every single checkpoint:** create a world, place blocks, quit to menu, reload the page, re-enter, confirm blocks persist. Automate it in PR 32 if possible; until then it's a manual gate.
+
+> **PR 6 found this table incomplete and superseded it — the authoritative list is now [`DEPLOY.md` §2](./DEPLOY.md#2-do-not-change-player-data-invariants).** The four rows above are real, but they miss: the three `js/world/persistence.js` localStorage keys (**`cuubz:characters`** — every character the player has ever made — plus `cuubz:slotMap` and `cuubz:worldSlot:{N}:conf`), both IndexedDB object stores and their key paths, and the entire chunk binary format (magic `"CUUB"`, version `3`, 20-byte header, FNV-1a checksum constants). It also misses the two hazards that make the table load-bearing: **bumping `DB_VERSION` destroys every player's worlds** (`onupgradeneeded` deletes all object stores before recreating them), and **chunk primary keys are not world-scoped, so the three world slots overwrite each other's terrain** — a live bug. The executable 14-step checklist is [`DEPLOY.md` §7](./DEPLOY.md#7-manual-saveload-checklist); it includes the save-timing rules (chunks flush on a 5 s timer, player state every 30 s / on Escape) without which the naive version of this test produces false failures.
 
 ### 1.6 `renderLoop` cannot be extracted as written.
 
@@ -379,8 +383,9 @@ cuubz/
 ├── vite.config.js
 ├── eslint.config.js           # FLAT config — ESLint 9+ (NOT .eslintrc.cjs)
 ├── .prettierrc
-├── sync.sh                    # REWRITTEN: build, then ship dist/
-└── cuubz-relay.service        # verify WorkingDirectory after layout change
+├── sync.sh                    # REWRITTEN: build, then ship dist/ (+ rollback — DEPLOY.md §6.4)
+├── cuubz-relay.service        # verify WorkingDirectory after layout change
+└── DEPLOY.md                  # deploy + rollback + data invariants (PR 6) — update in PR 10
 ```
 
 ### 4.2 Key Patterns
@@ -618,12 +623,76 @@ The four skips are the load-bearing detail: `run_tests.sh`'s `grep -E` + `sed -E
 
 **Still not pushed:** `main` itself (still at the PR 1 baseline `27959d3` on the remote — the six commits live only on `refactor/phase-0`) and the `pre-refactor-baseline` tag, which remains local. The **Phase 0 gate checkbox "CI runs on push" is satisfied in substance**; the gate list is left untouched because four of its seven items are still open and mixed ticking would obscure which.
 
-### PR 6 — Write down the invariants
+### PR 6 — Write down the invariants ✅ DONE (one accept criterion deliberately unmet — see below)
 Add to this file (or `DEPLOY.md`):
 - The [§1.5](#15-player-data-must-survive-byte-for-byte) data-compatibility table, marked **do not change**.
 - The full deployment plan: build → what gets tarred → what `sync.sh` excludes → how `cuubz-relay.service` is restarted → how to roll back a bad deploy.
 - The manual save/load checklist run at every checkpoint.
 - **Accept:** a fresh implementer can deploy and roll back from the doc alone.
+
+**Outcome (2026-07-29):**
+
+**Decision: standalone [`DEPLOY.md`](./DEPLOY.md), with §1.4 and §1.5 pointing at it.** The plan offered "this file (or `DEPLOY.md`)". Three reasons for the split, in order of weight:
+
+1. **The accept criterion says "from the doc alone."** A deploy runbook nested inside an 84 KB refactor plan is not a standalone document — reaching it requires knowing that a *refactoring* plan contains *operational* instructions. `DEPLOY.md` sits beside `README.md` where a fresh implementer looks.
+2. **The lifetimes differ.** `refactor.md` is transitional and gets archived when Phase 6 completes. The deploy path, the data invariants and the save/load checklist are permanent operational facts that outlive the refactor entirely. Putting them in a document scheduled for deletion is the wrong container.
+3. **It is needed under pressure.** §6 is read during a broken deploy. 84 KB of migration planning between the reader and the rollback procedure is a real cost at exactly the wrong moment.
+
+`DEPLOY.md` is 9 sections: short version → data invariants → topology → what `sync.sh` actually does → restarting the relay → rollback → save/load checklist → defect table with owners → verification status.
+
+**The §1.5 table was incomplete. Six additions, two of them serious.** `DEPLOY.md` §2 supersedes it (§1.5 now says so). The four original rows are correct; found by reading every `localStorage` / `indexedDB` call site in `js/`:
+
+| Added | Where | Why it matters |
+|---|---|---|
+| **`'cuubz:characters'`** | `js/world/persistence.js:20` | **every character the player has ever created.** Was entirely absent from §1.5 — the single most valuable key in the game. |
+| `'cuubz:slotMap'`, `'cuubz:worldSlot:{N}:conf'` | `persistence.js:24,28` | world↔slot mapping and per-slot config; `MAX_WORLD_SLOTS = 3` is part of the key space |
+| Object stores + key paths | `chunkmanager.js:23-24,273-275` | `chunks` (`keyPath: 'chunkKey'`), `manifests` (`keyPath: 'worldName'`), plus the non-unique `worldName` index |
+| Chunk key format | `chunkmanager.js:455` | `` `${cx},${cz}` `` — see H-1 below |
+| Chunk binary format | `chunkBinaryCodec.js:28-46` | magic `0x43555542` `"CUUB"`, version `3`, `LEGACY_LAYOUT_MAX = 2`, 20-byte header, height `256`, FNV-1a basis `0x811c9dc5` / prime `0x01000193`. Decode **throws** above version 3. |
+| Block IDs are baked into saved chunks | `blockRegistry.js` | the format stores numeric IDs, not names. Renumbering reinterprets every chunk ever saved — PR 4 bug 2 already navigated this. |
+
+**Two storage hazards found, both pre-existing, neither fixed here:**
+
+- **H-1 — chunk keys are not world-scoped, so the three world slots overwrite each other's terrain. This is a live data-corruption bug.** `chunkKey` is only `` `${cx},${cz}` ``, and *no read path* filters on `worldName` — `loadChunk` (`chunkmanager.js:322-330`), `hasChunk` (`:332-340`) and `_batchLoadChunks` (`:857-880`) all do a bare `store.get(key)`. Writes set the `worldName` field and index it; nothing ever reads either. So chunk `(0,0)` is one shared record across all worlds: play world A at spawn, then world B at spawn, and B's chunk overwrites A's. Manifests *are* per-world, so world A's manifest still claims the chunk is generated — which is precisely what makes the stale record load instead of regenerating. `js/main.js:551` even contains the comment *"chunks remain orphaned but harmless — they're keyed by chunk coordinates"*: right premise, wrong conclusion. **Not fixed, deliberately** — the fix changes the primary key format, which is itself an invariant, so every already-saved chunk is orphaned without a migration. That is a data-migration PR with its own test plan, not a line in a docs PR. Currently **unowned**; needs a decision.
+- **H-2 — bumping `DB_VERSION` destroys every player's worlds.** `onupgradeneeded` (`chunkmanager.js:264-276`) enumerates every existing object store, `deleteObjectStore`s all of them, then recreates them empty. Its comment describes this as "handles schema changes cleanly". §1.5 listed `version: 2` as a value to preserve without saying that incrementing that one character is unrecoverable total data loss. Now stated as a blocking warning.
+
+(H-3, minor: `js/main.js:545` opens the DB with **no version argument** — creates a store-less v1 DB if none exists, then throws `NotFoundError` into a silent `catch {}`. Self-heals on the next `ChunkManager` open. Documented, not fixed.)
+
+**The deployment reality is worse than §1.4 describes. Thirteen defects; §1.4 named one.** Full table with owners in `DEPLOY.md` §8. The ones that change how Phase 1 must be sequenced:
+
+- **`sync.sh` never restarts the relay.** There is no `systemctl` / `service` / `pm2` call anywhere in the repo — the only such text is prose in `multiplayer.md:376`. So `server/` changes are deployed and **silently inert** until a human restarts by hand; the script prints `Sync complete!` either way. §1.4 does not mention this, and it is the most likely way to lose an afternoon.
+- **`tar xzf` never deletes.** Files removed from the repo persist on the server forever. This is invisible today and concrete at PR 9: the stale `js/` tree stays live beside the new `src/`, `index.html` is overwritten to point at `src/`, and the host serves two full copies of the codebase — one dead, both fetchable, indistinguishable in a browser network tab. **PR 10's rewrite must handle deletion, not just the build.**
+- **`node_modules` is excluded and nothing runs `npm ci` on the remote**, yet `server/index.js:14` and `server/matchmaking.js:21` both `require('ws')`. Production's `node_modules` was installed by hand at some point. Consequence: **dependency changes never reach production** — bump `ws` and the relay throws `Cannot find module` on its next restart.
+- **The `chmod` is the fragile step.** `find /var/www/html -type f -exec chmod 644 {} +` runs over the *entire* web root, not the project. If any file there is not owned by `dadmin` it returns non-zero → the `&&` chain stops → `set -e` aborts — **after extraction already overwrote the live tree.** The error is about permissions and says nothing about the half-deployed site. This is the highest-value unverified check in the doc.
+- **The archive is staged inside the public web root** (`/var/www/html/${PROJECT_NAME}.tar.gz`, `sync.sh:34`) and removed *only on success*. During every deploy — and permanently after a failed one — the complete source tree is downloadable at a predictable URL.
+- **`ExecStart` hardcodes `/home/dadmin/.local/node-v22.22.0-linux-x64/bin/node`.** Production runs **22.22.0** from a hand-unpacked tarball; CI's `node-version: '22'` resolves **22.23.x**. Upgrading or moving that directory breaks the unit by path (`status=203/EXEC`, retried forever at 5 s). Note the skew has an edge: `jsdom@30`'s floor is `^22.22.2`, so production is *below* the version CI validates against — harmless (devDependency, quarantined test) but "green in CI" ≠ "runs on the relay host". **Not changed** — repointing the interpreter for the production relay is unverifiable without SSH.
+- **`textures/` ships on every deploy.** Measured by reproducing `sync.sh`'s exact `tar` flags: **116,004,047 bytes compressed, 3,544 entries, of which only 171 are not textures.** No exclude, no content check.
+- **`--exclude='dist'`** — the §1.4 landmine, noted and left for PR 10. Operational rule added to `DEPLOY.md`: **do not run `./sync.sh` between PR 7 and PR 10.**
+
+**One code bug fixed: `sync.sh` did not exclude `.env`.** `.gitignore:2` lists it, so the project anticipates one existing locally, and `sync.sh`'s exclude list did not cover it — a local env file would have been tarred, extracted into a public web root, and `chmod 644`'d world-readable. No `.env` exists in the repo today, which is the only reason this was never a live leak; that also makes the fix provably non-regressive. One line, plus a comment naming the two `DEPLOY.md` sections. **Everything else was left alone on purpose:** PR 10 owns `sync.sh` and "must land with PR 9, not after", and every remaining defect is structural (release directories, deletion semantics, the build step, the staging path) — fixing them *is* the rewrite.
+
+**Nothing was weakened.** No test touched, no assertion relaxed, no `QUARANTINE.md` change — still 4 files against the cap of 5, all owned by PR 26. `npm test` 50/50 + 4 quarantined, `check-globals` 0 duplicates / 65 files / 368 symbols, both exit 0 at this commit.
+
+**Accept criterion, honestly: deploy ✅, rollback ❌ — and documentation cannot close it.**
+
+> *"a fresh implementer can deploy and roll back from the doc alone"*
+
+Deploying is fully documented, including the relay restart `sync.sh` omits. **Rolling back is not, because there is nothing to roll back to.** `tar xzf` extracts over the live tree; no backup is taken, no previous copy is kept, there are no versioned release directories, no symlink to flip, and the uploaded archive — the one artifact that could serve as a record — is deleted immediately after extraction. Once a deploy lands, the previous server state has ceased to exist.
+
+`DEPLOY.md` §6.2 documents the best procedure that actually exists — re-deploy a known-good tag from a separate `git worktree`, with `npm test` / `check-globals` as the pre-flight gate — and states plainly that it is roll-*forward*-to-old-code with three gaps: deletions do not un-happen (§4.6), permissions and the relay's `node_modules` are not restored, and **it requires the known-good ref to be reachable**. Writing anything stronger would mean inventing machinery no line of this repo implements, which a fresh implementer would discover mid-incident. Two things close the gap, neither a documentation task:
+
+- **Push `pre-refactor-baseline`** — still an open PR 1 criterion, and `git ls-remote --tags origin` confirms it is local-only. §6.2 has no target without it. This is now a *second*, independent reason to push it: not just a Phase 0 rollback point, but the only usable deploy-rollback target.
+- **PR 10 must add a real rollback path** — versioned release directories plus an atomic symlink swap, or at minimum retaining the previous tree — in the same rewrite it already owns, and update `DEPLOY.md` §6 when it does.
+
+**Not verified, and this is the doc's main weakness: `./sync.sh` was not run.** It needs SSH to `dadmin@10.0.30.160` with `~/.ssh/id_ed25519`, which this environment does not have. Everything about repo *contents* was verified by reading the cited file, and the payload measurement, the absence of `systemctl`, the absence of server-side filesystem writes, and the 5 s flush-timer wiring were verified by execution. Everything about the *remote host* is inference, marked `[UNVERIFIED]` inline and collected in `DEPLOY.md` §9 with the exact command that would confirm each — nine of them. Also unverified: **the save/load checklist was written from the code paths, not from a play session**, including its prediction that steps 8–9 fail on H-1. The doc says so and asks the first person to run it to correct the file.
+
+**What serves `/var/www/html` is UNVERIFIED, not guessed.** Every `nginx` reference in the repo (`js/main.js:2112,2126`, `server/index.js:9`, `multiplayer.md:35,94,413`) describes nginx **only** as the TLS reverse proxy in front of the relay on 8765; `multiplayer.md:47` hedges the static server as `"(nginx / built-in)"`. There is no nginx config, no Apache config, and no static-server reference anywhere in the repo. Marked unverified with the command to settle it.
+
+**One useful finding in the other direction: the relay is stateless and there is nothing on the server to back up.** `server/` performs no filesystem writes at all (verified across every `server/*.js`); sessions live in an in-memory `Map` and are disposed on shutdown. All player data is client-side. So a bad deploy can break the code that reads player data but cannot corrupt the data itself, and rebuilding the host from scratch loses nothing. That is what bounds the rollback gap above to *downtime* rather than *data loss* — worth stating, because it is the reason PR 6 can close with an unmet criterion rather than blocking Phase 1. The flip side: restarting the relay instantly destroys every in-flight multiplayer session.
+
+**One unowned defect worth a decision (`DEPLOY.md` D-8):** `server/index.js:219-225` routes `uncaughtException` and `unhandledRejection` into the clean-shutdown path, which calls `process.exit(0)`. `Restart=on-failure` (`cuubz-relay.service:10`) does **not** restart on exit code 0 — so the relay stays down after an unhandled error, exactly the case the restart policy exists for. `Restart=always` or a non-zero exit code is the fix; both change production restart behavior, so neither belongs in a docs PR.
+
+**New file:** `DEPLOY.md`. **Modified:** `sync.sh` (the `.env` exclude), `refactor.md` §1.4 / §1.5 / §4.1 (pointers to `DEPLOY.md`).
 
 ### Phase 0 gate — do not proceed until all are true
 - [ ] `git status` clean; `pre-refactor-baseline` tag pushed
