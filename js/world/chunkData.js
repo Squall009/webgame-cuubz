@@ -6,6 +6,17 @@
  * BLOCK_TYPES, BLOCK_BY_ID, BLOCK_BY_NAME, MAX_BLOCK_ID are globals from blockRegistry.js.
  */
 
+// Node.js: require the block registry lookups; browser: use globals (script-tag load order).
+// These are re-exported below because several tests destructure them from this module —
+// chunkData is where block IDs are consumed, so it doubles as their entry point.
+if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+  const registry = require('./blockRegistry');
+  global.BLOCK_TYPES = registry.BLOCK_TYPES;
+  global.BLOCK_BY_ID = registry.BLOCK_BY_ID;
+  global.BLOCK_BY_NAME = registry.BLOCK_BY_NAME;
+  global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+}
+
 const CHUNK_WIDTH = 16;
 const CHUNK_DEPTH = 16;
 const CHUNK_HEIGHT = 256;
@@ -82,5 +93,5 @@ class Chunk {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { Chunk, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, MIN_Y, MAX_Y, SEA_LEVEL, EDGE_STRIP_SIZE };
+  module.exports = { Chunk, BLOCK_TYPES, BLOCK_BY_ID, BLOCK_BY_NAME, BLOCK_PROPERTIES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT, MIN_Y, MAX_Y, SEA_LEVEL, EDGE_STRIP_SIZE };
 }

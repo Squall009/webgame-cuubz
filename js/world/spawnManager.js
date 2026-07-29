@@ -3,6 +3,11 @@
  * Per-player spawn points stored per world. Default: world center if no bed set.
  */
 
+// Node.js: require SEA_LEVEL from chunkData; browser: use global (script-tag load order).
+if (typeof module !== 'undefined' && typeof SEA_LEVEL === 'undefined') {
+  global.SEA_LEVEL = require('./chunkData').SEA_LEVEL;
+}
+
 class SpawnManager {
   constructor() {
     // Map: "worldId" → { "playerId" → { x, y, z } }

@@ -19,6 +19,12 @@
  *     Each run: [blockID: Uint16, count: Uint16]
  */
 
+// Node.js: require the Chunk class from chunkData (decode() constructs one);
+// browser: use the global (script-tag load order — chunkData.js loads first).
+if (typeof module !== 'undefined' && typeof Chunk === 'undefined') {
+  global.Chunk = require('./chunkData').Chunk;
+}
+
 const CHUNK_MAGIC = 0x43555542; // "CUUB"
 const CHUNK_VERSION = 3;       // v3: Y-major block data layout
 const LEGACY_LAYOUT_MAX = 2;   // v1 and v2 use X-major — must regenerate

@@ -319,13 +319,13 @@ const beta = mgr.getAllCharacters().find(c => c.name === 'Beta');
 assertEquals(mgr.getSelectedCharacter(), null, 'No character selected initially');
 
 // Select first character
-result = mgr.selectCharacter(alpha.id);
+result = await mgr.selectCharacter(alpha.id);
 assertTrue(result.success, 'Selection succeeds');
 assertNotNull(result.character, 'Selected character returned');
 assertEquals(mgr.getSelectedCharacter().name, 'Alpha', 'Correct character selected');
 
 // Select non-existent
-result = mgr.selectCharacter('nonexistent');
+result = await mgr.selectCharacter('nonexistent');
 assertFalse(result.success, 'Selecting non-existent fails');
 
 // Verify lastPlayed updated
@@ -334,7 +334,7 @@ assert(selected.lastPlayed !== null, 'lastPlayed set on selection');
 assert(selected.lastPlayed > 0, 'lastPlayed is valid timestamp');
 
 // Switch selection
-result = mgr.selectCharacter(beta.id);
+result = await mgr.selectCharacter(beta.id);
 assertTrue(result.success, 'Re-selection succeeds');
 assertEquals(mgr.getSelectedCharacter().name, 'Beta', 'Selection switched to Beta');
 

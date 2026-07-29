@@ -10,6 +10,15 @@
  * (strings like 'coal', 'apple', 'corrupt_crystal').
  */
 
+// Node.js: require the block registry lookups; browser: use globals (script-tag load order).
+if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+  const registry = require('../world/blockRegistry');
+  global.BLOCK_TYPES = registry.BLOCK_TYPES;
+  global.BLOCK_BY_ID = registry.BLOCK_BY_ID;
+  global.BLOCK_BY_NAME = registry.BLOCK_BY_NAME;
+  global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+}
+
 // ============================================================
 // Item Definitions
 // ============================================================

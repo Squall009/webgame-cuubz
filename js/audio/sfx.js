@@ -216,12 +216,22 @@ function biomeToFootstepSurface(biomeName) {
  */
 function generateNoiseBuffer(sampleCount, seed) {
   const buffer = new Float32Array(sampleCount);
-  // Simple LCG PRNG seeded
-  let s = (seed || Date.now()) | 0;
+
+  // Simple LCG PRNG seeded.
+  //
+  // BUG FIX 2026-07-29: this used `(seed || Date.now()) | 0`, and `Date.now() | 0`
+  // truncates the epoch to 32 bits — which is NEGATIVE for a large share of wall-clock
+  // times. JavaScript's `%` keeps the sign of the dividend, so a negative seed produced
+  // a negative `s` forever, and the mapping below emitted samples in [-3, -1) instead of
+  // [-1, 1]. Out-of-range PCM clips audibly. Force the seed into the LCG's positive
+  // domain and keep it there.
+  const MODULUS = 2147483647; // 2^31 - 1
+  let s = Math.abs(Math.trunc(seed !== undefined && seed !== null ? seed : Date.now())) % MODULUS;
   if (s === 0) s = 1;
+
   for (let i = 0; i < sampleCount; i++) {
-    s = (s * 16807 + 12345) % 2147483647;
-    buffer[i] = ((s / 2147483647) * 2) - 1; // [-1, 1]
+    s = (s * 16807 + 12345) % MODULUS;
+    buffer[i] = ((s / MODULUS) * 2) - 1; // [-1, 1]
   }
   return buffer;
 }

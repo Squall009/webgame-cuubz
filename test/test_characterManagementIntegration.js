@@ -336,7 +336,7 @@ const s3 = (await selMgr.createCharacter('SelC', '#0000FF')).character;
 assertEquals(selMgr.getSelectedCharacter(), null, 'No character selected initially');
 
 // Select first
-const sel1 = selMgr.selectCharacter(s1.id);
+const sel1 = await selMgr.selectCharacter(s1.id);
 assertTrue(sel1.success, 'Select A succeeds');
 assertEquals(selMgr.getSelectedCharacter().name, 'SelA', 'SelA is selected');
 
@@ -345,12 +345,12 @@ assert(s1.lastPlayed !== null, 'lastPlayed set on selection');
 assert(typeof s1.lastPlayed === 'number' && s1.lastPlayed > 0, 'lastPlayed is valid timestamp');
 
 // Switch to second
-const sel2 = selMgr.selectCharacter(s2.id);
+const sel2 = await selMgr.selectCharacter(s2.id);
 assertTrue(sel2.success, 'Switch to B succeeds');
 assertEquals(selMgr.getSelectedCharacter().name, 'SelB', 'SelB now selected');
 
 // Select third
-selMgr.selectCharacter(s3.id);
+await selMgr.selectCharacter(s3.id);
 assertEquals(selMgr.getSelectedCharacter().name, 'SelC', 'SelC now selected');
 
 // Clear selection
@@ -359,7 +359,7 @@ assertEquals(selMgr.getSelectedCharacter(), null, 'Selection cleared returns nul
 
 // Delete selected character clears selection — use existing char (no need to create 4th)
 const selToDelete = s3; // Use existing SelC
-selMgr.selectCharacter(selToDelete.id);
+await selMgr.selectCharacter(selToDelete.id);
 assertEquals(selMgr.getSelectedCharacter().name, 'SelC', 'Selected SelC for deletion test');
 
 await selMgr.deleteCharacter(selToDelete.id);
@@ -519,7 +519,7 @@ const badDelete = await edgeMgr.deleteCharacter('nonexistent');
 assertFalse(badDelete.success, 'Delete non-existent character fails');
 
 // Select non-existent
-const badSelect = edgeMgr.selectCharacter('nonexistent');
+const badSelect = await edgeMgr.selectCharacter('nonexistent');
 assertFalse(badSelect.success, 'Select non-existent character fails');
 
 // ============================================================

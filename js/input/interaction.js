@@ -12,6 +12,13 @@
  *   - Right click to place selected block type
  */
 
+// Node.js: require BLOCK_TYPES/BLOCK_PROPERTIES from blockRegistry; browser: use globals.
+if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+  const registry = require('../world/blockRegistry');
+  global.BLOCK_TYPES = registry.BLOCK_TYPES;
+  global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+}
+
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable.
 //
 // This file previously called a bare `_log(...)` that it never declared, silently

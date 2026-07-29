@@ -502,7 +502,51 @@ For each, rename or consolidate, and **add a test that would have caught the bug
 
 **Regression check:** suite went 22/53 → 23/54. The 31 pre-existing failures are unchanged — no test that passed before PR 3 fails after it.
 
-### PR 4 — Get the suite green, or quarantine explicitly
+### PR 4 — Get the suite green, or quarantine explicitly ⏳ IN PROGRESS (~60% done)
+
+> **HANDOFF — read this before continuing PR 4.** Work is split one session per PR from here on.
+>
+> **Environment:** Node 22+/npm required and now installed (`node v24.18.0`, `npm 11.16.0`). `npm install` + `npm i -D jsdom` have been run. Run the suite with `bash test/run_tests.sh` (it is a bash script — `node` cannot run it; on Windows use Git Bash).
+>
+> **Progress: 17/53 → 30/54 passing.** `scripts/check-globals.js` reports 0 duplicates.
+>
+> **Decisions already made by the repo owner (do not re-litigate):**
+> 1. **Hybrid strategy.** Fix the mechanical failures; quarantine only what genuinely needs a human ruling.
+> 2. **For gameplay-value mismatches, the CODE IS RIGHT and the TEST IS STALE.** Update the assertion to match current behavior. This was confirmed against git history — the source changed in feature commits (`b287569` VoxelGen overhaul, `ed0dc1a` skybox rewiring) *after* the tests were written, and the tests were never updated.
+>
+> **Already done in PR 4:**
+> - `npm i -D jsdom` ✅
+> - **Real code bug fixed** — `js/audio/sfx.js` `generateNoiseBuffer()` seeded with `Date.now() | 0`, which truncates the epoch to 32 bits and is negative for a large share of wall-clock times. JS `%` keeps the dividend's sign, so samples came out in `[-3, -1)` instead of `[-1, 1]` — audible clipping. Now forces the seed into the LCG's positive domain. `test_sfx` 357/357.
+> - **Require-shim fixes** (same class as PR 2) in `js/world/spawnManager.js`, `js/input/interaction.js`, `js/world/chunkData.js`, `js/systems/inventory.js`, `js/multiplayer/chunkStreamer.js`, `js/world/chunkBinaryCodec.js`. `chunkData.js` now also re-exports `BLOCK_TYPES`/`BLOCK_BY_ID`/`BLOCK_BY_NAME`/`BLOCK_PROPERTIES`, which several tests destructure from it.
+> - **Async drift fixed** — `CharacterManager.selectCharacter()` became `async`; tests called it without `await`. Fixed in `test_characterManager.js` (112/112) and `test_characterManagementIntegration.js` (106/106).
+> - `test_noise.js` import corrected to `const { NoiseGenerator } = require(...)`.
+>
+> **Remaining 24 failures, pre-triaged.** Per the owner's ruling, update the TEST in every row below unless marked otherwise:
+>
+> | File | Test expects | Code does | Action |
+> |---|---|---|---|
+> | `test_worldManager` | 8 biomes incl. Corrupt/Lava; name ≤32 | 10 VoxelGen biomes; name ≤16 | update test |
+> | `test_skybox` | fog 0.008/0.025, night ambient 0.08 | 0.001/0.003, 0.25 | update test |
+> | `test_inventory` | apple stack 16; block 1 = Grass | 64; Bedrock | update test |
+> | `test_creativeMode` | `STONE === 2` | `3` | update test |
+> | `test_crafting` | recipe id `planks` | `planks_oak` | update test |
+> | `test_hostLogic` | world Y −32..64 | 0..96 | update test |
+> | `test_chunkStreamer` | `maxChunksPerTick` 4 | 32 | update test |
+> | `test_blockInteraction` | `breakTarget`/`breakDuration`/`onBlockBreak`/`onBlockPlace`/`crosshair` | `breakingBlock`/`breakProgress` | rewrite against current API |
+> | `test_noise` | `NoiseGenerator.perm` (512 entries) | `_perlin`, no `perm` | rewrite against current API |
+> | `test_questMarker`, `test_questIntegration` | 0 markers | 25 markers | update test (expectations are inverted) |
+> | `test_chunkBinaryCodec` | `dirty` survives encode/decode | code explicitly documents `dirty` is deliberately NOT persisted (`chunkBinaryCodec.js:60,155`) | update test |
+> | `test_survival` | default spawn Y 20 | `SEA_LEVEL + 4` = 68 | update test |
+> | `test_worldPersistenceIntegration` | 32-char world name; `updateWorld` | name ≤16 | update test |
+> | `test_textureAssets` | `textures/*.png` at root | moved to `textures/blocks/` (+ manifest) | rewrite against manifest |
+> | `test_textureGenerator` | `scripts/generate_textures.py` | **deleted** — only `generate-manifest.js` remains | delete this test; replace with the PR 4 manifest smoke test |
+> | `test_biomeEffects` | `undefined.speed` at test:28 | — | not yet diagnosed |
+> | `test_multiplayerClient`, `test_serverValidation`, `test_websocketErrorHandling`, `test_sessionDiscovery` | session-name propagation, misc | — | not yet diagnosed |
+> | `test_pageLoad`, `test_responsiveHUD`, `test_mobileViewports` | `readFileSync` + regex over HTML/CSS | — | **QUARANTINE these three.** §3.6 says PR 26 rewrites them anyway; fixing them now guarantees rework. |
+>
+> **Still to do in PR 4:** the table above · `test/QUARANTINE.md` + make `run_tests.sh` skip quarantined files and exit 0 · `"test": "bash test/run_tests.sh"` in `package.json` · smoke test for `scripts/generate-manifest.js`.
+
+
 - `npm i -D jsdom` (fixes `test_pageLoad`).
 - Fix the real assertion failures. Start with `test_skybox` (fog density 0.008 vs 0.001 — **decide which is correct** and fix the code or the test, not whichever is easier) and `test_responsiveHUD` (26 failures).
 - For anything that can't be fixed now, add `test/QUARANTINE.md` listing the file, the failure, why it's deferred, and the PR that will fix it. The runner must **skip quarantined files and exit 0**.

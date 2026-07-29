@@ -20,7 +20,13 @@
 
 'use strict';
 
-// Use globals from chunkData.js: CHUNK_WIDTH, CHUNK_DEPTH
+// Node.js: require the chunk dimensions from chunkData; browser: use globals
+// (script-tag load order — chunkData.js loads first).
+if (typeof module !== 'undefined' && typeof CHUNK_WIDTH === 'undefined') {
+  const chunkData = require('../world/chunkData');
+  global.CHUNK_WIDTH = chunkData.CHUNK_WIDTH;
+  global.CHUNK_DEPTH = chunkData.CHUNK_DEPTH;
+}
 
 // ─── Constants ──────────────────────────────────────────────
 
