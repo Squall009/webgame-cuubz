@@ -172,7 +172,11 @@ const BLOCK_REGISTRY = [
   { id: 112, name: 'pale_oak_leaves',  texture: { all: 'pale_oak_leaves' },    category: 'cutout',  hardness: 0.2,  tool: 'shears' },
   { id: 113, name: 'orange_poplar_leaves', texture: { all: 'orange_poplar_leaves' }, category: 'cutout', hardness: 0.2, tool: 'shears' },
   { id: 114, name: 'red_poplar_leaves',  texture: { all: 'red_poplar_leaves' }, category: 'cutout',  hardness: 0.2,  tool: 'shears' },
-  { id: 115, name: 'yellow_poplar_leaves', texture: { all: 'yellow_poplar_leaves' }, category: 'cutout', hardness: 0.2, tool: 'shears' },
+  // id 192, not 115: the colored-block range below starts at 115, so this entry
+  // collided with white_concrete and was silently shadowed (BLOCK_BY_ID is built by
+  // iteration, so the later entry won). Moved to the first free id rather than
+  // shifting the 32 concrete/wool blocks, which would reinterpret saved chunks.
+  { id: 192, name: 'yellow_poplar_leaves', texture: { all: 'yellow_poplar_leaves' }, category: 'cutout', hardness: 0.2, tool: 'shears' },
 
   // ═══════════════════════════════════════════════════════════
   // IDs 115–146 — Colored blocks (16 concrete + 16 wool)
@@ -474,7 +478,47 @@ const BLOCK_TYPES = {
   GRASS_BLOCK:     BLOCK_BY_NAME['grass_block'].id,
 };
 
+// ─── Block drops ───────────────────────────────────────────────────────
+// Keyed by block NAME, never by id: ids have been renumbered before (b287569)
+// and the previous id-keyed drop table in inventory.js silently rotted when they
+// were — breaking andesite dropped cobblestone and deepslate dropped coal.
+//
+// Only exceptions are listed. Every unlisted breakable block drops itself, and
+// any block with hardness -1 (bedrock, crying_obsidian) drops nothing.
+const BLOCK_DROP_OVERRIDES = {
+  air:             null,        // nothing to drop
+  water:           null,
+  lava:            null,
+  grass_block:     'dirt',      // block name — resolved to an id by getBlockDrop
+  coal_ore:        'item:coal', // 'item:' prefix — a NAMED_ITEMS entry, not a block
+  iron_ore:        'item:iron_ore',
+  gold_ore:        'item:gold_ore',
+  diamond_ore:     'item:diamond',
+  corrupt_crystal: 'item:corrupt_crystal',
+  apple:           'item:apple',
+};
+
+/**
+ * Resolve what breaking a block yields.
+ * @param {number} blockId
+ * @returns {number|string|null} block id, named-item string, or null for no drop.
+ */
+function getBlockDrop(blockId) {
+  const block = BLOCK_BY_ID[blockId];
+  if (!block) return null;
+  const props = BLOCK_PROPERTIES[blockId];
+  if (props && props.hardness === -1) return null; // unbreakable
+  if (!Object.prototype.hasOwnProperty.call(BLOCK_DROP_OVERRIDES, block.name)) {
+    return blockId; // default: drops itself
+  }
+  const override = BLOCK_DROP_OVERRIDES[block.name];
+  if (override === null) return null;
+  if (override.startsWith('item:')) return override.slice(5);
+  const target = BLOCK_BY_NAME[override];
+  return target ? target.id : null;
+}
+
 // ─── Export for module environments ────────────────────────────────────
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { BLOCK_REGISTRY, BLOCK_BY_ID, BLOCK_BY_NAME, MAX_BLOCK_ID, BLOCK_TYPES, BLOCK_PROPERTIES };
+  module.exports = { BLOCK_REGISTRY, BLOCK_BY_ID, BLOCK_BY_NAME, MAX_BLOCK_ID, BLOCK_TYPES, BLOCK_PROPERTIES, BLOCK_DROP_OVERRIDES, getBlockDrop };
 }

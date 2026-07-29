@@ -13,10 +13,13 @@
  */
 
 // Node.js: require BLOCK_TYPES/BLOCK_PROPERTIES from blockRegistry; browser: use globals.
-if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+// Guard each symbol separately — see the note in chunkData.js; a single shared
+// guard made these shims order-dependent.
+if (typeof module !== 'undefined') {
   const registry = require('../world/blockRegistry');
-  global.BLOCK_TYPES = registry.BLOCK_TYPES;
-  global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+  if (typeof BLOCK_TYPES === 'undefined') global.BLOCK_TYPES = registry.BLOCK_TYPES;
+  if (typeof BLOCK_PROPERTIES === 'undefined') global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+  if (typeof getBlockDrop === 'undefined') global.getBlockDrop = registry.getBlockDrop;
 }
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable.
@@ -72,7 +75,7 @@ class BlockInteraction {
     ]);
 
     // Selected block type for placing (from hotbar)
-    this.selectedBlockType = 3; // Default: STONE
+    this.selectedBlockType = BLOCK_TYPES.STONE; // was hard-coded 3, which is now cobblestone
 
     // Multiplayer: track last block change for network sync (cleared by main.js after send)
     this._lastBroken = null;  // { x, y, z }
@@ -346,29 +349,10 @@ class BlockInteraction {
    * @returns {number|string|null} The drop type ID, or null for no drop
    */
   _getDropType(blockType) {
-    // Use BLOCK_PROPERTIES.drop if available (from inventory system)
-    if (typeof _INLINE_BLOCK_PROPERTIES !== 'undefined') {
-      const props = _INLINE_BLOCK_PROPERTIES[blockType];
-      if (props) {
-        if (props.drop !== null) return props.drop;
-        if (props.mineable && props.drop) return props.drop;
-      }
-    }
-
-    // Try window.BLOCK_PROPERTIES (browser context)
-    if (typeof window !== 'undefined' && window.BLOCK_PROPERTIES) {
-      const props = window.BLOCK_PROPERTIES[blockType];
-      if (props && props.drop !== null) return props.drop;
-    }
-
-    // Default: most blocks drop themselves
-    // Exceptions: grass drops dirt, unbreakable blocks drop nothing
-    if (blockType === BLOCK_TYPES.GRASS) return BLOCK_TYPES.DIRT;
-    if (blockType === BLOCK_TYPES.BEDROCK || blockType === BLOCK_TYPES.OBSIDIAN) return null;
-    if (blockType === BLOCK_TYPES.WATER || blockType === BLOCK_TYPES.LAVA) return null;
-    if (blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) return null;
-
-    return blockType;
+    // Single source of truth — see blockRegistry.getBlockDrop. This previously
+    // consulted an id-keyed table in inventory.js that predated the block
+    // renumbering, so andesite dropped cobblestone and deepslate dropped coal.
+    return getBlockDrop(blockType);
   }
 
   /**

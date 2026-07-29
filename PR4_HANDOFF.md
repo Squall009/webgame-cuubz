@@ -1,5 +1,20 @@
 # PR 4 Handoff — Get the test suite green
 
+> ## ✅ COMPLETE — 2026-07-29. This document is superseded.
+>
+> `npm test` exits 0: **50/50 passing, 4 quarantined.** `check-globals` reports 0 duplicates.
+>
+> **The outcome, including six code bugs found and two corrections to the triage
+> below, is recorded in `refactor.md` §5 PR 4.** Read that, not this.
+>
+> Two triage entries in §3a were wrong and are corrected there: `test_creativeMode`
+> was the reverse of what §3a claimed (the code was stale, not the test), and the
+> two quest tests were not "inverted expectations" — that harness takes
+> `assertEquals(actual, expected)`, so "expected 0, got 25" meant the code returned
+> **0** markers. Both were real bugs.
+>
+> Kept for the audit trail of how the work was scoped.
+
 **Goal:** `npm test` exits 0, so Phase 1 has a trustworthy parity gate.
 **Status:** 30/54 passing (started at 17/53). 24 files left, all pre-triaged below.
 **Parent doc:** `refactor.md` §5 PR 4. **Do not start Phase 1 until this lands.**

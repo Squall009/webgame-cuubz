@@ -46,8 +46,11 @@ class BlockPalette {
       this._availableBlocks = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14];
     }
 
-    // Default selected block: Stone (ID=3)
-    this.selectedBlock = 3;
+    // Default selected block: Stone. Resolve by name — this was hard-coded to 3,
+    // which stopped being stone when the blocks were renumbered (3 is cobblestone).
+    this.selectedBlock = (typeof BLOCK_TYPES !== 'undefined' && BLOCK_TYPES.STONE !== undefined)
+      ? BLOCK_TYPES.STONE
+      : 3;
     
     // Callback for UI updates
     this.onSelectionChange = null;
@@ -59,10 +62,15 @@ class BlockPalette {
   _getPlaceableBlocks(blockTypes) {
     if (!blockTypes) return [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14];
 
-    // Exclude: Air (0), Water (6), Lava (15), Toxic Slime (17), 
-    //         Quest items (22, 24, 25, 26)
-    const excludeSet = new Set([0, 6, 8, 15, 17, 22, 24, 25, 26]);
-    
+    // Exclude by NAME, never by literal id — the previous hard-coded id set predated
+    // the block renumbering, so it excluded granite/deepslate/ores while letting
+    // water, lava and the quest items into the creative palette.
+    const excludeSet = new Set(
+      ['AIR', 'WATER', 'LAVA', 'TOXIC_SLIME', 'CORRUPT_CRYSTAL', 'APPLE', 'QUEST_KEY']
+        .map(n => blockTypes[n])
+        .filter(id => typeof id === 'number')
+    );
+
     const placeable = [];
     for (const [name, id] of Object.entries(blockTypes)) {
       if (typeof id === 'number' && !excludeSet.has(id)) {

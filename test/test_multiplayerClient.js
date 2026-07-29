@@ -91,7 +91,7 @@ assert(MESSAGE_TYPES.BROWSE === 'BROWSE', 'BROWSE message type');
 assert(MESSAGE_TYPES.SESSION_LIST === 'SESSION_LIST', 'SESSION_LIST message type');
 assert(MESSAGE_TYPES.CHUNK_DATA === 'CHUNK_DATA', 'CHUNK_DATA message type');
 
-assert(DEFAULT_CONFIG.heartbeatInterval === 15000, 'Default heartbeat interval 15s');
+assert(DEFAULT_CONFIG.heartbeatInterval === 25000, 'Default heartbeat interval 25s');
 assert(DEFAULT_CONFIG.maxReconnectAttempts === 10, 'Default max reconnect attempts 10');
 assert(DEFAULT_CONFIG.reconnectBaseDelay === 1000, 'Default reconnect base delay 1s');
 assert(DEFAULT_CONFIG.reconnectMaxDelay === 30000, 'Default reconnect max delay 30s');

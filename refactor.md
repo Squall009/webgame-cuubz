@@ -502,50 +502,7 @@ For each, rename or consolidate, and **add a test that would have caught the bug
 
 **Regression check:** suite went 22/53 → 23/54. The 31 pre-existing failures are unchanged — no test that passed before PR 3 fails after it.
 
-### PR 4 — Get the suite green, or quarantine explicitly ⏳ IN PROGRESS (~60% done)
-
-> **HANDOFF — read this before continuing PR 4.** Work is split one session per PR from here on.
->
-> **Environment:** Node 22+/npm required and now installed (`node v24.18.0`, `npm 11.16.0`). `npm install` + `npm i -D jsdom` have been run. Run the suite with `bash test/run_tests.sh` (it is a bash script — `node` cannot run it; on Windows use Git Bash).
->
-> **Progress: 17/53 → 30/54 passing.** `scripts/check-globals.js` reports 0 duplicates.
->
-> **Decisions already made by the repo owner (do not re-litigate):**
-> 1. **Hybrid strategy.** Fix the mechanical failures; quarantine only what genuinely needs a human ruling.
-> 2. **For gameplay-value mismatches, the CODE IS RIGHT and the TEST IS STALE.** Update the assertion to match current behavior. This was confirmed against git history — the source changed in feature commits (`b287569` VoxelGen overhaul, `ed0dc1a` skybox rewiring) *after* the tests were written, and the tests were never updated.
->
-> **Already done in PR 4:**
-> - `npm i -D jsdom` ✅
-> - **Real code bug fixed** — `js/audio/sfx.js` `generateNoiseBuffer()` seeded with `Date.now() | 0`, which truncates the epoch to 32 bits and is negative for a large share of wall-clock times. JS `%` keeps the dividend's sign, so samples came out in `[-3, -1)` instead of `[-1, 1]` — audible clipping. Now forces the seed into the LCG's positive domain. `test_sfx` 357/357.
-> - **Require-shim fixes** (same class as PR 2) in `js/world/spawnManager.js`, `js/input/interaction.js`, `js/world/chunkData.js`, `js/systems/inventory.js`, `js/multiplayer/chunkStreamer.js`, `js/world/chunkBinaryCodec.js`. `chunkData.js` now also re-exports `BLOCK_TYPES`/`BLOCK_BY_ID`/`BLOCK_BY_NAME`/`BLOCK_PROPERTIES`, which several tests destructure from it.
-> - **Async drift fixed** — `CharacterManager.selectCharacter()` became `async`; tests called it without `await`. Fixed in `test_characterManager.js` (112/112) and `test_characterManagementIntegration.js` (106/106).
-> - `test_noise.js` import corrected to `const { NoiseGenerator } = require(...)`.
->
-> **Remaining 24 failures, pre-triaged.** Per the owner's ruling, update the TEST in every row below unless marked otherwise:
->
-> | File | Test expects | Code does | Action |
-> |---|---|---|---|
-> | `test_worldManager` | 8 biomes incl. Corrupt/Lava; name ≤32 | 10 VoxelGen biomes; name ≤16 | update test |
-> | `test_skybox` | fog 0.008/0.025, night ambient 0.08 | 0.001/0.003, 0.25 | update test |
-> | `test_inventory` | apple stack 16; block 1 = Grass | 64; Bedrock | update test |
-> | `test_creativeMode` | `STONE === 2` | `3` | update test |
-> | `test_crafting` | recipe id `planks` | `planks_oak` | update test |
-> | `test_hostLogic` | world Y −32..64 | 0..96 | update test |
-> | `test_chunkStreamer` | `maxChunksPerTick` 4 | 32 | update test |
-> | `test_blockInteraction` | `breakTarget`/`breakDuration`/`onBlockBreak`/`onBlockPlace`/`crosshair` | `breakingBlock`/`breakProgress` | rewrite against current API |
-> | `test_noise` | `NoiseGenerator.perm` (512 entries) | `_perlin`, no `perm` | rewrite against current API |
-> | `test_questMarker`, `test_questIntegration` | 0 markers | 25 markers | update test (expectations are inverted) |
-> | `test_chunkBinaryCodec` | `dirty` survives encode/decode | code explicitly documents `dirty` is deliberately NOT persisted (`chunkBinaryCodec.js:60,155`) | update test |
-> | `test_survival` | default spawn Y 20 | `SEA_LEVEL + 4` = 68 | update test |
-> | `test_worldPersistenceIntegration` | 32-char world name; `updateWorld` | name ≤16 | update test |
-> | `test_textureAssets` | `textures/*.png` at root | moved to `textures/blocks/` (+ manifest) | rewrite against manifest |
-> | `test_textureGenerator` | `scripts/generate_textures.py` | **deleted** — only `generate-manifest.js` remains | delete this test; replace with the PR 4 manifest smoke test |
-> | `test_biomeEffects` | `undefined.speed` at test:28 | — | not yet diagnosed |
-> | `test_multiplayerClient`, `test_serverValidation`, `test_websocketErrorHandling`, `test_sessionDiscovery` | session-name propagation, misc | — | not yet diagnosed |
-> | `test_pageLoad`, `test_responsiveHUD`, `test_mobileViewports` | `readFileSync` + regex over HTML/CSS | — | **QUARANTINE these three.** §3.6 says PR 26 rewrites them anyway; fixing them now guarantees rework. |
->
-> **Still to do in PR 4:** the table above · `test/QUARANTINE.md` + make `run_tests.sh` skip quarantined files and exit 0 · `"test": "bash test/run_tests.sh"` in `package.json` · smoke test for `scripts/generate-manifest.js`.
-
+### PR 4 — Get the suite green, or quarantine explicitly ✅ DONE
 
 - `npm i -D jsdom` (fixes `test_pageLoad`).
 - Fix the real assertion failures. Start with `test_skybox` (fog density 0.008 vs 0.001 — **decide which is correct** and fix the code or the test, not whichever is easier) and `test_responsiveHUD` (26 failures).
@@ -554,6 +511,48 @@ For each, rename or consolidate, and **add a test that would have caught the bug
 - Add a smoke test for `scripts/generate-manifest.js` (guards the eval-regex).
 - **Accept:** `npm test` exits 0. Quarantine list is ≤5 files and every entry has an owner PR.
 - **Rollback:** revert; Phase 1 is blocked until this lands.
+
+**Outcome (2026-07-29):**
+
+**Suite went 17/53 → 50/50 passing, 4 quarantined. `npm test` exits 0.** `scripts/check-globals.js` still reports 0 duplicates across 65 script-tagged files.
+
+**Six genuine code bugs found and fixed.** Per the "the code is right, the test is stale" ruling, most failures were stale assertions — but that ruling only covered the value mismatches verified against git history. Everything else was investigated, and these turned out to be real:
+
+1. **Block drops were resolved from a stale ID table** (`js/systems/inventory.js`, `js/input/interaction.js`). `_getBlockProperties` read `window.BLOCK_PROPERTIES`, but `blockRegistry.js` declares `BLOCK_PROPERTIES` as a top-level `const` in a classic script — a lexical global that is **never** a property of `window`. So the lookup was always `undefined` in the browser and silently fell through to `_INLINE_BLOCK_PROPERTIES`, a hand-maintained table keyed by **pre-renumbering** IDs. Player-visible effect: breaking andesite dropped cobblestone, breaking deepslate dropped coal. Fixed by moving drop resolution into `blockRegistry.getBlockDrop()`, keyed by block **name**, and deleting the stale table. Verified all 192 blocks resolve to a valid drop.
+
+2. **Duplicate block ID in the registry** — `yellow_poplar_leaves` and `white_concrete` both claimed id `115`, so the leaves block was silently shadowed (`BLOCK_BY_ID` is built by iteration; the later entry wins). `BLOCK_TYPES.YELLOW_POPLAR_LEAVES === BLOCK_TYPES.WHITE_CONCRETE`. Moved the leaves to id `192` (the first free id) rather than shifting the 32 concrete/wool blocks, which would have reinterpreted every saved chunk. Caught by the new manifest smoke test, not by a pre-existing test.
+
+3. **Creative palette used hard-coded pre-renumbering IDs** (`js/game.js`). `selectedBlock = 3` with a comment reading "Stone (ID=3)" — stone is now `2`, so creative mode silently defaulted to cobblestone. The `_getPlaceableBlocks` exclude set was likewise a literal id list, so it excluded granite/deepslate/ores while **admitting** water, lava, toxic slime and the quest items into the palette. Both now resolve by name. Same stale `3` default fixed in `interaction.js`.
+
+4. **The require shims were order-dependent** (`chunkData.js`, `inventory.js`, `interaction.js`). Each guarded its whole block on `typeof BLOCK_TYPES === 'undefined'` while providing a *different* subset of symbols. Whichever module loaded first satisfied the guard for the rest, so e.g. requiring `interaction.js` before `chunkData.js` left `BLOCK_BY_ID` undefined and crashed on require. Each symbol is now guarded individually.
+
+5. **`isMatchmakingConnected` / `isGameSessionConnected` returned `null`, not `false`** (`js/multiplayer/client.js`) when no connection object existed — contradicting the `is*` naming, and breaking strict comparison and JSON serialization. Coerced with `!!`. Every caller uses them for truthiness, so behaviour is unchanged.
+
+6. **`test_websocketErrorHandling` would have hung the suite.** It only called `process.exit` on *failure*; passing fell off the end of the file with mock reconnect/heartbeat timers still pending, so Node never exited. Invisible while the file was red — it would have deadlocked `npm test` the moment it went green. Now exits explicitly in both directions.
+
+(The `sfx` seeding bug fixed earlier in this PR makes seven in total.)
+
+**Two handoff diagnoses were wrong, in the safe direction:**
+- `test_creativeMode` was the **reverse** of the §3a table — the test correctly used `BLOCK_TYPES.STONE`; the *code* was stale. Fixed the code (bug 3 above).
+- `test_questMarker` / `test_questIntegration` were **not** "inverted expectations". That harness's `assertEquals(actual, expected)` takes the literal in the *actual* slot, so "expected 0, got 25" actually meant `createAllMarkers()` returned **0**. Root cause: `questMarker.js` was missing a `QUEST_REGISTRY` require shim, so it silently produced no markers under Node. Browser was unaffected.
+
+**Rewritten rather than patched** (the old APIs no longer exist; assertions were rewritten against the real surface, not invented to match):
+- `test_biomeEffects` — targeted a `ParticleEffect` class plus `LAVA_ANIMATION` / `TOXIC_SLIME_ANIMATION` / `CORRUPT_FOG` and UV-offset state. `biomeEffects.js` exports only `{ BiomeEffects }` and none of those exist even as module-locals. Now covers biome fog/sky config, day/night blending, the particle pool, distance culling, the 200-particle cap and disposal. 136 assertions.
+- `test_blockInteraction` — the Crosshair half still passes and was kept; the BlockInteraction half targeted `breakTarget`/`breakDuration`/`onBlockBreak`. Rewritten against `breakingBlock`/`breakProgress`/`_startBreak`/`_continueBreak`/`_completeBreak`, including tool efficiency, creative-mode placement and the mob-attack override. 137 assertions.
+- `test_crafting` — the grid-based half (`craftingGrid`, `findMatchingRecipe`, `craft()`) is gone; crafting is inventory-driven via `getCraftableRecipes(inventory)` / `craftRecipe(id, inventory)`. 498 assertions.
+- `test_noise` — asserted `NoiseGenerator.perm.length === 512`, now private to `createPerlin`. Replaced with the observable property that table exists for: the field is periodic with period 256 per axis.
+
+**Harness bugs fixed** (not product bugs): `test_sessionDiscovery` built its own relay and dropped `sessionName`/`worldSeed`/`mode` when constructing `SessionManager`, so every name assertion failed against an `'Untitled'` fallback — the production path was intact throughout. `test_hostLogic` constructed a player and instantly moved it 2.2 blocks; with `dt` floored at 16ms that reads as ~140 blocks/s and the speed anti-cheat correctly rejected it — the test now backdates `lastMoveTime`.
+
+**Deleted:** `test_textureGenerator.js` (asserted `scripts/generate_textures.py`, which no longer exists).
+
+**New files:** `test/QUARANTINE.md`, `test/test_manifestGenerator.js`.
+
+**Quarantined — 4 files, all owned by PR 26:** `test_pageLoad`, `test_responsiveHUD`, `test_mobileViewports`, `test_textureAssets`. All four `readFileSync` + regex over `index.html` / `css/style.css` rather than exercising behaviour; §3.6 has PR 26 rewriting them in the same PR that changes the markup, so fixing them now guarantees rework. `run_tests.sh` parses the **first column of the table** in `QUARANTINE.md` (matching any `test_*.js` anywhere in that file wrongly skipped three passing tests that the prose merely mentions) and reports them as `⏭️ SKIP` so they stay visible.
+
+**The manifest smoke test** runs `scripts/generate-manifest.js` and cross-checks the entry count against a real `require()` of the block registry — that is the load-bearing assertion, because the script *scrapes* the registry with `eval('(' + match(/const BLOCK_REGISTRY = (\[.*?\]);/s)[1] + ')')`. A truncated parse still writes syntactically valid JSON, just missing most blocks. It snapshots and restores `textures/blocks/manifest.json` so the suite never dirties the tree. This test found bug 2 on its first run.
+
+**Left alone deliberately:** `SurvivalSystem`'s default spawn is `{x:0, y:20, z:0}` while `SpawnManager` uses `SEA_LEVEL + 4` (68) — y=20 is 44 blocks underground. `SurvivalSystem.onDeath`/`onRespawn` are not wired to anything in production, so this is latent, not live. Changing a gameplay value is out of scope for a test-gate PR; flagged for a decision.
 
 ### PR 5 — Add CI
 `.github/workflows/ci.yml`, on every push and PR:

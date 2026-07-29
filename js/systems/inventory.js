@@ -11,12 +11,15 @@
  */
 
 // Node.js: require the block registry lookups; browser: use globals (script-tag load order).
-if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+// Guard each symbol separately — see the note in chunkData.js; a single shared
+// guard made these shims order-dependent.
+if (typeof module !== 'undefined') {
   const registry = require('../world/blockRegistry');
-  global.BLOCK_TYPES = registry.BLOCK_TYPES;
-  global.BLOCK_BY_ID = registry.BLOCK_BY_ID;
-  global.BLOCK_BY_NAME = registry.BLOCK_BY_NAME;
-  global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+  if (typeof BLOCK_TYPES === 'undefined') global.BLOCK_TYPES = registry.BLOCK_TYPES;
+  if (typeof BLOCK_BY_ID === 'undefined') global.BLOCK_BY_ID = registry.BLOCK_BY_ID;
+  if (typeof BLOCK_BY_NAME === 'undefined') global.BLOCK_BY_NAME = registry.BLOCK_BY_NAME;
+  if (typeof BLOCK_PROPERTIES === 'undefined') global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+  if (typeof getBlockDrop === 'undefined') global.getBlockDrop = registry.getBlockDrop;
 }
 
 // ============================================================
@@ -288,7 +291,7 @@ class Inventory {
     }
     // Block items — check if it's a special single-stack block
     // Quest keys, corrupt crystals are single stack
-    if (typeId === BLOCK_TYPES.CORRUPT_CRYSTAL || typeId === BLOCK_TYPES.QUEST_KEY) return 1; // Corrupt Crystal(38), Quest Key(41)
+    if (typeId === BLOCK_TYPES.CORRUPT_CRYSTAL || typeId === BLOCK_TYPES.QUEST_KEY) return 1;
     return MAX_STACKS[ITEM_CATEGORIES.BLOCK];
   }
 
@@ -596,35 +599,12 @@ class Inventory {
 
   /**
    * Handle breaking a block — add the drop to inventory.
-   * Uses BLOCK_PROPERTIES.drop to determine what item is added.
+   * Drop resolution lives in blockRegistry.getBlockDrop (the block source of truth).
    * @param {number} blockType - The block type that was broken
    * @returns {boolean} Whether the item was successfully added
    */
   addBlockDrop(blockType) {
-    // Import BLOCK_PROPERTIES dynamically (available in browser context)
-    const props = this._getBlockProperties(blockType);
-    if (!props) return false;
-
-    // Unbreakable blocks don't drop anything
-    if (props.hardness === -1) return false;
-
-    let dropTypeId = null;
-
-    if (props.drop !== null) {
-      // Mineable blocks drop named items
-      if (props.mineable) {
-        dropTypeId = props.drop; // e.g., 'coal', 'iron_ore'
-      } else if (props.foodItem) {
-        dropTypeId = props.drop; // e.g., 'apple'
-      } else {
-        // Regular blocks drop themselves (or their drop type, e.g. grass → dirt)
-        dropTypeId = props.drop === null ? blockType : props.drop;
-      }
-    } else {
-      // No explicit drop — default to the block itself
-      dropTypeId = blockType;
-    }
-
+    const dropTypeId = getBlockDrop(blockType);
     if (dropTypeId === null || dropTypeId === 0) return false;
 
     const result = this.addItem(dropTypeId, 1);
@@ -994,63 +974,19 @@ class Inventory {
   }
 
   /**
-   * Get block properties — uses BLOCK_PROPERTIES from chunkData if available,
-   * otherwise falls back to inline defaults for testing.
+   * Get block properties from the live block registry.
+   *
+   * Note: blockRegistry.js declares `BLOCK_PROPERTIES` as a top-level `const`. In a
+   * classic <script> that is a lexical global binding, which is NOT exposed as
+   * `window.BLOCK_PROPERTIES` — the old `window.` lookup here was always undefined
+   * in the browser and silently fell back to a stale table. Reference it directly.
    */
   _getBlockProperties(blockType) {
-    // Try to access from global (browser context with Three.js setup)
-    if (typeof window !== 'undefined' && window.BLOCK_PROPERTIES) {
-      return window.BLOCK_PROPERTIES[blockType];
-    }
-    // Fallback: inline block properties for Node.js testing
-    return _INLINE_BLOCK_PROPERTIES[blockType];
+    if (typeof BLOCK_PROPERTIES === 'undefined') return undefined;
+    return BLOCK_PROPERTIES[blockType];
   }
 }
 
-// ============================================================
-// Inline Block Properties (for Node.js test environment)
-// Mirrors BLOCK_PROPERTIES from chunkData.js
-// ============================================================
-
-const _INLINE_BLOCK_PROPERTIES = {
-  // ── VoxelGen terrain blocks (IDs 0-19) ──────────────────────
-  0:  { solid: false, transparent: true, hardness: 0, damage: 0, drop: null },                                          // AIR
-  1:  { solid: true, transparent: false, hardness: -1, damage: 0, drop: null },                                          // BEDROCK unbreakable
-  2:  { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: null },                                         // STONE
-  3:  { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                         // DIRT
-  4:  { solid: true, transparent: false, hardness: 0.6, damage: 0, drop: 3 },                                            // GRASS → drops DIRT(3)
-  5:  { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                         // SAND
-  6:  { solid: true, transparent: false, hardness: 0.6, damage: 0, drop: null },                                         // GRAVEL
-  7:  { solid: false, transparent: true, hardness: 0, damage: 0, drop: null, drinkable: true },                          // WATER
-  8:  { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'coal', mineable: true },                       // COAL_ORE
-  9:  { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'iron_ore', mineable: true },                   // IRON_ORE
-  10: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'gold_ore', mineable: true },                   // GOLD_ORE
-  11: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: 'diamond', mineable: true },                    // DIAMOND_ORE
-  12: { solid: false, transparent: true, hardness: 0, damage: 0, drop: null },                                            // CAVE_AIR (invisible)
-  13: { solid: true, transparent: false, hardness: 0.3, damage: 0, drop: null },                                          // SNOW
-  14: { solid: true, transparent: false, hardness: 3.0, damage: 0, drop: null },                                          // SNOW_STONE
-  15: { solid: false, transparent: true, hardness: 0, damage: 4, drop: null, animated: true },                           // LAVA
-  16: { solid: true, transparent: false, hardness: 3.5, damage: 0, drop: null },                                          // TERRACOTTA
-  17: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                          // RED_SAND
-  18: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, slippery: true },                          // ICE
-  19: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null },                                          // CLAY
-
-  // ── Cuubz-specific decorations & features (IDs 32+) ─────────
-  32: { solid: true, transparent: false, hardness: 2.0, damage: 0, drop: null, craftable: true },                        // WOOD_LOG
-  33: { solid: false, transparent: true, hardness: 0.2, damage: 0, drop: null },                                          // LEAVES
-  34: { solid: true, transparent: false, hardness: 1.5, damage: 0, drop: null, craftable: true },                         // PLANKS
-  35: { solid: true, transparent: false, hardness: 50.0, damage: 0, drop: null },                                         // OBSIDIAN (effectively unbreakable)
-  36: { solid: true, transparent: false, hardness: 4.0, damage: 0, drop: null },                                          // BLACKSTONE
-  37: { solid: false, transparent: true, hardness: 0, damage: 2, drop: null, animated: true },                            // TOXIC_SLIME
-  38: { solid: true, transparent: false, hardness: 2.0, damage: 0, drop: 'corrupt_crystal', questItem: true },            // CORRUPT_CRYSTAL
-  39: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, placeable: true },                         // BED
-  40: { solid: false, transparent: true, hardness: 0, damage: 0, drop: 'apple', foodItem: true },                         // APPLE (food)
-  41: { solid: true, transparent: false, hardness: 0.5, damage: 0, drop: null, questItem: true },                         // QUEST_KEY
-  42: { solid: false, transparent: true, hardness: 0.1, damage: 0, drop: null },                                          // RED_FLOWER
-  43: { solid: false, transparent: true, hardness: 0.1, damage: 0, drop: null },                                          // YELLOW_FLOWER
-  44: { solid: false, transparent: true, hardness: 0.2, damage: 0, drop: null },                                          // CAVE_TORCH
-  45: { solid: true, transparent: false, hardness: 1.0, damage: 0, drop: null }                                           // GLOWSTONE
-};
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS, EQUIPMENT_SLOTS, EQUIPMENT_SLOT_ORDER, getEquipmentSlotForItem };

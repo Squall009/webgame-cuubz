@@ -481,13 +481,18 @@ test('ws.onerror triggers client cleanup', () => {
     close: () => {},
   };
 
-  let sessionLeft = false;
+  // onSessionLeave was split into onHostLeave / onClientLeave so that a departing
+  // non-host no longer tears down the whole session. This client hosts, so the
+  // error path must fire onHostLeave.
+  let hostLeft = false;
+  let clientLeft = false;
   const matchmaking = new Matchmaking({
     wss: mockWSS,
     onHostRequest: () => ({ sessionId: 's1', sessionPort: 8766 }),
     onJoinRequest: () => ({ sessionPort: 8766 }),
     listSessions: () => [],
-    onSessionLeave: (sid) => { sessionLeft = true; },
+    onHostLeave: () => { hostLeft = true; },
+    onClientLeave: () => { clientLeft = true; },
   });
 
   // Simulate a connection with MockWS
@@ -507,7 +512,8 @@ test('ws.onerror triggers client cleanup', () => {
   mockWS.triggerError('network failure');
 
   assert(matchmaking.clients.size === 0, `Client should be removed from Map after WS error, got ${matchmaking.clients.size}`);
-  assert(sessionLeft === true, 'onSessionLeave should be called for the session');
+  assert(hostLeft === true, 'onHostLeave should be called — the erroring client was the host');
+  assert(clientLeft === false, 'onClientLeave should not fire for a host error');
 });
 
 test('ws.onerror without session does not crash', () => {
@@ -621,6 +627,7 @@ console.log('\n===================================');
 console.log(`Results: ${passCount} passed, ${failCount} failed`);
 console.log('===================================');
 
-if (failCount > 0) {
-  process.exit(1);
-}
+// Exit explicitly in both directions. The mock clients leave reconnect/heartbeat
+// timers pending, so falling off the end of the file leaves the event loop alive
+// and hangs the run — which only showed up once these tests started passing.
+process.exit(failCount > 0 ? 1 : 0);

@@ -100,7 +100,7 @@ console.log('\n--- Test Group 1: DEFAULT_STREAM_CONFIG ---');
 assertEqual(DEFAULT_STREAM_CONFIG.loadRadius, 6, 'Default loadRadius is 6');
 assertEqual(DEFAULT_STREAM_CONFIG.unloadRadius, 8, 'Default unloadRadius is 8');
 assertEqual(DEFAULT_STREAM_CONFIG.streamInterval, 500, 'Default streamInterval is 500ms');
-assertEqual(DEFAULT_STREAM_CONFIG.maxChunksPerTick, 4, 'Default maxChunksPerTick is 4');
+assertEqual(DEFAULT_STREAM_CONFIG.maxChunksPerTick, 32, 'Default maxChunksPerTick is 32');
 assertTrue(DEFAULT_STREAM_CONFIG.compressData, 'Default compressData is true');
 
 console.log('\n--- Test Group 2: CHUNK_STATE constants ---');

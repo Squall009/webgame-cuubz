@@ -73,8 +73,9 @@ for (const [id, recipe] of Object.entries(CraftingSystem.RECIPES)) {
 
 // --- Group 3: Planks from Wood recipe ---
 setGroup('Planks Recipe');
-const planksRecipe = CraftingSystem.RECIPES.planks;
-assert(planksRecipe !== undefined, 'Planks recipe should exist');
+// Planks are now split per wood type; WOOD_LOG is the legacy alias for OAK_LOG.
+const planksRecipe = CraftingSystem.RECIPES.planks_oak;
+assert(planksRecipe !== undefined, 'Oak planks recipe should exist');
 assertEqual(planksRecipe.ingredients.length, 1, 'Planks recipe should have 1 ingredient type');
 assertEqual(planksRecipe.ingredients[0].typeId, BLOCK_TYPES.WOOD_LOG, 'Planks ingredient should be wood log');
 assertEqual(planksRecipe.ingredients[0].count, 1, 'Planks recipe should consume 1 wood log');
@@ -90,231 +91,182 @@ if (bedRecipe) {
 } else {
   console.log('  ℹ️ Bed recipe not yet defined (expected)');
 }
-
 // --- Group 5: CraftingSystem class constructor ---
+// Crafting is no longer grid-based: recipes are matched against inventory contents
+// via getCraftableRecipes(inventory) and executed with craftRecipe(id, inventory).
 setGroup('CraftingSystem Constructor');
 const crafting = new CraftingSystem.CraftingSystem();
 assert(crafting.recipes !== undefined, 'Should have recipes property');
 assert(crafting.discoveredRecipes !== undefined, 'Should have discoveredRecipes set');
-assert(crafting.craftingGrid !== undefined, 'Should have craftingGrid property');
-assert(Array.isArray(crafting.craftingGrid), 'craftingGrid should be an array');
+assert(crafting.discoveredRecipes instanceof Set, 'discoveredRecipes should be a Set');
+assertEqual(crafting.inventory, null, 'Inventory defaults to null');
+assert(typeof crafting.getCraftableRecipes === 'function', 'Should expose getCraftableRecipes');
+assert(typeof crafting.craftRecipe === 'function', 'Should expose craftRecipe');
 
-// --- Group 6: Recipe matching ---
+// Stage 1 recipes are auto-discovered
+assert(crafting.isRecipeDiscovered('planks_oak'), 'Stage 1 recipe auto-discovered');
+
+// ============================================================
+// Mock inventory — implements the surface CraftingSystem uses:
+// countItem / removeItem / addItem.
+// ============================================================
+function makeInventory(initial = []) {
+  return {
+    slots: initial.slice(),
+    countItem(typeId) {
+      return this.slots.reduce((n, s) => (s && s.typeId === typeId ? n + s.count : n), 0);
+    },
+    removeItem(typeId, count) {
+      let remaining = count;
+      for (let i = 0; i < this.slots.length && remaining > 0; i++) {
+        const slot = this.slots[i];
+        if (!slot || slot.typeId !== typeId) continue;
+        const take = Math.min(slot.count, remaining);
+        slot.count -= take;
+        remaining -= take;
+        if (slot.count <= 0) this.slots[i] = null;
+      }
+      return remaining === 0;
+    },
+    addItem(typeId, count) {
+      const existing = this.slots.find(s => s && s.typeId === typeId);
+      if (existing) { existing.count += count; return true; }
+      this.slots.push({ typeId, count });
+      return true;
+    },
+  };
+}
+
+// --- Group 6: Recipe availability from inventory ---
 setGroup('Recipe Matching');
 const crafting2 = new CraftingSystem.CraftingSystem();
 
-// Match planks recipe: single wood log in grid
-crafting2.craftingGrid = [
-  { typeId: BLOCK_TYPES.WOOD_LOG, count: 1 },
-  null, null, null, null, null, null, null, null
-];
-const matchResult = crafting2.findMatchingRecipe();
-assert(matchResult !== null, 'Should find planks recipe with wood log in grid');
-if (matchResult) {
-  assertEqual(matchResult.id, 'planks', 'Matched recipe should be planks');
+const logInv = makeInventory([{ typeId: BLOCK_TYPES.WOOD_LOG, count: 1 }]);
+const craftable = crafting2.getCraftableRecipes(logInv);
+assert(Array.isArray(craftable), 'getCraftableRecipes returns an array');
+assert(craftable.some(r => r.id === 'planks_oak'), 'Oak planks craftable with an oak log');
+
+// Empty inventory matches nothing
+const emptyInv = makeInventory([]);
+assertEqual(crafting2.getCraftableRecipes(emptyInv).length, 0, 'Empty inventory yields no recipes');
+
+// A block that is not an ingredient of any stage-1 recipe
+const stoneInv = makeInventory([{ typeId: BLOCK_TYPES.STONE, count: 1 }]);
+assert(!crafting2.getCraftableRecipes(stoneInv).some(r => r.id === 'planks_oak'),
+  'Stone alone does not make planks craftable');
+
+// Table-only recipes are hidden until at a crafting table
+const tableRecipeIds = Object.keys(CraftingSystem.RECIPES).filter(
+  id => CraftingSystem.RECIPES[id].requiresTable
+);
+if (tableRecipeIds.length > 0) {
+  const handOnly = crafting2.getCraftableRecipes(logInv, false).map(r => r.id);
+  assert(!handOnly.some(id => tableRecipeIds.includes(id)),
+    'requiresTable recipes excluded when not at a crafting table');
 }
-
-// No match: empty grid
-crafting2.craftingGrid = new Array(9).fill(null);
-const noMatch = crafting2.findMatchingRecipe();
-assertEqual(noMatch, null, 'Empty grid should not match any recipe');
-
-// No match: wrong ingredient
-crafting2.craftingGrid = [
-  { typeId: BLOCK_TYPES.STONE, count: 1 },
-  null, null, null, null, null, null, null, null
-];
-const stoneMatch = crafting2.findMatchingRecipe();
-assertEqual(stoneMatch, null, 'Stone alone should not match any recipe');
 
 // --- Group 7: Crafting execution ---
 setGroup('Crafting Execution');
-
-// Mock inventory for testing
-const mockInventory = {
-  slots: [
-    { typeId: BLOCK_TYPES.WOOD_LOG, count: 5 },
-    null, null, null, null,
-    null, null, null, null,
-    null, null, null, null,
-    null, null, null, null,
-    null, null, null, null,
-  ],
-  hasItem(typeId) {
-    return this.slots.some(s => s && s.typeId === typeId && s.count > 0);
-  },
-  removeItem(typeId, count) {
-    for (const slot of this.slots) {
-      if (slot && slot.typeId === typeId) {
-        slot.count -= count;
-        if (slot.count <= 0) {
-          // Find the slot index and set to null
-          const idx = this.slots.indexOf(slot);
-          this.slots[idx] = null;
-        }
-        return true;
-      }
-    }
-    return false;
-  },
-  addItem(typeId, count) {
-    // Try to stack first
-    for (const slot of this.slots) {
-      if (slot && slot.typeId === typeId && slot.count < 64) {
-        slot.count += count;
-        return true;
-      }
-    }
-    // Find empty slot
-    for (let i = 0; i < this.slots.length; i++) {
-      if (!this.slots[i]) {
-        this.slots[i] = { typeId, count };
-        return true;
-      }
-    }
-    return false; // Inventory full
-  },
-};
-
 const crafting3 = new CraftingSystem.CraftingSystem();
-crafting3.inventory = mockInventory;
-crafting3.craftingGrid = [
-  { typeId: BLOCK_TYPES.WOOD_LOG, count: 1 },
-  null, null, null, null, null, null, null, null
-];
+const craftInv = makeInventory([{ typeId: BLOCK_TYPES.WOOD_LOG, count: 5 }]);
 
-const woodBefore = mockInventory.slots.find(s => s && s.typeId === BLOCK_TYPES.WOOD_LOG);
-assertEqual(woodBefore.count, 5, 'Should have 5 wood logs before crafting');
+assertEqual(craftInv.countItem(BLOCK_TYPES.WOOD_LOG), 5, 'Should have 5 wood logs before crafting');
 
-const craftResult = crafting3.craft();
+const craftResult = crafting3.craftRecipe('planks_oak', craftInv);
 assert(craftResult !== null, 'Craft should succeed');
 if (craftResult) {
-  assertEqual(craftResult.recipeId, 'planks', 'Craft result should reference planks recipe');
+  assertEqual(craftResult.recipeId, 'planks_oak', 'Craft result references the oak planks recipe');
+  assertEqual(craftResult.count, 4, 'Craft yields 4 planks');
 }
-
-const woodAfter = mockInventory.slots.find(s => s && s.typeId === BLOCK_TYPES.WOOD_LOG);
-assert(woodAfter !== undefined, 'Should still have wood log slot (4 remaining)');
-assertEqual(woodAfter.count, 4, 'Should have 4 wood logs after crafting 1');
-
-// Check planks were added
-const planksSlot = mockInventory.slots.find(s => s && s.typeId === BLOCK_TYPES.PLANKS);
-assert(planksSlot !== undefined, 'Should have planks in inventory after crafting');
-assertEqual(planksSlot.count, 4, 'Should have 4 planks after crafting');
+assertEqual(craftInv.countItem(BLOCK_TYPES.WOOD_LOG), 4, 'Should have 4 wood logs after crafting 1');
+assertEqual(craftInv.countItem(BLOCK_TYPES.PLANKS), 4, 'Should have 4 planks after crafting');
 
 // --- Group 8: Insufficient ingredients ---
 setGroup('Insufficient Ingredients');
 const crafting4 = new CraftingSystem.CraftingSystem();
-crafting4.inventory = mockInventory;
-
-// Not enough wood logs (need 1, but simulate having 0)
-mockInventory.slots[0].count = 0; // Set wood to 0
-crafting4.craftingGrid = [
-  { typeId: BLOCK_TYPES.WOOD_LOG, count: 1 },
-  null, null, null, null, null, null, null, null
-];
-
-const failResult = crafting4.canCraft();
-assertEqual(failResult, false, 'Should not be able to craft without ingredients');
-
-// Restore wood for next tests
-mockInventory.slots[0].count = 5;
+const brokeInv = makeInventory([]);
+assertEqual(crafting4.craftRecipe('planks_oak', brokeInv), null,
+  'Should not be able to craft without ingredients');
+assertEqual(brokeInv.countItem(BLOCK_TYPES.PLANKS), 0, 'Failed craft adds nothing');
 
 // --- Group 9: Recipe discovery system ---
 setGroup('Recipe Discovery');
 const crafting5 = new CraftingSystem.CraftingSystem();
+assert(crafting5.discoveredRecipes instanceof Set, 'discoveredRecipes should be a Set');
 
-// Initially, recipes may or may not be discovered (depends on implementation)
-assert(crafting5.discoveredRecipes instanceof Set || typeof crafting5.discoveredRecipes === 'object',
-  'discoveredRecipes should be a Set or object');
+crafting5.discoverRecipe('planks_oak');
+assertEqual(crafting5.isRecipeDiscovered('planks_oak'), true,
+  'Planks recipe should be discovered after discoverRecipe()');
+assertEqual(crafting5.isRecipeDiscovered('nonexistent_recipe'), false,
+  'Non-existent recipe should not be discovered');
 
-// Discover a recipe
-crafting5.discoverRecipe('planks');
-const isDiscovered = crafting5.isRecipeDiscovered('planks');
-assertEqual(isDiscovered, true, 'Planks recipe should be discovered after discoverRecipe()');
+// discoverRecipe on an unknown id is a no-op, not a crash
+crafting5.discoverRecipe('nonexistent_recipe');
+assertEqual(crafting5.isRecipeDiscovered('nonexistent_recipe'), false,
+  'discoverRecipe ignores unknown recipe ids');
 
-// Check undiscovered recipe
-const undiscovered = crafting5.isRecipeDiscovered('nonexistent_recipe');
-assertEqual(undiscovered, false, 'Non-existent recipe should not be discovered');
+// Undiscovered recipes stay out of getCraftableRecipes
+const crafting5b = new CraftingSystem.CraftingSystem();
+crafting5b.discoveredRecipes.delete('planks_oak');
+assert(!crafting5b.getCraftableRecipes(makeInventory([{ typeId: BLOCK_TYPES.WOOD_LOG, count: 1 }]))
+  .some(r => r.id === 'planks_oak'), 'Undiscovered recipes are not craftable');
 
-// --- Group 10: getAvailableRecipes ---
+// --- Group 10: Recipe lookup ---
 setGroup('Available Recipes');
 const crafting6 = new CraftingSystem.CraftingSystem();
-crafting6.discoverRecipe('planks');
+const allRecipes = crafting6.getAllRecipes();
+assert(typeof allRecipes === 'object' && allRecipes !== null, 'getAllRecipes returns an object');
+assert(Object.keys(allRecipes).length >= 1, 'Should have at least 1 recipe');
+assert(allRecipes.planks_oak !== undefined, 'getAllRecipes includes oak planks');
+assertEqual(crafting6.getRecipeInfo('planks_oak').id, 'planks_oak', 'getRecipeInfo returns the recipe');
+assertEqual(crafting6.getRecipeInfo('nonexistent_recipe'), null, 'getRecipeInfo returns null when unknown');
 
-const available = crafting6.getAvailableRecipes();
-assert(Array.isArray(available), 'getAvailableRecipes should return array');
-assert(available.length >= 1, 'Should have at least 1 available recipe after discovering planks');
-
-// --- Group 11: Grid clear after crafting ---
-setGroup('Grid Clear After Craft');
+// --- Group 11: Ingredients are consumed exactly once ---
+setGroup('Ingredient Consumption');
 const crafting7 = new CraftingSystem.CraftingSystem();
-crafting7.inventory = mockInventory;
-mockInventory.slots[0].count = 5; // Ensure we have wood
-
-crafting7.craftingGrid = [
-  { typeId: BLOCK_TYPES.WOOD_LOG, count: 1 },
-  null, null, null, null, null, null, null, null
-];
-
-crafting7.craft();
-
-// Grid should be cleared after crafting
-let gridEmpty = true;
-for (const slot of crafting7.craftingGrid) {
-  if (slot !== null) {
-    gridEmpty = false;
-    break;
-  }
-}
-assert(gridEmpty, 'Crafting grid should be cleared after successful craft');
+const exactInv = makeInventory([{ typeId: BLOCK_TYPES.WOOD_LOG, count: 1 }]);
+crafting7.craftRecipe('planks_oak', exactInv);
+assertEqual(exactInv.countItem(BLOCK_TYPES.WOOD_LOG), 0, 'The single log was consumed');
+assertEqual(crafting7.craftRecipe('planks_oak', exactInv), null,
+  'Second craft fails once ingredients are gone');
 
 // --- Group 12: Callback system ---
 setGroup('Crafting Callbacks');
 const crafting8 = new CraftingSystem.CraftingSystem();
-crafting8.inventory = mockInventory;
-mockInventory.slots[0].count = 5;
-
 let craftCallbackFired = false;
 let callbackOutput = null;
 crafting8.onCraftComplete = (output) => {
   craftCallbackFired = true;
   callbackOutput = output;
 };
-
-crafting8.craftingGrid = [
-  { typeId: BLOCK_TYPES.WOOD_LOG, count: 1 },
-  null, null, null, null, null, null, null, null
-];
-
-crafting8.craft();
+crafting8.craftRecipe('planks_oak', makeInventory([{ typeId: BLOCK_TYPES.WOOD_LOG, count: 1 }]));
 assert(craftCallbackFired, 'onCraftComplete callback should fire');
 if (callbackOutput) {
   assert(callbackOutput.typeId === BLOCK_TYPES.PLANKS, 'Callback output should be planks');
   assertEqual(callbackOutput.count, 4, 'Callback output count should be 4');
 }
 
+// onRecipeDiscovered fires once, only for newly discovered recipes
+const crafting8b = new CraftingSystem.CraftingSystem();
+crafting8b.discoveredRecipes.delete('planks_oak');
+let discoveredFired = 0;
+crafting8b.onRecipeDiscovered = () => { discoveredFired++; };
+crafting8b.discoverRecipe('planks_oak');
+crafting8b.discoverRecipe('planks_oak');
+assertEqual(discoveredFired, 1, 'onRecipeDiscovered fires only on first discovery');
+
 // --- Group 13: Edge cases ---
 setGroup('Edge Cases');
-
-// Null inventory — canCraft should handle gracefully
 const crafting9 = new CraftingSystem.CraftingSystem();
-crafting9.inventory = null;
-assertEqual(crafting9.canCraft(), false, 'canCraft with null inventory should return false');
 
-// Empty grid — findMatchingRecipe should return null
-crafting9.craftingGrid = new Array(9).fill(null);
-assertEqual(crafting9.findMatchingRecipe(), null, 'Empty grid should not match any recipe');
-
-// Grid with invalid item type
-crafting9.craftingGrid = [
-  { typeId: -1, count: 1 },
-  null, null, null, null, null, null, null, null
-];
-assertEqual(crafting9.findMatchingRecipe(), null, 'Invalid item type should not match any recipe');
-
-// Craft with no inventory
-const noInvResult = crafting9.craft();
-assertEqual(noInvResult, null, 'craft() without inventory should return null');
+assertEqual(crafting9.getCraftableRecipes(null).length, 0,
+  'getCraftableRecipes with null inventory returns empty');
+assertEqual(crafting9.craftRecipe('planks_oak', null), null,
+  'craftRecipe with null inventory returns null');
+assertEqual(crafting9.craftRecipe('nonexistent_recipe', makeInventory([])), null,
+  'craftRecipe with unknown recipe returns null');
+assertEqual(crafting9.getCraftableRecipes(makeInventory([{ typeId: -1, count: 1 }])).length, 0,
+  'Invalid item type matches no recipe');
 
 // ============================================================
 // Summary

@@ -7,7 +7,9 @@
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "bash test/run_tests.sh",
+    "check-globals": "node scripts/check-globals.js",
+    "generate-manifest": "node scripts/generate-manifest.js"
   },
   "keywords": [],
   "author": "",

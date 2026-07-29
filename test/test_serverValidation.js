@@ -50,14 +50,14 @@ function runTests() {
   assert(result.valid === false, 'Non-integer coordinates rejected');
   assert(result.reason === 'Non-integer coordinates', `Reason correct: "${result.reason}"`);
 
-  // Invalid: Y below world minimum (-32)
-  result = validateBlockBreak('player1', playerPos, 8, -33, 8, hostConfig);
-  assert(result.valid === false, 'Y below -32 rejected');
+  // Invalid: Y below world minimum
+  result = validateBlockBreak('player1', playerPos, 8, hostConfig.yMin - 1, 8, hostConfig);
+  assert(result.valid === false, `Y below ${hostConfig.yMin} rejected`);
   assert(result.reason.includes('out of bounds'), `Reason mentions bounds: "${result.reason}"`);
 
-  // Invalid: Y above world maximum (64)
-  result = validateBlockBreak('player1', playerPos, 8, 65, 8, hostConfig);
-  assert(result.valid === false, 'Y above 64 rejected');
+  // Invalid: Y above world maximum
+  result = validateBlockBreak('player1', playerPos, 8, hostConfig.yMax + 1, 8, hostConfig);
+  assert(result.valid === false, `Y above ${hostConfig.yMax} rejected`);
 
   // Invalid: too far away (reach distance = 6 blocks by default)
   result = validateBlockBreak('player1', playerPos, 20, 20, 20, hostConfig);
@@ -245,19 +245,23 @@ function runTests() {
 
   group('9. Boundary condition — Y coordinate edge cases');
 
-  // Exactly at world boundaries
-  result = validateBlockBreak('player1', { x: 0, y: -32, z: 0 }, 0, -32, 0, hostConfig);
-  assert(result.valid === true, 'Block break at Y=-32 (world bottom) accepted');
+  // Exactly at world boundaries — derived from the config so a world-height
+  // change does not silently re-rot these assertions.
+  const yBottom = hostConfig.yMin;
+  const yTop = hostConfig.yMax;
 
-  result = validateBlockBreak('player1', { x: 0, y: 64, z: 0 }, 0, 64, 0, hostConfig);
-  assert(result.valid === true, 'Block break at Y=64 (world top) accepted');
+  result = validateBlockBreak('player1', { x: 0, y: yBottom, z: 0 }, 0, yBottom, 0, hostConfig);
+  assert(result.valid === true, `Block break at Y=${yBottom} (world bottom) accepted`);
+
+  result = validateBlockBreak('player1', { x: 0, y: yTop, z: 0 }, 0, yTop, 0, hostConfig);
+  assert(result.valid === true, `Block break at Y=${yTop} (world top) accepted`);
 
   // One past boundaries
-  result = validateBlockBreak('player1', { x: 0, y: -32, z: 0 }, 0, -33, 0, hostConfig);
-  assert(result.valid === false, 'Block break at Y=-33 rejected (below world)');
+  result = validateBlockBreak('player1', { x: 0, y: yBottom, z: 0 }, 0, yBottom - 1, 0, hostConfig);
+  assert(result.valid === false, `Block break at Y=${yBottom - 1} rejected (below world)`);
 
-  result = validateBlockBreak('player1', { x: 0, y: 64, z: 0 }, 0, 65, 0, hostConfig);
-  assert(result.valid === false, 'Block break at Y=65 rejected (above world)');
+  result = validateBlockBreak('player1', { x: 0, y: yTop, z: 0 }, 0, yTop + 1, 0, hostConfig);
+  assert(result.valid === false, `Block break at Y=${yTop + 1} rejected (above world)`);
 
   group('10. Custom configuration overrides');
 
@@ -320,8 +324,8 @@ function runTests() {
 
   // DEFAULT_HOST_CONFIG expected values
   assert(DEFAULT_HOST_CONFIG.reachDistance === 6, `Default reach distance is 6`);
-  assert(DEFAULT_HOST_CONFIG.yMin === -32, `Default Y min is -32`);
-  assert(DEFAULT_HOST_CONFIG.yMax === 64, `Default Y max is 64`);
+  assert(DEFAULT_HOST_CONFIG.yMin === 0, `Default Y min is 0`);
+  assert(DEFAULT_HOST_CONFIG.yMax === 96, `Default Y max is 96`);
   assert(DEFAULT_HOST_CONFIG.maxPlayers === 4, `Default max players is 4`);
 
   group('14. InventoryValidator — processInventoryUpdate');

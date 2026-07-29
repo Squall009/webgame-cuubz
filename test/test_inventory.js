@@ -7,6 +7,8 @@
 'use strict';
 
 const { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS } = require('../js/systems/inventory');
+// Reference block ids by name — they have been renumbered before and will be again.
+const { BLOCK_TYPES } = require('../js/world/chunkData');
 
 // ============================================================
 // Test Framework (embedded)
@@ -104,7 +106,7 @@ assertNotNull(NAMED_ITEMS.coal, 'Coal is a named item');
 assertNotNull(NAMED_ITEMS.corrupt_crystal, 'Corrupt crystal is a named item');
 assertEquals(NAMED_ITEMS.apple.name, 'Apple', 'Apple display name');
 assertEquals(NAMED_ITEMS.apple.category, 'food', 'Apple is food category');
-assertEquals(NAMED_ITEMS.apple.maxStack, 16, 'Apple max stack is 16');
+assertEquals(NAMED_ITEMS.apple.maxStack, 64, 'Apple max stack is 64');
 
 // --- Test: Construction ---
 console.log('\n[Construction]');
@@ -162,13 +164,13 @@ assertEquals(inv.getItemCategory('coal'), 'resource', 'Coal is resource category
 assertEquals(inv.getItemCategory('unknown_item'), 'resource', 'Unknown string defaults to resource');
 
 assertEquals(inv.getMaxStack(1), 64, 'Block max stack is 64');
-assertEquals(inv.getMaxStack(22), 1, 'Corrupt crystal (22) max stack is 1');
-assertEquals(inv.getMaxStack(25), 1, 'Quest key (25) max stack is 1');
-assertEquals(inv.getMaxStack('apple'), 16, 'Apple max stack is 16');
+assertEquals(inv.getMaxStack(BLOCK_TYPES.CORRUPT_CRYSTAL), 1, 'Corrupt crystal block max stack is 1');
+assertEquals(inv.getMaxStack(BLOCK_TYPES.QUEST_KEY), 1, 'Quest key block max stack is 1');
+assertEquals(inv.getMaxStack('apple'), 64, 'Apple max stack is 64');
 assertEquals(inv.getMaxStack('corrupt_crystal'), 1, 'Corrupt crystal named item max stack is 1');
 
-assertEquals(inv.getDisplayName(1), 'Grass', 'Block 1 display name is Grass');
-assertEquals(inv.getDisplayName(3), 'Stone', 'Block 3 display name is Stone');
+assertEquals(inv.getDisplayName(BLOCK_TYPES.GRASS), 'Grass Block', 'GRASS block display name is Grass Block');
+assertEquals(inv.getDisplayName(BLOCK_TYPES.STONE), 'Stone', 'STONE block display name is Stone');
 assertEquals(inv.getDisplayName('apple'), 'Apple', 'Apple display name');
 assertEquals(inv.getDisplayName('coal'), 'Coal', 'Coal display name');
 
@@ -275,16 +277,16 @@ result = addInv.addItem('apple', 5);
 assertEquals(result.added, 5, 'Added 5 apples');
 assertEquals(addInv.countItem('apple'), 5, 'Apple count is 5');
 
-// Stacking respects max stack for food (16)
+// Stacking respects a small max stack — ender pearls cap at 16
 const foodInv = new Inventory();
-result = foodInv.addItem('apple', 20); // Try to add 20 apples, max stack is 16
-assertEquals(result.added, 20, 'Added all 20 apples');
+result = foodInv.addItem('ender_pearl', 20); // Try to add 20, max stack is 16
+assertEquals(result.added, 20, 'Added all 20 ender pearls');
 assertEquals(result.remaining, 0, 'No remaining (split across 2 slots)');
 // Should be: slot 1 = 16, slot 2 = 4
 const items = foodInv.getItems();
-assertEquals(items.length, 2, 'Apples split into 2 slots');
-assertEquals(items[0].count, 16, 'First apple stack is max (16)');
-assertEquals(items[1].count, 4, 'Second apple stack is remainder (4)');
+assertEquals(items.length, 2, 'Ender pearls split into 2 slots');
+assertEquals(items[0].count, 16, 'First ender pearl stack is max (16)');
+assertEquals(items[1].count, 4, 'Second ender pearl stack is remainder (4)');
 
 // Overflow test — full inventory
 const tinyInv = new Inventory(1, 2); // Only 2 slots
@@ -359,33 +361,42 @@ console.log('\n[Block Break/Place]');
 
 const bpInv = new Inventory();
 
-// Breaking GRASS drops DIRT (block type 2)
-let dropResult = bpInv.addBlockDrop(1); // GRASS
+// Breaking GRASS drops DIRT
+let dropResult = bpInv.addBlockDrop(BLOCK_TYPES.GRASS);
 assertTrue(dropResult, 'Breaking grass adds drop to inventory');
-assertEquals(bpInv.countItem(2), 1, 'Dirt added from breaking grass');
-assertEquals(bpInv.getSlot(0).typeId, 2, 'First slot has dirt (drop type)');
+assertEquals(bpInv.countItem(BLOCK_TYPES.DIRT), 1, 'Dirt added from breaking grass');
+assertEquals(bpInv.getSlot(0).typeId, BLOCK_TYPES.DIRT, 'First slot has dirt (drop type)');
 
-// Breaking STONE drops nothing (no drop property)
+// Breaking STONE drops the block itself (no drop override)
 bpInv.clear();
-dropResult = bpInv.addBlockDrop(3); // STONE
+dropResult = bpInv.addBlockDrop(BLOCK_TYPES.STONE);
 assertTrue(dropResult, 'Breaking stone adds block itself');
-assertEquals(bpInv.countItem(3), 1, 'Stone block added to inventory');
+assertEquals(bpInv.countItem(BLOCK_TYPES.STONE), 1, 'Stone block added to inventory');
+
+// Blocks renumbered after this test was written used to hit a stale id-keyed drop
+// table: andesite dropped cobblestone and deepslate dropped coal. Both drop themselves.
+bpInv.clear();
+assertTrue(bpInv.addBlockDrop(BLOCK_TYPES.ANDESITE), 'Breaking andesite adds drop');
+assertEquals(bpInv.countItem(BLOCK_TYPES.ANDESITE), 1, 'Andesite drops itself, not cobblestone');
+bpInv.clear();
+assertTrue(bpInv.addBlockDrop(BLOCK_TYPES.DEEPSLATE), 'Breaking deepslate adds drop');
+assertEquals(bpInv.countItem(BLOCK_TYPES.DEEPSLATE), 1, 'Deepslate drops itself, not coal');
 
 // Breaking BEDROCK drops nothing (unbreakable)
 bpInv.clear();
-dropResult = bpInv.addBlockDrop(11); // BEDROCK
+dropResult = bpInv.addBlockDrop(BLOCK_TYPES.BEDROCK);
 assertFalse(dropResult, 'Breaking bedrock adds nothing');
 assertEquals(bpInv.countTotalItems(), 0, 'No items added for unbreakable block');
 
 // Breaking COAL_ORE drops 'coal' named item
 bpInv.clear();
-dropResult = bpInv.addBlockDrop(18); // COAL_ORE
+dropResult = bpInv.addBlockDrop(BLOCK_TYPES.COAL_ORE);
 assertTrue(dropResult, 'Breaking coal ore adds drop');
 assertEquals(bpInv.countItem('coal'), 1, 'Coal resource added');
 
 // Breaking APPLE block drops 'apple' food item
 bpInv.clear();
-dropResult = bpInv.addBlockDrop(24); // APPLE
+dropResult = bpInv.addBlockDrop(BLOCK_TYPES.APPLE);
 assertTrue(dropResult, 'Breaking apple block adds drop');
 assertEquals(bpInv.countItem('apple'), 1, 'Apple food item added');
 

@@ -676,12 +676,16 @@ class MultiplayerClient {
 
   // ── State Accessors ───────────────────────────────────────────
 
+  // Coerced to real booleans: these returned `null` before a connection object
+  // existed, which contradicts the `is*` naming and breaks strict comparison and
+  // JSON serialization. Every caller uses them for truthiness, so this is a no-op
+  // for behaviour.
   get isMatchmakingConnected() {
-    return this._matchmakingConn && this._matchmakingConn.isConnected;
+    return !!(this._matchmakingConn && this._matchmakingConn.isConnected);
   }
 
   get isGameSessionConnected() {
-    return this._gameSessionConn && this._gameSessionConn.isConnected;
+    return !!(this._gameSessionConn && this._gameSessionConn.isConnected);
   }
 
   get currentSessionId() {

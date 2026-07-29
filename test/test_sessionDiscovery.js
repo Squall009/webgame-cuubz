@@ -72,9 +72,16 @@ const matchmaking = new Matchmaking({
     });
 
     const sessionWSS = new WebSocketServer({ server: sessionHttp });
+    // The host request carries the session name, seed and mode — pass them through.
+    // Dropping them here made SessionManager fall back to 'Untitled', so every name
+    // assertion failed even though the production path (client.js → matchmaking.js →
+    // index.js → session.js) forwards them correctly.
     const session = new SessionManager({
       wss: sessionWSS,
       sessionId,
+      sessionName,
+      worldSeed: worldSeed || 42,
+      gameMode: mode || 'survival',
       hostId: playerId,
       maxPlayers: 4,
       heartbeatInterval: 30000,

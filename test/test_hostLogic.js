@@ -5,7 +5,7 @@
  * Test coverage:
  * - Validation functions (block break, block place, move, inventory, quest)
  * - RateLimiter class
- * - RemotePlayerState class
+ * - HostRemotePlayer class
  * - HostManager class (full lifecycle)
  * - Edge cases and error handling
  */
@@ -25,7 +25,7 @@ const {
   validateHostInventory,
   validateQuestUpdate,
   RateLimiter,
-  RemotePlayerState,
+  HostRemotePlayer,
   HostManager,
 } = require(path.join(__dirname, '..', 'js', 'multiplayer', 'host'));
 
@@ -116,8 +116,8 @@ console.log('\n--- Test Group 2: DEFAULT_HOST_CONFIG ---');
 
 assertEqual(DEFAULT_HOST_CONFIG.maxPlayers, 4, 'Default maxPlayers is 4');
 assertEqual(DEFAULT_HOST_CONFIG.reachDistance, 6, 'Default reachDistance is 6');
-assertEqual(DEFAULT_HOST_CONFIG.yMin, -32, 'Default yMin is -32');
-assertEqual(DEFAULT_HOST_CONFIG.yMax, 64, 'Default yMax is 64');
+assertEqual(DEFAULT_HOST_CONFIG.yMin, 0, 'Default yMin is 0');
+assertEqual(DEFAULT_HOST_CONFIG.yMax, 96, 'Default yMax is 96');
 assertEqual(DEFAULT_HOST_CONFIG.moveRateLimit, 20, 'Default moveRateLimit is 20');
 assertEqual(DEFAULT_HOST_CONFIG.blockChangeCooldown, 100, 'Default blockChangeCooldown is 100ms');
 
@@ -232,21 +232,26 @@ result = validateMove('p1', { x: 'a', y: 20, z: 10 });
 assertFalse(result.valid, 'Rejects non-numeric X in position');
 assertEqual(result.reason, 'Non-numeric position', 'Non-numeric position reason');
 
+// Movement allows ±2 blocks of slack outside the world bounds. Derive the
+// boundaries from the config so a world-height change does not re-rot this test.
+const MOVE_Y_MIN = DEFAULT_HOST_CONFIG.yMin - 2;
+const MOVE_Y_MAX = DEFAULT_HOST_CONFIG.yMax + 2;
+
 // Y out of range (below with tolerance)
-result = validateMove('p1', { x: 10, y: -35, z: 10 });
-assertFalse(result.valid, 'Rejects Y below acceptable range (-34)');
+result = validateMove('p1', { x: 10, y: MOVE_Y_MIN - 1, z: 10 });
+assertFalse(result.valid, `Rejects Y below acceptable range (${MOVE_Y_MIN - 1})`);
 
 // Y at lower tolerance boundary
-result = validateMove('p1', { x: 10, y: -34, z: 10 });
+result = validateMove('p1', { x: 10, y: MOVE_Y_MIN, z: 10 });
 assertTrue(result.valid, 'Accepts Y at lower tolerance boundary');
 
 // Y at upper tolerance boundary
-result = validateMove('p1', { x: 10, y: 66, z: 10 });
+result = validateMove('p1', { x: 10, y: MOVE_Y_MAX, z: 10 });
 assertTrue(result.valid, 'Accepts Y at upper tolerance boundary');
 
 // Y above tolerance boundary
-result = validateMove('p1', { x: 10, y: 67, z: 10 });
-assertFalse(result.valid, 'Rejects Y above acceptable range (66)');
+result = validateMove('p1', { x: 10, y: MOVE_Y_MAX + 1, z: 10 });
+assertFalse(result.valid, `Rejects Y above acceptable range (${MOVE_Y_MAX})`);
 
 // Pitch out of range (too high)
 result = validateMove('p1', { x: 10, y: 20, z: 10 }, { yaw: 0, pitch: Math.PI });
@@ -395,11 +400,11 @@ limiter.clear();
 const rAfterAllClear = limiter.check('p2', 'move');
 assertTrue(rAfterAllClear.allowed, 'Rate limit resets after clear()');
 
-// ─── Test Group 9: RemotePlayerState ────────────────────────
+// ─── Test Group 9: HostRemotePlayer ────────────────────────
 
-console.log('\n--- Test Group 9: RemotePlayerState ---');
+console.log('\n--- Test Group 9: HostRemotePlayer ---');
 
-const player = new RemotePlayerState('p1', { name: 'TestPlayer', color: '#ff0000' }, { x: 10, y: 20, z: 10 });
+const player = new HostRemotePlayer('p1', { name: 'TestPlayer', color: '#ff0000' }, { x: 10, y: 20, z: 10 });
 
 assertEqual(player.playerId, 'p1', 'Player ID set correctly');
 assertDeepEqual(player.character, { name: 'TestPlayer', color: '#ff0000' }, 'Character set correctly');
@@ -427,13 +432,13 @@ assertEqual(serialized.playerId, 'p1', 'Serialized playerId');
 assertDeepEqual(serialized.character, { name: 'TestPlayer', color: '#ff0000' }, 'Serialized character');
 assertDeepEqual(serialized.position, { x: 15, y: 22, z: 12 }, 'Serialized position');
 
-const deserialized = RemotePlayerState.deserialize(serialized);
+const deserialized = HostRemotePlayer.deserialize(serialized);
 assertEqual(deserialized.playerId, 'p1', 'Deserialized playerId matches');
 assertDeepEqual(deserialized.character, { name: 'TestPlayer', color: '#ff0000' }, 'Deserialized character matches');
 assertDeepEqual(deserialized.position, { x: 15, y: 22, z: 12 }, 'Deserialized position matches');
 
 // Default character when not provided
-const defaultPlayer = new RemotePlayerState('p2');
+const defaultPlayer = new HostRemotePlayer('p2');
 assertDeepEqual(defaultPlayer.character, { name: 'Player', color: '#ffffff' }, 'Default character values');
 assertDeepEqual(defaultPlayer.position, { x: 0, y: 20, z: 0 }, 'Default position values');
 
@@ -553,12 +558,17 @@ const moveHost = new HostManager({
 moveHost.startSession('Move World', 42);
 
 // Add a remote player
-const movePlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const movePlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   'move_p1',
   { name: 'MovePlayer', color: '#ffff00' },
   { x: 10, y: 20, z: 10 }
 );
 moveHost._players.set('move_p1', movePlayer);
+
+// Backdate the last move so the speed anti-cheat sees a plausible interval. The
+// constructor stamps lastMoveTime = now, and _handlePlayerMove floors dt at 16ms,
+// so an immediate 2.2-block step reads as ~140 blocks/s and is correctly rejected.
+movePlayer.lastMoveTime = Date.now() - 1000;
 
 // Valid move
 moveHost._handlePlayerMove({
@@ -602,7 +612,7 @@ const blockHost = new HostManager({
 blockHost.startSession('Block World', 42);
 
 // Add remote player at known position
-const blockPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const blockPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   'block_p1',
   { name: 'BlockPlayer', color: '#00ff00' },
   { x: 10, y: 20, z: 10 }
@@ -664,7 +674,7 @@ const invHost = new HostManager({
 });
 invHost.startSession('Inv World', 42);
 
-const invPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const invPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   'inv_p1',
   { name: 'InvPlayer', color: '#0000ff' },
   { x: 10, y: 20, z: 10 }
@@ -712,7 +722,7 @@ const questHost = new HostManager({
 });
 questHost.startSession('Quest World', 42);
 
-const questPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const questPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   'quest_p1',
   { name: 'QuestPlayer', color: '#88ff00' },
   { x: 10, y: 20, z: 10 }
@@ -766,7 +776,7 @@ const kickHost = new HostManager({
 });
 kickHost.startSession('Kick World', 42);
 
-const kickPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const kickPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   'kick_p1',
   { name: 'KickPlayer', color: '#88ff00' },
   { x: 10, y: 20, z: 10 }
@@ -800,7 +810,7 @@ const summaryHost = new HostManager({
 });
 summaryHost.startSession('Summary World', 42);
 
-const sPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const sPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   's_p1',
   { name: 'SPlayer', color: '#ff0088' },
   { x: 5, y: 20, z: 5 }
@@ -845,7 +855,7 @@ const cdHost = new HostManager({
 });
 cdHost.startSession('CD World', 42);
 
-const cdPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const cdPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   'cd_p1',
   { name: 'CDPlayer', color: '#00ff88' },
   { x: 10, y: 20, z: 10 }
@@ -870,7 +880,7 @@ cdHost._handleRemoteBlockBreak({ playerId: 'cd_p1', x: 13, y: 20, z: 10 });
 assertEqual(cdBreakCount, 2, 'Third break passes after simulated cooldown expiry');
 
 // Test cooldown works per-player (different player not affected)
-const cdPlayer2 = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).RemotePlayerState)(
+const cdPlayer2 = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
   'cd_p2',
   { name: 'CDPlayer2', color: '#8800ff' },
   { x: 10, y: 20, z: 10 }

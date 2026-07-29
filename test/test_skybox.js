@@ -30,11 +30,11 @@ console.log('================================\n');
 // Group 1: Constants
 console.log('--- Group 1: Constants ---');
 assertEquals(DEFAULT_CYCLE_DURATION, 300, 'Default cycle is 300s');
-assertEquals(FOG_DENSITY_DAY, 0.008, 'Day fog density = 0.008');
-assertEquals(FOG_DENSITY_NIGHT, 0.025, 'Night fog density = 0.025');
+assertEquals(FOG_DENSITY_DAY, 0.001, 'Day fog density = 0.001');
+assertEquals(FOG_DENSITY_NIGHT, 0.003, 'Night fog density = 0.003');
 assertGreaterThan(FOG_DENSITY_NIGHT, FOG_DENSITY_DAY, 'Night fog > day fog');
 assertEquals(AMBIENT_LIGHT.dayIntensity, 0.45, 'Day ambient = 0.45');
-assertEquals(AMBIENT_LIGHT.nightIntensity, 0.08, 'Night ambient = 0.08');
+assertEquals(AMBIENT_LIGHT.nightIntensity, 0.25, 'Night ambient = 0.25');
 assertTrue(SKY_COLORS.midnight === 0x0a0a2e, 'Midnight sky color defined');
 assertTrue(SKY_COLORS.day === 0x87CEEB, 'Day sky color defined');
 

@@ -9,12 +9,16 @@
 // Node.js: require the block registry lookups; browser: use globals (script-tag load order).
 // These are re-exported below because several tests destructure them from this module —
 // chunkData is where block IDs are consumed, so it doubles as their entry point.
-if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+// Each symbol is guarded separately. Guarding the whole block on BLOCK_TYPES alone
+// made these shims order-dependent: a module that set only a subset (say
+// BLOCK_TYPES + BLOCK_PROPERTIES) would satisfy the guard here and leave
+// BLOCK_BY_ID undefined for whoever loaded next.
+if (typeof module !== 'undefined') {
   const registry = require('./blockRegistry');
-  global.BLOCK_TYPES = registry.BLOCK_TYPES;
-  global.BLOCK_BY_ID = registry.BLOCK_BY_ID;
-  global.BLOCK_BY_NAME = registry.BLOCK_BY_NAME;
-  global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
+  if (typeof BLOCK_TYPES === 'undefined') global.BLOCK_TYPES = registry.BLOCK_TYPES;
+  if (typeof BLOCK_BY_ID === 'undefined') global.BLOCK_BY_ID = registry.BLOCK_BY_ID;
+  if (typeof BLOCK_BY_NAME === 'undefined') global.BLOCK_BY_NAME = registry.BLOCK_BY_NAME;
+  if (typeof BLOCK_PROPERTIES === 'undefined') global.BLOCK_PROPERTIES = registry.BLOCK_PROPERTIES;
 }
 
 const CHUNK_WIDTH = 16;

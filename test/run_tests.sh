@@ -1,33 +1,71 @@
 #!/bin/bash
 # Cuubz Test Runner — Run all tests and report results
 # Usage: bash test/run_tests.sh
+#
+# Tests listed in test/QUARANTINE.md are skipped and reported as SKIP. They do not
+# affect the exit code. See that file for why each one is deferred and who owns it.
 
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 
 PASS=0
 FAIL=0
+SKIP=0
 TOTAL=0
 FAILED_TESTS=""
+SKIPPED_TESTS=""
+
+QUARANTINE_FILE="test/QUARANTINE.md"
 
 echo "==================================="
 echo "  Cuubz Test Suite"
 echo "==================================="
 echo ""
 
+# Collect quarantined basenames from QUARANTINE.md.
+#
+# Only the FIRST COLUMN of a markdown table row counts. Matching any test_*.js
+# anywhere in the file is wrong — the prose discusses tests that are deliberately
+# NOT quarantined, and scooping those up silently skips passing tests.
+QUARANTINED=""
+if [ -f "$QUARANTINE_FILE" ]; then
+  QUARANTINED=$(grep -E '^[[:space:]]*\|' "$QUARANTINE_FILE" \
+    | sed -E 's/^[[:space:]]*\|[[:space:]]*`?([A-Za-z0-9_]+\.js)`?[[:space:]]*\|.*/\1/' \
+    | grep -E '^test_[A-Za-z0-9_]+\.js$' \
+    | sort -u)
+fi
+
+is_quarantined() {
+  local name="$1"
+  for q in $QUARANTINED; do
+    [ "$q" = "$name" ] && return 0
+  done
+  return 1
+}
+
 # Find all test files
 for test_file in test/test_*.js; do
   # Skip if no test files exist yet
   [ -e "$test_file" ] || continue
-  
-  TOTAL=$((TOTAL + 1))
+
+  TEST_BASENAME=$(basename "$test_file")
   TEST_NAME=$(basename "$test_file" .js)
-  
+
+  if is_quarantined "$TEST_BASENAME"; then
+    SKIP=$((SKIP + 1))
+    SKIPPED_TESTS="$SKIPPED_TESTS\n  ⏭️  SKIP — $TEST_NAME (see test/QUARANTINE.md)"
+    echo "Running: $TEST_NAME..."
+    echo "  ⏭️  SKIP — $TEST_NAME (quarantined)"
+    continue
+  fi
+
+  TOTAL=$((TOTAL + 1))
+
   echo "Running: $TEST_NAME..."
-  
+
   # Run test, capture output and exit code
   OUTPUT=$(node "$test_file" 2>&1)
   EXIT_CODE=$?
-  
+
   if [ $EXIT_CODE -eq 0 ]; then
     PASS=$((PASS + 1))
     echo "  ✅ PASS — $TEST_NAME"
@@ -42,8 +80,14 @@ done
 
 echo ""
 echo "==================================="
-echo "  Results: $PASS/$TOTAL passed, $FAIL failed"
+echo "  Results: $PASS/$TOTAL passed, $FAIL failed, $SKIP skipped"
 echo "==================================="
+
+if [ $SKIP -gt 0 ]; then
+  echo ""
+  echo "Quarantined (not run, see test/QUARANTINE.md):"
+  echo -e "$SKIPPED_TESTS"
+fi
 
 if [ $TOTAL -eq 0 ]; then
   echo "  ⚠️  No test files found in test/"

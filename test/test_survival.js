@@ -7,6 +7,7 @@
 
 const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS } = require('../js/systems/survival');
 const SpawnManager = require('../js/world/spawnManager');
+const { SEA_LEVEL } = require('../js/world/chunkData');
 
 let passed = 0;
 let failed = 0;
@@ -1172,7 +1173,8 @@ assert(savedSpawn.z === -9, `SpawnManager should have Z=-9, got ${savedSpawn.z}`
 const spawnMgr2 = new SpawnManager();
 const defaultSpawn = spawnMgr2.getSpawn('nonexistent-world', 'player-2');
 assert(defaultSpawn.x === 0, 'Default spawn X should be 0');
-assert(defaultSpawn.y === 20, 'Default spawn Y should be 20');
+// Default spawn tracks sea level, so it stays above water when SEA_LEVEL changes.
+assert(defaultSpawn.y === SEA_LEVEL + 4, `Default spawn Y should be SEA_LEVEL+4, got ${defaultSpawn.y}`);
 
 // --- Test B28: Legacy useBed still works with new restoration values ---
 const ssB22 = new SurvivalSystem();

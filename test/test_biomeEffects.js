@@ -1,10 +1,25 @@
 #!/usr/bin/env node
 /**
  * Cuubz — Biome Effects Tests
- * Tests for lava animation, toxic slime bubbling, corrupt fog, particle effects.
+ *
+ * Covers the current BiomeEffects surface: biome fog/sky configuration and
+ * transitions, day/night blending, the particle pool used for lava and toxic
+ * bubbles, distance culling, the active-particle cap, and disposal.
+ *
+ * This file previously tested a different design (a `ParticleEffect` class, plus
+ * LAVA_ANIMATION / TOXIC_SLIME_ANIMATION / CORRUPT_FOG constants and UV-offset
+ * state like `time` / `lavaOffset` / `inCorruptZone`). None of that exists any
+ * more — biomeEffects.js exports only { BiomeEffects } — so the assertions were
+ * rewritten against the real API rather than inventing constants to satisfy the
+ * old ones.
  */
 
-const { BiomeEffects, ParticleEffect, LAVA_ANIMATION, TOXIC_SLIME_ANIMATION, CORRUPT_FOG } = require('../js/renderer/biomeEffects');
+'use strict';
+
+// biomeEffects.js is a browser classic script that expects a global THREE.
+global.THREE = require('../js/three.min.js');
+
+const { BiomeEffects } = require('../js/renderer/biomeEffects');
 
 let passed = 0;
 let failed = 0;
@@ -18,331 +33,383 @@ function assert(condition, message) {
   }
 }
 
+function assertEqual(actual, expected, message) {
+  assert(actual === expected, `${message} (expected ${expected}, got ${actual})`);
+}
+
+/** Minimal stand-in for the parts of a THREE.Scene that BiomeEffects touches. */
+function makeScene(withFog = true) {
+  return {
+    background: null,
+    fog: withFog ? { color: new THREE.Color(0xffffff), density: 0.001 } : null,
+    children: [],
+    add(obj) { this.children.push(obj); obj.parent = this; },
+    remove(obj) {
+      const i = this.children.indexOf(obj);
+      if (i >= 0) this.children.splice(i, 1);
+      obj.parent = null;
+    },
+  };
+}
+
+/** A BiomeEffects wired to a scene + renderer, so update() actually runs. */
+function makeEffects(withFog = true) {
+  const effects = new BiomeEffects();
+  const scene = makeScene(withFog);
+  effects.init(scene, { /* renderer stub — only presence is checked */ });
+  return { effects, scene };
+}
+
 console.log('Testing Biome Effects System...\n');
 
 // ============================================================
-// Group 1: Configuration Constants
+// Group 1: Constructor defaults
 // ============================================================
-console.log('Group 1: Configuration Constants');
+console.log('Group 1: Constructor defaults');
 
-assert(LAVA_ANIMATION.speed === 0.5, 'LAVA_ANIMATION.speed should be 0.5');
-assert(LAVA_ANIMATION.bubbleFrequency === 2.0, 'LAVA_ANIMATION.bubbleFrequency should be 2.0');
-assert(typeof LAVA_ANIMATION.colorBase === 'number', 'LAVA_ANIMATION.colorBase should be a number');
-assert(typeof LAVA_ANIMATION.colorBright === 'number', 'LAVA_ANIMATION.colorBright should be a number');
-
-assert(TOXIC_SLIME_ANIMATION.speed === 0.3, 'TOXIC_SLIME_ANIMATION.speed should be 0.3');
-assert(TOXIC_SLIME_ANIMATION.bubbleFrequency === 1.5, 'TOXIC_SLIME_ANIMATION.bubbleFrequency should be 1.5');
-assert(typeof TOXIC_SLIME_ANIMATION.colorBase === 'number', 'TOXIC_SLIME.colorBase should be a number');
-
-assert(CORRUPT_FOG.densityBase === 0.015, 'CORRUPT_FOG.densityBase should be 0.015');
-assert(CORRUPT_FOG.densityCorruptZone === 0.03, 'CORRUPT_FOG.densityCorruptZone should be 0.03');
-assert(CORRUPT_FOG.pulseSpeed === 0.2, 'CORRUPT_FOG.pulseSpeed should be 0.2');
-assert(CORRUPT_FOG.colorDay !== undefined, 'CORRUPT_FOG.colorDay should be defined');
-assert(CORRUPT_FOG.colorNight !== undefined, 'CORRUPT_FOG.colorNight should be defined');
+const fresh = new BiomeEffects();
+assertEqual(fresh.currentBiome, 'plains', 'Starts in the plains biome');
+assertEqual(fresh.particles.length, 0, 'No active particles initially');
+assertEqual(fresh.particlePool.length, 0, 'Particle pool starts empty');
+assertEqual(fresh.scene, null, 'No scene before init()');
+assertEqual(fresh.renderer, null, 'No renderer before init()');
+assert(fresh.lerpSpeed > 0, 'lerpSpeed is positive');
+assert(fresh.targetFogNear < fresh.targetFogFar, 'Fog near is closer than fog far');
+assert(fresh.currentFogColor instanceof THREE.Color, 'currentFogColor is a THREE.Color');
+assert(fresh.currentSkyColor instanceof THREE.Color, 'currentSkyColor is a THREE.Color');
 
 // ============================================================
-// Group 2: ParticleEffect Constructor
+// Group 2: Biome configuration table
 // ============================================================
-console.log('\nGroup 2: ParticleEffect Constructor');
+console.log('\nGroup 2: Biome configuration table');
 
-const p = new ParticleEffect(10, 5, 10, 0xffaa00, 2.0);
-assert(p.x === 10, 'Particle x position should be 10');
-assert(p.y === 5, 'Particle y position should be 5');
-assert(p.z === 10, 'Particle z position should be 10');
-assert(p.color === 0xffaa00, 'Particle color should match constructor value');
-assert(p.lifetime === 2.0, 'Particle lifetime should be 2.0');
-assert(p.age === 0, 'Particle initial age should be 0');
-assert(p.active === true, 'Particle should start active');
-assert(p.velocity > 0 && p.velocity <= 1.0, 'Particle velocity should be between 0 and 1');
-assert(p.size > 0 && p.size <= 0.2, 'Particle size should be between 0 and 0.2');
+const configs = fresh.biomeConfigs;
+for (const required of ['plains', 'ocean', 'desert', 'lava', 'corrupt', 'frozen_peaks']) {
+  assert(configs[required] !== undefined, `biomeConfigs has an entry for ${required}`);
+}
+for (const [id, cfg] of Object.entries(configs)) {
+  assert(typeof cfg.fogColor === 'number', `${id} fogColor is a hex number`);
+  assert(typeof cfg.skyColor === 'number', `${id} skyColor is a hex number`);
+  assert(cfg.fogNear > 0, `${id} fogNear is positive`);
+  assert(cfg.fogFar > cfg.fogNear, `${id} fogFar is beyond fogNear`);
+}
 
-// ============================================================
-// Group 3: ParticleEffect Update
-// ============================================================
-console.log('\nGroup 3: ParticleEffect Update');
-
-const p2 = new ParticleEffect(0, 0, 0, 0xcc66ff, 1.0);
-assert(p2.active === true, 'Particle should be active before update');
-
-p2.update(0.5); // Half lifetime
-assert(p2.age === 0.5, 'Age should increase by delta');
-assert(p2.y > 0, 'Y position should increase (rise upward)');
-assert(p2.active === true, 'Particle should still be active at half lifetime');
-
-p2.update(0.6); // Total 1.1 > lifetime of 1.0
-assert(p2.age >= 1.0, 'Age should exceed lifetime');
-assert(p2.active === false, 'Particle should be inactive after lifetime expires');
+// Enclosed/hazard biomes should be foggier (shorter draw) than open ones
+assert(configs.lava.fogFar < configs.desert.fogFar, 'Lava biome fog is thicker than desert');
+assert(configs.corrupt.fogFar < configs.plains.fogFar, 'Corrupt biome fog is thicker than plains');
+assert(configs.deep_ocean.fogFar < configs.ocean.fogFar, 'Deep ocean fog is thicker than ocean');
 
 // ============================================================
-// Group 4: ParticleEffect Alpha & Scale
+// Group 3: setBiome
 // ============================================================
-console.log('\nGroup 4: ParticleEffect Alpha and Scale');
+console.log('\nGroup 3: setBiome');
 
-const p3 = new ParticleEffect(0, 0, 0, 0xff0000, 2.0);
+const sb = new BiomeEffects();
+sb.setBiome('desert');
+assertEqual(sb.currentBiome, 'desert', 'Biome switches to desert');
+assertEqual(sb.targetFogNear, configs.desert.fogNear, 'targetFogNear follows the desert config');
+assertEqual(sb.targetFogFar, configs.desert.fogFar, 'targetFogFar follows the desert config');
+assertEqual(sb.targetFogColor.getHex(), configs.desert.fogColor, 'targetFogColor follows the desert config');
+assertEqual(sb.targetSkyColor.getHex(), configs.desert.skyColor, 'targetSkyColor follows the desert config');
 
-// Fresh particle — alpha should be low (fading in)
-p3.update(0.1);
-let alpha = p3.getAlpha();
-assert(alpha > 0 && alpha < 1, 'Fresh particle should have partial alpha (fading in)');
+// Unknown biome is ignored, leaving the previous biome in place
+sb.setBiome('atlantis');
+assertEqual(sb.currentBiome, 'desert', 'Unknown biome does not change currentBiome');
+assertEqual(sb.targetFogFar, configs.desert.fogFar, 'Unknown biome leaves targets untouched');
 
-// Mid-life particle — alpha should be near 1
-p3.update(0.9); // total age = 1.0
-alpha = p3.getAlpha();
-assert(alpha >= 0.8, 'Mid-life particle should have high alpha');
-
-// Near death — alpha should fade out
-p3.update(0.9); // total age = 1.9
-alpha = p3.getAlpha();
-assert(alpha < 0.5, 'Near-death particle should have low alpha (fading out)');
-
-// Scale test
-const scaleStart = p3.getScale();
-p3.update(0.1); // age = 2.0 — fully expired
-const scaleEnd = p3.getScale();
-assert(scaleEnd <= scaleStart, 'Scale should decrease as particle nears end of life');
+// Re-setting the same biome is a no-op
+sb.setBiome('desert');
+assertEqual(sb.currentBiome, 'desert', 'Re-setting the same biome keeps it');
 
 // ============================================================
-// Group 5: BiomeEffects Constructor
+// Group 4: Position tracking
 // ============================================================
-console.log('\nGroup 5: BiomeEffects Constructor');
+console.log('\nGroup 4: Position tracking');
 
-const effects = new BiomeEffects();
-assert(effects.time === 0, 'Initial time should be 0');
-assert(effects.lavaOffset === 0, 'Initial lava offset should be 0');
-assert(effects.toxicOffset === 0, 'Initial toxic offset should be 0');
-assert(effects.particles.length === 0, 'Should start with no particles');
-assert(effects.currentBiome === 'plains', 'Default biome should be plains');
-assert(effects.inCorruptZone === false, 'Should not be in corrupt zone by default');
-assert(effects.enabled === true, 'Effects should be enabled by default');
-assert(effects.scene === null, 'Scene should be null initially');
+const pt = new BiomeEffects();
+pt.setPlayerPosition(10, 64, -20);
+assertEqual(pt.playerPos.x, 10, 'Player X tracked');
+assertEqual(pt.playerPos.y, 64, 'Player Y tracked');
+assertEqual(pt.playerPos.z, -20, 'Player Z tracked');
 
-// ============================================================
-// Group 6: BiomeEffects Update Loop
-// ============================================================
-console.log('\nGroup 6: BiomeEffects Update Loop');
+pt.setCameraPosition({ x: 1, y: 2, z: 3 });
+assertEqual(pt.cameraPos.x, 1, 'Camera X tracked from object');
+assertEqual(pt.cameraPos.y, 2, 'Camera Y tracked from object');
+assertEqual(pt.cameraPos.z, 3, 'Camera Z tracked from object');
 
-const effects2 = new BiomeEffects();
-effects2.update(1.0); // 1 second of simulation
+// Numeric fallback sets x only, leaving y/z alone
+pt.setCameraPosition(7);
+assertEqual(pt.cameraPos.x, 7, 'Numeric camera arg sets X');
+assertEqual(pt.cameraPos.y, 2, 'Numeric camera arg leaves Y');
 
-assert(effects2.time === 1.0, 'Time should advance by delta');
-assert(effects2.lavaOffset >= 0 && effects2.lavaOffset < 1.0, 'Lava offset should be in [0, 1)');
-assert(effects2.toxicOffset >= 0 && effects2.toxicOffset < 1.0, 'Toxic offset should be in [0, 1)');
-
-// Lava offset after 1 second: speed * time = 0.5 * 1.0 = 0.5
-assert(Math.abs(effects2.lavaOffset - 0.5) < 0.001, `Lava offset should be ~0.5, got ${effects2.lavaOffset}`);
-
-// Toxic offset after 1 second: speed * time = 0.3 * 1.0 = 0.3
-assert(Math.abs(effects2.toxicOffset - 0.3) < 0.001, `Toxic offset should be ~0.3, got ${effects2.toxicOffset}`);
+// Null is ignored rather than throwing
+pt.setCameraPosition(null);
+assertEqual(pt.cameraPos.x, 7, 'Null camera position is ignored');
 
 // ============================================================
-// Group 7: UV Offset Wrapping
+// Group 5: init()
 // ============================================================
-console.log('\nGroup 7: UV Offset Wrapping');
+console.log('\nGroup 5: init');
 
-const effects3 = new BiomeEffects();
-effects3.update(3.0); // 3 seconds — lava offset = 0.5 * 3 = 1.5, should wrap to 0.5
-assert(Math.abs(effects3.lavaOffset - 0.5) < 0.001, `Lava offset should wrap: expected 0.5, got ${effects3.lavaOffset}`);
+const initScene = makeScene();
+const initEffects = new BiomeEffects();
+initEffects.init(initScene, { stub: true });
+assert(initEffects.scene === initScene, 'init stores the scene');
+assert(initEffects.renderer !== null, 'init stores the renderer');
+assert(initScene.background instanceof THREE.Color, 'init gives the scene a background color');
 
-effects3.update(1.0); // Total 4 seconds — lava = 0.5 * 4 = 2.0 % 1 = 0
-assert(effects3.lavaOffset < 0.001 || effects3.lavaOffset > 0.999, `Lava offset should wrap to ~0, got ${effects3.lavaOffset}`);
+// An existing background is left alone — the Skybox owns it
+const preset = makeScene();
+preset.background = new THREE.Color(0x123456);
+new BiomeEffects().init(preset, {});
+assertEqual(preset.background.getHex(), 0x123456, 'init does not overwrite an existing background');
 
 // ============================================================
-// Group 8: Biome Setting
+// Group 6: update() requires scene and renderer
 // ============================================================
-console.log('\nGroup 8: Biome Setting');
+console.log('\nGroup 6: update guards');
 
-const effects4 = new BiomeEffects();
-effects4.setBiome('corrupt');
-assert(effects4.currentBiome === 'corrupt', 'Biome should be set to corrupt');
-assert(effects4.inCorruptZone === true, 'inCorruptZone should be true for corrupt biome');
+const noScene = new BiomeEffects();
+noScene.update(0.016, new THREE.Color(0xffffff), 0.001); // must not throw
+assertEqual(noScene.particles.length, 0, 'update without a scene is a safe no-op');
 
-effects4.setBiome('plains');
-assert(effects4.currentBiome === 'plains', 'Biome should change to plains');
-assert(effects4.inCorruptZone === false, 'inCorruptZone should be false for plains');
+// ============================================================
+// Group 7: Day/night blending
+// ============================================================
+console.log('\nGroup 7: Day/night blending');
 
-// Test all biomes
-const biomes = ['plains', 'forest', 'desert', 'tundra', 'mountains', 'ocean', 'lava', 'corrupt'];
-for (const biome of biomes) {
-  effects4.setBiome(biome);
-  assert(effects4.currentBiome === biome, `Biome should be set to ${biome}`);
-  if (biome === 'corrupt') {
-    assert(effects4.inCorruptZone === true, `${biome} should set inCorruptZone`);
-  } else {
-    assert(effects4.inCorruptZone === false, `${biome} should not set inCorruptZone`);
-  }
+{
+  const { effects, scene } = makeEffects();
+  effects.setBiome('lava');
+
+  // Bright daylight base → blended background is set
+  effects.update(0.016, new THREE.Color(1, 1, 1), 0.001);
+  assert(scene.background instanceof THREE.Color, 'update writes a blended background');
+  assert(effects.getFinalSkyColor() !== null, 'getFinalSkyColor returns a color once a background exists');
+
+  // Night base is dark, so the blended result must stay dark even with a biome tint
+  const night = new BiomeEffects();
+  const nightScene = makeScene();
+  night.init(nightScene, {});
+  night.setBiome('lava');
+  night.update(0.016, new THREE.Color(0.02, 0.02, 0.04), 0.001);
+  assert(nightScene.background.r < 0.2 && nightScene.background.g < 0.2,
+    'Night stays dark despite the lava biome tint');
+
+  // Fog density is driven from the base value
+  assert(scene.fog.density > 0, 'Fog density is positive after update');
+
+  // Without a base sky color, the background is left to the Skybox
+  const passive = new BiomeEffects();
+  const passiveScene = makeScene();
+  passive.init(passiveScene, {});
+  const before = passiveScene.background.getHex();
+  passive.update(0.016);
+  assertEqual(passiveScene.background.getHex(), before, 'update without a base color leaves the background alone');
+}
+
+// getFinalSkyColor with no scene
+assertEqual(new BiomeEffects().getFinalSkyColor(), null, 'getFinalSkyColor is null without a scene');
+
+// ============================================================
+// Group 8: Fog transitions lerp toward the biome target
+// ============================================================
+console.log('\nGroup 8: Fog transitions');
+
+{
+  const { effects } = makeEffects();
+  effects.setBiome('deep_ocean'); // fogFar 150, well below the plains default of 300
+  const startFar = effects.currentFogFar;
+  for (let i = 0; i < 20; i++) effects.update(0.05, new THREE.Color(1, 1, 1), 0.001);
+  assert(effects.currentFogFar < startFar, 'currentFogFar moves toward the deep-ocean target');
+  assert(effects.currentFogFar >= effects.targetFogFar - 1, 'currentFogFar does not overshoot the target');
+
+  // Colors converge on the target as well. The lerp is asymptotic (each frame
+  // closes lerpSpeed*dt of the gap), so check that the gap shrinks and then
+  // effectively closes given enough frames.
+  const colorGap = () =>
+    Math.abs(effects.currentFogColor.r - effects.targetFogColor.r)
+    + Math.abs(effects.currentFogColor.g - effects.targetFogColor.g)
+    + Math.abs(effects.currentFogColor.b - effects.targetFogColor.b);
+
+  const gapAfter20 = colorGap();
+  for (let i = 0; i < 200; i++) effects.update(0.05, new THREE.Color(1, 1, 1), 0.001);
+  const gapAfter220 = colorGap();
+  assert(gapAfter220 < gapAfter20, 'currentFogColor keeps closing on targetFogColor');
+  assert(gapAfter220 < 0.01, 'currentFogColor converges on targetFogColor');
+}
+
+// A scene with no fog object must not break update()
+{
+  const { effects } = makeEffects(false);
+  effects.update(0.016, new THREE.Color(1, 1, 1), 0.001);
+  assert(true, 'update tolerates a scene with no fog');
 }
 
 // ============================================================
-// Group 9: Fog Density with Corrupt Zone
+// Group 9: Particle spawning
 // ============================================================
-console.log('\nGroup 9: Fog Density');
+console.log('\nGroup 9: Particle spawning');
 
-const effects5 = new BiomeEffects();
-effects5.update(0.1); // Small update to initialize pulse
+{
+  const { effects, scene } = makeEffects();
 
-let densityNormal = effects5.getFogDensity();
-assert(densityNormal >= CORRUPT_FOG.densityBase - CORRUPT_FOG.pulseAmplitude, 'Normal fog density should be near base');
-assert(densityNormal <= CORRUPT_FOG.densityBase + CORRUPT_FOG.pulseAmplitude, 'Normal fog density should not exceed base + amplitude');
+  effects.spawnLavaBubbles(0, 64, 0);
+  assertEqual(effects.particles.length, 1, 'Lava bubble is tracked as active');
+  assertEqual(scene.children.length, 1, 'Lava bubble is added to the scene');
 
-effects5.setBiome('corrupt');
-effects5.update(0.1);
-let densityCorrupt = effects5.getFogDensity();
-assert(densityCorrupt > densityNormal, 'Corrupt zone fog should be denser than normal');
-assert(densityCorrupt >= CORRUPT_FOG.densityBase + CORRUPT_FOG.densityCorruptZone - 0.01, 'Corrupt fog should include zone boost');
+  const lava = effects.particles[0];
+  assertEqual(lava.userData.type, 'lava_bubble', 'Lava particle is tagged lava_bubble');
+  assertEqual(lava.userData.life, 1.0, 'Lava bubble lives 1 second');
+  assertEqual(lava.userData.maxLife, 1.0, 'Lava bubble maxLife matches its life');
+  assert(lava.userData.velocity.y > 0, 'Lava bubble rises');
+  assert(Math.abs(lava.position.x) <= 1, 'Lava bubble spawns within 1 block in x');
 
-// ============================================================
-// Group 10: Fog Color Hex
-// ============================================================
-console.log('\nGroup 10: Fog Color');
-
-const effects6 = new BiomeEffects();
-assert(effects6.getFogColorHex() === null, 'Non-corrupt biome should return null fog color');
-
-effects6.setBiome('corrupt');
-let fogHex = effects6.getFogColorHex();
-assert(fogHex !== null, 'Corrupt biome should return a fog color hex');
-assert(typeof fogHex === 'number', 'Fog color hex should be a number');
-
-// ============================================================
-// Group 11: Day/Night Fraction
-// ============================================================
-console.log('\nGroup 11: Day/Night Fraction');
-
-const effects7 = new BiomeEffects();
-effects7.setBiome('corrupt');
-// In Node.js, THREE is undefined — setDayNightFraction should not crash
-effects7.setDayNightFraction(12); // Noon
-assert(true, 'setDayNightFraction should not crash without Three.js');
-
-effects7.setDayNightFraction(0); // Midnight
-assert(true, 'setDayNightFraction at midnight should not crash');
-
-// ============================================================
-// Group 12: Particle Spawning
-// ============================================================
-console.log('\nGroup 12: Particle Spawning');
-
-const effects8 = new BiomeEffects();
-assert(effects8.getActiveParticles().length === 0, 'Should start with no particles');
-
-effects8.spawnLavaBubbles(100, 5, 100);
-let lavaParticles = effects8.getActiveParticles();
-assert(lavaParticles.length >= 1, 'Should spawn at least 1 lava bubble');
-assert(lavaParticles.length <= 2, 'Should spawn at most 2 lava bubbles per call');
-
-for (const particle of lavaParticles) {
-  assert(particle.color === LAVA_ANIMATION.colorBright, 'Lava particles should use bright color');
-  assert(Math.abs(particle.x - 100) < 3, 'Particle X should be near pool center');
-  assert(Math.abs(particle.z - 100) < 3, 'Particle Z should be near pool center');
+  effects.spawnToxicBubbles(0, 64, 0);
+  assertEqual(effects.particles.length, 2, 'Toxic bubble is tracked too');
+  const toxic = effects.particles[1];
+  assertEqual(toxic.userData.type, 'toxic_bubble', 'Toxic particle is tagged toxic_bubble');
+  assertEqual(toxic.userData.life, 2.0, 'Toxic bubble lives 2 seconds — longer than lava');
+  assert(toxic.userData.life > lava.userData.maxLife, 'Toxic bubbles outlive lava bubbles');
+  assert(Math.abs(toxic.position.x) <= 1.5, 'Toxic bubble spawns within 1.5 blocks in x');
 }
 
-effects8.spawnToxicBubbles(200, 3, 200);
-let allParticles = effects8.getActiveParticles();
-assert(allParticles.length > lavaParticles.length, 'Should have more particles after spawning toxic bubbles');
-
-for (const particle of allParticles.slice(lavaParticles.length)) {
-  assert(particle.color === TOXIC_SLIME_ANIMATION.colorBright, 'Toxic particles should use bright color');
+// Spawning without a scene is a no-op rather than a crash
+{
+  const orphan = new BiomeEffects();
+  orphan.spawnLavaBubbles(0, 0, 0);
+  orphan.spawnToxicBubbles(0, 0, 0);
+  assertEqual(orphan.particles.length, 0, 'Spawning without a scene adds nothing');
 }
 
 // ============================================================
-// Group 13: Particle Lifecycle in Effects Manager
+// Group 10: Particle lifecycle, fading and pooling
 // ============================================================
-console.log('\nGroup 13: Particle Lifecycle');
+console.log('\nGroup 10: Particle lifecycle');
 
-const effects9 = new BiomeEffects();
-effects9.spawnLavaBubbles(0, 0, 0);
-assert(effects9.getActiveParticles().length >= 1, 'Should have particles after spawn');
+{
+  const { effects, scene } = makeEffects();
+  effects.setPlayerPosition(0, 64, 0);
+  effects.spawnLavaBubbles(0, 64, 0);
 
-// Advance time past particle lifetime (max ~2 seconds)
-effects9.update(3.0);
-let expired = effects9.getActiveParticles();
-assert(expired.length === 0, 'All particles should be cleaned up after sufficient time');
+  const p = effects.particles[0];
+  const startY = p.position.y;
 
-// ============================================================
-// Group 14: State Summary
-// ============================================================
-console.log('\nGroup 14: State Summary');
+  effects.update(0.5, new THREE.Color(1, 1, 1), 0.001);
+  assert(p.position.y > startY, 'Particle rises during update');
+  assert(p.userData.life < 1.0, 'Particle life decreases');
+  assert(p.material.opacity <= 0.8, 'Particle opacity is capped at 0.8');
+  assertEqual(effects.particles.length, 1, 'Particle still active at half life');
 
-const effects10 = new BiomeEffects();
-effects10.setBiome('lava');
-effects10.update(2.5);
-effects10.spawnLavaBubbles(0, 0, 0);
+  // Run past the end of its life
+  effects.update(0.6, new THREE.Color(1, 1, 1), 0.001);
+  assertEqual(effects.particles.length, 0, 'Expired particle leaves the active list');
+  assertEqual(scene.children.length, 0, 'Expired particle is removed from the scene');
+  assertEqual(effects.particlePool.length, 1, 'Expired particle returns to the pool');
 
-const summary = effects10.getStateSummary();
-assert(summary.time === 2.5, 'Summary time should match current time');
-assert(summary.biome === 'lava', 'Summary biome should be lava');
-assert(summary.inCorruptZone === false, 'Summary corrupt zone should be false');
-assert(typeof summary.lavaOffset === 'number', 'Summary should include lava offset');
-assert(typeof summary.toxicOffset === 'number', 'Summary should include toxic offset');
-assert(typeof summary.fogDensity === 'number', 'Summary should include fog density');
-assert(typeof summary.particleCount === 'number', 'Summary should include particle count');
-assert(summary.particleCount >= 1, 'Particle count should reflect spawned particles');
+  // The pooled object is reused rather than reallocated
+  effects.spawnLavaBubbles(0, 64, 0);
+  assertEqual(effects.particlePool.length, 0, 'Pool is drained on the next spawn');
+  assert(effects.particles[0] === p, 'The pooled particle object is reused');
+}
 
-// ============================================================
-// Group 15: Init and Dispose
-// ============================================================
-console.log('\nGroup 15: Init and Dispose');
+// Distance culling
+{
+  const { effects } = makeEffects();
+  effects.setPlayerPosition(0, 64, 0);
+  effects.spawnLavaBubbles(0, 64, 0);
+  effects.particles[0].position.set(500, 64, 0); // >100 blocks away
+  effects.update(0.016, new THREE.Color(1, 1, 1), 0.001);
+  assertEqual(effects.particles.length, 0, 'Particles beyond 100 blocks are culled');
+  assertEqual(effects.particlePool.length, 1, 'Culled particle is pooled for reuse');
+}
 
-const effects11 = new BiomeEffects();
-let result = effects11.init(null, null); // No Three.js
-assert(result === false, 'init should return false without Three.js');
-
-effects11.spawnLavaBubbles(0, 0, 0);
-assert(effects11.particles.length >= 1, 'Should have particles before dispose');
-
-effects11.dispose();
-assert(effects11.particles.length === 0, 'Dispose should clear particles');
-assert(effects11.scene === null, 'Dispose should null scene');
-assert(effects11.enabled === false, 'Dispose should disable effects');
-
-// After dispose, update should be a no-op
-effects11.update(1.0);
-assert(effects11.particles.length === 0, 'Disabled effects should not accumulate particles');
+// Active-particle cap
+{
+  const { effects } = makeEffects();
+  effects.setPlayerPosition(0, 64, 0);
+  for (let i = 0; i < 260; i++) effects.spawnToxicBubbles(0, 64, 0);
+  assertEqual(effects.particles.length, 260, 'All spawns are tracked before the update');
+  effects.update(0.016, new THREE.Color(1, 1, 1), 0.001);
+  assert(effects.particles.length <= 200, `Active particles capped at 200 (got ${effects.particles.length})`);
+  assert(effects.particlePool.length > 0, 'Particles trimmed by the cap are pooled');
+}
 
 // ============================================================
-// Group 16: Edge Cases
+// Group 11: Per-type particle colour
 // ============================================================
-console.log('\nGroup 16: Edge Cases');
+console.log('\nGroup 11: Particle colour by type');
 
-// Zero delta update
-const effects12 = new BiomeEffects();
-effects12.update(0);
-assert(effects12.time === 0, 'Zero delta should not advance time');
-assert(effects12.lavaOffset === 0, 'Zero delta should not change lava offset');
+{
+  const { effects } = makeEffects();
+  effects.setPlayerPosition(0, 64, 0);
+  effects.spawnLavaBubbles(0, 64, 0);
+  effects.update(0.1, new THREE.Color(1, 1, 1), 0.001);
+  const lavaColor = effects.particles[0].material.color;
+  assert(lavaColor.r > lavaColor.b, 'Lava bubbles are red-dominant');
 
-// Very large delta update
-effects12.update(1000);
-assert(effects12.lavaOffset >= 0 && effects12.lavaOffset < 1.0, 'Large delta should still wrap UV offset');
-
-// Multiple biome changes
-effects12.setBiome('forest');
-effects12.setBiome('desert');
-effects12.setBiome('ocean');
-assert(effects12.currentBiome === 'ocean', 'Should track last set biome');
-
-// Empty particle array operations
-const emptyEffects = new BiomeEffects();
-assert(emptyEffects.getActiveParticles().length === 0, 'Empty effects should return empty particles');
-const emptySummary = emptyEffects.getStateSummary();
-assert(emptySummary.particleCount === 0, 'Empty summary should have 0 particles');
+  const toxicRun = makeEffects();
+  toxicRun.effects.setPlayerPosition(0, 64, 0);
+  toxicRun.effects.spawnToxicBubbles(0, 64, 0);
+  toxicRun.effects.update(0.1, new THREE.Color(1, 1, 1), 0.001);
+  const toxicColor = toxicRun.effects.particles[0].material.color;
+  assert(toxicColor.b > toxicColor.r, 'Toxic bubbles are blue/purple-dominant');
+}
 
 // ============================================================
-// Group 17: Animation Speed Verification
+// Group 12: dispose()
 // ============================================================
-console.log('\nGroup 17: Animation Speed Verification');
+console.log('\nGroup 12: dispose');
 
-// Lava is faster than toxic slime
-const speedTest = new BiomeEffects();
-speedTest.update(2.0); // 2 seconds
+{
+  const { effects, scene } = makeEffects();
+  effects.setPlayerPosition(0, 64, 0);
+  effects.spawnLavaBubbles(0, 64, 0);
+  effects.spawnToxicBubbles(0, 64, 0);
+  // Retire one into the pool so dispose has to clear both lists
+  effects.particles[0].userData.life = 0;
+  effects.update(0.016, new THREE.Color(1, 1, 1), 0.001);
+  assert(effects.particlePool.length >= 1, 'One particle is pooled before dispose');
 
-// After 2 seconds: lava offset = (0.5 * 2) % 1 = 0, toxic offset = (0.3 * 2) % 1 = 0.6
-const lavaOff = speedTest.getLavaUvOffset();
-const toxicOff = speedTest.getToxicSlimeUvOffset();
-assert(Math.abs(lavaOff) < 0.001 || Math.abs(lavaOff - 1.0) < 0.001, `Lava offset at t=2 should be ~0, got ${lavaOff}`);
-assert(Math.abs(toxicOff - 0.6) < 0.001, `Toxic offset at t=2 should be ~0.6, got ${toxicOff}`);
+  effects.dispose();
+  assertEqual(effects.particles.length, 0, 'dispose clears active particles');
+  assertEqual(effects.particlePool.length, 0, 'dispose clears the particle pool');
+  assertEqual(scene.children.length, 0, 'dispose detaches particles from the scene');
+
+  // dispose is idempotent
+  effects.dispose();
+  assertEqual(effects.particles.length, 0, 'dispose is safe to call twice');
+}
+
+// ============================================================
+// Group 13: Edge cases
+// ============================================================
+console.log('\nGroup 13: Edge cases');
+
+{
+  const { effects } = makeEffects();
+  effects.setPlayerPosition(0, 64, 0);
+  effects.spawnLavaBubbles(0, 64, 0);
+
+  // Zero delta neither advances nor expires anything
+  const lifeBefore = effects.particles[0].userData.life;
+  effects.update(0, new THREE.Color(1, 1, 1), 0.001);
+  assertEqual(effects.particles[0].userData.life, lifeBefore, 'Zero delta leaves particle life unchanged');
+
+  // A very large delta expires everything at once instead of going negative
+  effects.update(100, new THREE.Color(1, 1, 1), 0.001);
+  assertEqual(effects.particles.length, 0, 'A huge delta expires all particles');
+
+  // Missing fog density is tolerated
+  effects.spawnLavaBubbles(0, 64, 0);
+  effects.update(0.016, new THREE.Color(1, 1, 1));
+  assert(true, 'update without a fog density does not throw');
+}
 
 // ============================================================
 // Summary
 // ============================================================
-console.log(`\nBiome Effects Tests: ${passed} passed, ${failed} failed`);
+console.log(`\n===================================`);
+console.log(`Biome Effects Tests: ${passed} passed, ${failed} failed`);
+console.log(`===================================`);
 process.exit(failed > 0 ? 1 : 0);

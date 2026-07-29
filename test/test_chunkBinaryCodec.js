@@ -77,7 +77,9 @@ console.log('\n=== ChunkBinaryCodec (simplified) ===\n');
   assert(typeof decoded.waterLevels === 'undefined', 'Decoded chunk should not have waterLevels');
 }
 
-// Test 3: Preserves dirty flag through encode/decode
+// Test 3: dirty is deliberately NOT persisted — a chunk loaded from storage is by
+// definition clean, since it was written out. See the notes in chunkBinaryCodec.js
+// at encode() and decode(); dirty is an in-memory flag that only matters until flush.
 {
   const chunk = new Chunk(0, 0);
   chunk.setBlock(8, 64, 8, BLOCK_TYPES.GRASS); // sets dirty=true
@@ -85,7 +87,9 @@ console.log('\n=== ChunkBinaryCodec (simplified) ===\n');
 
   const encoded = ChunkBinaryCodec.encode(chunk);
   const decoded = ChunkBinaryCodec.decode(encoded);
-  assert(decoded.dirty === true, 'dirty flag should survive encode/decode roundtrip');
+  assert(decoded.dirty === false, 'decoded chunk is clean — dirty is not persisted');
+  // Block data still round-trips even though the flag does not.
+  assert(decoded.getBlock(8, 64, 8) === BLOCK_TYPES.GRASS, 'block data survives the roundtrip');
 }
 
 // Test 4: Throws on corrupted data (checksum mismatch)

@@ -9,6 +9,7 @@
 
 // Node.js: require BLOCK_TYPES from blockRegistry; browser: use global (script-tag load order).
 if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+  // Only BLOCK_TYPES is needed here, so a single guard on it is accurate.
   global.BLOCK_TYPES = require('../world/blockRegistry').BLOCK_TYPES;
 }
 

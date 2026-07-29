@@ -4,6 +4,12 @@
  * Visible from distance with particle effect. Interact to receive quest update/dialogue.
  */
 
+// Node.js: require QUEST_REGISTRY from questSystem; browser: use global (script-tag
+// load order). Without this, createAllMarkers() silently produced zero markers here.
+if (typeof module !== 'undefined' && typeof QUEST_REGISTRY === 'undefined') {
+  global.QUEST_REGISTRY = require('../systems/questSystem').QUEST_REGISTRY;
+}
+
 // ============================================================
 // Constants
 // ============================================================

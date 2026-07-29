@@ -111,12 +111,12 @@ console.log('\n--- Constants & Static Methods ---');
 
 assertEquals(MAX_WORLDS, 3, 'MAX_WORLDS is 3');
 assertEquals(MIN_NAME_LENGTH, 1, 'MIN_NAME_LENGTH is 1');
-assertEquals(MAX_NAME_LENGTH, 32, 'MAX_NAME_LENGTH is 32');
+assertEquals(MAX_NAME_LENGTH, 16, 'MAX_NAME_LENGTH is 16');
 assertEquals(DEFAULT_SEED, 42, 'DEFAULT_SEED is 42');
-assert(BIOME_NAMES.length === 8, 'BIOME_NAMES has 8 biomes');
+assert(BIOME_NAMES.length === 10, 'BIOME_NAMES has 10 biomes');
 assertArrayContains(BIOME_NAMES, 'Plains', 'Plains biome exists');
-assertArrayContains(BIOME_NAMES, 'Corrupt', 'Corrupt biome exists');
-assertArrayContains(BIOME_NAMES, 'Lava', 'Lava biome exists');
+assertArrayContains(BIOME_NAMES, 'Badlands', 'Badlands biome exists');
+assertArrayContains(BIOME_NAMES, 'Frozen Peaks', 'Frozen Peaks biome exists');
 assert(typeof WorldManager.generateId === 'function', 'generateId is a function');
 assert(typeof WorldManager.generateSeed === 'function', 'generateSeed is a function');
 assert(typeof WorldManager.formatSeed === 'function', 'formatSeed is a function');
@@ -171,15 +171,15 @@ assert(WorldManager.validateName('My World').valid, 'Normal name valid');
 assert(WorldManager.validateName('Test-World').valid, 'Hyphenated name valid');
 assert(WorldManager.validateName('world_1').valid, 'Underscored name valid');
 assert(WorldManager.validateName('a').valid, 'Single character name valid');
-assertEquals(WorldManager.validateName('12345678901234567890123456789012').valid, true, 
-  '32 char name valid (max)');
-assert(WorldManager.validateName('The_Great-World_2026').valid, 'Mixed special chars valid');
+assertEquals(WorldManager.validateName('1234567890123456').valid, true,
+  '16 char name valid (max)');
+assert(WorldManager.validateName('The_Great-W_26').valid, 'Mixed special chars valid');
 
 // Invalid names
 assertFalse(WorldManager.validateName('').valid, 'Empty name invalid');
 assertFalse(WorldManager.validateName('   ').valid, 'Whitespace-only name invalid');
-assertFalse(WorldManager.validateName('123456789012345678901234567890123').valid, 
-  '33 char name invalid (over max)');
+assertFalse(WorldManager.validateName('12345678901234567').valid,
+  '17 char name invalid (over max)');
 assertFalse(WorldManager.validateName('test@world!').valid, 'Special chars in name invalid');
 assertFalse(WorldManager.validateName(123).valid, 'Non-string name invalid');
 assertFalse(WorldManager.validateName(null).valid, 'Null name invalid');
@@ -277,9 +277,9 @@ result = await mgr.updateWorld(firstWorld.id, { name: secondWorld.name });
 assertFalse(result.success, 'Update to duplicate name rejected');
 
 // Partial update (only name)
-result = await mgr.updateWorld(firstWorld.id, { name: 'Final Plains Name' });
+result = await mgr.updateWorld(firstWorld.id, { name: 'Final Plains' });
 assertTrue(result.success, 'Partial update succeeds');
-assertEquals(result.world.name, 'Final Plains Name', 'Name changed in partial update');
+assertEquals(result.world.name, 'Final Plains', 'Name changed in partial update');
 assert(result.world.seed !== undefined, 'Seed preserved during update');
 
 // --- Test Suite 5: World Deletion ---
@@ -324,13 +324,13 @@ const beta = mgr.getAllWorlds().find(w => w.name === 'Beta World');
 assertEquals(mgr.getSelectedWorld(), null, 'No world selected initially');
 
 // Select first world
-result = mgr.selectWorld(alpha.id);
+result = await mgr.selectWorld(alpha.id);
 assertTrue(result.success, 'Selection succeeds');
 assertNotNull(result.world, 'Selected world returned');
 assertEquals(mgr.getSelectedWorld().name, 'Alpha World', 'Correct world selected');
 
 // Select non-existent
-result = mgr.selectWorld('nonexistent');
+result = await mgr.selectWorld('nonexistent');
 assertFalse(result.success, 'Selecting non-existent fails');
 
 // Verify lastPlayed updated
@@ -339,7 +339,7 @@ assert(selected.lastPlayed !== null, 'lastPlayed set on selection');
 assert(selected.lastPlayed > 0, 'lastPlayed is valid timestamp');
 
 // Switch selection
-result = mgr.selectWorld(beta.id);
+result = await mgr.selectWorld(beta.id);
 assertTrue(result.success, 'Re-selection succeeds');
 assertEquals(mgr.getSelectedWorld().name, 'Beta World', 'Selection switched to Beta');
 
@@ -471,7 +471,7 @@ mgr.worlds = []; // Clear in-memory cache
 await mgr.init();
 
 // Max length name exactly at limit
-const maxName = '12345678901234567890123456789012'; // 32 chars
+const maxName = '1234567890123456'; // 16 chars
 result = await mgr.createWorld(maxName);
 assertTrue(result.success, 'Max length name accepted');
 

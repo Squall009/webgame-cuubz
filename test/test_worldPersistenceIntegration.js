@@ -329,16 +329,16 @@ assertEquals(readW.seed, 77777, 'READ: seed correct');
 assertEquals(readW.chunkReferences.length, 1, 'READ: chunk references preserved');
 
 // UPDATE world name
-const updateRes = await readMgr.updateWorld(w1.id, { name: 'UpdatedPersistenceTest' });
+const updateRes = await readMgr.updateWorld(w1.id, { name: 'UpdatedPersist' });
 assertTrue(updateRes.success, 'UPDATE: succeeds');
-assertEquals(readMgr.getWorld(w1.id).name, 'UpdatedPersistenceTest', 'UPDATE: name changed');
+assertEquals(readMgr.getWorld(w1.id).name, 'UpdatedPersist', 'UPDATE: name changed');
 
 // Save updated state
 await crudStorage.saveWorld(readMgr.getWorld(w1.id));
 
 // Verify in storage
 const storedW = await crudStorage.loadWorlds();
-assertEquals(storedW[0].name, 'UpdatedPersistenceTest', 'UPDATE: persisted to storage');
+assertEquals(storedW[0].name, 'UpdatedPersist', 'UPDATE: persisted to storage');
 
 // DELETE world
 const deleteRes = await readMgr.deleteWorld(w1.id);
@@ -453,12 +453,12 @@ await edgeMgr.init();
 const minName = await edgeMgr.createWorld('A', 11111);
 assertTrue(minName.success, '1-char world name accepted');
 
-const maxNameStr = 'A'.repeat(32);
+const maxNameStr = 'A'.repeat(16);
 const maxName = await edgeMgr.createWorld(maxNameStr, 22222);
-assertTrue(maxName.success, '32-char world name accepted (max)');
+assertTrue(maxName.success, '16-char world name accepted (max)');
 
-const overMax = await edgeMgr.createWorld('X'.repeat(33), 33333);
-assertFalse(overMax.success, '33-char world name rejected');
+const overMax = await edgeMgr.createWorld('X'.repeat(17), 33333);
+assertFalse(overMax.success, '17-char world name rejected');
 
 // Non-existent operations
 assertEquals(edgeMgr.getWorld('nonexistent'), null, 'getWorld returns null for unknown ID');

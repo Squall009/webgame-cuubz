@@ -48,10 +48,22 @@ console.log('[Constructor & Seed]');
 
 const noise1 = new NoiseGenerator(42);
 assert(noise1.seed === 42, 'Seed is stored correctly');
-assert(noise1.perm.length === 512, 'Permutation table has 512 entries (doubled for wrapping)');
+
+// The permutation table is now private to createPerlin(), so assert the property it
+// exists for instead of the table itself: the lattice is doubled to 512 so lookups
+// wrap cleanly, which makes the field periodic with period 256 on each axis.
+assert(noise1.perlin2(1.5, 2.5) === noise1.perlin2(1.5 + 256, 2.5), 'perlin2 wraps with period 256 in x');
+assert(noise1.perlin2(1.5, 2.5) === noise1.perlin2(1.5, 2.5 + 256), 'perlin2 wraps with period 256 in y');
+assert(noise1.perlin3(1.5, 2.5, 3.5) === noise1.perlin3(1.5 + 256, 2.5, 3.5), 'perlin3 wraps with period 256 in x');
 
 const noise2 = new NoiseGenerator(0);
-assert(noise2.perm.length === 512, 'Default seed creates valid permutation table');
+assert(noise2.seed === 0, 'Default seed is 0');
+assertInRange(noise2.perlin2(3.7, 1.2), -1, 1, 'Default-seed generator produces valid noise');
+
+// String seeds are hashed to a number rather than coerced to NaN
+const strSeeded = new NoiseGenerator('cuubz');
+assert(typeof strSeeded.seed === 'number' && Number.isFinite(strSeeded.seed), 'String seed hashes to a finite number');
+assert(new NoiseGenerator('cuubz').seed === strSeeded.seed, 'String seed hashing is deterministic');
 
 // --- Test: Perlin 2D ---
 console.log('\n[Perlin 2D]');
