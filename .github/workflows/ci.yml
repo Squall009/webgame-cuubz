@@ -1,0 +1,74 @@
+name: CI
+
+# Phase 0 gate — refactor.md §5 PR 5.
+#
+# Two hard gates, both of which must stay green for Phase 1 to be allowed to start:
+#
+#   1. npm test               — test/run_tests.sh: 50 passing, 4 quarantined, exit 0.
+#                               Quarantined files are listed in test/QUARANTINE.md and
+#                               reported as SKIP. That list is capped at five files and
+#                               every entry names an owner PR; do not grow it to make
+#                               this job green.
+#   2. npm run check-globals   — scripts/check-globals.js: 0 duplicate top-level
+#                               symbols across the 65 classic <script> tags in
+#                               index.html. This is the check that found the eight
+#                               silent global collisions fixed in PR 3. It exists so
+#                               they cannot come back during the PR 9 migration.
+#
+# Deliberately NOT here yet — neither script exists in package.json:
+#
+#   npm run build   → added by PR 7  (Vite skeleton)
+#   npm run lint    → added by PR 11 (ESLint 9 flat config + Prettier)
+#
+# refactor.md §5 PR 5 lists both in the step chain, but `npm run <missing-script>`
+# exits 1, so adding them now would make CI red on its first run, and adding them
+# with `|| true` would be a gate that reports success without checking anything.
+# PR 7 and PR 11 each add their step in the same commit that adds the script.
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same ref supersedes the run already in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test + check-globals
+    runs-on: ubuntu-latest
+
+    # The suite runs in ~20s but stands up real WebSocket servers on fixed ports and
+    # has no per-test timeout of its own. 10 minutes fails fast instead of burning the
+    # 6-hour default if a test hangs — PR 4 fixed a test that did exactly that
+    # (test_websocketErrorHandling: passing fell off the end with timers still pending).
+    timeout-minutes: 10
+
+    steps:
+      # Full checkout. Do NOT sparse-checkout textures/ to save the 118 MB:
+      # test_manifestGenerator runs scripts/generate-manifest.js, which
+      # readdirSync()s textures/blocks/ and cross-checks it against the block
+      # registry. That is the test that found the duplicate block id in PR 4.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Resolves to the latest 22.x. jsdom@30 requires >=22.22.2, so do not pin
+          # this to an exact older 22.x patch without checking that floor.
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # test/run_tests.sh is bash, not sh: it uses `local`, `echo -e`, and GNU
+      # `grep -E` / `sed -E` to parse the first column of the table in
+      # test/QUARANTINE.md. `shell: bash` is already the ubuntu-latest default —
+      # it is stated explicitly so the requirement survives a runner change.
+      - name: Test suite
+        shell: bash
+        run: npm test
+
+      - name: No duplicate top-level globals
+        shell: bash
+        run: npm run check-globals

@@ -564,6 +564,46 @@ Also add `scripts/check-globals.js` — parse the `<script src>` list from `inde
 - **Accept:** CI green on a PR. `check-globals.js` fails when a duplicate is deliberately introduced.
 - **Rollback:** delete the workflow.
 
+**Outcome (2026-07-29):** ✅ DONE (one half of the accept criterion is pending a push — see *Not yet proven* below).
+
+`.github/workflows/ci.yml` — one job, `ubuntu-latest`, on `push` and `pull_request`: `actions/checkout@v4` → `actions/setup-node@v4` (node 22, npm cache) → `npm ci` → `npm test` → `npm run check-globals`. `scripts/check-globals.js` already existed (PR 3); PR 5 only makes it a standing gate.
+
+**`npm run lint` and `npm run build` are deliberately NOT steps.** Neither script exists in `package.json`. `npm run <missing-script>` exits 1, so adding them now makes CI red on its first run; adding them with `|| true` makes a gate that reports success without checking anything, which is worse than not having it. They are recorded as comments in the workflow naming the PR that adds each — **`npm run build` → PR 7** (Vite skeleton), **`npm run lint` → PR 11** (ESLint 9 flat config + Prettier). Each of those PRs adds its step in the same commit that adds its script.
+
+**Four things the workflow does that the plan text did not ask for**, each because leaving it out has a concrete cost:
+- **`timeout-minutes: 10`.** The suite runs in ~18 s but stands up real WebSocket servers and has no per-test timeout of its own. PR 4 bug 6 was a test that hung after passing; without this, the next one burns the 6-hour default.
+- **`concurrency` + `cancel-in-progress`.** A newer push to the same ref supersedes the run in flight.
+- **Full checkout — do not sparse-checkout `textures/` to save the 118 MB.** `test_manifestGenerator` runs `scripts/generate-manifest.js`, which `readdirSync()`s `textures/blocks/` (897 diffuse PNGs). That is the test that found PR 4's duplicate block id.
+- **Explicit `shell: bash`** on both script steps. It is already the `ubuntu-latest` default; stating it keeps the requirement visible if the runner image ever changes.
+
+**Verified without pushing.** The workflow has to be executed by GitHub, but everything inside it was reproduced locally: a fresh `git clone --depth 1` of `HEAD` into a scratch directory, then `npm ci` → `npm test` → `npm run check-globals` under **Node 22.22.0** (local dev is Node 24.18.0). Result: `npm ci` clean, **50/50 passing / 4 quarantined / exit 0**, **0 duplicates across 65 script-tagged files / 368 top-level symbols**, and `git status` clean afterwards — the manifest smoke test restores its snapshot correctly.
+
+**Node 22 satisfies `jsdom`'s floor, but only just.** `jsdom@30.0.1` declares `engines: node ^22.22.2 || ^24.15.0 || >=26.0.0`. `node-version: '22'` resolves to the latest 22.x (22.23.2), which satisfies it; **pinning an exact older 22.x patch would emit `EBADENGINE`** (22.22.0 does). Noted in the workflow. `jsdom` is required only by `test_pageLoad`, which is quarantined, so it is not actually exercised in CI until PR 26 unquarantines it.
+
+**Portability audit — the runner is a bash script, and the concern was that it only works in Windows Git Bash.** It does not; the toolchain is the same one, not merely a compatible one:
+- **Line endings.** `core.autocrlf=true` normalizes on commit, and **zero tracked text blobs in `HEAD` contain a CR byte** (checked every tracked file, not just the shell scripts). A Linux checkout gets LF, so `bad interpreter: /bin/bash^M` cannot happen. There is no `.gitattributes`, and none is needed for this.
+- **`grep -E` / `sed -E` / `sort -u` / `echo -e` / `local`.** Git Bash ships GNU coreutils and bash 5, exactly as `ubuntu-latest` does — `sed -E` is GNU `sed` in both. No BSD `sed` is in the picture on either side. `package.json` invokes `bash test/run_tests.sh` explicitly, so the `100755` mode bit is not load-bearing either.
+- **Case sensitivity** (the risk that only shows up off NTFS), four sweeps, **0 mismatches**: the 65 `<script src>` and `<link href>` paths in `index.html`; **105 relative `require()` calls across 125 JS files**; 49 path-shaped string literals in `test/` + `scripts/`; and the texture pipeline — 92 named item textures in `itemTextureAtlas.js`, plus all 192 registry block textures, which the generator itself resolves through a case-sensitive `Set` lookup rather than `existsSync`, so it reports `✓ All registry textures found` identically on both platforms. Also **0 case-only duplicate paths** in the index (two such files can coexist on ext4 but not NTFS).
+- **No platform coupling anywhere in Node-executed code**: no `process.platform` / `win32` branch, no `os.tmpdir` / `homedir` / `EOL`, no `toLocaleString` / `getTimezoneOffset` / `Intl` (CI runs UTC), no `os.cpus` / `availableParallelism` — the only concurrency probe is `navigator.hardwareConcurrency` in `chunkmanager.js`, which is browser-only.
+- **`readdir` ordering.** ext4 returns directory entries in arbitrary order; NTFS does not. `generate-manifest.js` iterates `BLOCK_REGISTRY`, not `readdirSync`, so manifest order is registry-determined, and the smoke test asserts counts and shapes rather than bytes. Order cannot change the outcome.
+
+**Both halves of the `check-globals` acceptance proof, run as the exact CI step** (`npm run check-globals`), then reverted:
+
+| Injected collision | Result |
+|---|---|
+| `const SEA_LEVEL = 64;` appended to `js/util/mathUtils.js` (already owned by `chunkData.js:29`) | **exit 1** — `SEA_LEVEL: const at js/util/mathUtils.js:74 ← shadowed / const at js/world/chunkData.js:29 ← WINS (loads last)` |
+| `function distanceBetween(a, b)` appended to `js/world/chunkData.js` (already owned by `mathUtils.js:38`) | **exit 1** — same report, correct load-order attribution |
+
+The second shape matters because all three PR 3 collisions (`getBossDefinition`, `validateInventory`, `_log`) were **functions**, not `const`s. Both reverted with `git checkout --`; `git diff HEAD` empty and the gate back to exit 0.
+
+**No code bugs found in this PR, and that is the finding.** For a CI PR the bug surface is portability — code that works on the author's machine and breaks on the runner — and the audit above came up empty across all six categories. Contrast PR 4, which found seven. Nothing was weakened to get here: no test was touched, `QUARANTINE.md` still holds 4 files against its cap of 5, and all four are still owned by PR 26.
+
+**Flagged, not fixed** (both are out of scope for a CI PR, and neither fails silently):
+- **The four relay tests call `http.listen()` on a fixed port with no `'error'` handler** — `test_serverIntegration` 18765, `test_multiplayerSync` 18770, `test_maxPlayerAndDisconnect` 18780, `test_sessionDiscovery` 18790. All four are free on a fresh runner and the tests run sequentially in separate processes, so this is fine in practice; but if one is ever occupied, the test dies on an unhandled `EADDRINUSE` and CI goes red with a misleading message instead of a clear one. Worth an `on('error')` for whoever next touches those files.
+- **`on: push` with no branch filter plus `on: pull_request` double-runs a same-repo PR branch.** Kept literal to the plan ("on every push and PR"); `push: branches: [main]` is the one-line fix if the duplicate runs become annoying.
+
+**Not yet proven:** the workflow has never executed on GitHub. `actionlint 1.7.7` validates it clean (exit 0 — schema, expression syntax, and `shellcheck` over the `run:` blocks), and the fresh-clone simulation covers every step except the kernel, so **"`check-globals` fails when a duplicate is deliberately introduced" is proven and "CI green on a PR" is not.** Nothing has been pushed — `main` is 6 commits ahead of `origin` and the `pre-refactor-baseline` tag is still local. The **Phase 0 gate checkbox "CI runs on push" therefore stays unchecked** until the first push lands a green run.
+
 ### PR 6 — Write down the invariants
 Add to this file (or `DEPLOY.md`):
 - The [§1.5](#15-player-data-must-survive-byte-for-byte) data-compatibility table, marked **do not change**.
