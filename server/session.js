@@ -201,6 +201,15 @@ class SessionManager {
         this._handleHeartbeat(playerId);
         break;
 
+      case 'TIME_SYNC':
+        // Relay time-of-day sync from host to all non-host players
+        this._broadcast(playerId, {
+          type: 'TIME_SYNC',
+          timeOfDay: msg.timeOfDay,
+          timePaused: msg.timePaused,
+        });
+        break;
+
       case MESSAGE_TYPES.LEAVE:
         if (playerId) {
           this._removePlayer(playerId);
@@ -217,6 +226,33 @@ class SessionManager {
    */
   _handleJoin(ws, playerId, msg) {
     console.log(`[SESSION ${this.sessionId}] JOIN from ${playerId}: ${msg.character?.name || 'unknown'} at ${JSON.stringify(msg.position)}`);
+
+    // Handle reconnection — update the WebSocket for an existing player.
+    // This happens when a player's WebSocket auto-reconnects after a network blip.
+    // We must NOT broadcast PLAYER_JOINED again for a reconnecting player.
+    if (this.players.has(playerId)) {
+      const existing = this.players.get(playerId);
+      existing.ws = ws;
+      existing.lastHeartbeat = Date.now();
+      if (msg.position) existing.position = msg.position;
+      if (msg.rotation) existing.rotation = msg.rotation;
+      if (msg.character) existing.character = msg.character;
+
+      console.log(`[SESSION ${this.sessionId}] Player ${playerId} reconnected (WebSocket updated)`);
+
+      // Send welcome with current player list so the reconnecting client can resync
+      this._send(ws, {
+        type: 'WELCOME',
+        sessionId: this.sessionId,
+        playerId,
+        mode: this.gameMode,
+        worldSeed: this.worldSeed,
+        players: this._getPlayerList(),
+      });
+      return;
+    }
+
+    // Max players check for NEW players only
     if (this.players.size >= this.maxPlayers) {
       this._send(ws, { type: 'ERROR', message: 'Session is full' });
       ws.close();
@@ -370,7 +406,8 @@ class SessionManager {
 
     console.log(`[SESSION ${this.sessionId}] Host ${playerId} streaming chunk ${msg.chunkX},${msg.chunkZ} (${msg.compressed ? 'compressed' : 'raw'}) to ${this.players.size - 1} players`);
 
-    // Build the forwarded message
+    // Build the forwarded message — include all fields (neighborEdges, humidityMap, etc.)
+    // so clients have everything they need for correct rendering
     const chunkMsg = {
       type: 'CHUNK_DATA',
       chunkX: msg.chunkX,
@@ -379,6 +416,9 @@ class SessionManager {
       compressed: msg.compressed || false,
       dirty: msg.dirty || false,
     };
+    // Forward optional fields needed by clients
+    if (msg.neighborEdges) chunkMsg.neighborEdges = msg.neighborEdges;
+    if (msg.humidityMap) chunkMsg.humidityMap = msg.humidityMap;
 
     // Send to target players if specified, otherwise all non-host players
     if (msg.targetPlayers && Array.isArray(msg.targetPlayers) && msg.targetPlayers.length > 0) {
@@ -482,10 +522,23 @@ class SessionManager {
 
     console.log(`[SESSION ${this.sessionId}] Player ${playerId} removed (${this.players.size}/${this.maxPlayers})`);
 
-    // If host left, or session is empty, signal relay to clean up
-    if (playerId === this.hostId || this.players.size === 0) {
-      console.log(`[SESSION ${this.sessionId}] Session ending (host left or empty)`);
-      this.onSessionEmpty(this.sessionId);
+    // Session cleanup — only destroy when ALL players are gone.
+    // The host can momentarily disconnect and reconnect (WS auto-reconnect),
+    // so we must NOT destroy the session just because the host left briefly.
+    // The grace period allows the host time to reconnect before cleanup.
+    if (this.players.size === 0) {
+      console.log(`[SESSION ${this.sessionId}] Session empty — scheduling cleanup in 30s`);
+      // Give the host 30 seconds to reconnect before destroying the session
+      if (this._emptyTimer) clearTimeout(this._emptyTimer);
+      this._emptyTimer = setTimeout(() => {
+        if (this.players.size === 0) {
+          console.log(`[SESSION ${this.sessionId}] Session still empty after grace period — destroying`);
+          this.onSessionEmpty(this.sessionId);
+        }
+      }, 30000);
+    } else {
+      // Host left but others are still here — just remove host, session stays alive
+      console.log(`[SESSION ${this.sessionId}] Host ${playerId} disconnected but ${this.players.size} players remain — session stays alive`);
     }
   }
 
@@ -580,6 +633,12 @@ class SessionManager {
     this._disposed = true;
 
     this._stopHeartbeatCheck();
+
+    // Clear any pending empty-session cleanup timer
+    if (this._emptyTimer) {
+      clearTimeout(this._emptyTimer);
+      this._emptyTimer = null;
+    }
 
     // Disconnect all players
     for (const player of this.players.values()) {

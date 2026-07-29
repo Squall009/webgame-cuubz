@@ -60,6 +60,10 @@ class BlockInteraction {
     // Multiplayer: track last block change for network sync (cleared by main.js after send)
     this._lastBroken = null;  // { x, y, z }
     this._lastPlaced = null;  // { x, y, z, blockType }
+
+    // Attack override flag — set by the game loop when a mob attack fires.
+    // When true, block breaking is skipped this frame (mob attack takes priority).
+    this._attackOverride = false;
   }
 
   /**
@@ -82,7 +86,15 @@ class BlockInteraction {
     //   console.log(`[BREAK_DEBUG] mouse.leftClick=${this.mouse.leftClick}, justClickedLeft=${this.mouse.justClickedLeft}, breakingBlock=${this.breakingBlock ? 'yes' : 'no'}`);
     // }
 
-    if (isHoldingBreak) {
+    // If a mob attack fired this frame, skip block breaking entirely.
+    // This prevents simultaneously breaking a block behind a mob while attacking it.
+    if (this._attackOverride) {
+      this._attackOverride = false;
+      // If we were mid-break, cancel it (mob moved in front of our block)
+      if (this.breakingBlock) {
+        this._cancelBreak();
+      }
+    } else if (isHoldingBreak) {
       if (!this.breakingBlock) {
         // Try to start breaking — retry every frame while holding
         // (not just on click) so it works even if raycast fails initially
@@ -239,6 +251,9 @@ class BlockInteraction {
       const toolInfo = this.inventory.getToolInfo();
       if (toolInfo && toolInfo.toolType === requiredTool) {
         miningSpeedMultiplier = toolInfo.miningSpeed || 1.0;
+        // console.log(`[TOOL] ✓ ${toolInfo.toolType} (${toolInfo.miningSpeed}x) mining ${this.breakingBlock.blockType} — multiplier=${miningSpeedMultiplier}`);
+      } else {
+        // console.log(`[TOOL] ✗ mismatch: block=${this.breakingBlock.blockType} required=${requiredTool}, held=${toolInfo?.toolType || 'none'} speed=${toolInfo?.miningSpeed || 'N/A'}`);
       }
     }
 

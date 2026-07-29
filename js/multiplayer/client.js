@@ -659,6 +659,10 @@ class MultiplayerClient {
     // sent automatically once the game session WebSocket connects.
     this._pendingGameJoin = null;
 
+    // Last join data — stored for reconnection. When the WebSocket auto-reconnects
+    // after a network blip, we must resend JOIN so the server updates its ws mapping.
+    this._lastGameJoin = null;
+
     // High-level event handlers
     this._matchmakingHandlers = {};
     this._gameHandlers = {};
@@ -842,13 +846,22 @@ class MultiplayerClient {
       // Wire up game session event handlers
       this._setupGameSessionHandlers();
 
-      // Send any queued join once the game session WebSocket is open
+      // Send join on initial connection AND on reconnection.
+      // On initial connect, _pendingGameJoin holds the queued join data.
+      // On reconnect, _lastGameJoin holds the data from the previous joinGame() call
+      // so the server can update its WebSocket mapping (the old ws was closed).
       this._gameSessionConn.on('stateChange', (data) => {
-        if (data.to === 'connected' && this._pendingGameJoin) {
-          const join = this._pendingGameJoin;
-          this._pendingGameJoin = null;
-          console.log('[MP] Game session connected — sending queued JOIN');
-          this._gameSessionConn.sendJoin(this._playerId, join.character, join.position, join.rotation);
+        if (data.to === 'connected') {
+          if (this._pendingGameJoin) {
+            const join = this._pendingGameJoin;
+            this._pendingGameJoin = null;
+            console.log('[MP] Game session connected — sending queued JOIN');
+            this._gameSessionConn.sendJoin(this._playerId, join.character, join.position, join.rotation);
+          } else if (this._lastGameJoin) {
+            console.log('[MP] Game session reconnected — resending JOIN');
+            const join = this._lastGameJoin;
+            this._gameSessionConn.sendJoin(this._playerId, join.character, join.position, join.rotation);
+          }
         }
       });
 
@@ -869,6 +882,7 @@ class MultiplayerClient {
     const gameEvents = [
       'WELCOME', 'PLAYER_JOINED', 'PLAYER_LEFT', 'PLAYER_MOVE',
       'BLOCK_BREAK', 'BLOCK_PLACE', 'INVENTORY_SYNC', 'CHUNK_DATA',
+      'TIME_SYNC',
       'ERROR', 'disconnect', 'stateChange',
     ];
     for (const eventType of gameEvents) {
@@ -938,6 +952,9 @@ class MultiplayerClient {
 
   /** Join game session with player info */
   joinGame(character, position, rotation) {
+    // Always store join data for reconnection support
+    this._lastGameJoin = { character, position, rotation };
+
     if (this._gameSessionConn) {
       this._gameSessionConn.sendJoin(this._playerId, character, position, rotation);
     } else {

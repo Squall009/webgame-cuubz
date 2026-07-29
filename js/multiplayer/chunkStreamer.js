@@ -354,7 +354,7 @@ class ChunkStreamer {
         for (let dz = -this._options.loadRadius; dz <= this._options.loadRadius; dz++) {
           // Use squared distance for efficiency (avoids Math.sqrt)
           const radSq = this._options.loadRadius * this._options.loadRadius;
-          if (dx * dx + dz * dz > radSq * 2.25) continu
+          if (dx * dx + dz * dz > radSq) continue
 
           const cx = pcx + dx;
           const cz = pcz + dz;
@@ -568,6 +568,15 @@ class ChunkStreamer {
    */
   tick() {
     const payloads = [];
+
+    // Debug: log tracked player positions
+    if (this._playerPositions.size > 0) {
+      const posLog = [];
+      for (const [pid, pos] of this._playerPositions) {
+        posLog.push(`${pid.substring(0,8)}@(${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)})`);
+      }
+      console.log(`[CHUNK_STREAM] tick: ${this._playerPositions.size} players: ${posLog.join(', ')}`);
+    }
 
     // Calculate load/unload needs based on player positions
     const { toLoad, toUnload } = this.calculateChunkNeeds();

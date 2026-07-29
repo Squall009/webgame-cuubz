@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "pngjs": "^7.0.0",
     "ws": "^8.21.0"
   }
 }

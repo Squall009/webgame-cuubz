@@ -2574,19 +2574,20 @@
           game.skybox = skybox; // Expose for pause menu access
           game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
           game.frameCount = 0; // Frame counter for debug logging
+          game.attackCooldown = 0; // Cooldown timer for mob attacks (seconds)
 
-          // ─── Initialize Mob System ─────────────────────────
+          // ─── Initialize Mob System (stub — inventory + survival set after their init) ──
           try {
             mobIntegration = new MobIntegration();
             const deps = {
               scene: renderer.scene,
+              camera: renderer.camera,
               player: player,
-              inventory: inventory,
-              survivalSystem: survivalSystem || null,
+              inventory: null, // Set after Inventory constructor below
+              survivalSystem: null, // Not wired yet
               worldSeed: currentWorld.seed,
               onMobDeath: (mob, drops) => {
                 _log(`[Cuubz] Mob died: ${mob.mobType}, drops:`, drops);
-                // Drops are auto-looted via playerInventory reference in mobManager
               },
             };
             mobIntegration.init(deps);
@@ -2604,12 +2605,14 @@
           if (typeof FirstPersonHand !== 'undefined') {
             firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas });
           }
+          game.firstPersonHand = firstPersonHand;
 
           // ─── Initialize Multiplayer Player Sync ─────────
           let playerSync = null;
           if (typeof PlayerSyncManager !== 'undefined' && sessionManager && sessionManager.client) {
             playerSync = new PlayerSyncManager();
             playerSync.setGameMode(mode || 'survival');
+            game.playerSync = playerSync;
 
             // Wire session events to player sync
             // Handle WELCOME — it includes existing players already in the session
@@ -2669,6 +2672,7 @@
 
             if (overlayEl && itemsEl) {
               playerListHUD = new PlayerListHUD({ overlay: overlayEl, count: countEl, items: itemsEl });
+              game.playerListHUD = playerListHUD;
 
               // Build initial player list: include local player + any remote players
               const localChar = characterManager ? characterManager.getSelectedCharacter() : null;
@@ -2794,6 +2798,18 @@
                   }
                 }
 
+                // Get humidityMap from the chunk — needed for vertex color tinting on clients
+                const chunkData = chunkManager.getChunkData(cx, cz);
+                let humidityMap;
+                if (chunkData && chunkData.humidityMap) {
+                  humidityMap = Array.from(chunkData.humidityMap);
+                } else if (typeof computeHumidityMap === 'function') {
+                  // Fallback: compute humidityMap for the chunk (e.g., if loaded from cache)
+                  humidityMap = Array.from(computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams));
+                } else {
+                  humidityMap = undefined;
+                }
+
                 const msg = {
                   type: 'CHUNK_DATA',
                   chunkX: cx,
@@ -2802,6 +2818,10 @@
                   compressed: payload.compressed,
                   dirty: payload.dirty,
                   neighborEdges: Object.keys(neighborEdges).length > 0 ? neighborEdges : undefined,
+                  humidityMap: humidityMap,
+                  // Only send to players who need this chunk (prevents unnecessary re-streaming
+                  // to players who already have it, which was causing excessive mesh rebuilds)
+                  targetPlayers: payload.players,
                 };
                 sessionManager.client._gameSessionConn?.send(msg);
               }
@@ -2814,6 +2834,7 @@
             chunkStreamer.start();
             _log('[Cuubz] ChunkStreamer initialized for host-side proactive chunk streaming');
           }
+          game.chunkStreamer = chunkStreamer;
 
           // ─── Client-side CHUNK_DATA handling (receive streamed chunks from host) ───
           if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
@@ -2836,15 +2857,28 @@
 
                 if (!blockData || blockData.length === 0) return;
 
-                // If chunk is already loaded, apply as dirty update
+                // If chunk is already loaded, apply as dirty update (only if data changed)
                 const existing = chunkManager.memoryCache.get(key);
                 if (existing) {
+                  // Compare blocks to avoid unnecessary mesh rebuilds — only update if changed
+                  let changed = false;
                   for (let i = 0; i < Math.min(blockData.length, existing.blocks.length); i++) {
-                    existing.blocks[i] = blockData[i];
+                    if (existing.blocks[i] !== blockData[i]) {
+                      existing.blocks[i] = blockData[i];
+                      changed = true;
+                    }
                   }
-                  existing.dirty = true;
-                  existing.changed = true; // Trigger mesh rebuild
-                  _log(`[Cuubz] Applied streamed chunk update: ${key} (${blockData.length} blocks)`);
+                  if (changed) {
+                    existing.dirty = true;
+                    existing.changed = true; // Trigger mesh rebuild only if data changed
+                    _log(`[Cuubz] Applied streamed chunk update: ${key} (${blockData.length} blocks)`);
+                  }
+                  // Update humidityMap if provided (even if block data didn't change)
+                  if (data.humidityMap) {
+                    existing.humidityMap = new Float32Array(data.humidityMap);
+                  } else if (typeof computeHumidityMap === 'function' && !existing.humidityMap) {
+                    existing.humidityMap = computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams);
+                  }
                 } else {
                   // Chunk not loaded — create it from host data
                   const newChunk = new Chunk(cx, cz);
@@ -2853,6 +2887,13 @@
                   }
                   newChunk.dirty = false; // Host data is authoritative
                   newChunk.changed = true; // Trigger mesh rebuild
+
+                  // Store humidity map for vertex color tinting
+                  if (data.humidityMap) {
+                    newChunk.humidityMap = new Float32Array(data.humidityMap);
+                  } else if (typeof computeHumidityMap === 'function') {
+                    newChunk.humidityMap = computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams);
+                  }
 
                   // Store virtual neighbor edge strips (if provided by host)
                   // These prevent false water side faces at chunk boundaries
@@ -2884,6 +2925,22 @@
             _log('[Cuubz] CHUNK_DATA handler registered for receiving streamed chunks');
           }
 
+          // ─── Client-side TIME_SYNC handling (receive time-of-day from host) ───
+          if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
+            sessionManager.client.onGame('TIME_SYNC', (data) => {
+              try {
+                if (!data || data.timeOfDay === undefined) return;
+                if (skybox) {
+                  skybox.timeOfDay = ((data.timeOfDay % 24) + 24) % 24;
+                  skybox.timePaused = !!data.timePaused;
+                }
+              } catch (err) {
+                console.error('[Cuubz] Error processing TIME_SYNC:', err.message);
+              }
+            });
+            _log('[Cuubz] TIME_SYNC handler registered for time-of-day sync from host');
+          }
+
           // Initialize Block Interaction system
           const blockInteraction = new BlockInteraction({
             renderer: renderer,
@@ -2897,6 +2954,11 @@
           const inventory = new Inventory();
           player.inventory = inventory;
           game.inventory = inventory;
+
+          // Wire inventory into mob system for auto-loot
+          if (mobIntegration && mobIntegration.getManager()) {
+            mobIntegration.getManager().setPlayerInventory(inventory);
+          }
 
           // ─── Initialize Crafting System ─────────────────
           const crafting = new CraftingSystem(inventory);
@@ -2986,6 +3048,7 @@
           blockInteraction.onBreakStarted = () => {
             if (firstPersonHand) firstPersonHand.swing();
           };
+          game.blockInteraction = blockInteraction;
 
           // ─── Dropped Items System ──────────────────────
           const droppedItems = {
@@ -3081,6 +3144,7 @@
               this.drops = [];
             },
           };
+          game.droppedItems = droppedItems;
 
           // ─── Block Color Helper (fallback for dropped items) ────────────────
           function getBlockColor(blockType) {
@@ -3202,6 +3266,12 @@
 
           // Initial hotbar render
           updateHotbarUI();
+
+          // Set first-person hand to the initially selected item
+          if (firstPersonHand) {
+            const item = inventory.getSelectedItem();
+            firstPersonHand.setItem(item ? item.typeId : null);
+          }
 
           // ─── Inventory + Crafting Screen ────────────────
           let inventoryOpen = false;
@@ -3849,6 +3919,12 @@
               game.delta = Math.min((now - game.lastTime) / 1000, 0.1);
               game.lastTime = now;
 
+              // Decay attack cooldown
+              if (game.attackCooldown > 0) {
+                game.attackCooldown -= game.delta;
+                if (game.attackCooldown < 0) game.attackCooldown = 0;
+              }
+
               // Update keyboard just-pressed flags
               keyboard.update();
               
@@ -3931,7 +4007,29 @@
               
               // Debug: log player state every 60 frames (disabled — too verbose)
 
-              // Update block interaction (break/place)
+              // Update camera to follow player at eye level.
+              // This MUST happen before blockInteraction.update() so raycasting
+              // uses the current frame's camera position/direction, not stale data
+              // from the previous frame. Without this, moving while interacting
+              // causes the raycast to be misaligned with the crosshair.
+              const camPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
+              renderer.updateCamera(camPos, player.yaw, player.pitch);
+
+              // Update sky dome to follow the player (prevents seeing through the skybox)
+              renderer.updateSkyPosition(camPos);
+
+              // Update shadow camera to follow the player
+              renderer.updateShadowCamera(player.position);
+
+              // Update day/night cycle (advances time, updates sky color, sun/moon, fog, clouds)
+              if (skybox) {
+                skybox.update(game.delta, player.position);
+              }
+
+              // Update block interaction (break/place/attack)
+              // Runs AFTER camera update so raycasting uses the current frame's
+              // camera position/direction. This ensures accurate targeting while
+              // the player is moving.
               if (blockInteraction) {
                 blockInteraction.update(game.delta);
               }
@@ -3941,7 +4039,60 @@
                 firstPersonHand.update(game.delta);
               }
 
-              // Update mouse input (clears just-clicked flags) — AFTER blockInteraction reads them
+              // ─── Player Attack Mobs (Left Click) ────────────────
+              // Uses mouse.leftClick (held state) so holding left-click
+              // repeatedly attacks mobs with a cooldown between hits.
+              // The cooldown is based on the weapon's attack speed.
+              // Must run BEFORE mouse.update() clears justClickedLeft.
+              if (mobIntegration && mouse && mouse.leftClick && renderer.camera && game.attackCooldown <= 0) {
+                try {
+                  const mobManager = mobIntegration.getManager();
+                  if (mobManager) {
+                    const origin = renderer.camera.position;
+                    const direction = new THREE.Vector3();
+                    renderer.camera.getWorldDirection(direction);
+                    const maxDist = 7;
+                    const hit = mobManager.raycastMobs(origin, direction, maxDist);
+                    if (hit) {
+                      // Get attack damage
+                      const damage = inventory.getAttackDamage();
+
+                      // Calculate cooldown from weapon attack speed
+                      // Minecraft base = 4.0 attacks/sec, weapon attackSpeed is a modifier
+                      // e.g. sword: -2.4 → actual = 1.6 att/sec → cooldown = 0.625s
+                      let attackCooldown = 0.25; // Default fist speed (4 att/sec)
+                      const item = inventory.getSelectedItem();
+                      if (item && typeof item.typeId === 'string') {
+                        const def = (typeof NAMED_ITEMS !== 'undefined' && NAMED_ITEMS[item.typeId]);
+                        if (def && def.attackSpeed !== undefined) {
+                          const actualSpeed = 4.0 + def.attackSpeed;
+                          if (actualSpeed > 0) {
+                            attackCooldown = 1.0 / actualSpeed;
+                          }
+                        }
+                      }
+                      game.attackCooldown = attackCooldown;
+
+                      // Apply damage and knockback
+                      hit.mob.takeDamage(damage, 'player_attack');
+                      const dx = hit.mob.position.x - player.position.x;
+                      const dz = hit.mob.position.z - player.position.z;
+                      const dist = Math.sqrt(dx*dx + dz*dz) || 1;
+                      hit.mob.knockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
+
+                      // Trigger hand swing animation
+                      if (firstPersonHand) firstPersonHand.swing();
+
+                      // Prevent block breaking this frame (mob attack takes priority)
+                      if (blockInteraction) blockInteraction._attackOverride = true;
+                    }
+                  }
+                } catch(e) {
+                  if (game.frameCount < 10) console.warn('[Cuubz] Mob attack error:', e.message);
+                }
+              }
+
+              // Update mouse input (clears just-clicked flags) — AFTER blockInteraction and mob attack read them
               mouse.update();
 
               // ─── Multiplayer: Sync remote player positions ───
@@ -3978,8 +4129,29 @@
                 });
                 // Update remote player positions from PlayerSyncManager
                 if (playerSync) {
-                  for (const remotePlayer of playerSync.getActivePlayers()) {
+                  const activePlayers = playerSync.getActivePlayers();
+                  if (activePlayers.length > 0 && game.frameCount % 60 === 0) {
+                    console.log(`[CHUNK_STREAM] Updating ${activePlayers.length} remote player positions in chunkStreamer`);
+                    for (const rp of activePlayers) {
+                      console.log(`[CHUNK_STREAM]   ${rp.playerId.substring(0,8)} @ (${Math.floor(rp.authoritativePosition.x)},${Math.floor(rp.authoritativePosition.z)})`);
+                    }
+                  }
+                  for (const remotePlayer of activePlayers) {
                     chunkStreamer.updatePlayerPosition(remotePlayer.playerId, remotePlayer.authoritativePosition);
+                  }
+                }
+              }
+
+              // ─── Multiplayer: Sync time of day to clients (host, every ~0.5s) ───
+              if (sessionManager && sessionManager.hostingSessionId && skybox && game.frameCount % 30 === 0) {
+                if (sessionManager.client && sessionManager.client._gameSessionConn) {
+                  sessionManager.client._gameSessionConn.send({
+                    type: 'TIME_SYNC',
+                    timeOfDay: skybox.timeOfDay,
+                    timePaused: skybox.timePaused,
+                  });
+                  if (game.frameCount % 300 === 0) {
+                    console.log(`[TIME_SYNC] Sent: timeOfDay=${skybox.timeOfDay.toFixed(2)}, paused=${skybox.timePaused}`);
                   }
                 }
               }
@@ -4021,21 +4193,6 @@
               if (player.position.y < MIN_Y - 5) {
                 player.position.y = spawnHeight;
                 player.velocity.y = 0;
-              }
-
-              // Update camera to follow player at eye level
-              const camPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
-              renderer.updateCamera(camPos, player.yaw, player.pitch);
-
-              // Update sky dome to follow the player (prevents seeing through the skybox)
-              renderer.updateSkyPosition(camPos);
-
-              // Update shadow camera to follow the player
-              renderer.updateShadowCamera(player.position);
-
-              // Update day/night cycle (advances time, updates sky color, sun/moon, fog, clouds)
-              if (skybox) {
-                skybox.update(game.delta, player.position);
               }
 
               // Update PBR materials with shadow data + day/night lighting
@@ -4180,43 +4337,19 @@
                 game.chunkManager.updateRenderChunks(player.position.x, player.position.z);
               }
 
-              // ─── Player Attack Mobs ─────────────────────
-              // Check left-click against mob AABBs, damage nearest mob hit
-              if (mobIntegration && mouse && mouse.justClickedLeft && renderer.camera) {
-                try {
-                  const mobManager = mobIntegration.getManager();
-                  if (mobManager) {
-                    const origin = renderer.camera.position;
-                    const direction = new THREE.Vector3();
-                    renderer.camera.getWorldDirection(direction);
-                    const maxDist = 7;
-                    const hit = mobManager.raycastMobs(origin, direction, maxDist);
-                    if (hit) {
-                      const damage = inventory.getAttackDamage();
-                      hit.mob.takeDamage(damage, 'player_attack');
-                      // Apply knockback away from player
-                      const dx = hit.mob.position.x - player.position.x;
-                      const dz = hit.mob.position.z - player.position.z;
-                      const dist = Math.sqrt(dx*dx + dz*dz) || 1;
-                      hit.mob.knockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
-                    }
-                  }
-                } catch(e) {
-                  if (game.frameCount < 10) console.warn('[Cuubz] Mob attack error:', e.message);
-                }
-              }
+
 
               // ─── Update Mob System ──────────────────────
               if (mobIntegration) {
                 try {
-                  const wx = Math.floor(player.position.x);
-                  const wz = Math.floor(player.position.z);
-                  let biomeId = undefined;
-                  try {
-                    const biomeData = BiomeSystem.getBiomeAtWorldPos(wx, wz, chunkManager.worldSeed);
-                    if (biomeData) biomeId = biomeData.id;
-                  } catch(e) { /* ignore */ }
-                  mobIntegration.update(game.delta, chunkWorld, player.position, chunkManager.renderDistance || 6, biomeId);
+                  // Pass a biome lookup function so each chunk spawns its own biome's mobs
+                  const getBiomeFn = (wx, wz) => {
+                    try {
+                      const bd = BiomeSystem.getBiomeAtWorldPos(wx, wz, chunkManager.worldSeed);
+                      return bd ? bd.id : undefined;
+                    } catch(e) { return undefined; }
+                  };
+                  mobIntegration.update(game.delta, chunkWorld, player.position, chunkManager.renderDistance || 6, getBiomeFn);
                 } catch(e) {
                   if (game.frameCount < 10) console.warn('[Cuubz] Mob update error:', e.message);
                 }
@@ -4411,6 +4544,55 @@
         }
       }
 
+      // ── Clean up multiplayer session ──
+      if (typeof sessionManager !== 'undefined' && sessionManager) {
+        sessionManager.leaveSession();
+      }
+
+      // ── Clean up chunk streamer ──
+      if (game.chunkStreamer) {
+        game.chunkStreamer.stop();
+        game.chunkStreamer.dispose();
+        game.chunkStreamer = null;
+      }
+
+      // ── Clean up player sync ──
+      if (game.playerSync) {
+        game.playerSync.clearAll();
+        game.playerSync.reset();
+        game.playerSync = null;
+      }
+
+      // ── Clean up player list HUD ──
+      if (game.playerListHUD) {
+        game.playerListHUD.destroy();
+        game.playerListHUD = null;
+      }
+
+      // ── Clean up block interaction ──
+      if (game.blockInteraction) {
+        game.blockInteraction.dispose();
+        game.blockInteraction = null;
+      }
+
+      // ── Clean up first-person hand ──
+      if (game.firstPersonHand) {
+        game.firstPersonHand.dispose();
+        game.firstPersonHand = null;
+      }
+
+      // ── Clean up dropped items ──
+      if (game.droppedItems) {
+        game.droppedItems.clear();
+        game.droppedItems = null;
+      }
+
+      // ── Clean up mob integration ──
+      if (typeof mobIntegration !== 'undefined' && mobIntegration) {
+        mobIntegration.destroy();
+        mobIntegration = null;
+      }
+
       // Clean up event listeners from this session
       if (typeof _cleanupPauseMenu === 'function') {
         _cleanupPauseMenu();
@@ -4512,6 +4694,18 @@
       pauseTimeCheckbox.addEventListener('change', () => {
         game.skybox.timePaused = !pauseTimeCheckbox.checked;
         _log(`[Cuubz] Time of day ${game.skybox.timePaused ? 'PAUSED' : 'RESUMED'}`);
+        // Immediately broadcast time change to clients.
+        // Use hostingSessionId as the guard — the host is the authority on time,
+        // and time sync is independent of chunk streaming.
+        if (sessionManager && sessionManager.hostingSessionId &&
+            sessionManager.client && sessionManager.client._gameSessionConn) {
+          sessionManager.client._gameSessionConn.send({
+            type: 'TIME_SYNC',
+            timeOfDay: game.skybox.timeOfDay,
+            timePaused: game.skybox.timePaused,
+          });
+          _log(`[Cuubz] TIME_SYNC sent: timePaused=${game.skybox.timePaused}`);
+        }
       });
     }
 

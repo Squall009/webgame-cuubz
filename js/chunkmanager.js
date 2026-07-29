@@ -810,6 +810,9 @@ class ChunkManager {
   async checkRegion(playerX, playerZ) {
     if (this._disposed) return;
 
+    // Client mode: chunks are received from host via CHUNK_DATA — never generate locally
+    if (this.clientMode) return;
+
     const pcx = Math.floor(playerX / CHUNK_W);
     const pcz = Math.floor(playerZ / CHUNK_D);
     const radius = this.regionRadius;

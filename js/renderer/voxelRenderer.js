@@ -63,6 +63,8 @@ class VoxelRenderer {
       75, this.width / this.height, 0.1, 1000
     );
     this.camera.position.set(0, 20, 0);
+    // Add camera to scene so children (e.g., first-person hand) get rendered
+    this.scene.add(this.camera);
     
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true });

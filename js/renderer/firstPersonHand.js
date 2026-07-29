@@ -26,27 +26,39 @@ class FirstPersonHand {
     this.group = new THREE.Group();
     camera.add(this.group);
 
+
     // Skin color (neutral medium tone, adjustable later for character creator)
     const skinColor = 0xC68642;
 
     // ─── Forearm ──────────────────────────────────────────
-    // Thick box extending from shoulder toward bottom-right of view
+    // Extends UPWARD from the elbow pivot (group origin at y=0).
+    // Centered at y=0.35 so it spans y=0 (elbow) to y=0.7 (wrist).
     const forearmGeo = new THREE.BoxGeometry(0.08, 0.7, 0.08);
-    const forearmMat = new THREE.MeshLambertMaterial({ color: skinColor });
+    const forearmMat = new THREE.MeshBasicMaterial({
+      color: skinColor,
+    });
     this.forearm = new THREE.Mesh(forearmGeo, forearmMat);
-    this.forearm.position.set(0, -0.25, 0);
+    this.forearm.position.set(0, 0.35, 0);
     this.group.add(this.forearm);
 
     // ─── Hand ─────────────────────────────────────────────
-    // Wider box at the end of the forearm
+    // At the top of the forearm (y=0.7), far from the elbow pivot.
+    // This ensures a large, visible swing arc.
     const handGeo = new THREE.BoxGeometry(0.12, 0.16, 0.1);
-    const handMat = new THREE.MeshLambertMaterial({ color: skinColor });
+    const handMat = new THREE.MeshBasicMaterial({
+      color: skinColor,
+    });
     this.hand = new THREE.Mesh(handGeo, handMat);
-    this.hand.position.set(0, -0.6, 0);
+    this.hand.position.set(0, 0.7, 0);
     this.group.add(this.hand);
 
     // ─── Item Plane ───────────────────────────────────────
-    // Plane showing the item texture, positioned in front of the hand
+    // Tool texture shown in front of the hand.
+    // Tool handle is at bottom-left of the texture.
+    // PlaneGeometry(0.5,0.5) has bottom-left at (-0.25,-0.25) in local space.
+    // Hand is at (0, 0.7, 0) with size 0.12 x 0.16 x 0.1.
+    // Plane center at (0.2, 0.9, 0.1) puts bottom-left at (-0.05, 0.65, 0.1),
+    // so the handle area overlaps the hand body for a natural grip look.
     this.itemTexture = null;
     this.itemMesh = null;
     this.currentItemKey = null;
@@ -61,20 +73,23 @@ class FirstPersonHand {
       const itemMat = new THREE.MeshBasicMaterial({
         map: this.itemTexture,
         transparent: true,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         depthTest: true,
+        depthWrite: false,
       });
       this.itemMesh = new THREE.Mesh(itemGeo, itemMat);
-      this.itemMesh.position.set(0, -0.7, -0.12);
+      this.itemMesh.position.set(0.2, 0.9, -0.05);
       this.itemMesh.visible = false;
       this.group.add(this.itemMesh);
     }
 
     // ─── Position and rotate the entire arm group ─────────
-    // Move to bottom-right of viewport, angled naturally
-    // z=-0.3 keeps it just in front of near clip plane
-    this.group.position.set(0.45, -0.35, -0.3);
-    this.group.rotation.set(0.2, -0.2, -0.35);
+    // Group origin = elbow pivot. Hand is at y=0.7 (far from pivot).
+    // Adjusted y down by ~0.8 so the hand stays at roughly the same screen position
+    // as before (when hand was at y=-0.1 and group y was 0.3).
+    this.group.position.set(1.1, -1.1, -1.4);
+    this.group.scale.set(1.5, 1.5, 1.5);
+    this.group.rotation.set(0.2, -0.2, 0.35);
 
     // ─── Animation State ──────────────────────────────────
     this.swingProgress = 0;    // 0-1-0 swing cycle
@@ -94,6 +109,7 @@ class FirstPersonHand {
   setItem(itemKey) {
     if (itemKey === this.currentItemKey) return;
     this.currentItemKey = itemKey;
+
 
     if (!this.itemMesh || !this.itemAtlas) {
       if (this.itemMesh) this.itemMesh.visible = false;
@@ -132,6 +148,7 @@ class FirstPersonHand {
     mat.map.offset.set(uv.u, uv.v);
     mat.map.repeat.set(uvSize, uvSize);
     mat.map.needsUpdate = true;
+
   }
 
   /**
@@ -150,6 +167,7 @@ class FirstPersonHand {
     // Clamp delta to avoid huge jumps when tab is backgrounded
     delta = Math.min(delta, 0.05);
 
+
     // ─── Idle bob ─────────────────────────────────────────
     this.idlePhase += delta * 1.5;
     const bobY = Math.sin(this.idlePhase) * 0.005;
@@ -166,15 +184,16 @@ class FirstPersonHand {
       } else {
         // Smooth swing curve: forward then return
         const t = this.swingProgress;
-        const swingAngle = Math.sin(t * Math.PI) * 0.6; // Max 0.6 rad forward
+        const swingAngle = Math.sin(t * Math.PI) * 0.9; // Max 0.9 rad forward
         const swingForward = Math.sin(t * Math.PI) * 0.15;
 
+        // Swing the entire arm group from the elbow pivot
         this.group.rotation.x = this.restRotation.x - swingAngle + bobY;
-        this.group.rotation.z = this.restRotation.z - swingAngle * 0.3;
+        this.group.rotation.z = this.restRotation.z + swingAngle * 0.3;
         this.group.position.z = this.restPosition.z - swingForward;
       }
     } else {
-      // Idle state
+      // Idle state — subtle bob on the group
       this.group.rotation.x = this.restRotation.x + bobY;
       this.group.rotation.z = this.restRotation.z;
     }
