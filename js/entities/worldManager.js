@@ -10,12 +10,20 @@
 
 'use strict';
 
+// Node.js: require the shared name-length limits from characterManager; browser: use globals
+// (script-tag load order — characterManager.js loads first).
+if (typeof module !== 'undefined' && typeof MIN_NAME_LENGTH === 'undefined') {
+  const cm = require('./characterManager');
+  global.MIN_NAME_LENGTH = cm.MIN_NAME_LENGTH;
+  global.MAX_NAME_LENGTH = cm.MAX_NAME_LENGTH;
+}
+
 // ============================================================
 // Constants
 // ============================================================
 
 const MAX_WORLDS = 3;
-// MIN_NAME_LENGTH and MAX_NAME_LENGTH defined in characterManager.js — use globals
+// MIN_NAME_LENGTH and MAX_NAME_LENGTH come from characterManager.js (see shim above)
 const DEFAULT_SEED = 42;
 const BIOME_NAMES = [
   'Deep Ocean', 'Ocean', 'Beach', 'Plains', 'Forest', 'Badlands',

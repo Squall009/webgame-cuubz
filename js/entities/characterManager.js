@@ -388,5 +388,5 @@ class CharacterManager {
 // ============================================================
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { CharacterManager, MAX_CHARACTERS, DEFAULT_COLOR, CHARACTER_COLORS };
+  module.exports = { CharacterManager, MAX_CHARACTERS, MIN_NAME_LENGTH, MAX_NAME_LENGTH, DEFAULT_COLOR, CHARACTER_COLORS };
 }

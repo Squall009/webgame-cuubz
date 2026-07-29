@@ -7,6 +7,11 @@
  *   - Crafting table (requiresTable: true) — requires standing within 4 blocks of block ID 162
  */
 
+// Node.js: require BLOCK_TYPES from blockRegistry; browser: use global (script-tag load order).
+if (typeof module !== 'undefined' && typeof BLOCK_TYPES === 'undefined') {
+  global.BLOCK_TYPES = require('../world/blockRegistry').BLOCK_TYPES;
+}
+
 // ============================================================
 // Recipe Definitions
 // ============================================================
