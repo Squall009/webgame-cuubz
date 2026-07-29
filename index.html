@@ -511,8 +511,10 @@
     </div>
   </div>
 
-  <!-- Utilities -->
+  <!-- Utilities — must load before every consumer (they read these as globals) -->
   <script src="js/util/logger.js?v=20260714-1"></script>
+  <script src="js/util/mathUtils.js?v=20260729-1"></script>
+  <script src="js/util/viewport.js?v=20260729-1"></script>
 
   <!-- World Generation (VoxelGen Overhaul) -->
   <script src="js/world/blockRegistry.js?v=20260725-2"></script>

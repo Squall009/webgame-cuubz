@@ -163,8 +163,8 @@ function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humS
       let temp = p.temp.noise2((sx + warpCX) / tempScale, (sz + warpCZ) / tempScale);
       let hum  = p.hum.noise2((sx + warpGX) / humScale, (sz + warpGZ) / humScale);
       // Per-sample jitter for smooth biome transitions.
-      temp += fbm2(p.jitter, sx / 15 + 999, sz / 15 + 999, 3, 0.5, 2.0) * 0.04;
-      hum  += fbm2(p.jitter, sx / 15 + 777, sz / 15 + 777, 3, 0.5, 2.0) * 0.04;
+      temp += _fbm2(p.jitter, sx / 15 + 999, sz / 15 + 999, 3, 0.5, 2.0) * 0.04;
+      hum  += _fbm2(p.jitter, sx / 15 + 777, sz / 15 + 777, 3, 0.5, 2.0) * 0.04;
 
       const dist2 = dx * dx + dz * dz;
       const w = Math.exp(-dist2 * 0.6);
@@ -186,9 +186,9 @@ function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humS
       // Two-tier continentalness: apply spline independently then blend.
       const continentRaw = p.cont.noise2((sx + warpCX) / continentScale, (sz + warpCZ) / continentScale);
       const detailRaw    = p.cont.noise2((sx + warpCX) / contScale,      (sz + warpCZ) / contScale);
-      let cont = applySpline(continentRaw, CONT_SPLINE) * 0.7 + applySpline(detailRaw, CONT_SPLINE) * 0.3;
+      let cont = _applySpline(continentRaw, CONT_SPLINE) * 0.7 + _applySpline(detailRaw, CONT_SPLINE) * 0.3;
       cont = Math.max(-1.1, Math.min(1.1, cont));
-      cont += fbm2(p.jitter, sx / 15, sz / 15, 3, 0.5, 2.0) * 0.08;
+      cont += _fbm2(p.jitter, sx / 15, sz / 15, 3, 0.5, 2.0) * 0.08;
 
       const eros = p.eros.noise2((sx + warpGX) / erosScale, (sz + warpGZ) / erosScale);
       const biome = selectBiome(cont, eros, blendedTemp, blendedHum);
@@ -277,9 +277,11 @@ function _applySpline(val, points) {
   }
 }
 
-// Aliases used by sampleBiomeParams
-var fbm2 = _fbm2;
-var applySpline = _applySpline;
+// NOTE: this file used to alias its private helpers to the bare names `fbm2` and
+// `applySpline`, which silently collided with the identical functions declared in
+// js/world/noise.js (refactor.md §2.1). biomeSystem.js loads later, so its aliases won.
+// The aliases are gone; call sites use the private `_fbm2` / `_applySpline` directly.
+// Behaviour is unchanged — the implementations were line-for-line equivalent.
 
 function _createSharedPerlin(seed) {
   var sInt = _hashString(String(seed));

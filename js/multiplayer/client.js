@@ -14,8 +14,8 @@
 'use strict';
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
-var _log;
-if (typeof CuubzLogger !== 'undefined') { _log = CuubzLogger.log; } else { _log = function() {}; }
+var _clientLog;
+if (typeof CuubzLogger !== 'undefined') { _clientLog = CuubzLogger.log; } else { _clientLog = function() {}; }
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -229,7 +229,7 @@ class WSConnection {
       this._socket = new this._wsFactory(this.url);
 
       this._socket.onopen = () => {
-        _log(`[WSConnection] Connected to ${this.url}`);
+        _clientLog(`[WSConnection] Connected to ${this.url}`);
         this._reconnectAttempts = 0; // Reset on successful connection
         this._setState(CLIENT_STATE.CONNECTED);
         this._startHeartbeat();
@@ -246,7 +246,7 @@ class WSConnection {
       };
 
       this._socket.onclose = (event) => {
-        _log(`[WSConnection] Disconnected from ${this.url} (${event.code})`);
+        _clientLog(`[WSConnection] Disconnected from ${this.url} (${event.code})`);
         this._stopHeartbeat();
         this._setState(CLIENT_STATE.DISCONNECTED);
         this._emit('disconnect', { code: event.code, reason: event.reason });
@@ -412,7 +412,7 @@ class WSConnection {
     if (typeof document !== 'undefined') {
       this._visibilityHandler = () => {
         if (!document.hidden && this.isConnected && !this._disposed) {
-          _log('[WSConnection] Tab visible — sending heartbeat');
+          _clientLog('[WSConnection] Tab visible — sending heartbeat');
           this._sendRaw({ type: MESSAGE_TYPES.HEARTBEAT });
           this._setHeartbeatTimeout();
         }
@@ -478,7 +478,7 @@ class WSConnection {
     const delay = this._calculateReconnectDelay();
     this._reconnectAttempts++;
 
-    _log(`[WSConnection] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
+    _clientLog(`[WSConnection] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
     this._setState(CLIENT_STATE.RECONNECTING);
 
     this._reconnectTimer = setTimeout(() => {

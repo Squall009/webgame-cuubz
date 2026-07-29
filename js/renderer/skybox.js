@@ -50,12 +50,11 @@ const AMBIENT_LIGHT = {
 // Pure Utility Functions (testable without Three.js)
 // ============================================================
 
-/**
- * Smoothstep interpolation for smooth transitions.
- */
-function smoothstep(t) {
-  t = Math.max(0, Math.min(1, t));
-  return t * t * (3 - 2 * t);
+// `smoothstep` now lives in js/util/mathUtils.js — it used to be declared here AND in
+// js/audio/ambient.js, which silently collided in the shared global scope (refactor.md §2.1).
+// Node.js: require it; browser: mathUtils.js loads first and provides the global.
+if (typeof module !== 'undefined' && typeof smoothstep === 'undefined') {
+  global.smoothstep = require('../util/mathUtils').smoothstep;
 }
 
 /**

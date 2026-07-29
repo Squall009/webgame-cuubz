@@ -56,13 +56,23 @@ function getHealthColor(percent) {
   return '#e74c3c';
 }
 
+// Node.js: require the canonical viewport helper; browser: viewport.js loads first.
+if (typeof module !== 'undefined' && typeof isMobileViewport === 'undefined') {
+  global.isMobileViewport = require('../util/viewport').isMobileViewport;
+}
+
 /**
- * Check if current viewport is mobile-sized.
+ * Check if the current viewport is narrow enough to collapse the player list.
+ *
+ * Renamed from `isMobileViewport` on 2026-07-29: that name was also declared in
+ * js/renderer/performanceOptimizer.js and silently overwrote it (refactor.md §2.1).
+ * The HUD breakpoint (600px) is deliberately narrower than the performance-tuning
+ * breakpoint (768px) — see js/util/viewport.js for why they stay separate.
+ *
  * @returns {boolean}
  */
-function isMobileViewport() {
-  if (typeof window === 'undefined' || !window.innerWidth) return false;
-  return window.innerWidth <= HUD_CONFIG.mobileBreakpoint;
+function isMobileHudViewport() {
+  return isMobileViewport(undefined, HUD_CONFIG.mobileBreakpoint);
 }
 
 // ─── Player List HUD Class ──────────────────────────────────────────
@@ -128,7 +138,7 @@ class PlayerListHUD {
       window.addEventListener('resize', () => {
         this._updateToggleVisibility();
         // If resized to desktop, auto-expand
-        if (!isMobileViewport() && this._collapsed) {
+        if (!isMobileHudViewport() && this._collapsed) {
           this.setCollapsed(false);
         }
       });
@@ -140,7 +150,7 @@ class PlayerListHUD {
    */
   _updateToggleVisibility() {
     if (!this._toggleBtn) return;
-    if (isMobileViewport()) {
+    if (isMobileHudViewport()) {
       this._toggleBtn.style.display = 'inline';
     } else {
       this._toggleBtn.style.display = 'none';
@@ -427,7 +437,7 @@ if (typeof module !== 'undefined' && module.exports) {
     HUD_CONFIG,
     escapeHtml,
     getHealthColor,
-    isMobileViewport,
+    isMobileHudViewport,
     PlayerListHUD,
     PlayerListState,
   };

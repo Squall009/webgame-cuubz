@@ -428,7 +428,7 @@ export class GameState {
 
 > **Nothing else in this document is safe until Phase 0 lands.** v1 had no equivalent phase.
 
-### PR 1 — Commit everything, tag a rollback point
+### PR 1 — Commit everything, tag a rollback point ✅ DONE
 - `git add js/mobs/ MOB_PLAN.md refactor.md textures/items/*.png` and the 16 modified tracked files.
 - Commit with a message naming the mob subsystem as work-in-progress.
 - `git tag pre-refactor-baseline` and push the tag.
@@ -436,13 +436,27 @@ export class GameState {
 - **Accept:** `git status` clean. Tag exists on the remote.
 - **Rollback:** n/a (this *is* the rollback point).
 
-### PR 2 — Fix the 3 crash-on-require exports
+**Outcome (2026-07-29):**
+- Working tree was already clean; `js/mobs/` (18 files) and `MOB_PLAN.md` are tracked as of commit `27959d3`.
+- Tag `pre-refactor-baseline` created locally at `27959d3`. **Push it manually** — the automation environment has no git credentials: `git push origin pre-refactor-baseline`.
+- **Decision: mobs are PARKED.** `js/mobs/` and `MOB_PLAN.md` are frozen — no new mob features until PR 25. The 253 unchecked `MOB_PLAN.md` items are explicitly out of scope for Phases 0–4. Mob files still get migrated mechanically in PR 9 (`js/mobs/` → `src/game/mobs/`) but their *behavior* does not change. Rationale: a half-built subsystem that is still growing cannot serve as a parity baseline.
+
+### PR 2 — Fix the 3 crash-on-require exports ✅ DONE
 - `js/systems/crafting.js` — `BLOCK_TYPES is not defined`
 - `js/systems/damageSystem.js` — `DAMAGE_SOURCES is not defined`
 - `js/entities/worldManager.js:462` — `MIN_NAME_LENGTH is not defined`
 - Minimal fix: guard the `module.exports` object, or (better) define the constants locally in the file that exports them.
 - **Accept:** `node -e "require('./js/systems/crafting.js')"` and the other two exit 0. Browser still loads and plays.
 - **Rollback:** revert commit; 3 files only.
+
+**Outcome (2026-07-29):**
+- Used the **existing in-repo shim pattern** from `js/world/biomeSystem.js:7-9` rather than defining the constants locally. Defining them locally would have created *new* duplicate top-level symbols (`BLOCK_TYPES`, `DAMAGE_SOURCES`, `MIN_NAME_LENGTH` are all already declared elsewhere) — i.e. it would have manufactured exactly the collision class PR 3 exists to eliminate. The shim is a no-op in the browser (`typeof module !== 'undefined'` is false there), so browser behavior is unchanged byte-for-byte.
+  - `crafting.js` → `require('../world/blockRegistry').BLOCK_TYPES`
+  - `damageSystem.js` → `require('./survival').DAMAGE_SOURCES`
+  - `worldManager.js` → `require('./characterManager')` for `MIN_NAME_LENGTH` / `MAX_NAME_LENGTH`
+- `characterManager.js` had to **add `MIN_NAME_LENGTH` / `MAX_NAME_LENGTH` to its `module.exports`** — it declared them but never exported them.
+- Verified: all four files `require` with exit 0. No circular requires introduced.
+- **Suite went 17/53 → 22/53.**
 
 ### PR 3 — Fix the 8 global collisions, with regression tests
 For each, rename or consolidate, and **add a test that would have caught the bug**:
@@ -460,6 +474,33 @@ For each, rename or consolidate, and **add a test that would have caught the bug
 - **Note in the changelog that behavior intentionally changes here:** boss spawning starts working, host inventory sync starts working, and the mobile breakpoint moves. Doing this in Phase 0 keeps Phase 1's "no behavior change" claim honest.
 - **Accept:** the 3 new regression tests pass; no remaining duplicate top-level symbols (see the collision-detector script in PR 5).
 - **Rollback:** revert commit.
+
+**Outcome (2026-07-29):** ✅ DONE — `scripts/check-globals.js` now reports **0 duplicates** across 65 script-tagged files / 367 top-level symbols. `test/test_globalCollisions.js` added: **93 assertions, all passing.**
+
+| Collision | Resolution |
+|---|---|
+| `getBossDefinition` | `damageSystem.js`'s copy renamed → **`getBossAttackProfile`**. `boss.js` keeps `getBossDefinition`. Test asserts the two key namespaces are disjoint, each lookup resolves only its own table, **and that `new Boss(id)` constructs for all 5 boss ids** (it previously always threw). |
+| `validateInventory` | `host.js` → **`validateHostInventory`**; `inventorySync.js` → **`validateInventorySlots`**. Test asserts the host accepts a well-formed sync and that every rejection carries a **defined** `.reason` string (host.js:934 logs it). |
+| `isMobileViewport` | New **`js/util/viewport.js`** — one impl, two named breakpoints. Boundary assertions at 599/600/601/767/768/769. |
+| `smoothstep` | Moved to new **`js/util/mathUtils.js`**; `skybox.js` + `ambient.js` re-export it. |
+| `distanceBetween` | Moved to **`js/util/mathUtils.js`**; `boss.js` + `playerSync.js` re-export it. |
+| `fbm2`, `applySpline` | `biomeSystem.js`'s aliases deleted; its call sites now use its own private `_fbm2` / `_applySpline`. |
+| `_log` ×3 | → `_clientLog` / `_hostLog` / `_gameLog`. |
+
+**Two things the plan did not anticipate:**
+
+1. **A fourth `_log` consumer.** `js/input/interaction.js` called a bare `_log(...)` at two sites (block break, block place) **without ever declaring it** — it was silently borrowing whichever of the three colliding globals loaded last. Renaming the three would have made breaking or placing a block throw `ReferenceError` in production. It now declares its own `_interactionLog`. *This is a bug the plan's own §2.1 audit missed, because a file that only consumes a colliding global is invisible to a duplicate-declaration scan.*
+
+2. **Deviation on `isMobileViewport`.** The plan said "pick one threshold and document it". Not followed, deliberately. The two thresholds are not accidental duplication — 768px answers "is this device weak enough to need reduced draw distance?" and 600px answers "is this screen narrow enough to collapse the player list?". Collapsing them to one number would silently change either perf tuning or HUD layout with no gameplay justification. `js/util/viewport.js` therefore provides **one implementation with two named, documented breakpoints** (`MOBILE_MAX_WIDTH_PERF = 767`, `MOBILE_MAX_WIDTH_HUD = 600`, compared with `<=`, exactly reproducing the old `< 768` and `<= 600`). The collision is gone; both behaviors are preserved. Rationale is written into the file header.
+
+**Behavior that intentionally changed in the browser** (all previously broken):
+- Boss spawning now works — `new Boss(...)` no longer throws `Unknown boss: ...`.
+- Client→host inventory sync is now actually validated instead of always rejected, and the warning log no longer reads `undefined`.
+- Mobile **performance** tuning now applies below 768px as intended, not 600px. The player-list HUD still collapses at 600px, unchanged.
+
+**New files:** `js/util/mathUtils.js`, `js/util/viewport.js` (both script-tagged in `index.html` immediately after `logger.js`, before every consumer), `scripts/check-globals.js`, `test/test_globalCollisions.js`.
+
+**Regression check:** suite went 22/53 → 23/54. The 31 pre-existing failures are unchanged — no test that passed before PR 3 fails after it.
 
 ### PR 4 — Get the suite green, or quarantine explicitly
 - `npm i -D jsdom` (fixes `test_pageLoad`).

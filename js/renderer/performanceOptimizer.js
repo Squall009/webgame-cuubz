@@ -46,14 +46,14 @@ function isTouchDevice(options = {}) {
   return maxTouchPoints > 0 || hasTouchStart;
 }
 
-/**
- * Detect if running on a mobile viewport.
- * @param {number} screenWidth - Screen width for testing overrides
- * @returns {boolean}
- */
-function isMobileViewport(screenWidth) {
-  const width = screenWidth !== undefined ? screenWidth : (typeof window !== 'undefined' ? window.innerWidth : 1920);
-  return width < 768;
+// `isMobileViewport` now lives in js/util/viewport.js. It used to be declared here AND in
+// js/multiplayer/playerListHUD.js; playerListHUD loads later (index.html:576 vs :544) so its
+// zero-arg 600px version silently won, meaning line ~400 below passed a width that was
+// ignored and perf tuning used a 600px breakpoint instead of 768. See refactor.md §2.1.
+// The canonical helper defaults to MOBILE_MAX_WIDTH_PERF (767 inclusive === the old `< 768`).
+// Node.js: require it; browser: viewport.js loads first and provides the global.
+if (typeof module !== 'undefined' && typeof isMobileViewport === 'undefined') {
+  global.isMobileViewport = require('../util/viewport').isMobileViewport;
 }
 
 /**

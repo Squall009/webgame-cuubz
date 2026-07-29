@@ -326,16 +326,11 @@ function getAllBossIds() {
   return Object.keys(BOSS_DEFINITIONS);
 }
 
-/**
- * Calculate distance between two world positions.
- * @param {{x:number,y:number,z:number}} a
- * @param {{x:number,y:number,z:number}} b
- * @returns {number} Euclidean distance
- */
-function distanceBetween(a, b) {
-  return Math.sqrt(
-    (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2
-  );
+// `distanceBetween` now lives in js/util/mathUtils.js — it used to be declared here AND in
+// js/multiplayer/playerSync.js, which silently collided in the shared global scope
+// (refactor.md §2.1). Node.js: require it; browser: mathUtils.js loads first.
+if (typeof module !== 'undefined' && typeof distanceBetween === 'undefined') {
+  global.distanceBetween = require('../util/mathUtils').distanceBetween;
 }
 
 /**

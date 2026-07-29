@@ -9,7 +9,7 @@
 'use strict';
 
 const { validateBlockBreak, validateBlockPlace, validateMove, validateQuestUpdate } = require('../js/multiplayer/host');
-const { InventoryValidator, VALID_BLOCK_IDS, VALID_NAMED_ITEMS, MAX_STACK, isValidTypeId, validateSlot, slotsEqual, DEFAULT_INVENTORY_ROWS, DEFAULT_INVENTORY_COLS, validateInventory: invSyncValidateInventory } = require('../js/multiplayer/inventorySync');
+const { InventoryValidator, VALID_BLOCK_IDS, VALID_NAMED_ITEMS, MAX_STACK, isValidTypeId, validateSlot, slotsEqual, DEFAULT_INVENTORY_ROWS, DEFAULT_INVENTORY_COLS, validateInventorySlots: invSyncValidateInventory } = require('../js/multiplayer/inventorySync');
 const { HOST_STATE, DEFAULT_HOST_CONFIG, RateLimiter } = require('../js/multiplayer/host');
 
 // ─── Test Harness ──────────────────────────────────────────────
@@ -137,7 +137,7 @@ function runTests() {
   slotResult = validateSlot(null);
   assert(slotResult.valid === true, 'Null slot (empty) passes validation');
 
-  // Test validateInventory with proper structure
+  // Test validateInventorySlots with proper structure
   const validInventory = [
     { typeId: 3, count: 64 },   // Stone (block type)
     { typeId: 7, count: 12 },   // Wood Log

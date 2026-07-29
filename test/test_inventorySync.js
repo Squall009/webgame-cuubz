@@ -23,7 +23,7 @@ const {
   getMaxStackSize,
   isValidTypeId,
   validateSlot,
-  validateInventory,
+  validateInventorySlots,
   serializeInventory,
   deserializeInventory,
   computeInventoryDiff,
@@ -209,36 +209,36 @@ assertFalse(validateSlot([1, 2]).valid, 'Array slot is invalid');
 console.log('');
 
 // ============================================================
-// Test Group 6: validateInventory
+// Test Group 6: validateInventorySlots
 // ============================================================
 
-console.log('[validateInventory]');
+console.log('[validateInventorySlots]');
 
 // Valid inventories
-assertTrue(validateInventory([]).valid, 'Empty inventory is valid');
-assertTrue(validateInventory([null, null]).valid, 'All-null inventory is valid');
-assertTrue(validateInventory([{ typeId: 1, count: 1 }, null]).valid, 'Mixed valid/null slots');
+assertTrue(validateInventorySlots([]).valid, 'Empty inventory is valid');
+assertTrue(validateInventorySlots([null, null]).valid, 'All-null inventory is valid');
+assertTrue(validateInventorySlots([{ typeId: 1, count: 1 }, null]).valid, 'Mixed valid/null slots');
 const fullValid = [];
 for (let i = 0; i < 36; i++) fullValid.push({ typeId: 1, count: 1 });
-assertTrue(validateInventory(fullValid).valid, 'Full inventory of valid items');
+assertTrue(validateInventorySlots(fullValid).valid, 'Full inventory of valid items');
 
 // Invalid inventories
-assertFalse(validateInventory('not_array').valid, 'Non-array is invalid');
-assertTrue(validateInventory([null]).valid === true, 'Single null slot is valid');
+assertFalse(validateInventorySlots('not_array').valid, 'Non-array is invalid');
+assertTrue(validateInventorySlots([null]).valid === true, 'Single null slot is valid');
 
 const invalidSlots = [{ typeId: 27, count: 1 }]; // Unknown block type
-const invResult1 = validateInventory(invalidSlots);
+const invResult1 = validateInventorySlots(invalidSlots);
 assertFalse(invResult1.valid, 'Unknown block type fails validation');
 assertEquals(invResult1.errors.length, 1, 'One error reported for unknown block type');
 
 const invalidCount = [{ typeId: 1, count: 999 }];
-const invResult2 = validateInventory(invalidCount);
+const invResult2 = validateInventorySlots(invalidCount);
 assertFalse(invResult2.valid, 'Over-max-stack count fails validation');
 
 // Too many slots
 const tooManySlots = [];
 for (let i = 0; i < 100; i++) tooManySlots.push(null);
-const invResult3 = validateInventory(tooManySlots);
+const invResult3 = validateInventorySlots(tooManySlots);
 assertFalse(invResult3.valid, 'Too many slots (>72) fails validation');
 
 console.log('');

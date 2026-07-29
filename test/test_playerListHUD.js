@@ -15,7 +15,7 @@ const {
   HUD_CONFIG,
   escapeHtml,
   getHealthColor,
-  isMobileViewport,
+  isMobileHudViewport,
   PlayerListHUD,
   PlayerListState,
 } = require(path.join(__dirname, '..', 'js', 'multiplayer', 'playerListHUD.js'));
@@ -85,10 +85,10 @@ assertEqual(getHealthColor(0), '#e74c3c', '0% → red');
 assertEqual(getHealthColor(-10), '#e74c3c', '-10 clamped to 0 → red');
 assertEqual(getHealthColor(150), '#4CAF50', '150 clamped to 100 → green');
 
-// ─── Group 4: isMobileViewport in Node.js ──────────────────────
-console.log('\nGroup 4: isMobileViewport in Node.js context');
+// ─── Group 4: isMobileHudViewport in Node.js ──────────────────────
+console.log('\nGroup 4: isMobileHudViewport in Node.js context');
 
-assertFalse(isMobileViewport(), 'returns false in Node.js (no window)');
+assertFalse(isMobileHudViewport(), 'returns false in Node.js (no window)');
 
 // ─── Group 5: PlayerListState — constructor defaults ──────────
 console.log('\nGroup 5: PlayerListState — constructor defaults');

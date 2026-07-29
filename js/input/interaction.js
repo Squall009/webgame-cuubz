@@ -12,6 +12,16 @@
  *   - Right click to place selected block type
  */
 
+// Debug logging — set CuubzLogger.DEBUG = true in browser console to enable.
+//
+// This file previously called a bare `_log(...)` that it never declared, silently
+// borrowing whichever of the three colliding global `_log` declarations (client.js,
+// host.js, game.js) happened to load last. Those were renamed on 2026-07-29
+// (refactor.md §2.1 / PR 3), so this file now owns its logger explicitly — otherwise
+// breaking or placing a block would throw ReferenceError.
+var _interactionLog;
+if (typeof CuubzLogger !== 'undefined') { _interactionLog = CuubzLogger.log; } else { _interactionLog = function() {}; }
+
 class BlockInteraction {
   /**
    * @param {Object} options - Configuration
@@ -305,7 +315,7 @@ class BlockInteraction {
       }
     }
 
-    _log('[BlockInteraction] Broke block ' + blockType + ' at (' + x + ', ' + y + ', ' + z + ')');
+    _interactionLog('[BlockInteraction] Broke block ' + blockType + ' at (' + x + ', ' + y + ', ' + z + ')');
 
     // Multiplayer: track for network sync
     this._lastBroken = { x, y, z };
@@ -448,7 +458,7 @@ class BlockInteraction {
     // Also mark adjacent chunks for mesh rebuild (face culling may change)
     this._markAdjacentChunksDirty(wx, wy, wz, targetChunkX, targetChunkZ);
 
-    _log('[BlockInteraction] Placed block ' + placeType + ' at (' + wx + ', ' + wy + ', ' + wz + ')');
+    _interactionLog('[BlockInteraction] Placed block ' + placeType + ' at (' + wx + ', ' + wy + ', ' + wz + ')');
 
     // Multiplayer: track for network sync
     this._lastPlaced = { x: wx, y: wy, z: wz, blockType: placeType };

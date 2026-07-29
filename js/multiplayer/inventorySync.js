@@ -186,7 +186,7 @@ function validateSlot(slot) {
  * Validate a complete inventory array.
  * Returns { valid, errors } where errors is an array of per-slot issues.
  */
-function validateInventory(slots, maxSlots) {
+function validateInventorySlots(slots, maxSlots) {
   const limit = maxSlots || DEFAULT_TOTAL_SLOTS;
   if (!Array.isArray(slots)) {
     return { valid: false, errors: ['Inventory is not an array'] };
@@ -422,7 +422,7 @@ class InventorySync {
   handleJoinResponse(data) {
     if (!data || !data.inventory) return false;
 
-    const result = validateInventory(data.inventory.slots);
+    const result = validateInventorySlots(data.inventory.slots);
     if (!result.valid) {
       if (this.onSyncError) {
         this.onSyncError({ reason: 'Invalid inventory from host', errors: result.errors });
@@ -510,7 +510,7 @@ class InventorySync {
   applyRemoteSync(playerId, inventoryData) {
     if (!playerId || !inventoryData) return false;
 
-    const result = validateInventory(inventoryData.slots);
+    const result = validateInventorySlots(inventoryData.slots);
     if (!result.valid) {
       if (this.onInventoryInvalid) {
         this.onInventoryInvalid({ playerId, errors: result.errors });
@@ -560,7 +560,7 @@ class InventorySync {
   restoreFromSave(savedData) {
     if (!savedData || !Array.isArray(savedData.slots)) return false;
 
-    const result = validateInventory(savedData.slots);
+    const result = validateInventorySlots(savedData.slots);
     if (!result.valid) {
       if (this.onSyncError) {
         this.onSyncError({ reason: 'Invalid saved inventory', errors: result.errors });
@@ -633,7 +633,7 @@ class InventoryValidator {
 
   /** Register/initialize a player's inventory on join */
   registerPlayer(playerId, slots) {
-    const result = validateInventory(slots);
+    const result = validateInventorySlots(slots);
     if (!result.valid) {
       // Sanitize: remove invalid items
       const sanitized = this._sanitizeSlots(slots);
@@ -709,7 +709,7 @@ class InventoryValidator {
    * Validates and stores the updated state.
    */
   processInventoryUpdate(playerId, inventoryData) {
-    const result = validateInventory(inventoryData.slots);
+    const result = validateInventorySlots(inventoryData.slots);
     if (!result.valid) {
       if (this._strictMode) {
         // Strict: reject and sanitize
@@ -798,7 +798,7 @@ if (typeof module !== 'undefined' && module.exports) {
     getMaxStackSize,
     isValidTypeId,
     validateSlot,
-    validateInventory,
+    validateInventorySlots,
     serializeInventory,
     deserializeInventory,
     computeInventoryDiff,

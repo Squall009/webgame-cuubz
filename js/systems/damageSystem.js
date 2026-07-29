@@ -6,7 +6,11 @@
  */
 
 // Damage source constants (mirrored from survival.js)
-// DAMAGE_SOURCES defined in survival.js — use global
+// Node.js: require DAMAGE_SOURCES from survival.js; browser: use global (script-tag load order).
+if (typeof module !== 'undefined' && typeof DAMAGE_SOURCES === 'undefined') {
+  global.DAMAGE_SOURCES = require('./survival').DAMAGE_SOURCES;
+}
+
 const ENVIRONMENTAL_DAMAGE_RATES = {
   [DAMAGE_SOURCES.LAVA]:    20.0,   // Rapid — kills in ~5 seconds
   [DAMAGE_SOURCES.POISON]:   5.0,   // Slower DoT — kills in ~20 seconds
@@ -123,11 +127,19 @@ function getEnvironmentalDamageRate(source) {
 }
 
 /**
- * Get boss definition by key.
+ * Get a boss ATTACK PROFILE by key.
+ *
+ * NOTE: this is NOT the same thing as boss.js's `getBossDefinition()`. That one
+ * looks up BOSS_DEFINITIONS (keys like 'forest_warden'); this one looks up
+ * BOSS_ATTACKS (keys like 'CORRUPT_GUARDIAN'). The two key namespaces are disjoint.
+ * Until 2026-07-29 both functions were named `getBossDefinition` and shared one
+ * global scope, so this one — loading later — silently won and broke every
+ * `new Boss(...)` call. See refactor.md §2.1.
+ *
  * @param {string} bossKey - Key from BOSS_ATTACKS
- * @returns {object|null} Boss definition or null
+ * @returns {object|null} Boss attack profile or null
  */
-function getBossDefinition(bossKey) {
+function getBossAttackProfile(bossKey) {
   return BOSS_ATTACKS[bossKey] || null;
 }
 
@@ -484,7 +496,7 @@ class DamageSystem {
    * @returns {object|null} Boss instance or null if invalid key
    */
   spawnBoss(bossKey, position, bossId) {
-    const def = getBossDefinition(bossKey);
+    const def = getBossAttackProfile(bossKey);
     if (!def) return null;
 
     const bossInstance = {
@@ -627,7 +639,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isDamagingBlock,
     calculateFallDamage,
     getEnvironmentalDamageRate,
-    getBossDefinition,
+    getBossAttackProfile,
     calculateBossAttackDamage,
     getBossKeys,
   };

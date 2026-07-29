@@ -19,8 +19,8 @@
 'use strict';
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
-var _log;
-if (typeof CuubzLogger !== 'undefined') { _log = CuubzLogger.log; } else { _log = function() {}; }
+var _hostLog;
+if (typeof CuubzLogger !== 'undefined') { _hostLog = CuubzLogger.log; } else { _hostLog = function() {}; }
 
 // Re-export from client.js for protocol consistency
 // Use globals from client.js: CLIENT_STATE, MESSAGE_TYPES (server-side only)
@@ -202,7 +202,7 @@ function validateMoveExtrapolation(playerId, player, position, config) {
  * Validate inventory update from a remote player.
  * Returns { valid, reason } object.
  */
-function validateInventory(playerId, inventory) {
+function validateHostInventory(playerId, inventory) {
   if (!inventory || !Array.isArray(inventory)) {
     return { valid: false, reason: 'Invalid inventory format' };
   }
@@ -540,7 +540,7 @@ class HostManager {
       this._client.onMatchmaking('HOST_CREATED', (data) => {
         this._sessionId = data.sessionId;
         this._setState(HOST_STATE.HOSTING);
-        _log(`[HostManager] Session created: ${this._sessionId}`);
+        _hostLog(`[HostManager] Session created: ${this._sessionId}`);
       });
 
       this._client.onMatchmaking('ERROR', (data) => {
@@ -665,7 +665,7 @@ class HostManager {
 
     this._players.set(playerId, playerState);
 
-    _log(`[HostManager] Player joined: ${playerId} (${data.character?.name || 'Unknown'})`);
+    _hostLog(`[HostManager] Player joined: ${playerId} (${data.character?.name || 'Unknown'})`);
 
     // Callback
     if (this.onPlayerJoined) {
@@ -692,7 +692,7 @@ class HostManager {
     player.connected = false;
     this._rateLimiter.clearPlayer(playerId);
 
-    _log(`[HostManager] Player left: ${playerId}`);
+    _hostLog(`[HostManager] Player left: ${playerId}`);
 
     // Callback
     if (this.onPlayerLeft) {
@@ -931,7 +931,7 @@ class HostManager {
     if (!player || !player.connected) return;
 
     // Validate inventory
-    const valid = validateInventory(playerId, data.inventory);
+    const valid = validateHostInventory(playerId, data.inventory);
     if (!valid.valid) {
       console.warn(`[HostManager] Invalid inventory from ${playerId}: ${valid.reason}`);
       return;
@@ -1162,7 +1162,7 @@ if (typeof module !== 'undefined' && module.exports) {
     validateBlockBreak,
     validateBlockPlace,
     validateMove,
-    validateInventory,
+    validateHostInventory,
     validateQuestUpdate,
     // Utility classes
     RateLimiter,

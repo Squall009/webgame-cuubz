@@ -17,7 +17,7 @@ const {
   isDamagingBlock,
   calculateFallDamage,
   getEnvironmentalDamageRate,
-  getBossDefinition,
+  getBossAttackProfile,
   calculateBossAttackDamage,
   getBossKeys,
 } = require('../js/systems/damageSystem');
@@ -130,15 +130,15 @@ assert(getEnvironmentalDamageRate(DAMAGE_SOURCES.POISON) === 5.0, 'Poison rate l
 // Section 5: Boss Definitions
 // ============================================================
 
-// --- Test: getBossDefinition returns correct data ---
-const boss1 = getBossDefinition('CORRUPT_GUARDIAN');
+// --- Test: getBossAttackProfile returns correct data ---
+const boss1 = getBossAttackProfile('CORRUPT_GUARDIAN');
 assert(boss1 !== null, 'CORRUPT_GUARDIAN should exist');
 assert(boss1.name === 'Corrupt Crystal Guardian', 'Boss 1 name should match');
 assert(boss1.health === 500, 'Boss 1 health should be 500');
 assert(boss1.attacks.length === 3, 'Boss 1 should have 3 attacks');
 assert(boss1.phases === 2, 'Boss 1 should have 2 phases');
 
-const boss4 = getBossDefinition('CORRUPTION_OVERLORD');
+const boss4 = getBossAttackProfile('CORRUPTION_OVERLORD');
 assert(boss4 !== null, 'CORRUPTION_OVERLORD should exist');
 assert(boss4.health === 1500, 'Final boss health should be 1500');
 assert(boss4.phases === 3, 'Final boss should have 3 phases');
@@ -146,7 +146,7 @@ assert(boss4.phase2HealthThreshold === 0.6, 'Phase 2 threshold should be 0.6');
 assert(boss4.phase3HealthThreshold === 0.3, 'Phase 3 threshold should be 0.3');
 
 // --- Test: Invalid boss key returns null ---
-assert(getBossDefinition('NONEXISTENT') === null, 'Invalid boss key should return null');
+assert(getBossAttackProfile('NONEXISTENT') === null, 'Invalid boss key should return null');
 
 // --- Test: getBossKeys returns all 4 bosses ---
 const keys = getBossKeys();
@@ -158,7 +158,7 @@ assert(keys.includes('CORRUPTION_OVERLORD'), 'Should include CORRUPTION_OVERLORD
 
 // --- Test: Boss attack definitions have required fields ---
 for (const key of getBossKeys()) {
-  const def = getBossDefinition(key);
+  const def = getBossAttackProfile(key);
   for (const attack of def.attacks) {
     assert(typeof attack.name === 'string', `${key} attack "${attack.name}" should have name`);
     assert(typeof attack.damage === 'number', `${key} attack "${attack.name}" should have damage`);

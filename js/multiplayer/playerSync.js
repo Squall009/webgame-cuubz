@@ -792,14 +792,10 @@ class PlayerSyncManager {
 
 // ─── Utility Functions ─────────────────────────────────────────────
 
-/**
- * Calculate distance between two positions.
- */
-function distanceBetween(pos1, pos2) {
-  const dx = pos2.x - pos1.x;
-  const dy = pos2.y - pos1.y;
-  const dz = pos2.z - pos1.z;
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+// `distanceBetween` now lives in js/util/mathUtils.js — see the note in js/entities/boss.js.
+// Node.js: require it; browser: mathUtils.js loads first and provides the global.
+if (typeof module !== 'undefined' && typeof distanceBetween === 'undefined') {
+  global.distanceBetween = require('../util/mathUtils').distanceBetween;
 }
 
 /**

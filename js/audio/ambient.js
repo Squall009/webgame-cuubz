@@ -271,12 +271,10 @@ function calculateDayNightVolume(baseVolume, timeOfDay, masterVolume) {
   return Math.max(0, Math.min(1, baseVolume * dayNightMult * masterVolume));
 }
 
-/**
- * Smoothstep interpolation for smooth transitions.
- */
-function smoothstep(t) {
-  t = Math.max(0, Math.min(1, t));
-  return t * t * (3 - 2 * t);
+// `smoothstep` now lives in js/util/mathUtils.js — see the note in js/renderer/skybox.js.
+// Node.js: require it; browser: mathUtils.js loads first and provides the global.
+if (typeof module !== 'undefined' && typeof smoothstep === 'undefined') {
+  global.smoothstep = require('../util/mathUtils').smoothstep;
 }
 
 /**

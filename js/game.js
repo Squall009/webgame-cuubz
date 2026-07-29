@@ -11,8 +11,8 @@
  */
 
 // Debug logging — set CuubzLogger.DEBUG = true in console to enable
-var _log;
-if (typeof CuubzLogger !== 'undefined') { _log = CuubzLogger.log; } else { _log = function() {}; }
+var _gameLog;
+if (typeof CuubzLogger !== 'undefined') { _gameLog = CuubzLogger.log; } else { _gameLog = function() {}; }
 
 // ============================================================
 // Mode Constants
@@ -156,7 +156,7 @@ class Game {
     }
     this.running = true;
     this.lastTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    _log(`[Game] Started in ${this.mode} mode`);
+    _gameLog(`[Game] Started in ${this.mode} mode`);
   }
 
   /**
@@ -164,7 +164,7 @@ class Game {
    */
   stop() {
     this.running = false;
-    _log('[Game] Stopped');
+    _gameLog('[Game] Stopped');
   }
 
   /**
@@ -193,7 +193,7 @@ class Game {
       this.onModeChange(this.mode, oldMode);
     }
     
-    _log(`[Game] Mode changed: ${oldMode} → ${this.mode}`);
+    _gameLog(`[Game] Mode changed: ${oldMode} → ${this.mode}`);
   }
 
   /**

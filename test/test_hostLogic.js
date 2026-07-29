@@ -22,7 +22,7 @@ const {
   validateBlockBreak,
   validateBlockPlace,
   validateMove,
-  validateInventory,
+  validateHostInventory,
   validateQuestUpdate,
   RateLimiter,
   RemotePlayerState,
@@ -268,12 +268,12 @@ result = validateMove('p1', { x: 10, y: 20, z: 10 }, { yaw: 'a', pitch: 0 });
 assertFalse(result.valid, 'Rejects non-numeric yaw');
 assertEqual(result.reason, 'Non-numeric rotation', 'Non-numeric rotation reason');
 
-// ─── Test Group 6: validateInventory ───────────────────────
+// ─── Test Group 6: validateHostInventory ───────────────────────
 
-console.log('\n--- Test Group 6: validateInventory ---');
+console.log('\n--- Test Group 6: validateHostInventory ---');
 
 // Valid empty inventory
-result = validateInventory('p1', []);
+result = validateHostInventory('p1', []);
 assertTrue(result.valid, 'Valid empty inventory array');
 
 // Valid inventory with items
@@ -283,45 +283,45 @@ const validInv = [
   null,
   { blockType: 1, count: 10 },
 ];
-result = validateInventory('p1', validInv);
+result = validateHostInventory('p1', validInv);
 assertTrue(result.valid, 'Valid inventory with mixed items');
 
 // Invalid: not an array
-result = validateInventory('p1', 'not-array');
+result = validateHostInventory('p1', 'not-array');
 assertFalse(result.valid, 'Rejects string as inventory');
 
-result = validateInventory('p1', null);
+result = validateHostInventory('p1', null);
 assertFalse(result.valid, 'Rejects null inventory');
 
-result = validateInventory('p1', {});
+result = validateHostInventory('p1', {});
 assertFalse(result.valid, 'Rejects object as inventory');
 
 // Invalid: too large
-result = validateInventory('p1', Array(101).fill({ type: 'stone', count: 1 }));
+result = validateHostInventory('p1', Array(101).fill({ type: 'stone', count: 1 }));
 assertFalse(result.valid, 'Rejects inventory with >100 slots');
 
 // Exactly at limit (100 slots) should be valid
-result = validateInventory('p1', Array(100).fill({ type: 'stone', count: 1 }));
+result = validateHostInventory('p1', Array(100).fill({ type: 'stone', count: 1 }));
 assertTrue(result.valid, 'Accepts inventory with exactly 100 slots');
 
 // Invalid slot type (not an object)
-result = validateInventory('p1', ['string-slot']);
+result = validateHostInventory('p1', ['string-slot']);
 assertFalse(result.valid, 'Rejects string as slot value');
 
 // Missing type/blockType in slot
-result = validateInventory('p1', [{ count: 5 }]);
+result = validateHostInventory('p1', [{ count: 5 }]);
 assertFalse(result.valid, 'Rejects slot without type or blockType');
 
 // Invalid count (negative)
-result = validateInventory('p1', [{ type: 'stone', count: -1 }]);
+result = validateHostInventory('p1', [{ type: 'stone', count: -1 }]);
 assertFalse(result.valid, 'Rejects negative item count');
 
 // Invalid count (too large)
-result = validateInventory('p1', [{ type: 'stone', count: 10000 }]);
+result = validateHostInventory('p1', [{ type: 'stone', count: 10000 }]);
 assertFalse(result.valid, 'Rejects count > 9999');
 
 // Valid count at boundary
-result = validateInventory('p1', [{ type: 'stone', count: 9999 }]);
+result = validateHostInventory('p1', [{ type: 'stone', count: 9999 }]);
 assertTrue(result.valid, 'Accepts count of 9999');
 
 // ─── Test Group 7: validateQuestUpdate ─────────────────────
