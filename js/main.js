@@ -4862,7 +4862,11 @@
 
               // Start the game
               startGame(lastSession.mode || 'survival');
-              console.error('[Cuubz] === AUTO-REJOIN COMPLETE ===');
+              // console.info, not console.error — this is a success milestone.
+              // CuubzLogger.log is console.log gated on DEBUG=false (js/util/logger.js:39),
+              // i.e. silent in production, which is why someone reached for console.error
+              // to force visibility. The logger is correct; the severity was not.
+              console.info('[Cuubz] === AUTO-REJOIN COMPLETE ===');
               return; // Skip showing main menu
             }
           }
@@ -4875,7 +4879,7 @@
       }
 
       showScreen('mainMenu');
-      console.error('[Cuubz] === INIT COMPLETE ===');
+      console.info('[Cuubz] === INIT COMPLETE ==='); // success milestone — see AUTO-REJOIN above
     } catch (err) {
       console.error('[Cuubz] FATAL init error:', err.message, err.stack);
     }

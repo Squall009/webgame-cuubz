@@ -31,7 +31,7 @@ command that would confirm them. See [§9](#9-verification-status).
 4. [What `./sync.sh` actually does](#4-what-syncsh-actually-does)
 5. [Restarting the relay](#5-restarting-the-relay-the-step-syncsh-does-not-do)
 6. [Rollback](#6-rollback)
-7. [Manual save/load checklist](#7-manual-saveload-checklist)
+7. [Save/load checklist — automated + manual remainder](#7-saveload-checklist)
 8. [Known defects and who owns them](#8-known-defects-and-who-owns-them)
 9. [Verification status](#9-verification-status)
 
@@ -171,8 +171,14 @@ coordinate-only keys are the bug, not a mitigation.
 **Not fixed here.** The fix changes the primary key format, which is itself an entry in
 the table above — every already-saved chunk would be orphaned unless a migration is
 written. That is a data-migration PR with its own manual test plan, not a line in a
-documentation PR. [§7](#7-manual-saveload-checklist) step 8 detects it deliberately and
-is **expected to fail today**, so nobody spends a day blaming their own refactor.
+documentation PR. [§7](#7-saveload-checklist) steps 8–9 detect it deliberately and
+**fail today**, so nobody spends a day blaming their own refactor.
+
+> **Confirmed by observation in PR 6b, and worse than described above.** One visit to a
+> second world destroyed **1,073 of the first world's 1,184 saved chunks**, and
+> re-entering the first world served the second world's spawn chunk byte for byte. Full
+> measurements, plus a cheap detection mechanism the stored data already supports, in
+> [§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted).
 
 **H2 — `js/main.js:545` opens the database with no version.**
 
@@ -609,12 +615,40 @@ Two things close the gap, neither of them a documentation task:
 
 ---
 
-## 7. Manual save/load checklist
+## 7. Save/load checklist
 
-Run this **at every Phase gate and after every deploy.** `refactor.md` §1.5 specifies
-it as a manual gate until PR 32 can automate it. Storage is the one part of this
-codebase with no automated coverage and unrecoverable failure modes, so it is worth
-the ten minutes.
+> ### ▶ Most of this is automated. Run the script first.
+>
+> ```bash
+> npm run test:e2e        # test/e2e/saveLoad.js — added by PR 6b
+> ```
+>
+> A real browser (Edge, driven by `playwright-core`, WebGL via SwiftShader) walks the
+> menu flow, generates two worlds from pinned seeds, and reads IndexedDB and
+> localStorage directly. **104 assertions, exit 0, ~4 minutes.** Screenshots land in
+> `test/e2e/artifacts/` (gitignored).
+>
+> It covers steps 1, 2, 3, 5, 6, 10, 11 and 14 outright, plus every invariant in
+> [§2](#2-do-not-change-player-data-invariants) — including the chunk binary header
+> decoded from bytes the browser actually wrote, and the database version read
+> **without** triggering the `onupgradeneeded` handler described in
+> [§2.1](#21-indexeddb--worlds-and-terrain).
+>
+> **Three steps it cannot do, and you still have to:** step 4 (place/break blocks),
+> step 7 (quit to menu — blocked by **D-14**, see below), steps 12–13 (multiplayer).
+> The script prints those three as `⚠️ UNVERIFIED` with what would close each, so a
+> passing run never implies more than it checked. It is deliberately **not** in
+> `npm test` and **not** in CI — see the comment block in `.github/workflows/ci.yml`.
+>
+> **Three of its assertions describe defects rather than requirements** (H-1, D-14,
+> D-15). They pass because the bug is present. Fixing any of them turns the script
+> red on purpose; that is the signal to replace the block with the assertion the fix
+> makes true.
+
+Run the manual remainder **at every Phase gate and after every deploy.**
+`refactor.md` §1.5 specifies this as a manual gate until PR 32 can automate it.
+Storage is the one part of this codebase with no automated coverage and
+unrecoverable failure modes, so it is worth the ten minutes.
 
 **Timing rules — these are why naive attempts produce false failures.** Save is not
 synchronous with your actions:
@@ -637,33 +671,74 @@ Serve the repo over HTTP — `file://` breaks the relative `fetch` in
 (`python3 -m http.server 8080`). Open the browser console and keep it visible; every
 step below has a console-visible failure mode.
 
-| # | Step | Expected |
-|---|---|---|
-| 1 | Load the page | No console errors. Menu renders. |
-| 2 | Create a character | Appears in the character list. `localStorage['cuubz:characters']` is a non-empty array. |
-| 3 | Create a world in slot 0, enter it, **survival** | Terrain generates. `localStorage['cuubz:slotMap']` maps the world id → `0`. |
-| 4 | Place ~10 blocks in a recognisable shape at spawn. Break 2–3 blocks. | Blocks appear/disappear. Broken blocks drop the **correct** item (PR 4 bug 1 — andesite must not drop cobblestone). |
-| 5 | Pick up the drops, note the hotbar contents. **Press Escape. Wait 5 s.** | Pause menu opens. Console logs `[Cuubz] Saved player state`. |
-| 6 | **Reload the page** (F5), re-enter the same world | **Your shape is exactly as you left it. Broken blocks are still broken. Inventory and hotbar match.** ← the load-bearing assertion |
-| 7 | Quit to menu, re-enter the same world without reloading | Same result as step 6. |
-| 8 | **Two-world test.** Create a world in slot 1. Enter it, look at spawn. | ⚠️ **EXPECTED TO FAIL TODAY** — see below. |
-| 9 | Return to the slot 0 world | ⚠️ **EXPECTED TO FAIL TODAY** — see below. |
-| 10 | Open DevTools → Application → IndexedDB | DB `cuubz-worlds`, **version 2**, stores `chunks` + `manifests`. If the version is not 2, **stop** — see [§2.1](#21-indexeddb--worlds-and-terrain). |
-| 11 | Change a graphics setting, reload | Setting persists. `localStorage['cuubz:settings']` reflects it. |
-| 12 | Host a multiplayer session, join from a second browser profile, place a block as the guest | Block appears for both. Host's browser persists it (host is authoritative). |
-| 13 | Quit both. Reload as host, re-enter | The guest's block is still there. |
-| 14 | Confirm the tree is clean | `git status` clean — the manifest smoke test snapshots and restores `textures/blocks/manifest.json`; a dirty tree means it did not. |
+| # | Step | Expected | Automated |
+|---|---|---|---|
+| 1 | Load the page | No console errors. Menu renders. | ✅ |
+| 2 | Create a character | Appears in the character list. `localStorage['cuubz:characters']` is a non-empty array. | ✅ |
+| 3 | Create a world in slot 0, enter it, **survival** | Terrain generates. `localStorage['cuubz:slotMap']` maps the world id → `0`. | ✅ |
+| 4 | Place ~10 blocks in a recognisable shape at spawn. Break 2–3 blocks. | Blocks appear/disappear. Broken blocks drop the **correct** item (PR 4 bug 1 — andesite must not drop cobblestone). | ❌ manual |
+| 5 | Pick up the drops, note the hotbar contents. **Press Escape. Wait 5 s.** | Pause menu opens. Console logs `[Cuubz] Saved player state`. | ✅ (pause menu; hotbar is manual) |
+| 6 | **Reload the page** (F5), re-enter the same world | **Your shape is exactly as you left it. Broken blocks are still broken. Inventory and hotbar match.** ← the load-bearing assertion | ✅ for terrain (byte-identical); ❌ for placed blocks + inventory |
+| 7 | Quit to menu, re-enter the same world without reloading | Same result as step 6. | ⛔ **blocked by D-14** — see below |
+| 8 | **Two-world test.** Create a world in slot 1. Enter it, look at spawn. | ⚠️ **FAILS TODAY — H-1, confirmed by observation.** See below. | ✅ (asserts the defect) |
+| 9 | Return to the slot 0 world | ⚠️ **FAILS TODAY — H-1, confirmed by observation.** See below. | ✅ (asserts the defect) |
+| 10 | Open DevTools → Application → IndexedDB | DB `cuubz-worlds`, **version 2**, stores `chunks` + `manifests`. If the version is not 2, **stop** — see [§2.1](#21-indexeddb--worlds-and-terrain). | ✅ read programmatically, without triggering an upgrade |
+| 11 | Change a graphics setting, reload | Setting persists. `localStorage['cuubz:settings']` reflects it. | ✅ |
+| 12 | Host a multiplayer session, join from a second browser profile, place a block as the guest | Block appears for both. Host's browser persists it (host is authoritative). | ❌ manual |
+| 13 | Quit both. Reload as host, re-enter | The guest's block is still there. | ❌ manual |
+| 14 | Confirm the tree is clean | `git status` clean — the manifest smoke test snapshots and restores `textures/blocks/manifest.json`; a dirty tree means it did not. | ✅ |
 
-**Steps 8–9 are expected to fail, today, before any refactor.** They exist to detect
-hazard H1 ([§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions)):
-slot 1's spawn chunk overwrites slot 0's, so the second world shows the first world's
-terrain — including the shape you built in step 4 — and returning to slot 0 shows
-slot 1's. **This is pre-existing, not something a refactor broke.** Record it as a
-known failure and move on. Once H1 is fixed, these two steps become real assertions
-and this note should be deleted.
+### 7.1 Steps 8–9 fail. H-1 is confirmed, not predicted.
+
+**PR 6 wrote these two steps from the read paths and asked the first runner to correct
+this document if the prediction did not hold. It held, and the run was worse than the
+prediction.** Observed by `npm run test:e2e`, world A on seed `424242` (slot 0) and
+world B on seed `999111` (slot 1):
+
+| Observation | Value |
+|---|---|
+| Chunk record `"0,0"`'s own `worldName` field after visiting B | world **B**'s id — B's write replaced A's record at the same key |
+| Re-entering world A and reading `"0,0"` | **byte-for-byte identical to world B's chunk.** The player is standing in the other world's terrain. |
+| World A's manifest after B's visit | still lists `"0,0"` as generated, so A loads the stale record instead of regenerating |
+| World A's manifest checksum for `"0,0"` | `3799605976` — but the bytes stored at that key now checksum to `1653333176`. **Nothing verifies this on load.** |
+| World A chunks destroyed by one visit to world B | **1,073 of 1,184** (world-scoped keys would have left 2,393 records in the store; it holds 1,320) |
+
+Two things follow that the original note did not say:
+
+1. **The blast radius is the whole overlapping region, not just spawn.** ~90% of a
+   world's saved chunks are destroyed by a single visit to another world. There is no
+   "look at spawn and you'll see it" nuance — the worlds are the same world.
+2. **The damage is already detectable with data the game stores today.**
+   `manifest.generatedChunks[].checksum` is the chunk header's own FNV-1a
+   (`chunkmanager.js:649`), so a manifest/record checksum mismatch identifies a
+   contaminated chunk exactly. Nothing compares them. That is a cheap partial
+   mitigation for whoever owns H-1 — verify on load, regenerate on mismatch — short of
+   the primary-key migration, which is still the real fix.
+
+**This is pre-existing, not something a refactor broke.** The harness asserts the
+defect so a fix flips it red; when H-1 is fixed, replace that block with the inverse
+assertions and delete this subsection.
+
+### 7.2 Step 7 cannot be run at all — D-14
+
+`js/main.js:4562` calls `game.playerSync.reset()`. `PlayerSyncManager` has no
+`reset()` — that method belongs to `PingTracker` (`playerSync.js:103`; class
+boundaries at `:51`, `:125`, `:366`). `game.playerSync` is set whenever
+`sessionManager.client` exists, **including solo play** (`main.js:2612`), so **every
+"Exit to Menu" throws a `TypeError`** partway through `onExit`.
+
+The throw skips six cleanup steps and, critically, `showScreen('mainMenu')`
+(`main.js:4603`) — leaving **every screen hidden: a blank page with no way back except
+F5.** So step 7 is not "expected to fail", it is unreachable: there is no menu to
+re-enter the world from.
+
+The fix is to delete the call. `clearAll()` on the line above already disposes every
+remote-player mesh and clears the map (`playerSync.js:523-531`), so it is redundant as
+well as wrong. Tracked as **D-14** in [§8](#8-known-defects-and-who-owns-them).
 
 **If steps 6, 7 or 13 fail, stop the refactor and bisect.** Those three are the whole
-point of the checklist.
+point of the checklist — and note that step 7 is *currently* failing for a reason that
+has nothing to do with any refactor.
 
 ---
 
@@ -684,6 +759,8 @@ point of the checklist.
 | D-11 | `textures/` (120 MB, 3,370 files) re-uploaded on every deploy | low — transfer cost | Documented [§4.1](#41-measured-payload). Fix in **PR 10** |
 | D-12 | `StrictHostKeyChecking=no` on both `scp` and `ssh` — any host key is accepted | low (LAN IP), by design | `sync.sh:34,36`. Unowned |
 | D-13 | Whole repo (`test/`, `scripts/`, all planning `.md`, `.claude/`) ships to the public web root | low — information disclosure | Documented [§4.2](#42-what-gets-shipped). Fix in **PR 10** |
+| **D-14** | `js/main.js:4562` calls `game.playerSync.reset()`, which does not exist on `PlayerSyncManager`. **Every "Exit to Menu" throws**, skipping six cleanup steps and `showScreen('mainMenu')` — the player is left on a blank page, recoverable only by F5 | **high — the quit path is broken in every session, solo included** | Found by PR 6b, [§7.2](#72-step-7-cannot-be-run-at-all--d-14). One-line fix (delete the call). **Unowned** |
+| **D-15** | `chunkBinaryCodec.js:63` sizes the buffer as `HEADER_SIZE + blockRuns.length * 4`, but a run is *two* `Uint16`s, so the payload written is half that. **Every stored chunk is exactly 2× the size it needs, half zero padding** — measured 24,156 bytes allocated / 12,088 used, ≈14 MB of zeroes per world | medium — 50% of IndexedDB footprint and 50% of every 5 s flush's write volume, wasted | Found by PR 6b. Not a corruption bug (`decode` stops at `blockRunCount`), but the fix changes stored byte length, i.e. a [§2.2](#22-chunk-binary-format) format change. **Unowned** |
 | **H-1** | Chunk primary keys are not world-scoped; worlds cross-contaminate | **high — live data corruption** | Documented [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions). Needs a migration PR. **Unowned** |
 | **H-2** | `onupgradeneeded` deletes every object store; bumping `DB_VERSION` destroys all player worlds | **critical if triggered** | Documented [§2.1](#21-indexeddb--worlds-and-terrain). Unowned |
 | H-3 | `js/main.js:545` opens IndexedDB with no version; can create a store-less v1 DB | low — self-heals | Documented [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions). Unowned |
@@ -692,6 +769,21 @@ Only **D-1** was fixed in PR 6. Everything else is either owned by PR 10 (which
 rewrites `sync.sh` and must land with PR 9) or needs a decision that a documentation
 PR should not make unilaterally — H-1 in particular requires a data migration, and
 "fixing" it carelessly would violate [§2](#2-do-not-change-player-data-invariants).
+
+**PR 6b fixed one and found three.** Fixed: `js/main.js:4865,4878` logged the
+`=== AUTO-REJOIN COMPLETE ===` and `=== INIT COMPLETE ===` success milestones through
+`console.error`, so every successful page load reported two console errors — which
+pollutes error monitoring and made "zero console errors on a clean load" unassertable.
+Now `console.info`; same visibility, correct severity. `js/util/logger.js` is *not* the
+problem and was left alone — `CuubzLogger.log` is `console.log` gated on `DEBUG = false`
+and therefore silent in production, which is exactly why someone reached for
+`console.error` to force visibility. Found and not fixed: **D-14**, **D-15**, and one
+UI-semantics defect that needs a product decision rather than a fix —
+`#pause-pause-time` (`index.html:477`) is a checkbox labelled **"Pause Time of Day"**,
+`checked` by default, and `main.js:4693` sets `checked = !game.skybox.timePaused`. So
+**checked means time is running**: ticking a box labelled "pause" un-pauses it.
+Relabelling it "Day/Night Cycle" is a zero-behaviour-change fix; inverting the logic
+changes what every existing player's default does. **Unowned, needs a decision.**
 
 ---
 
@@ -708,11 +800,55 @@ verified by execution:
 - `server/` performs no filesystem writes (no `writeFile` / `mkdir` in any `server/*.js`).
 - `ws` is required by `server/index.js:14` and `server/matchmaking.js:21`.
 - `startFlushTimer(5000)` is genuinely wired up (`js/main.js:2359,4491`) — the 5 s
-  figure in [§7](#7-manual-saveload-checklist) is real, not a default that never runs.
+  figure in [§7](#7-saveload-checklist) is real, not a default that never runs.
 - No `.env` exists in the repo.
 - `pre-refactor-baseline` is local-only: `git ls-remote --tags origin` returns nothing.
 - `npm test` exits 0 (50/50 passing, 4 quarantined) and `node scripts/check-globals.js`
   exits 0 (0 duplicates, 65 script-tagged files, 368 top-level symbols) at this commit.
+
+### Verified by execution in a real browser — added by PR 6b
+
+`npm run test:e2e` (`test/e2e/saveLoad.js`), Edge 150.0.4078.105 headless, WebGL via
+SwiftShader, **104 assertions / 0 failures / exit 0**. This moved the following out of
+"not verified":
+
+- **Every value in [§2](#2-do-not-change-player-data-invariants)** — read from the
+  running page rather than from source text. Database name, version `2` (read
+  **without** firing `onupgradeneeded`), both object stores and their key paths, the
+  non-unique `worldName` index, the `` `${cx},${cz}` `` key format, all four
+  `persistence.js` localStorage keys, `MAX_WORLD_SLOTS = 3`,
+  `BLOCK_REGISTRY.length === 193`, and every chunk-format constant.
+- **The chunk binary format, decoded from bytes the browser actually wrote.** Magic
+  `0x43555542` at offset 0, version `3` at 4, `chunkX`/`chunkZ` matching the record
+  key, height `256`, flags `0`, the run count, and the FNV-1a checksum at offset 16
+  re-derived from the payload. The same buffer then decodes cleanly through
+  `js/world/chunkBinaryCodec.js` under Node — a browser-writes / Node-reads crossing
+  that is what protects the on-disk format through PR 9's module conversion.
+- **§7 steps 1, 2, 3, 5, 6, 10, 11, 14.** Step 6, the load-bearing one, holds: chunk
+  `"0,0"` is byte-for-byte identical after a reload and re-entry, with `savedAt`
+  unchanged — the terrain was loaded, not regenerated.
+- **§7 steps 8–9 — H-1 reproduces.** See [§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted).
+  The prediction PR 6 asked the first runner to confirm is confirmed, and quantified.
+- **The clean-load claim is now literally true**: 0 uncaught exceptions, 0 console
+  errors, 0 missing assets. It was not before — see the `console.error` fix in
+  [§8](#8-known-defects-and-who-owns-them). The only exclusion on the asset check is
+  `/favicon.ico`, which Chromium requests unprompted and the repo does not have.
+- **`THREE.REVISION === 134`** and `window.__THREE_LOAD_FAILED` unset, i.e.
+  `refactor.md` §1.2's pin is what the browser really loads. PR 8 must keep it there.
+
+Two limits on that run, both stated because they bound what a green result means:
+
+- **SwiftShader is not a GPU.** The screenshots in `test/e2e/artifacts/` are a
+  self-consistent baseline — comparable to another SwiftShader run on the same
+  Chromium, and useful as PR 9's "zero visual change" gate. They are **not** evidence
+  that the game looks correct on real hardware.
+- **Live game state is out of reach.** Only four things are on `window`
+  (`CuubzGame`, `CuubzBlockPalette`, `MobIntegration`, `CuubzLogger`) and all four are
+  classes. The running `renderer` / `chunkManager` / `player` / `inventory` are among
+  the ~184 closure locals inside `startGame()`'s `setTimeout` (`refactor.md` §1.6), so
+  the harness can click and type but cannot place a block or read the player's
+  position. That is why the persistence checks read storage directly, and why steps 4
+  and 12–13 stay manual until PR 12–13 hoist those locals onto `Game`.
 
 ### NOT verified — requires SSH to `dadmin@10.0.30.160`
 
@@ -736,12 +872,15 @@ The highest-value single check is the D-6 one: if any file under `/var/www/html`
 owned by `dadmin`, then **every** deploy already fails halfway through the `chmod`,
 after overwriting the live tree — and the error message says nothing about that.
 
-### Also unverified: the checklist in §7
+### Still unverified in §7 — three steps, and why
 
-[§7](#7-manual-saveload-checklist) was written from the code paths, not from a play
-session — including the prediction that steps 8–9 fail. That prediction follows
-directly from the read paths in
-[§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions)
-(`store.get(key)` with a world-agnostic key, three call sites, no `worldName` filter),
-but it has not been observed in a browser. **The first person to run this checklist
-should confirm steps 8–9 fail as described and correct this document if they do not.**
+PR 6 wrote [§7](#7-saveload-checklist) from the code paths and asked the first runner to
+correct it. PR 6b ran it. Eight steps are now automated and H-1 is confirmed
+([§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted)); three remain, and the
+harness prints each one as `⚠️ UNVERIFIED` on every run so a pass never overclaims:
+
+| Step | Why it is not automated | What would close it |
+|---|---|---|
+| 4, and the placed-block half of 6 | Placing or breaking a block needs pointer lock plus mouse-look, and `blockInteraction` / `inventory` / `chunkManager` are closure locals | **PR 12–13.** Once they are on `Game`, place → flush → reload → assert the voxel is a few lines in `saveLoad.js` |
+| 7 (quit to menu) | **Not a harness limitation — D-14 makes it unreachable.** See [§7.2](#72-step-7-cannot-be-run-at-all--d-14) | Delete the `game.playerSync.reset()` call at `js/main.js:4562` |
+| 12–13 (multiplayer) | Needs a running relay, two browser contexts, **and** a guest placing a block | The relay half works today (spawn `server/index.js` as a child process); the placement half waits for PR 12–13 |

@@ -24,6 +24,27 @@ name: CI
 # exits 1, so adding them now would make CI red on its first run, and adding them
 # with `|| true` would be a gate that reports success without checking anything.
 # PR 7 and PR 11 each add their step in the same commit that adds the script.
+#
+# Deliberately NOT here for a different reason — the script DOES exist:
+#
+#   npm run test:e2e  → the DEPLOY.md §7 save/load harness (PR 6b,
+#                       test/e2e/saveLoad.js). Runs a real browser via
+#                       playwright-core's channel:msedge. ubuntu-latest has no
+#                       Edge, and installing a Chromium plus software-rasterising
+#                       WebGL through SwiftShader turns a ~26 s job into minutes.
+#                       It also asserts two known defects (H-1, D-14), so it is a
+#                       local pre-Phase-gate gate, not a per-push one.
+#
+#                       PR 10 is the earliest sensible owner if this ever moves to
+#                       CI: it already rewrites the deploy path and would want a
+#                       post-deploy smoke check. Doing it needs a
+#                       `browser-actions/setup-chrome` (or playwright's own
+#                       docker image) plus the SwiftShader flags already in
+#                       test/e2e/saveLoad.js, on a separate job so it cannot slow
+#                       the two gates below.
+#
+# test/run_tests.sh globs test/test_*.js — flat, non-recursive — so nothing under
+# test/e2e/ reaches `npm test` either. That is deliberate; keep it that way.
 
 on:
   push:

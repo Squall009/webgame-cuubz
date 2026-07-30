@@ -2,5 +2,10 @@ node_modules/
 .env
 dist/
 *.log
+
+# Screenshots written by `npm run test:e2e` (test/e2e/saveLoad.js). Regenerated on
+# every run, and SwiftShader output is only comparable to another SwiftShader run —
+# see the "Screenshot artifacts" note in that file.
+test/e2e/artifacts/
 .DS_Store
 Thumbs.db

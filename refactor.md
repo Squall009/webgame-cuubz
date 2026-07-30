@@ -14,7 +14,7 @@
 2. [Why Modules: The Global Scope Is Actively Broken](#2-why-modules-the-global-scope-is-actively-broken)
 3. [Measured Current State](#3-measured-current-state)
 4. [Architecture Target](#4-architecture-target)
-5. [Phase 0 — Stop The Bleeding (PR 1–6)](#5-phase-0--stop-the-bleeding-pr-16)
+5. [Phase 0 — Stop The Bleeding (PR 1–6, plus 6b)](#5-phase-0--stop-the-bleeding-pr-16-plus-6b)
 6. [Phase 1 — Vite + ES Modules (PR 7–11)](#6-phase-1--vite--es-modules-pr-711)
 7. [Phase 2 — Hoist Closure State onto `Game` (PR 12–13)](#7-phase-2--hoist-closure-state-onto-game-pr-1213)
 8. [Phase 3 — Decompose main.js (PR 14–19)](#8-phase-3--decompose-mainjs-pr-1419)
@@ -105,9 +105,9 @@ Hard invariants — never change these strings or the schema behind them:
 | localStorage | `js/renderer/performanceSettings.js:34,52` | `'cuubz:settings'` |
 | localStorage | `js/main.js:1272,1284,1593,1768,1785` | `'cuubz_last_session'` |
 
-→ **Manual save/load test at every single checkpoint:** create a world, place blocks, quit to menu, reload the page, re-enter, confirm blocks persist. Automate it in PR 32 if possible; until then it's a manual gate.
+→ **Save/load test at every single checkpoint:** create a world, place blocks, quit to menu, reload the page, re-enter, confirm blocks persist. **PR 6b automated most of it early — run `npm run test:e2e`** (104 assertions, real browser, reads IndexedDB and localStorage directly). Three steps stay manual until PR 12–13 hoists the closure locals: placing/breaking blocks, quit-to-menu (blocked by `DEPLOY.md` D-14), and multiplayer. See the [PR 6b outcome](#pr-6b--automate-the-saveload-gate--done).
 
-> **PR 6 found this table incomplete and superseded it — the authoritative list is now [`DEPLOY.md` §2](./DEPLOY.md#2-do-not-change-player-data-invariants).** The four rows above are real, but they miss: the three `js/world/persistence.js` localStorage keys (**`cuubz:characters`** — every character the player has ever made — plus `cuubz:slotMap` and `cuubz:worldSlot:{N}:conf`), both IndexedDB object stores and their key paths, and the entire chunk binary format (magic `"CUUB"`, version `3`, 20-byte header, FNV-1a checksum constants). It also misses the two hazards that make the table load-bearing: **bumping `DB_VERSION` destroys every player's worlds** (`onupgradeneeded` deletes all object stores before recreating them), and **chunk primary keys are not world-scoped, so the three world slots overwrite each other's terrain** — a live bug. The executable 14-step checklist is [`DEPLOY.md` §7](./DEPLOY.md#7-manual-saveload-checklist); it includes the save-timing rules (chunks flush on a 5 s timer, player state every 30 s / on Escape) without which the naive version of this test produces false failures.
+> **PR 6 found this table incomplete and superseded it — the authoritative list is now [`DEPLOY.md` §2](./DEPLOY.md#2-do-not-change-player-data-invariants).** The four rows above are real, but they miss: the three `js/world/persistence.js` localStorage keys (**`cuubz:characters`** — every character the player has ever made — plus `cuubz:slotMap` and `cuubz:worldSlot:{N}:conf`), both IndexedDB object stores and their key paths, and the entire chunk binary format (magic `"CUUB"`, version `3`, 20-byte header, FNV-1a checksum constants). It also misses the two hazards that make the table load-bearing: **bumping `DB_VERSION` destroys every player's worlds** (`onupgradeneeded` deletes all object stores before recreating them), and **chunk primary keys are not world-scoped, so the three world slots overwrite each other's terrain** — a live bug. The executable 14-step checklist is [`DEPLOY.md` §7](./DEPLOY.md#7-saveload-checklist); it includes the save-timing rules (chunks flush on a 5 s timer, player state every 30 s / on Escape) without which the naive version of this test produces false failures.
 
 ### 1.6 `renderLoop` cannot be extracted as written.
 
@@ -429,7 +429,7 @@ export class GameState {
 
 ---
 
-## 5. Phase 0 — Stop The Bleeding (PR 1–6)
+## 5. Phase 0 — Stop The Bleeding (PR 1–6, plus 6b)
 
 > **Nothing else in this document is safe until Phase 0 lands.** v1 had no equivalent phase.
 
@@ -693,6 +693,73 @@ Deploying is fully documented, including the relay restart `sync.sh` omits. **Ro
 **One unowned defect worth a decision (`DEPLOY.md` D-8):** `server/index.js:219-225` routes `uncaughtException` and `unhandledRejection` into the clean-shutdown path, which calls `process.exit(0)`. `Restart=on-failure` (`cuubz-relay.service:10`) does **not** restart on exit code 0 — so the relay stays down after an unhandled error, exactly the case the restart policy exists for. `Restart=always` or a non-zero exit code is the fix; both change production restart behavior, so neither belongs in a docs PR.
 
 **New file:** `DEPLOY.md`. **Modified:** `sync.sh` (the `.env` exclude), `refactor.md` §1.4 / §1.5 / §4.1 (pointers to `DEPLOY.md`).
+
+### PR 6b — Automate the save/load gate ✅ DONE
+Not in the original plan. Added because PR 6 closed with `DEPLOY.md` §7 written but **never run**, and §9 said so: *"the save/load checklist was written from the code paths, not from a play session… The first person to run this checklist should confirm steps 8–9 fail as described and correct this document if they do not."* §7 is the parity baseline that Phase 1's "identical game, zero visual change" claim rests on, and a gate that depends on a human clicking around does not get run at every checkpoint.
+
+- **Accept:** `DEPLOY.md` §7 runs as a script; H-1's prediction is either confirmed or the doc is corrected; nothing that cannot be driven is faked.
+- **Rollback:** delete `test/e2e/` and the `test:e2e` script. Nothing else depends on it.
+
+**Outcome (2026-07-29):** ✅ DONE. `npm run test:e2e` → **104 assertions, 0 failures, exit 0**, ~4 minutes. `npm test` (50/50 + 4 quarantined) and `check-globals` (0 duplicates / 65 files / 368 symbols) unchanged.
+
+**The key design decision: build the harness around storage inspection, not input simulation.** That is what made this PR possible at all, and it follows from a hard limit worth stating precisely, because it is [§1.6](#16-renderloop-cannot-be-extracted-as-written) showing up somewhere new.
+
+`page.evaluate` **can** reach all 368 top-level lexical symbols — `BLOCK_TYPES`, `ChunkManager`, `CHUNK_MAGIC`, `BLOCK_REGISTRY`, `PersistenceManager` — even though none of them are `window` properties. Same mechanism as [§2.4](#24-the-mechanism-is-implicit-globals-not-windows) and PR 4 bug 1: a top-level `const` in a classic `<script>` is a global lexical binding. Verified live: `typeof BLOCK_TYPES === 'object'`, `BLOCK_REGISTRY.length === 193`. So every registry, constant and codec is directly testable from the browser.
+
+It **cannot** reach live game state. Exactly four things are on `window` — `CuubzGame` / `CuubzBlockPalette` (`game.js:282-283`), `MobIntegration` (`mobIntegration.js:125`), `CuubzLogger` (`logger.js:39`) — and all four are **classes, not instances**. The running `renderer` / `chunkManager` / `player` / `inventory` are among §1.6's ~184 closure locals inside `startGame()`'s `setTimeout`. So the harness can click and type but cannot say "place block 2 at (14,68,-3)" or read the player's position. **This is not fought, it is designed around, and it unblocks at PR 12–13** — which is now a second, independent argument for Phase 2 existing: it is the PR that makes the save/load gate fully automatable.
+
+The consequence is the interesting part. **DEPLOY.md steps 8–9 need no block placement.** The naive reading of §7 is "build a shape in world A, visit world B, look at spawn" — which needs pointer lock, mouse-look and inventory, i.e. everything out of reach. But H-1 is a *storage* bug, so it is provable purely from storage: world B generating chunk `"0,0"` overwrites world A's record at the same key, so read that record's own `worldName` field and watch it carry world B's id while world A's manifest still lists the key as generated. No pointer lock, no mouse simulation, no screenshot diffing. Same for the binary format — decode a stored `ArrayBuffer` and assert magic and version straight from the bytes.
+
+**H-1 REPRODUCES. The prediction PR 6 asked to be confirmed is confirmed, and it is worse than described.** World A seed `424242` slot 0, world B seed `999111` slot 1:
+
+| Observation | Result |
+|---|---|
+| Chunk `"0,0"`'s own `worldName` after visiting B | world **B**'s id — B's record replaced A's at the same key |
+| Re-entering world A and reading `"0,0"` | **byte-for-byte identical to world B's chunk** (`e78141dbf2aa11bb` both sides) |
+| World A's original spawn chunk (`b7ae538ee784e765`) | **gone from the store entirely — unrecoverable** |
+| World A's manifest | still lists `"0,0"` as generated, so A loads the stale record rather than regenerating |
+| World A's manifest checksum for `"0,0"` | `3799605976`, but the bytes stored there checksum to `1653333176` |
+| World A chunks destroyed by **one** visit to world B | **1,073 of 1,184** — world-scoped keys would have left 2,393 records; the store holds 1,320 |
+
+Two findings the original write-up did not have:
+
+1. **The blast radius is the entire overlapping region, ~90% of the world, not just spawn.** "Play world A, then world B at spawn, and B's chunk overwrites A's" understates it — the two worlds *are* one world everywhere their pre-generated regions overlap, which at `regionRadius: 16` is nearly all of both.
+2. **The corruption is already detectable with data the game stores today.** `manifest.generatedChunks[].checksum` is the chunk header's own FNV-1a, read straight out of the encoded buffer at offset 16 (`chunkmanager.js:649`), so a manifest-vs-record checksum mismatch identifies a contaminated chunk exactly. Nothing compares them on load. **That is a cheap partial mitigation for whoever owns H-1** — verify on load, regenerate on mismatch — degrading corruption into regeneration without touching the key format. The primary-key migration is still the real fix; this is the thing that could ship first.
+
+**So H-1 needs its own migration PR, and it now has an evidence base for one.** Still unowned.
+
+**Three genuine bugs found. One fixed, two flagged — plus a UI-semantics defect that is a product call.**
+
+- **FIXED — `js/main.js:4865,4878` logged success milestones through `console.error`.** `=== AUTO-REJOIN COMPLETE ===` and `=== INIT COMPLETE ===`, so **every successful page load reported two console errors.** That pollutes error monitoring and made the harness's "zero console errors on a clean load" assertion impossible to write honestly. Now `console.info` — same visibility, correct severity, no behaviour change. **`js/util/logger.js` is correct and was left alone:** `CuubzLogger.log` is `console.log` gated on `DEBUG = false`, i.e. silent in production, which is exactly why someone reached for `console.error` to force visibility. The logger is not the bug; the severity was. With this fixed, "0 uncaught exceptions, 0 console errors, 0 missing assets on a clean load" is now literally true and asserted on every run.
+- **FOUND, NOT FIXED — `DEPLOY.md` D-14: every "Exit to Menu" throws, leaving a blank page.** `js/main.js:4562` calls `game.playerSync.reset()`. `PlayerSyncManager` has no `reset()` — that method belongs to `PingTracker` (`playerSync.js:103`; class boundaries at `:51`, `:125`, `:366`). `game.playerSync` is set whenever `sessionManager.client` exists, **which includes solo play** (`main.js:2612`), so this fires every time. The `TypeError` aborts `onExit` partway, skipping six cleanup steps (`playerListHUD.destroy`, `blockInteraction.dispose`, `firstPersonHand.dispose`, `droppedItems.clear`, `mobIntegration.destroy`, `_cleanupPauseMenu`) and — critically — `showScreen('mainMenu')` at `:4603`. Every screen stays `hidden`: **a blank page, recoverable only by F5.** The fix is to delete the call; `clearAll()` on the line above already disposes every remote-player mesh and clears the map (`playerSync.js:523-531`), so it is redundant as well as wrong. **This makes §7 step 7 unreachable** — one of the three steps the checklist says to stop the refactor over — so it is reported as `⚠️ UNVERIFIED` rather than skipped.
+- **FOUND, NOT FIXED — `DEPLOY.md` D-15: every saved chunk is exactly twice the size it needs to be.** `chunkBinaryCodec.js:63` sizes the buffer as `HEADER_SIZE + blockRuns.length * 4`, but `blockRuns` is a flat `Uint16Array` of `[id, count, id, count, …]`, so the run count is `blockRuns.length / 2` and the payload actually written is half the allocation. Measured on a real stored chunk: **24,156 bytes allocated, 12,088 used, 12,068 bytes of zeroes — 50.0% waste, ≈14 MB per world.** Not a corruption bug — `decode()` stops after `blockRunCount` runs and the checksum spans the whole data portion at both ends, so the padding is self-consistent, which is precisely why nobody noticed. It is pure waste: half the IndexedDB footprint and half the bytes written on every 5 s flush. Not fixed because shrinking the allocation changes the stored byte length and checksum of every future chunk, i.e. it is a `DEPLOY.md` §2.2 on-disk-format change and this PR is not allowed to touch `js/` beyond the log-severity fix. Backward compatible in principle (`decode` never consults buffer length), but it wants its own PR. **This bug is the direct payoff of asserting the header from real stored bytes rather than from the source constants** — a source-text test cannot see it.
+- **FLAGGED FOR A DECISION — `#pause-pause-time` is inverted.** `index.html:477` is a checkbox labelled **"Pause Time of Day"**, `checked` by default, and `main.js:4693` sets `checked = !game.skybox.timePaused`. **So checked means time is running:** ticking a box labelled "pause" un-pauses it. Two fixes, and choosing between them is a product call, not a refactor call: **relabel to "Day/Night Cycle"** (zero behaviour change, the checkbox then reads correctly as "cycle on") or **invert the logic** (changes what the default does for every existing player). Deliberately not decided here.
+
+**Three defect-asserting blocks, and why that is a gate rather than an allowlist.** H-1, D-14 and D-15 are asserted *as defects* — the assertions pass because the bug is present, each headed `ASSERTING A KNOWN DEFECT` with the fix and the replacement assertion written next to it. This is not "allowlisting a bug to make a green run": a run goes red if a new failure appears **or** if a known failure stops reproducing, so fixing any of the three turns the harness red on purpose and forces the assertion to be rewritten to what the fix makes true. The alternative — a harness that exits 1 from birth on three pre-existing bugs — is the [§1.1](#11-there-is-no-green-baseline-the-suite-is-red-now) problem again, and PR 4 already paid to get out of it. Nothing was added to `QUARANTINE.md`; it still holds 4 files against its cap of 5, all owned by PR 26.
+
+**Coverage: eight of fourteen steps automated, three explicitly not, and the harness says which on every run.** Steps 1, 2, 3, 5, 6, 10, 11, 14 plus every `DEPLOY.md` §2 invariant. The load-bearing one holds: **step 6 — chunk `"0,0"` is byte-for-byte identical after a reload and re-entry, `savedAt` unchanged**, so the terrain was loaded from storage rather than regenerated. `#world-seed` (`index.html:154`) pins terrain, which is what makes a byte-equality assertion legitimate instead of a coin flip. The three it cannot do are printed as `⚠️ UNVERIFIED` with what would close each, because a passing run must not imply more than it checked:
+
+| Not verified | Why | What closes it |
+|---|---|---|
+| Step 4, and the placed-block half of step 6 | pointer lock + mouse-look, and `blockInteraction` / `inventory` are §1.6 closure locals | **PR 12–13** |
+| Step 7 (quit to menu) | **not a harness limit — D-14 makes it unreachable** | delete `js/main.js:4562` |
+| Steps 12–13 (multiplayer) | needs a relay, two contexts, **and** a guest placing a block | relay half works today; placement half waits for PR 12–13 |
+
+**Toolchain, and why these choices.** `playwright-core`, **not** `playwright` — the latter's postinstall downloads ~300 MB of browsers; `playwright-core` is 14 MB and downloads nothing, driving the already-installed Edge (150.0.4078.105) via `chromium.launch({ channel: 'msedge' })`. **Headless WebGL works** with `['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']`: `glRenderer` reports `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)`, THREE loads, and `THREE.REVISION === 134` is asserted — so [§1.2](#12-pin-three0134-do-not-run-npm-install-three)'s pin is now checked against what the browser really loads, which PR 8 must preserve. `test/e2e/staticServer.js` is a ~90-line dependency-free static server rather than a dev server, so the harness stays independent of the thing PR 7 changes: a gate that depends on what it validates is not a gate.
+
+**Two engineering details that were failures first.**
+- **`waitForQuiesce`.** `#hud` loses `.hidden` (`main.js:3901`) long before `checkRegion(0,0)` finishes pre-generating its 33×33 region, so a snapshot taken a fixed few seconds after the HUD appears catches a partly-generated world. Comparing two such snapshots produced a false *"33 chunks appeared after a reload"* failure with nothing to do with persistence. Polling the chunk count until three consecutive reads agree is what lets the round-trip assertions compare **exact** counts instead of being weakened to inequalities. Weakening the assertion would have hidden the real property.
+- **Console-error accounting has exactly two exclusions, and the count is itself asserted.** `/favicon.ico` (Chromium requests it unprompted; the repo has none — `staticServer.js` already excludes it from `missing` for the same reason) and the relay WebSocket to `cuubz-relay.thehomelabguy.com:8765`, which cannot connect because the harness runs no relay — tolerated *only* outside the load and world-entry phases, which must be clean. Every suppressed message is printed. `assertEquals(NOISE_RULES.length, 2, …)` means a third exclusion cannot be added quietly.
+
+**Not in `npm test`, not in CI, deliberately — and recorded PR 5's way.** `ubuntu-latest` has no Edge, and a real Chromium download plus SwiftShader rasterisation turns a 26 s job into minutes. Following PR 5's idiom for `npm run build` / `npm run lint`, it is a **comment in `ci.yml` naming the earliest sensible owner (PR 10, which already rewrites the deploy path and would want a post-deploy smoke check)** rather than a step that fails or one wrapped in `|| true`. It is also invisible to `npm test`: `test/run_tests.sh:46` globs `test/test_*.js` — flat, non-recursive — so nothing under `test/e2e/` is collected. That is a safety property this PR depends on; the workflow comment says so, and nothing in here is named `test/test_e2e*.js`.
+
+**Screenshots are a self-comparison baseline, and nothing more.** Six PNGs to `test/e2e/artifacts/` (gitignored), including `05-world-alpha-contaminated.png` and `06-exit-to-menu-blank.png`. **SwiftShader does not render identically to a GPU**, so these are comparable only to another SwiftShader run on the same Chromium. That is still the right regression gate for PR 9's "zero visual change" claim; it is **not** evidence that the game looks correct on real hardware. Stated in the file so a future reader does not over-trust them.
+
+**Portability preserved.** PR 5's audit asserts no `os.tmpdir` / `homedir` / `platform` in Node-executed code; `saveLoad.js` and `staticServer.js` use only `__dirname`-relative paths and keep that property intact. The harness itself asserts §7 step 14: `git status --porcelain` is byte-identical before and after the run.
+
+**Nothing was weakened.** No test touched, no assertion relaxed, no `QUARANTINE.md` change — 4 files against the cap of 5, all owned by PR 26. CI green.
+
+**New files:** `test/e2e/saveLoad.js`, `test/e2e/staticServer.js`. **Modified:** `package.json` + `package-lock.json` (`playwright-core` devDependency, `test:e2e` script), `.gitignore` (`test/e2e/artifacts/`), `.github/workflows/ci.yml` (comment only), `js/main.js` (two `console.error` → `console.info`), `DEPLOY.md` §2.4 / §7 / §8 / §9, `refactor.md` (this section).
 
 ### Phase 0 gate — do not proceed until all are true
 - [ ] `git status` clean; `pre-refactor-baseline` tag pushed
