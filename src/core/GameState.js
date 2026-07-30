@@ -79,6 +79,11 @@ export class GameState {
     this.worldName = null;
     this.currentWorld = null;
     this.currentCharacter = null;
+    // The storage backend (`PersistenceManager`) the character and world managers were
+    // constructed with. `savePlayerState()` writes the periodic character save through
+    // this handle. It was `undefined` for the whole of PR 12 and PR 13 — BUGS.md **D-37**,
+    // closed in PR 14 when the `storage` / `persistence` field-name split went away with
+    // the duplicate managers.
     this.persistence = null;
 
     // ── Gameplay systems ──────────────────────────────────────────────────

@@ -254,14 +254,40 @@ Then: `voxelRenderer.js` 667 · `damageSystem.js` 634 · `sfx.js` 621 · `questM
 
 These will drift after the first edit. Grep for the symbol.
 
-### 3.4 Duplicate managers — decide before touching them
+### 3.4 Duplicate managers — RULED IN PR 14: Option A ✅
 
 | In `main.js` | Duplicates | Status |
 |---|---|---|
-| `BrowserCharacterManager` (L69) | `js/entities/characterManager.js` (392 lines) | Script-tagged, **has tests**, `require`s cleanly. `main.js` does **not** use it. |
-| `BrowserWorldManager` (L428) | `js/entities/worldManager.js` (463 lines) | Script-tagged, **has tests**, currently **crashes on require**. `main.js` does **not** use it. |
+| `BrowserCharacterManager` (L69) | `js/entities/characterManager.js` (392 lines) | Script-tagged, **has tests**, `require`s cleanly. `main.js` did **not** use it. |
+| `BrowserWorldManager` (L428) | `js/entities/worldManager.js` (463 lines) | Script-tagged, **has tests**, crashed on require pre-PR-9. `main.js` did **not** use it. |
 
-v1's §4.1 said move `BrowserCharacterManager` → `src/game/entities/CharacterManager.js`, which **collides with the existing tested file**. PR 14 must make an explicit reconcile-or-delete decision and record it here.
+v1's §4.1 said move `BrowserCharacterManager` → `src/game/entities/CharacterManager.js`, which **collides with the existing tested file**. This section required PR 14 to make an explicit reconcile-or-delete decision and record it here. **It is recorded.**
+
+> **The ruling — Option A. `BUGS.md` decision 26, made in PR 14, 2026-07-30.**
+>
+> `main.js` imports `src/game/entities/CharacterManager.js` and `WorldManager.js`. Both
+> `Browser*` classes are **deleted** — ~320 lines. There is now exactly one
+> `CharacterManager` and one `WorldManager` in the tree and both are the tested ones.
+>
+> **Why not Option B:** the tested classes are near-supersets. They carry `setInventory` /
+> `getInventory` / `setSpawnPoint` / `getSpawnPoint` / `serialize` / `deserialize` /
+> `getQuestProgress` / `advanceQuest` / `addChunkReference` / `CHARACTER_COLORS` /
+> `generateBiomeMap` on top of everything the browser copies did. Option B deletes the only
+> coverage either class has ever had, in order to keep ~320 lines inside the file Phase 3
+> exists to empty.
+>
+> **Six divergences stood in the way and none was merged silently** — the full write-up is
+> [§8.1](#81-pr-14--reconcile-the-duplicate-managers-do-this-first)'s outcome:
+> the `storage`/`persistence` field-name split (**D-37**, closed); `selectCharacter`
+> becoming `async` and persisting `lastPlayed` (**decision 24**); the world-name limit,
+> ruled **32** with worlds owning the constant (**D-38**, closed, decision 24); the D-18/H-3
+> chunk cleanup, which moved to **`PersistenceManager.deleteWorld()`** because
+> `WorldManager.js` must stay environment-free for the Node tests (**decision 25**);
+> `getBiomePreview` → `getWorldPreview`; and the `{success:false, error}` error shape.
+>
+> Two defects were found in the process and fixed in the same PR: **D-39** (world previews
+> advertised two biomes the game does not have) and **D-40** (the chunk cleanup failed
+> silently and ran after the point of no return).
 
 Similarly, `js/game.js` (280 lines) is mostly a stub, touched only at `new CuubzGame()` (`main.js:2569`). State plainly: **`core/Game.js` is a rewrite, not a move.**
 
@@ -2283,13 +2309,182 @@ than rediscovered.
 
 > **Deliverable:** `main.js` deleted, contents distributed. Feature parity.
 
-### 8.1 PR 14 — Reconcile the duplicate managers (do this first)
-Decide, per [§3.4](#34-duplicate-managers--decide-before-touching-them):
+### 8.1 PR 14 — Reconcile the duplicate managers (do this first) ✅ DONE
+Decide, per [§3.4](#34-duplicate-managers--ruled-in-pr-14-option-a-):
 - **Option A (preferred):** make `main.js` use the tested `js/entities/characterManager.js` / `worldManager.js`, delete `BrowserCharacterManager` / `BrowserWorldManager`, port any browser-only behavior across.
 - **Option B:** delete the untested standalone files **and their tests**, promote the `Browser*` classes.
 
 Record the choice and the reason. Do not merge both silently.
 - **Accept:** exactly one `CharacterManager` and one `WorldManager` in the tree, both covered by tests, character and world CRUD verified in the browser.
+
+**Outcome (2026-07-30):** ✅ DONE. **Option A, confirmed and executed.** `main.js` imports
+`src/game/entities/CharacterManager.js` and `WorldManager.js`; `BrowserCharacterManager`
+(~130 lines) and `BrowserWorldManager` (~190 lines) are deleted; the one piece of
+browser-only behaviour they carried moved to `PersistenceManager.deleteWorld()`. **D-37 and
+D-38 are closed, D-39 and D-40 were found and fixed in the same PR**, and the delete path —
+which no assertion had ever touched — is now driven end to end by the e2e harness.
+
+| Gate | Result |
+|---|---|
+| `npm test` | **52/52 + 4 quarantined, exit 0** |
+| `npm run lint` | **0 errors, 176 warnings, exit 0** (was 178 — the deleted classes took two with them) |
+| `npm run build` | exit 0 |
+| `npm run test:e2e` (built `dist/`) | **183 / 0 — 166 → 183, +17** |
+| `npm run test:e2e:vite` (dev server) | **183 / 0 — identical** |
+
+**The +17 is the point of the PR, not a side effect.** Sixteen of them drive
+`updateCharacter`, `deleteCharacter` and `deleteWorld`, none of which any assertion had
+ever called; the seventeenth is that the delete path raises no page errors.
+`PR13_HANDOFF.md` §4.2 named those three as where PR 14's risk actually was and offered
+"say plainly that they are unverified" as the alternative. Measuring was worth the effort:
+the D-18 chunk cleanup is a shipped data-integrity fix that this PR **moved between
+files**, and reading two implementations side by side does not prove a move.
+
+#### The ruling — Option A, and Option B was never close
+
+[§3.4](#34-duplicate-managers--ruled-in-pr-14-option-a-) requires an explicit
+reconcile-or-delete decision, recorded. It is **Option A**: the tested classes win.
+
+They are near-supersets. Everything the browser copies did, they do, plus `setInventory` /
+`getInventory` / `setSpawnPoint` / `getSpawnPoint` / `serialize` / `deserialize` /
+`getQuestProgress` / `advanceQuest` / `addChunkReference` / `CHARACTER_COLORS` /
+`generateBiomeMap`. Option B — delete the tested files **and their tests** — throws away
+the only coverage either class has ever had in exchange for keeping ~320 lines inside the
+file Phase 3 exists to empty. **`BUGS.md` decision 26.**
+
+Six divergences stood in the way. Every one was a decision, not a merge.
+
+**1. `this.storage` vs `this.persistence` — `storage` survives.** Two live call sites
+disagreed and one was already broken: **D-37**. `startGame()` read
+`characterManager.storage` against a class that named the field `persistence`, so
+`gameState.persistence` was `undefined` for the whole of PR 12 and PR 13. Both sites are
+fixed, and `savePlayerState()` now writes **through** `gameState.persistence` rather than
+reaching into the manager for a second handle. That half matters more than the rename: the
+field went dead *because* nothing read it, and a field nothing reads goes wrong again the
+next time someone moves it.
+
+**2. `selectCharacter` becomes `async` and persists `lastPlayed`.** Every call site already
+`await`s it, so the switch is safe. The change is that selecting a character now costs one
+`localStorage` write it did not cost before. That is intended rather than tolerated:
+`selectWorld` already persisted on both sides, and a `lastPlayed` that updates for worlds
+but not characters is the asymmetry, not the fix. **Decision 24.**
+
+**3. World names: 32, not 16 — D-38 ruled.** `MAX_WORLD_NAME_LENGTH = 32` is
+`WorldManager.js`'s own constant now and the `import { MAX_NAME_LENGTH } from
+'./CharacterManager.js'` is gone, along with the re-export. Three pieces of evidence, none
+of them a preference: `index.html` gives `#world-name` and `#host-world-name`
+`maxlength="32"`; the class that has actually been running in browsers used 32; and
+**`test/test_worldManager.js` asserted both numbers at once** — `MAX_NAME_LENGTH is 16`
+with *"17 char name invalid (over max)"* in one suite, and *"one over max"* applied to a
+**33**-character name in another. The 16 was never a decision about worlds. It was the
+character limit arriving through an import, and borrowing a character constant for worlds
+was the defect — keeping the number and fixing only the coupling would have left the same
+trap for the next reader. Four assertions across two test files were rewritten into what
+the fix makes true, including a **new** one that a 32-character world name is *accepted*,
+which is the case that was broken.
+
+**4. The chunk cleanup moved to `PersistenceManager.deleteWorld()`. This was the risk.**
+`BrowserWorldManager.deleteWorld` deleted the world's chunk records and manifest from
+IndexedDB and the tested class does not — that is the **D-18 fix and the H-3 fix**, shipped
+in PR 6c/6d with 25 lines of reasoning at the call site. It could not go into
+`WorldManager.js`: Node tests import that file and it has to stay environment-free.
+`PersistenceManager` is the browser storage backend, already owns the localStorage half of
+the same operation, and is the object `WorldManager` is constructed with — so
+**`WorldManager.deleteWorld` did not change at all.** It already called
+`this.storage.deleteWorld(id)`, and a test's mock storage simply has no chunks to clean.
+**Decision 25.**
+
+The import cycle `PR13_HANDOFF.md` §4 said to check for **does not exist**:
+`ChunkManager.js` imports `ChunkMeshBuilder`, `BiomeSystem`, `BlockRegistry`,
+`ChunkBinaryCodec`, `ChunkData` and `three`, and none of those reaches `Persistence.js`.
+Nothing in `src/` imported `Persistence.js` except `main.js` and `testBridge.js`, both of
+which already import `ChunkManager`, so the bundle is unchanged.
+
+**5. `getBiomePreview` → `getWorldPreview`.** One call site, and the tested one is a
+superset — it also returns `chunkCount`, which nothing renders yet.
+
+**6. Error shapes.** The tested `createCharacter` / `deleteWorld` wrap their storage calls
+in `try/catch` and return `{success:false, error}` where the browser ones let a rejection
+escape, and `init()` is idempotent via `_initialized`. Both are improvements, and both
+change what a failing IndexedDB write looks like to the UI: a create that fails now puts
+the error in the modal instead of rejecting into the click handler.
+
+#### D-39 — the world previews advertised two biomes that do not exist
+
+Found while repointing `createWorldSlotElement`. `BrowserWorldManager` generated each
+world's `biomeMap.dominantBiomes` from its own eight-name list — `Plains Forest Desert
+Tundra Mountains Ocean Lava Corrupt` — and **Lava and Corrupt are not biomes this game
+has.** `BiomeSystem.js` defines ten and `WorldManager.BIOME_NAMES` is exactly those ten. So
+every world created in the browser has shown a preview drawn from a list two-thirds
+overlapping the real one, with two entries that can never appear in the terrain.
+
+The reconcile fixes it by construction. `createWorldSlotElement`'s `biomeColors` table was
+rekeyed onto the real ten, with the four new colours taken from `BiomeSystem.js`'s own
+`color:` fields rather than invented. **Worlds created before this PR keep the `biomeMap`
+already in their config** — nothing rewrites stored world data to correct a label — so only
+new worlds get the right list. That is deliberate and is stated rather than left to be
+discovered.
+
+#### D-40 — the chunk cleanup failed silently, and in the wrong order
+
+Found while moving it, which is the argument for the move: the block had been read past in
+PR 6c, PR 6d and PR 13's comparison as a landmark, and lifting it out is what forced
+someone to read it as code. Two things were wrong and neither was visible from outside:
+
+1. **The `catch` was empty**, under a comment reading *"Silently ignore cleanup errors on
+   world deletion"*. A failed cleanup reported success and re-opened D-18 — a world's
+   chunks left on disk with the only id that could find them already gone — with no console
+   trace. It warns now. It still does **not** throw: `WorldManager.deleteWorld` turns a
+   throw into `{success:false}` and keeps the world in its list, so escalating would leave
+   the UI showing a world whose config had already been deleted.
+2. **The localStorage config was removed first.** A tab that died between the two halves
+   orphaned the chunks permanently. Chunks go first now, so the same crash window costs a
+   regenerated world instead of an unreachable ~14 MB.
+
+#### The delete path, measured rather than reasoned about
+
+Seventeen new assertions in `test/e2e/saveLoad.js`, after the block-edit round trip and
+before teardown. World B is deleted, world A is not, and both are snapshotted immediately
+before and after:
+
+- world B's **1,209** chunk records go to **0**, and its manifest record with them;
+- world A keeps **all 1,185** of its records and its chunk `"0,0"` is **byte-identical**
+  across the deletion — a key range one character wrong would take A's with B's, and that
+  comparison is what catches it;
+- the store afterwards holds **exactly** world A's records, so nothing of B's survived
+  under a key the range missed;
+- `cuubz:slotMap` loses B's entry and `cuubz:worldSlot:1:conf` is cleared, while slot 0 is
+  untouched;
+- `updateCharacter` renames through the edit modal and the character's **id is unchanged**,
+  which is what distinguishes an update from a create-and-replace;
+- `deleteCharacter` removes a second character and leaves the first.
+
+**Proved non-vacuous the way PR 12 proved D-35's, not assumed.** With the chunk cleanup
+disabled in `PersistenceManager.deleteWorld()`, the run reports *"D-18 — deleting world B
+removed all 1209 of its chunk records: **expected 0, got 1209**"* and two further failures
+— 183 = 180 passed + 3 failed. The assertions fail for the reason they exist.
+
+**What is still not covered**, stated rather than implied: multiplayer character/world
+handling, because the harness is single-context; and world **renaming**, because
+`updateWorld` has no UI to drive — there is no rename control on a world slot. That is not
+a gap this PR opened, it is a manager method `main.js` never wired up.
+
+**One harness trap worth recording:** `page.waitForSelector('#create-char-modal.hidden')`
+waits for the element to become **visible**, and a `.hidden` modal never does — it burns
+the full 30 s timeout and fails. Closing modals are waited on with `waitForFunction` and a
+`classList.contains` check instead.
+
+**Modified:** `src/main.js` (both `Browser*` classes deleted, two imports added, five call
+sites repointed, D-37's two sites, D-39's colour table), `src/game/entities/WorldManager.js`
+(D-38), `src/engine/world/Persistence.js` (the D-18/H-3 chunk cleanup, plus D-40),
+`src/core/GameState.js` (a comment on `persistence` naming D-37), `src/index.js` (the two
+reconcile side-effect imports removed — `main.js` reaches both by name now),
+`test/e2e/saveLoad.js` (+17), `test/test_worldManager.js`,
+`test/test_worldPersistenceIntegration.js` (D-38's assertions), `refactor.md` (this
+section, §3.4's ruling), `BUGS.md` (D-37, D-38 closed; D-39, D-40 added and closed;
+decisions 24-26).
+
+---
 
 ### 8.2 PR 15 — Extract the UI layer
 

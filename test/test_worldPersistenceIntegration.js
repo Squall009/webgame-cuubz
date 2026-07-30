@@ -453,12 +453,16 @@ await edgeMgr.init();
 const minName = await edgeMgr.createWorld('A', 11111);
 assertTrue(minName.success, '1-char world name accepted');
 
-const maxNameStr = 'A'.repeat(16);
+// D-38, ruled in PR 14: the world-name limit is 32, not the character limit of 16 this
+// file used to assert. index.html gives #world-name maxlength="32" and the class that has
+// actually been shipping used 32; the 16 came from WorldManager.js importing
+// MAX_NAME_LENGTH out of CharacterManager.js.
+const maxNameStr = 'A'.repeat(32);
 const maxName = await edgeMgr.createWorld(maxNameStr, 22222);
-assertTrue(maxName.success, '16-char world name accepted (max)');
+assertTrue(maxName.success, '32-char world name accepted (max) — was rejected before PR 14');
 
-const overMax = await edgeMgr.createWorld('X'.repeat(17), 33333);
-assertFalse(overMax.success, '17-char world name rejected');
+const overMax = await edgeMgr.createWorld('X'.repeat(33), 33333);
+assertFalse(overMax.success, '33-char world name rejected (one over max)');
 
 // Non-existent operations
 assertEquals(edgeMgr.getWorld('nonexistent'), null, 'getWorld returns null for unknown ID');

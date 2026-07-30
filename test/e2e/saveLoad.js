@@ -1328,6 +1328,117 @@ async function main() {
     assertEquals(teardownErrors.length, 0,
       `The second Exit to Menu of the run is also clean${teardownErrors.length ? ' — ' + teardownErrors.map(e => e.text).join(' | ') : ''}`);
 
+    // ═══ PR 14 — the DESTRUCTIVE half of the CRUD surface ═════
+    //
+    // Everything above this line exercises create → enter → reload → re-enter. Nothing in
+    // the 166 assertions that preceded PR 14 ever called `deleteWorld`, `deleteCharacter`
+    // or `updateCharacter` — which is exactly where PR 14's risk was, because
+    // `BrowserWorldManager.deleteWorld` held the only copy of the **D-18 + H-3 chunk
+    // cleanup** and PR 14 moved it into `PersistenceManager.deleteWorld()`. Reading the
+    // two implementations side by side would not have proved the move. This does.
+    //
+    // Ordering matters. World B is deleted, world A is not, and world A's records are
+    // snapshotted immediately before and after. A key range one character wrong would take
+    // A's chunks with B's, and that pair of snapshots is what catches it.
+    console.log('\n[PR 14 — updateCharacter, deleteCharacter, deleteWorld]');
+    drain(consoleErrors); drain(pageErrors);
+
+    const snapBbeforeDelete = await readStorage(page, worldB);
+    const snapAbeforeDelete = await readStorage(page, worldA);
+    assert(snapBbeforeDelete.worldChunkCount > 0,
+      `PR 14 baseline — world B owns ${snapBbeforeDelete.worldChunkCount} chunk records before the delete`);
+    assert(snapBbeforeDelete.manifestKeys.includes(worldB),
+      'PR 14 baseline — world B has a manifest record before the delete');
+
+    // ── updateCharacter: rename through the edit modal ─────────────────────
+    await page.click('#btn-play-solo');
+    await page.waitForSelector('#character-screen:not(.hidden)');
+    const charIdBefore = await page.$eval('.char-slot[data-char-id]', el => el.dataset.charId);
+    await page.click('.char-slot[data-char-id] [data-action="edit"]');
+    await page.waitForSelector('#create-char-modal:not(.hidden)');
+    await page.fill('#char-name', 'E2E Renamed');
+    await page.click('#btn-save-char');
+    // Not waitForSelector('#create-char-modal.hidden') — that waits for VISIBLE, and a
+    // .hidden modal never becomes visible, so it burns the full timeout and fails green.
+    await page.waitForFunction(() =>
+      document.getElementById('create-char-modal').classList.contains('hidden'));
+
+    const afterRename = await page.evaluate(() => JSON.parse(localStorage.getItem('cuubz:characters') || '[]'));
+    assertEquals(afterRename.length, 1, 'updateCharacter did not create a second character');
+    assertEquals(afterRename[0].name, 'E2E Renamed',
+      "updateCharacter — the new name round-trips through localStorage['cuubz:characters']");
+    assertEquals(afterRename[0].id, charIdBefore,
+      'updateCharacter — the id is unchanged, so this was an update and not a create-and-replace');
+
+    // ── deleteCharacter: create a second character, then remove it ─────────
+    await page.click('#btn-create-char');
+    await page.waitForSelector('#create-char-modal:not(.hidden)');
+    await page.fill('#char-name', 'Doomed');
+    await page.click('#btn-save-char');
+    await page.waitForFunction(() => document.querySelectorAll('.char-slot[data-char-id]').length === 2);
+    const doomedId = await page.evaluate(() =>
+      (JSON.parse(localStorage.getItem('cuubz:characters') || '[]').find(c => c.name === 'Doomed') || {}).id);
+    assert(!!doomedId, 'A second character was created for the delete path');
+
+    await page.click(`.char-slot[data-char-id="${doomedId}"] [data-action="delete"]`);
+    await page.waitForSelector('#delete-char-modal:not(.hidden)');
+    await page.click('#btn-confirm-delete-char');
+    await page.waitForFunction(() => document.querySelectorAll('.char-slot[data-char-id]').length === 1);
+
+    const afterCharDelete = await page.evaluate(() => JSON.parse(localStorage.getItem('cuubz:characters') || '[]'));
+    assertEquals(afterCharDelete.length, 1,
+      "deleteCharacter — localStorage['cuubz:characters'] holds one character again");
+    assertEquals(afterCharDelete[0].id, charIdBefore,
+      'deleteCharacter — it removed the character that was asked for, not the other one');
+
+    // ── deleteWorld: the D-18 / H-3 chunk cleanup, measured ───────────────
+    await page.click(`.char-slot[data-char-id="${charIdBefore}"]`);
+    await page.waitForSelector('#world-screen:not(.hidden)');
+    await page.click(`.world-slot[data-world-id="${worldB}"] [data-action="delete"]`);
+    await page.waitForSelector('#delete-char-modal:not(.hidden)');
+    await page.click('#btn-confirm-delete-char');
+    await page.waitForFunction(
+      id => document.querySelector(`.world-slot[data-world-id="${id}"]`) === null, worldB);
+    await sleep(1500); // the IndexedDB delete transaction is not awaited by the click handler
+
+    const snapBafterDelete = await readStorage(page, worldB);
+    assertEquals(snapBafterDelete.worldChunkCount, 0,
+      `D-18 — deleting world B removed all ${snapBbeforeDelete.worldChunkCount} of its chunk records from ` +
+      'IndexedDB. This is the fix PR 14 moved out of main.js into PersistenceManager.deleteWorld()');
+    assertEquals(snapBafterDelete.manifestKeys.includes(worldB), false,
+      "D-18 — world B's manifest record was deleted in the same transaction as its chunks");
+
+    const snapAafterDelete = await readStorage(page, worldA);
+    assertEquals(snapAafterDelete.worldChunkCount, snapAbeforeDelete.worldChunkCount,
+      `World A still owns every one of its ${snapAbeforeDelete.worldChunkCount} chunk records — the key range ` +
+      "took B's and only B's");
+    assertEquals(snapAafterDelete.recBytes, snapAbeforeDelete.recBytes,
+      'World A\'s chunk "0,0" is byte-identical across the deletion of world B');
+    assertEquals(snapAafterDelete.chunkCount, snapAafterDelete.worldChunkCount,
+      "The chunks store now holds exactly world A's records — nothing of B's was left orphaned");
+
+    const lsAfterDelete = await page.evaluate(() => ({
+      slotMap: JSON.parse(localStorage.getItem('cuubz:slotMap') || '{}'),
+      conf1: localStorage.getItem('cuubz:worldSlot:1:conf'),
+      conf0: localStorage.getItem('cuubz:worldSlot:0:conf'),
+    }));
+    assertEquals(lsAfterDelete.slotMap[worldB], undefined,
+      "deleteWorld — world B's entry is gone from localStorage['cuubz:slotMap']");
+    assertEquals(lsAfterDelete.conf1, null,
+      "deleteWorld — 'cuubz:worldSlot:1:conf' was cleared (world B held slot 1)");
+    assert(lsAfterDelete.conf0 !== null && lsAfterDelete.conf0.indexOf(worldA) !== -1,
+      "deleteWorld — world A's slot-0 config is untouched");
+
+    const deletePathErrors = drain(pageErrors);
+    assertEquals(deletePathErrors.length, 0,
+      `The delete path raised no page errors${deletePathErrors.length ? ' — ' + deletePathErrors.map(e => e.text).join(' | ') : ''}`);
+
+    // Back to the main menu, so the tree-clean check below runs from where it always has.
+    await page.click('#btn-back-world');
+    await page.waitForSelector('#character-screen:not(.hidden)');
+    await page.click('#btn-back-char');
+    await page.waitForSelector('#main-menu:not(.hidden)');
+
     note(
       '§7 steps 12-13 — multiplayer host/guest persistence',
       'Needs a running relay (server/index.js on 8765) and two browser contexts. The relay ' +

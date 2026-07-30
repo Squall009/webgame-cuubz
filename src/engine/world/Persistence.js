@@ -1,11 +1,21 @@
 /**
- * Cuubz — localStorage Persistence System (Characters + World Configs only)
- * Chunk storage has been moved to IndexedDB via ChunkStore/ChunkBinaryCodec.
+ * Cuubz — browser storage backend for characters and world configs.
  *
  *   cuubz:characters              → JSON array of character objects
  *   cuubz:worldSlot:{N}:conf      → World config for slot N (0, 1, 2)
  *   cuubz:slotMap                 → JSON map of worldId → slot number
+ *
+ * Chunks live in IndexedDB (`cuubz-worlds`), not here — `ChunkManager` owns them. The one
+ * place the two meet is `deleteWorld()`, which has to remove both halves or leak the
+ * larger one; see the comment there (D-18 / H-3, and BUGS.md D-40 for the flaw PR 14 found
+ * in the shipped version while moving it).
+ *
+ * This is the `storage` backend `CharacterManager` and `WorldManager` are constructed
+ * with. Node tests inject an in-memory mock instead, which is why those two files stay
+ * environment-free and this one does not have to.
  */
+
+import { ChunkManager } from './ChunkManager.js';
 
 export const MAX_WORLD_SLOTS = 3;
 
@@ -185,11 +195,70 @@ export class PersistenceManager {
     return worlds;
   }
 
+  /**
+   * Delete a world: its IndexedDB chunks and manifest, then its localStorage config.
+   *
+   * **Both halves, or the big one leaks.** This came from `BrowserWorldManager.deleteWorld`
+   * in `main.js` in PR 14, and it is the **D-18 fix and the H-3 fix**, shipped in PR 6c/6d.
+   * It could not go into `src/game/entities/WorldManager.js` — Node tests import that file
+   * and it has to stay environment-free — so it lives here, in the browser storage backend
+   * that already owned the localStorage half of the same operation. `WorldManager` calls
+   * `this.storage.deleteWorld(id)` and is unchanged by the move; a test's mock storage
+   * simply has no chunks to clean.
+   *
+   * H-3: this used to be `indexedDB.open('cuubz-worlds')` with NO version argument. On a
+   * device where the database did not exist yet — a player who deletes a world before ever
+   * entering one — that CREATES `cuubz-worlds` at version 1 with no object stores, and the
+   * `db.transaction([...])` below then throws NotFoundError. `ChunkManager.openDatabase()`
+   * is the single opener: it names DB_VERSION and carries the schema ladder, so the
+   * database it finds or creates is always one this codebase recognises. It returns a
+   * fresh connection, which is why the `db.close()` below is correct.
+   *
+   * **D-40, fixed in PR 14 while moving this.** Two things were wrong with the shipped
+   * version and neither was visible:
+   *   1. The `catch` was empty, under the comment "Silently ignore cleanup errors". A
+   *      failed cleanup therefore reported success and re-opened D-18 — a world's chunks
+   *      left on disk with nothing left to identify them by — with no console trace.
+   *      It now warns. It still does not throw: the caller (`WorldManager.deleteWorld`)
+   *      turns a throw into `{success:false}` and keeps the world in its list, so
+   *      escalating would leave the UI showing a world whose config is already gone.
+   *   2. The localStorage config was removed FIRST. A tab that died between the two
+   *      halves orphaned the chunks permanently, because the world id lives in the config
+   *      that was just deleted. Chunks go first now: the same crash window costs a
+   *      regenerated world instead of an unreachable ~14 MB.
+   */
   async deleteWorld(id) {
+    // ── 1. IndexedDB: this world's chunk records and its manifest.
+    try {
+      const db = await ChunkManager.openDatabase();
+      const tx = db.transaction(['manifests', 'chunks'], 'readwrite');
+      tx.objectStore('manifests').delete(id);
+      // D-18: chunk records used to be left behind here, under a comment reading
+      // "orphaned but harmless - they're keyed by chunk coordinates". Coordinate-only
+      // keys were H-1, not a mitigation: the records were not orphaned, they were
+      // SHARED with whatever world next generated the same coordinates. PR 6c scoped
+      // the primary key to `${worldName}:${cx},${cz}`, which is what makes this
+      // world's chunks both identifiable and safe to remove — a contiguous key range.
+      // U+FFFF is the upper bound because it sorts after every character IndexedDB
+      // will see in a chunk key, which is only digits, '-' and ','. Written as an
+      // escape rather than a literal so the file stays pure ASCII.
+      tx.objectStore('chunks').delete(
+        IDBKeyRange.bound(`${id}:`, `${id}:` + String.fromCharCode(0xFFFF))
+      );
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch (err) {
+      // Non-fatal by design (see D-40 above) — but never silent again.
+      console.warn(`[Cuubz] World ${id}: chunk/manifest cleanup failed, records may be orphaned:`, err);
+    }
+
+    // ── 2. localStorage: the world config and its slot-map entry.
     const slot = this._getSlotForWorld(id);
     if (slot >= 0) {
       this.clearSlot(slot);
-      // Remove from slot map
       const map = JSON.parse(localStorage.getItem(this._slotMapKey()) || '{}');
       delete map[id];
       localStorage.setItem(this._slotMapKey(), JSON.stringify(map));

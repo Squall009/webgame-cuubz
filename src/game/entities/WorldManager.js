@@ -8,17 +8,33 @@
  *   - Tests: In-memory mock store
  */
 
-import { MAX_NAME_LENGTH, MIN_NAME_LENGTH } from './CharacterManager.js';
-
-'use strict';
-
-// Node.js: require the shared name-length limits from characterManager; browser: use globals
 // ============================================================
 // Constants
 // ============================================================
 
 export const MAX_WORLDS = 3;
-// MIN_NAME_LENGTH and MAX_NAME_LENGTH come from characterManager.js (see shim above)
+
+/**
+ * World-name length limits — **D-38**, ruled in PR 14.
+ *
+ * This file used to `import { MAX_NAME_LENGTH, MIN_NAME_LENGTH } from './CharacterManager.js'`
+ * and validate world names against a *character*-name limit of 16. The class that has
+ * actually been running in the browser since forever (`BrowserWorldManager` in `main.js`)
+ * used 32, and `index.html` gives `#world-name` and `#host-world-name` `maxlength="32"`.
+ * So 32 is the shipped limit and 16 was an accident of the import.
+ *
+ * `test/test_worldManager.js` proved it against itself: it asserted `MAX_NAME_LENGTH === 16`
+ * and "17 char name invalid (over max)", but its edge-case suite rejected a **33**-character
+ * name as "one over max". Two of its own assertions were written against two different
+ * limits.
+ *
+ * Worlds now own their limits outright. Borrowing a character constant for worlds was the
+ * defect; keeping the number and fixing the coupling would have left the same trap for the
+ * next reader.
+ */
+export const MIN_WORLD_NAME_LENGTH = 1;
+export const MAX_WORLD_NAME_LENGTH = 32;
+
 export const DEFAULT_SEED = 42;
 export const BIOME_NAMES = [
   'Deep Ocean', 'Ocean', 'Beach', 'Plains', 'Forest', 'Badlands',
@@ -70,11 +86,11 @@ export class WorldManager {
       return { valid: false, error: 'Name must be a string' };
     }
     const trimmed = name.trim();
-    if (trimmed.length < MIN_NAME_LENGTH) {
-      return { valid: false, error: `Name must be at least ${MIN_NAME_LENGTH} character` };
+    if (trimmed.length < MIN_WORLD_NAME_LENGTH) {
+      return { valid: false, error: `Name must be at least ${MIN_WORLD_NAME_LENGTH} character` };
     }
-    if (trimmed.length > MAX_NAME_LENGTH) {
-      return { valid: false, error: `Name must be at most ${MAX_NAME_LENGTH} characters` };
+    if (trimmed.length > MAX_WORLD_NAME_LENGTH) {
+      return { valid: false, error: `Name must be at most ${MAX_WORLD_NAME_LENGTH} characters` };
     }
     // Allow alphanumeric, spaces, hyphens, underscores
     if (!/^[a-zA-Z0-9 _\-]+$/.test(trimmed)) {
@@ -460,7 +476,8 @@ export class WorldManager {
 // ============================================================
 // Module Exports (for Node.js testing)
 // ============================================================
-
-// Re-exported for compatibility with the CommonJS surface these files had
-// before PR 9 (tests import them from here).
-export { MAX_NAME_LENGTH, MIN_NAME_LENGTH };
+//
+// This file used to re-export `MAX_NAME_LENGTH` / `MIN_NAME_LENGTH` from
+// `CharacterManager.js` "for compatibility with the CommonJS surface these files had
+// before PR 9". The re-export is gone with the import — see MAX_WORLD_NAME_LENGTH above
+// and BUGS.md D-38. `test/test_worldManager.js` is the only reader and PR 14 moved it.

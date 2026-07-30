@@ -42,8 +42,9 @@ import './engine/renderer/PerformanceOptimizer.js';
 import './engine/world/Noise.js';          // the main-thread copy; the worker has its own
 import './engine/world/SpawnManager.js';
 import './game/entities/Boss.js';
-import './game/entities/CharacterManager.js';  // RECONCILE with main.js:69 — PR 14
-import './game/entities/WorldManager.js';      // RECONCILE with main.js:428 — PR 14
+// CharacterManager.js and WorldManager.js were listed here as unreferenced modules kept in
+// the graph pending the PR 14 reconcile. PR 14 ruled Option A: `main.js` imports both by
+// name now, so they are reached the ordinary way and their side-effect imports are gone.
 import './game/entities/QuestMarker.js';
 import './game/mobs/ai/pathfinding.js';
 import './game/systems/QuestSystem.js';

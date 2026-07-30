@@ -96,7 +96,14 @@ class MockStorage {
 // Load WorldManager Module
 // ============================================================
 
-const { WorldManager, MAX_WORLDS, MIN_NAME_LENGTH, MAX_NAME_LENGTH, DEFAULT_SEED, BIOME_NAMES } = require('../src/game/entities/WorldManager.js');
+const { WorldManager, MAX_WORLDS, MIN_WORLD_NAME_LENGTH, MAX_WORLD_NAME_LENGTH, DEFAULT_SEED, BIOME_NAMES } = require('../src/game/entities/WorldManager.js');
+// D-38, ruled in PR 14: worlds own their name-length limits. This file used to import
+// MIN_NAME_LENGTH/MAX_NAME_LENGTH, which WorldManager.js re-exported from
+// CharacterManager.js — a CHARACTER limit of 16 validating world names. The shipped
+// browser class used 32 and index.html gives #world-name maxlength="32", so 32 is the
+// real limit. This file asserted BOTH numbers at once: 'MAX_NAME_LENGTH is 16' and
+// '17 char name invalid (over max)' against a 16, and the edge-case suite below rejecting
+// a 33-character name as 'one over max' against a 32.
 
 // ============================================================
 // Tests — wrapped in async IIFE to support await
@@ -110,8 +117,8 @@ console.log('===================================\n');
 console.log('\n--- Constants & Static Methods ---');
 
 assertEquals(MAX_WORLDS, 3, 'MAX_WORLDS is 3');
-assertEquals(MIN_NAME_LENGTH, 1, 'MIN_NAME_LENGTH is 1');
-assertEquals(MAX_NAME_LENGTH, 16, 'MAX_NAME_LENGTH is 16');
+assertEquals(MIN_WORLD_NAME_LENGTH, 1, 'MIN_WORLD_NAME_LENGTH is 1');
+assertEquals(MAX_WORLD_NAME_LENGTH, 32, 'MAX_WORLD_NAME_LENGTH is 32 (D-38 — worlds do not borrow the character limit)');
 assertEquals(DEFAULT_SEED, 42, 'DEFAULT_SEED is 42');
 assert(BIOME_NAMES.length === 10, 'BIOME_NAMES has 10 biomes');
 assertArrayContains(BIOME_NAMES, 'Plains', 'Plains biome exists');
@@ -172,14 +179,16 @@ assert(WorldManager.validateName('Test-World').valid, 'Hyphenated name valid');
 assert(WorldManager.validateName('world_1').valid, 'Underscored name valid');
 assert(WorldManager.validateName('a').valid, 'Single character name valid');
 assertEquals(WorldManager.validateName('1234567890123456').valid, true,
-  '16 char name valid (max)');
+  '16 char name valid');
+assertEquals(WorldManager.validateName('12345678901234567890123456789012').valid, true,
+  '32 char name valid (max) — D-38: this was REJECTED before PR 14');
 assert(WorldManager.validateName('The_Great-W_26').valid, 'Mixed special chars valid');
 
 // Invalid names
 assertFalse(WorldManager.validateName('').valid, 'Empty name invalid');
 assertFalse(WorldManager.validateName('   ').valid, 'Whitespace-only name invalid');
-assertFalse(WorldManager.validateName('12345678901234567').valid,
-  '17 char name invalid (over max)');
+assertFalse(WorldManager.validateName('123456789012345678901234567890123').valid,
+  '33 char name invalid (one over max)');
 assertFalse(WorldManager.validateName('test@world!').valid, 'Special chars in name invalid');
 assertFalse(WorldManager.validateName(123).valid, 'Non-string name invalid');
 assertFalse(WorldManager.validateName(null).valid, 'Null name invalid');
@@ -471,7 +480,7 @@ mgr.worlds = []; // Clear in-memory cache
 await mgr.init();
 
 // Max length name exactly at limit
-const maxName = '1234567890123456'; // 16 chars
+const maxName = '12345678901234567890123456789012'; // 32 chars
 result = await mgr.createWorld(maxName);
 assertTrue(result.success, 'Max length name accepted');
 

@@ -31,6 +31,13 @@ import { BiomeSystem, computeHumidityMap } from './engine/world/BiomeSystem.js';
 import { BLOCK_BY_ID, BLOCK_TYPES } from './engine/world/BlockRegistry.js';
 import { Chunk, MAX_Y, MIN_Y, SEA_LEVEL } from './engine/world/ChunkData.js';
 import { PersistenceManager } from './engine/world/Persistence.js';
+// PR 14 — the reconcile (refactor.md §3.4, §8.1). `main.js` carried its own
+// `BrowserCharacterManager` / `BrowserWorldManager` and never used these two, which have
+// the only test coverage either class has. Option A: the tested classes win, the browser
+// copies are deleted, and the browser-only behaviour they carried (world chunk cleanup)
+// moved to `PersistenceManager.deleteWorld()`. The full ruling is refactor.md §8.1.
+import { CharacterManager, DEFAULT_COLOR, MAX_CHARACTERS } from './game/entities/CharacterManager.js';
+import { MAX_WORLDS, WorldManager } from './game/entities/WorldManager.js';
 // `js/game.js` published its class as the global `window.CuubzGame`; main.js has always
 // constructed it under that name. The alias keeps the call site (`new CuubzGame()`)
 // byte-identical while the binding becomes an ordinary import. PR 17 rewrites both.
@@ -89,151 +96,9 @@ import { publishGameState } from './testBridge.js';
     if (target) target.classList.remove('hidden');
   }
 
-  // ============================================================
-  // Character Manager (inline — runs in browser context)
-  // ============================================================
-
-  const MAX_CHARACTERS = 3;
-  const MIN_NAME_LENGTH = 1;
-  const MAX_NAME_LENGTH = 16;
-  const DEFAULT_COLOR = '#4CAF50';
-
-  /**
-   * BrowserCharacterManager — Wraps PersistenceManager for browser UI.
-   * Handles character CRUD with IndexedDB storage.
-   */
-  class BrowserCharacterManager {
-    constructor(persistence) {
-      this.persistence = persistence;
-      this.characters = [];
-      this.selectedId = null;
-    }
-
-    async init() {
-      this.characters = await this.persistence.loadCharacters();
-      return this.characters;
-    }
-
-    static validateName(name) {
-      if (typeof name !== 'string') return { valid: false, error: 'Name must be a string' };
-      const trimmed = name.trim();
-      if (trimmed.length < MIN_NAME_LENGTH) return { valid: false, error: `Name must be at least ${MIN_NAME_LENGTH} character` };
-      if (trimmed.length > MAX_NAME_LENGTH) return { valid: false, error: `Name must be at most ${MAX_NAME_LENGTH} characters` };
-      if (!/^[a-zA-Z0-9 _\-]+$/.test(trimmed)) return { valid: false, error: 'Name can only contain letters, numbers, spaces, hyphens, and underscores' };
-      return { valid: true };
-    }
-
-    static validateColor(color) {
-      if (typeof color !== 'string') return { valid: false };
-      if (/^#[0-9A-Fa-f]{6}$/.test(color)) return { valid: true, color: color.toUpperCase() };
-      return { valid: false };
-    }
-
-    static generateId() {
-      const ts = Date.now().toString(36);
-      const rnd = Math.random().toString(36).substring(2, 8);
-      return `char_${ts}_${rnd}`;
-    }
-
-    canCreateMore() {
-      return this.characters.length < MAX_CHARACTERS;
-    }
-
-    getRemainingSlots() {
-      return MAX_CHARACTERS - this.characters.length;
-    }
-
-    async createCharacter(name, color) {
-      const nameResult = BrowserCharacterManager.validateName(name);
-      if (!nameResult.valid) return { success: false, error: nameResult.error };
-
-      const colorVal = color || DEFAULT_COLOR;
-      const colorResult = BrowserCharacterManager.validateColor(colorVal);
-      if (!colorResult.valid) return { success: false, error: 'Invalid color format' };
-
-      if (!this.canCreateMore()) return { success: false, error: `Maximum ${MAX_CHARACTERS} characters reached` };
-
-      const trimmedName = name.trim();
-      const duplicate = this.characters.find(c => c.name.toLowerCase() === trimmedName.toLowerCase());
-      if (duplicate) return { success: false, error: `Character "${duplicate.name}" already exists` };
-
-      const id = BrowserCharacterManager.generateId();
-      const character = {
-        id,
-        name: trimmedName,
-        color: colorResult.color,
-        inventory: [],
-        spawnPoints: {},
-        createdAt: Date.now(),
-        lastPlayed: null,
-      };
-
-      await this.persistence.saveCharacter(character);
-      this.characters.push(character);
-      return { success: true, character };
-    }
-
-    async updateCharacter(id, updates) {
-      const index = this.characters.findIndex(c => c.id === id);
-      if (index === -1) return { success: false, error: 'Character not found' };
-
-      const character = this.characters[index];
-
-      if (updates.name !== undefined) {
-        const nameResult = BrowserCharacterManager.validateName(updates.name);
-        if (!nameResult.valid) return { success: false, error: nameResult.error };
-        const trimmedName = updates.name.trim();
-        const duplicate = this.characters.find(c => c.id !== id && c.name.toLowerCase() === trimmedName.toLowerCase());
-        if (duplicate) return { success: false, error: `Character "${duplicate.name}" already exists` };
-        character.name = trimmedName;
-      }
-
-      if (updates.color !== undefined) {
-        const colorResult = BrowserCharacterManager.validateColor(updates.color);
-        if (!colorResult.valid) return { success: false, error: 'Invalid color format' };
-        character.color = colorResult.color;
-      }
-
-      await this.persistence.saveCharacter(character);
-      this.characters[index] = character;
-      return { success: true, character };
-    }
-
-    async deleteCharacter(id) {
-      const index = this.characters.findIndex(c => c.id === id);
-      if (index === -1) return { success: false, error: 'Character not found' };
-
-      await this.persistence.deleteCharacter(id);
-      this.characters.splice(index, 1);
-      if (this.selectedId === id) this.selectedId = null;
-      return { success: true };
-    }
-
-    getCharacter(id) {
-      return this.characters.find(c => c.id === id) || null;
-    }
-
-    getAllCharacters() {
-      return [...this.characters];
-    }
-
-    selectCharacter(id) {
-      const character = this.getCharacter(id);
-      if (!character) return { success: false, error: 'Character not found' };
-      this.selectedId = id;
-      character.lastPlayed = Date.now();
-      return { success: true, character };
-    }
-
-    getSelectedCharacter() {
-      if (!this.selectedId) return null;
-      return this.getCharacter(this.selectedId);
-    }
-
-    clearSelection() {
-      this.selectedId = null;
-    }
-  }
+  // PR 14 — `BrowserCharacterManager` (~130 lines) and its four constants stood here.
+  // Deleted; `CharacterManager` from src/game/entities/ is imported above. See the
+  // reconcile note on that import and refactor.md §8.1.
 
   // Global reference for game engine access
   let characterManager = null;
@@ -456,207 +321,11 @@ import { publishGameState } from './testBridge.js';
     document.getElementById('char-error').classList.add('hidden');
   }
 
-  // ============================================================
-  // World Manager (inline — runs in browser context)
-  // ============================================================
-
-  const MAX_WORLDS = 3;
-  const DEFAULT_WORLD_SEED = 42;
-
-  /**
-   * BrowserWorldManager — Wraps PersistenceManager for browser UI.
-   * Handles world CRUD with IndexedDB storage.
-   */
-  class BrowserWorldManager {
-    constructor(persistence) {
-      this.persistence = persistence;
-      this.worlds = [];
-      this.selectedId = null;
-    }
-
-    async init() {
-      this.worlds = await this.persistence.loadWorlds();
-      return this.worlds;
-    }
-
-    static validateName(name) {
-      if (typeof name !== 'string') return { valid: false, error: 'Name must be a string' };
-      const trimmed = name.trim();
-      if (trimmed.length < 1) return { valid: false, error: 'Name must be at least 1 character' };
-      if (trimmed.length > 32) return { valid: false, error: 'Name must be at most 32 characters' };
-      if (!/^[a-zA-Z0-9 _\-]+$/.test(trimmed)) return { valid: false, error: 'Name can only contain letters, numbers, spaces, hyphens, and underscores' };
-      return { valid: true };
-    }
-
-    static generateId() {
-      const ts = Date.now().toString(36);
-      const rnd = Math.random().toString(36).substring(2, 8);
-      return `world_${ts}_${rnd}`;
-    }
-
-    static generateSeed() {
-      return Math.floor(Math.random() * 0xFFFFFFFF);
-    }
-
-    static formatSeed(seed) {
-      return String(seed).padStart(8, '0');
-    }
-
-    canCreateMore() {
-      return this.worlds.length < MAX_WORLDS;
-    }
-
-    getRemainingSlots() {
-      return MAX_WORLDS - this.worlds.length;
-    }
-
-    async createWorld(name, seed) {
-      const nameResult = BrowserWorldManager.validateName(name);
-      if (!nameResult.valid) return { success: false, error: nameResult.error };
-
-      if (!this.canCreateMore()) return { success: false, error: `Maximum ${MAX_WORLDS} worlds reached` };
-
-      const trimmedName = name.trim();
-      const duplicate = this.worlds.find(w => w.name.toLowerCase() === trimmedName.toLowerCase());
-      if (duplicate) return { success: false, error: `World "${duplicate.name}" already exists` };
-
-      const worldSeed = seed !== undefined ? seed : BrowserWorldManager.generateSeed();
-      
-      // Generate biome map metadata
-      const lcg = (s) => (s * 16807 + 12345) % 2147483647;
-      let s = worldSeed;
-      const biomeNames = ['Plains', 'Forest', 'Desert', 'Tundra', 'Mountains', 'Ocean', 'Lava', 'Corrupt'];
-      const count = 2 + (lcg(s) % 3);
-      const biomes = [];
-      const used = new Set();
-      for (let i = 0; i < count; i++) {
-        s = lcg(s);
-        let idx = s % biomeNames.length;
-        while (used.has(idx)) idx = (idx + 1) % biomeNames.length;
-        used.add(idx);
-        biomes.push(biomeNames[idx]);
-      }
-
-      const id = BrowserWorldManager.generateId();
-      const world = {
-        id,
-        name: trimmedName,
-        seed: worldSeed,
-        biomeMap: { dominantBiomes: biomes, seed: worldSeed },
-        questProgress: {},
-        chunkReferences: [],
-        createdAt: Date.now(),
-        lastPlayed: null,
-      };
-
-      await this.persistence.saveWorld(world);
-      this.worlds.push(world);
-      return { success: true, world };
-    }
-
-    async updateWorld(id, updates) {
-      const index = this.worlds.findIndex(w => w.id === id);
-      if (index === -1) return { success: false, error: 'World not found' };
-
-      const world = this.worlds[index];
-
-      if (updates.name !== undefined) {
-        const nameResult = BrowserWorldManager.validateName(updates.name);
-        if (!nameResult.valid) return { success: false, error: nameResult.error };
-        const trimmedName = updates.name.trim();
-        const duplicate = this.worlds.find(w => w.id !== id && w.name.toLowerCase() === trimmedName.toLowerCase());
-        if (duplicate) return { success: false, error: `World "${duplicate.name}" already exists` };
-        world.name = trimmedName;
-      }
-
-      await this.persistence.saveWorld(world);
-      this.worlds[index] = world;
-      return { success: true, world };
-    }
-
-    async deleteWorld(id) {
-      const index = this.worlds.findIndex(w => w.id === id);
-      if (index === -1) return { success: false, error: 'World not found' };
-
-      // Remove world metadata from PersistenceManager
-      await this.persistence.deleteWorld(id);
-
-      // Clean up orphaned chunk data and manifest from IndexedDB.
-      //
-      // H-3: this used to be `indexedDB.open('cuubz-worlds')` with NO version
-      // argument. On a device where the database did not exist yet — a player who
-      // deletes a world before ever entering one — that CREATES `cuubz-worlds` at
-      // version 1 with no object stores, and the `db.transaction([...])` below then
-      // throws NotFoundError into the silent `catch {}` at the bottom of this block.
-      // `ChunkManager.openDatabase()` is the single opener: it names DB_VERSION and
-      // carries the schema ladder, so the database it finds or creates is always one
-      // this codebase recognises. It returns a fresh connection, which is why the
-      // `db.close()` below is still correct.
-      try {
-        const db = await ChunkManager.openDatabase();
-        const tx = db.transaction(['manifests', 'chunks'], 'readwrite');
-        // Delete manifest for this world
-        tx.objectStore('manifests').delete(id);
-        // D-18: chunk records used to be left behind here, under a comment reading
-        // "orphaned but harmless - they're keyed by chunk coordinates". Coordinate-only
-        // keys were H-1, not a mitigation: the records were not orphaned, they were
-        // SHARED with whatever world next generated the same coordinates. PR 6c scoped
-        // the primary key to `${worldName}:${cx},${cz}`, which is what makes this
-        // world's chunks both identifiable and safe to remove — a contiguous key range.
-        // U+FFFF is the upper bound because it sorts after every character IndexedDB
-        // will see in a chunk key, which is only digits, '-' and ','. Written as an
-        // escape rather than a literal so the file stays pure ASCII.
-        tx.objectStore('chunks').delete(
-          IDBKeyRange.bound(`${id}:`, `${id}:` + String.fromCharCode(0xFFFF))
-        );
-        await new Promise((resolve, reject) => {
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
-        });
-        db.close();
-      } catch (err) {
-        // Silently ignore cleanup errors on world deletion.
-      }
-
-      this.worlds.splice(index, 1);
-      if (this.selectedId === id) this.selectedId = null;
-      return { success: true };
-    }
-
-    getWorld(id) {
-      return this.worlds.find(w => w.id === id) || null;
-    }
-
-    getAllWorlds() {
-      return [...this.worlds];
-    }
-
-    async selectWorld(id) {
-      const world = this.getWorld(id);
-      if (!world) return { success: false, error: 'World not found' };
-      this.selectedId = id;
-      world.lastPlayed = Date.now();
-      await this.persistence.saveWorld(world);
-      return { success: true, world };
-    }
-
-    getSelectedWorld() {
-      if (!this.selectedId) return null;
-      return this.getWorld(this.selectedId);
-    }
-
-    clearSelection() {
-      this.selectedId = null;
-    }
-
-    static getBiomePreview(world) {
-      const biomes = world.biomeMap && world.biomeMap.dominantBiomes
-        ? world.biomeMap.dominantBiomes.join(', ')
-        : 'Unknown';
-      const seed = BrowserWorldManager.formatSeed(world.seed);
-      return { biomes, seed };
-    }
-  }
+  // PR 14 — `BrowserWorldManager` (~190 lines), `MAX_WORLDS` and an unused
+  // `DEFAULT_WORLD_SEED` stood here. Deleted; `WorldManager` from src/game/entities/ is
+  // imported above. Its `deleteWorld` carried the D-18/H-3 chunk cleanup, which is now
+  // `PersistenceManager.deleteWorld()` — that file, not this one, because Node tests
+  // import WorldManager.js and it has to stay environment-free. refactor.md §8.1.
 
   // ============================================================
   // World UI Rendering
@@ -725,12 +394,21 @@ import { publishGameState } from './testBridge.js';
     slot.style.position = 'relative';
     slot.dataset.worldId = world.id;
 
-    const preview = BrowserWorldManager.getBiomePreview(world);
+    // `getWorldPreview` is the tested equivalent of `BrowserWorldManager.getBiomePreview`
+    // and a superset — it also returns `chunkCount`, which nothing renders yet.
+    const preview = WorldManager.getWorldPreview(world);
 
-    // Biome color indicator based on dominant biome
+    // Biome colour indicator based on the dominant biome.
+    //
+    // D-39: this table used to key on the eight names `BrowserWorldManager` invented
+    // (`Plains Forest Desert Tundra Mountains Ocean Lava Corrupt`), two of which — Lava
+    // and Corrupt — are not biomes this game has. `WorldManager.BIOME_NAMES` is the real
+    // ten from `BiomeSystem.js`, so the table is keyed on those now and the four new
+    // colours come from that file's own `color:` fields.
     const biomeColors = {
-      'Plains': '#4CAF50', 'Forest': '#2E7D32', 'Desert': '#FFB300', 'Tundra': '#90CAF9',
-      'Mountains': '#78909C', 'Ocean': '#1E88E5', 'Lava': '#E64A19', 'Corrupt': '#AB47BC'
+      'Deep Ocean': '#051d3b', 'Ocean': '#1565C0', 'Beach': '#d4b483', 'Plains': '#5a8a3c',
+      'Forest': '#2d6e2d', 'Badlands': '#b5623e', 'Tundra': '#c8dde8', 'Desert': '#d1b247',
+      'Mountains': '#607d8b', 'Frozen Peaks': '#e0f7fa'
     };
     const primaryBiome = preview.biomes.split(',')[0] || 'Plains';
     const biomeColor = biomeColors[primaryBiome] || '#4CAF50';
@@ -1441,7 +1119,7 @@ import { publishGameState } from './testBridge.js';
     worlds.forEach(w => {
       const opt = document.createElement('option');
       opt.value = w.id;
-      opt.textContent = `${w.name} (seed: ${BrowserWorldManager.formatSeed(w.seed)})`;
+      opt.textContent = `${w.name} (seed: ${WorldManager.formatSeed(w.seed)})`;
       select.appendChild(opt);
     });
   }
@@ -2722,7 +2400,13 @@ import { publishGameState } from './testBridge.js';
       // props in". `game.player` stays because CuubzGame.setMode() uses it to push
       // creative-mode physics onto the player; it is the same object as
       // `gameState.player` and neither is ever reassigned.
-      gameState.persistence = characterManager ? characterManager.storage : null; // For periodic saving
+      // D-37, fixed in PR 14. This line read `characterManager.storage` while the class it
+      // ran against (`BrowserCharacterManager`) named the field `this.persistence`, so the
+      // ternary's truthy branch yielded `undefined` every time. The reconcile settles on
+      // one name — `storage`, the tested class's — and this is now the live handle:
+      // `savePlayerState()` below writes through it rather than reaching into the manager,
+      // which is what stops it from going quietly dead again.
+      gameState.persistence = characterManager ? characterManager.storage : null;
 
       // ══ Step 9 — mob system ═══════════════════════════════════════════════════════════════
       // Constructed before the inventory exists and handed it at step 12 — the `inventory: null`
@@ -4030,7 +3714,11 @@ import { publishGameState } from './testBridge.js';
           z: player.position.z,
         };
 
-        characterManager.persistence.saveCharacter(selected);
+        // D-37: was `characterManager.persistence.saveCharacter(...)` — the other half of
+        // the field-name split. `gameState.persistence` is the same object and is set at
+        // step 8; reading it here is what keeps that field honest.
+        if (!gameState.persistence) return;
+        gameState.persistence.saveCharacter(selected);
         _log('[Cuubz] Saved player state');
       }
 
@@ -4977,12 +4665,12 @@ import { publishGameState } from './testBridge.js';
       _log('[Cuubz] IndexedDB initialized');
 
       // Initialize CharacterManager
-      characterManager = new BrowserCharacterManager(persistence);
+      characterManager = new CharacterManager(persistence);
       await characterManager.init();
       _log(`[Cuubz] Loaded ${characterManager.getAllCharacters().length} characters`);
 
       // Initialize WorldManager
-      worldManager = new BrowserWorldManager(persistence);
+      worldManager = new WorldManager(persistence);
       await worldManager.init();
       _log(`[Cuubz] Loaded ${worldManager.getAllWorlds().length} worlds`);
 
