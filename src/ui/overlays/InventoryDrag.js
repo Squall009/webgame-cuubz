@@ -9,11 +9,13 @@
  * the pointer leaves the slot it started on. Every one guards on
  * `state.inventoryOpen`, so they are inert while the game is being played.
  *
- * **They are never removed.** `startGame()` adds them on every call, so exiting to the
- * menu and starting again registers a second set that closes over the *previous*
- * `GameState` — whose `inventoryOpen` stays `false`, which is the only reason it is
- * harmless. `BUGS.md` **D-50**, owned by PR 18, which is where a session teardown
- * belongs.
+ * **D-50 — CLOSED IN PR 18.** They used to be added on every `startGame()` and never
+ * removed, so exiting to the menu and starting again registered a second set closing
+ * over the *previous* `GameState` — whose `inventoryOpen` stays `false`, which was the
+ * only reason it was harmless. Each is a named `const` now (a named *function
+ * expression* is not enough: the name is only bound inside its own body, so
+ * `removeEventListener` had nothing to name) and each registers its remover through
+ * `state.addTeardown()`, drained by `Game.stop()`.
  */
 
 /**
@@ -23,7 +25,7 @@ export function installInventoryDrag(state) {
   let _invDrag = null;       // { fromSlot, fromEquipSlot, typeId, count, ghostEl }
   let _invClickStart = null; // { slot | equipSlot, x, y } — click vs drag
 
-  document.addEventListener('mousedown', function invMouseDown(e) {
+  const invMouseDown = function(e) {
     if (!state.inventoryOpen || e.button !== 0) return;
     const slotEl = e.target.closest('.inventory-slot');
     const equipEl = e.target.closest('.equipment-slot');
@@ -34,9 +36,11 @@ export function installInventoryDrag(state) {
       e.preventDefault();
       _invClickStart = { equipSlot: equipEl.dataset.slot, x: e.clientX, y: e.clientY };
     }
-  });
+  };
+  document.addEventListener('mousedown', invMouseDown);
+  state.addTeardown(() => document.removeEventListener('mousedown', invMouseDown));
 
-  document.addEventListener('mousemove', function invMouseMove(e) {
+  const invMouseMove = function(e) {
     if (!_invClickStart) return;
     const inventory = state.inventory;
     const dx = e.clientX - _invClickStart.x;
@@ -91,9 +95,11 @@ export function installInventoryDrag(state) {
       _invDrag.ghostEl.style.left = e.clientX + 'px';
       _invDrag.ghostEl.style.top = e.clientY + 'px';
     }
-  });
+  };
+  document.addEventListener('mousemove', invMouseMove);
+  state.addTeardown(() => document.removeEventListener('mousemove', invMouseMove));
 
-  document.addEventListener('mouseup', function invMouseUp(e) {
+  const invMouseUp = function(e) {
     if (!_invClickStart) return;
     const inventory = state.inventory;
     const dx = e.clientX - _invClickStart.x;
@@ -268,5 +274,7 @@ export function installInventoryDrag(state) {
         state.updateHotbarUI();
       }
     }
-  });
+  };
+  document.addEventListener('mouseup', invMouseUp);
+  state.addTeardown(() => document.removeEventListener('mouseup', invMouseUp));
 }

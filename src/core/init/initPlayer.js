@@ -180,15 +180,19 @@ export async function initPlayer(game) {
     }, 100);
   }
 
-  // Handle mouse movement for camera rotation (pointer lock) — must be after player exists
-  document.addEventListener('mousemove', (e) => {
+  // Handle mouse movement for camera rotation (pointer lock) — must be after player exists.
+  // D-50: hoisted out of the `addEventListener` call so the same reference can be handed
+  // to `removeEventListener`; an inline arrow removes nothing.
+  const onCameraLook = (e) => {
     if (document.pointerLockElement === state.canvas) {
       player.yaw -= e.movementX * state.sensitivity;
       player.pitch -= e.movementY * state.sensitivity;
       // Clamp pitch to avoid flipping at gimbal lock limits
       player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
     }
-  });
+  };
+  document.addEventListener('mousemove', onCameraLook);
+  state.addTeardown(() => document.removeEventListener('mousemove', onCameraLook));
 
   // Initialize Game Engine
   game.loadingStatus.textContent = 'Starting game loop...';

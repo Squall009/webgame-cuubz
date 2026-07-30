@@ -257,11 +257,12 @@ assertEquals(keyWriters.join(', '), ALLOWED_REJOIN_WRITERS.join(', '),
 //
 //   ChunkManager.js — the D-19 chunk flush: dirty chunks and their manifest, in one
 //                     transaction. Nothing to do with sessions.
-//   main.js         — the rejoin record, and the only writer of it. PR 19 moves this
-//                     one to src/index.js, at which point this list changes with it.
+//   Bootstrap.js    — the rejoin record, and the only writer of it. This was `main.js`
+//                     until PR 18 deleted that file; the handler itself is unchanged,
+//                     still registered once, at module evaluation.
 //
 // Counted by file and by occurrence, because D-43's two were in the same file.
-const ALLOWED_BEFOREUNLOAD = ['src/engine/world/ChunkManager.js', 'src/main.js'];
+const ALLOWED_BEFOREUNLOAD = ['src/core/Bootstrap.js', 'src/engine/world/ChunkManager.js'];
 const beforeUnloadFiles = [];
 let beforeUnloadCount = 0;
 for (const f of srcFiles) {

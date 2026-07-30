@@ -67,6 +67,11 @@ export class GameState {
     this.skybox = null;
     this.biomeEffects = null;
     this.firstPersonHand = null;
+    // PR 18 — the eye-level camera position for the current frame. `ViewStep` assigns a
+    // **fresh** `THREE.Vector3` here every frame (it was a `const` in the old one-function
+    // loop, main.js:494) and `WorldStep` reads it for `biomeEffects.setCameraPosition`
+    // (main.js:717). Declared, not grown — see the header.
+    this.camPos = null;
 
     // ── Input ─────────────────────────────────────────────────────────────
     this.keyboard = null;
@@ -101,6 +106,12 @@ export class GameState {
     this.mobIntegration = null;
 
     // ── Multiplayer ───────────────────────────────────────────────────────
+    // PR 18 — the live `SessionManager`. The render loop read a `main.js` module `let`
+    // called `sessionManager` at nine points (main.js:443, 444, 603, 625–627, 639, 642,
+    // 647); those are `state.session` now. `Game.init()` sets it once, at the top, from
+    // `deps.sessionManager` — it is always assigned before a session starts and never
+    // reassigned during one. Declared, not grown — see the header.
+    this.session = null;
     this.playerSync = null;
     this.playerListHUD = null;
     this.chunkStreamer = null;
@@ -143,11 +154,54 @@ export class GameState {
     this.shadowMissingCount = 0;
     this.noPbrCount = 0;
 
+    // ── Session teardown (PR 18) ──────────────────────────────────────────
+    //
+    // `BUGS.md` **D-50**: eight listeners were added on every `startGame()` and nothing
+    // removed them, so a player who exited to the menu and started again carried a
+    // second set closing over the *previous* `GameState`. They were inert — each guards
+    // on a `Game` whose `running` is false, or on an `inventoryOpen` that stays false —
+    // but they accumulated one set per session, along with the 30 s save interval.
+    //
+    // Every `addEventListener` an init step makes for the session pushes its remover
+    // here through `addTeardown()`, and `Game.stop()` drains it through
+    // `runTeardowns()` — i.e. on exit-to-menu, which is exactly when the session ends.
+    // The pause menu's own `keydown` is **not** in here: it has to keep working while
+    // the game is paused, and `setupPauseMenu`'s returned cleanup already owns it.
+    //
+    // Declared, not grown — see the header.
+    /** @type {Array<function():void>} */
+    this.teardowns = [];
+
     // ── §4.2 shape ────────────────────────────────────────────────────────
     // `stats` is written by `updateDebugStats`; `systems` is the registry PR 20's
     // `System` base class and PR 18's `SystemRunner` populate. Empty until then.
     this.stats = { fps: 0, activeChunks: 0, dirtyCount: 0 };
     this.systems = new Map();
+  }
+
+  /**
+   * Register one session-scoped teardown — in practice a `removeEventListener` call
+   * bound to the **same function reference** that was added. D-50.
+   * @param {function():void} fn
+   */
+  addTeardown(fn) {
+    if (typeof fn === 'function') this.teardowns.push(fn);
+  }
+
+  /**
+   * Run every registered teardown and empty the list. Called by `Game.stop()` and
+   * nowhere else. `splice(0)` empties first, so a throw in one remover cannot leave
+   * the rest queued for a second `stop()`, and a teardown that registers another is
+   * not lost.
+   */
+  runTeardowns() {
+    for (const fn of this.teardowns.splice(0)) {
+      try {
+        fn();
+      } catch (e) {
+        console.warn('[GameState] teardown failed:', e && e.message);
+      }
+    }
   }
 
   /** `'survival'` | `'creative'` — owned by the `Game` instance, read through. */

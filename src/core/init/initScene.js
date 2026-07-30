@@ -56,12 +56,33 @@ export async function initScene(game) {
   const canvas = state.canvas = renderer.domElement;
   const mouse = state.mouse = new MouseInput(canvas);
 
-  // Request pointer lock on canvas click
-  canvas.addEventListener('click', () => {
+  // D-50 — the three input classes each carry an idempotent `dispose()` that removes
+  // everything they bound, and **not one of them had a call site.** PR 18's adversarial
+  // pass found them: the row's "eight `document` listeners" was an undercount, because
+  // it counted the ones written inline in `startGame()` and not the ones a constructor
+  // registers. `KeyboardInput` adds `keydown`/`keyup` on `document`, `MouseInput` adds
+  // `pointerlockchange` on `document`, and `TouchInput` binds thirteen handlers to the
+  // touch-control buttons in `index.html` — all three sets outlive the session, and the
+  // touch ones outlive the canvas as well. The keyboard set is the one that was not
+  // inert: `_onKeyDown` calls `e.preventDefault()` on `Space` with no focus guard, so
+  // one exit to the menu left a stale handler eating the space bar in the character-name
+  // and world-name inputs.
+  state.addTeardown(() => state.keyboard && state.keyboard.dispose());
+  state.addTeardown(() => state.touch && state.touch.dispose());
+  state.addTeardown(() => mouse.dispose());
+
+  // Request pointer lock on canvas click. Named, and registered for teardown (D-50):
+  // an inline arrow cannot be removed, because `remove` would be handed a second
+  // function. This canvas is replaced on the next session (step 1 empties the
+  // container), so the removal is belt-and-braces rather than the whole leak — the
+  // `document`-level listeners and `TouchInput`'s thirteen are the leak.
+  const onCanvasClick = () => {
     if (!mouse.locked) {
       mouse.requestPointerLock();
     }
-  });
+  };
+  canvas.addEventListener('click', onCanvasClick);
+  state.addTeardown(() => canvas.removeEventListener('click', onCanvasClick));
 
   // Initialize Terrain Generation (handled internally by ChunkManager)
   state.sensitivity = 0.002;

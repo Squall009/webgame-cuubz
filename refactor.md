@@ -2902,6 +2902,21 @@ const SYSTEM_ORDER = ['inputManager','blockInteraction','player','mobSystem','dr
 - **Also owns `BUGS.md` D-42** — `applyPerfSettings()` in `main.js` is defined and never called; `startGame()` applies both settings inline instead. Either the inline sites call it or it is deleted. Nothing may still be dead when `main.js` goes.
 - **Accept:** `js/main.js` gone. `src/index.js` under 50 lines. Every extracted file under 400 lines. Escape → pause → resume/exit/settings all work.
 
+#### PR 18 outcome — `main.js` is gone
+
+`src/main.js` was 1,401 lines and is **deleted**. The render loop is `src/engine/loop/RenderLoop.js` (105) + `SystemRunner.js` (45) + six ordered steps under `steps/` (52–211); `updateDebugStats` and its three FPS `let`s are `src/ui/hud/DebugStats.js` (60); the pause menu is `src/ui/overlays/PauseMenu.js` (377); the auto-rejoin block is `src/multiplayer/AutoRejoin.js` (156); everything else is `src/core/Bootstrap.js` (351), which exports `start()`. `src/index.js` is 64 lines and **the `< 50` box does not close** — 26 of them are D-25's ten side-effect imports and the comment that explains why they are deliberately in the module graph, and those belong to **PR 20** (decision 41). Ordering was preserved exactly: `sendMove` is still inside the player step between `player.update()` and the touch-look, the draw is still in the middle of `WorldStep` with the tooltip raycast and `updateRenderChunks` after it, and `frameCount++` is still the frame's last statement — verified statement-by-statement against the old file, not asserted. `camPos` and `session` are **declared** `GameState` fields (decisions 36, 37; decision 23 binds). **D-42** was deleted, **D-54** now has its call site and **D-50** has a teardown registry — and D-50's row said eight listeners where there are **eleven**: the three input classes each carried an idempotent `dispose()` that nothing had ever called, and the keyboard one was not inert (`preventDefault()` on `Space` with no focus guard, so one exit to the menu left a stale handler eating the space bar in the character-name field). That undercount, and a `try/catch` that would have let a failed save skip the teardown it was meant to guarantee, were both found by the **adversarial verification pass**, not by the implementation — the third consecutive PR where a structural check beat reading. Fixing them pushed `Game.js` from 400 to 410, so decision 33 applied a third time and `savePlayerState()` is `src/core/savePlayerState.js`. Seven new ledger rows, all owned. One `test:e2e` run went red on the world-seed assertion and the identical tree passed it on the run before and the run after; that is **D-62**, logged rather than re-run into silence.
+
+| Gate | Before | After |
+|---|---|---|
+| `npm test` | 53/53 + 4 quarantined | **53/53 + 4 quarantined** |
+| `npm run lint` | 0 errors, 171 warnings | **0 errors, 170 warnings** (−1 = D-42) |
+| `npm run build` | exit 0 | **exit 0** |
+| `npm run test:e2e` (dist) | 189 / 0 | **189 / 0** |
+| `npm run test:e2e:vite` | 189 / 0 | **189 / 0** |
+| `src/main.js` | 1,401 lines | **deleted** |
+| `src/index.js` | 56 lines | **64** (26 are PR 20's D-25 block) |
+| largest extracted file | 399 (`Game.js`) | **394 (`Game.js`)**; 377 (`PauseMenu.js`) is the largest new file |
+
 ### 8.7 The remaining plan was collapsed — 17 PRs to 7 (owner, 2026-07-30)
 
 **The owner cut this after PR 16.** Sixteen PRs had landed; seventeen remained; the plan

@@ -52,6 +52,7 @@
 import { GameState } from './GameState.js';
 import { BlockPalette } from './BlockPalette.js';
 import { CuubzLogger } from '../util/Logger.js';
+import { savePlayerState as _savePlayerState } from './savePlayerState.js'; // split for the ceiling
 
 import { initScene } from './init/initScene.js';                   // steps 1–5
 import { initSkybox } from './init/initSkybox.js';                 // step 6
@@ -127,8 +128,6 @@ export class Game {
     this.requestedMode = null;
     /** In a session, not hosting it. Step 7 computes it; step 8 reads it. */
     this.isJoiningClient = false;
-    /** Session teardown, installed by `init()`; run by `stop()`. */
-    this._onStop = null;
   }
 
   // ============================================================
@@ -150,6 +149,7 @@ export class Game {
   async init(mode) {
     const deps = this.deps;
     const log = deps.log || _gameLog;
+    this.state.session = deps.sessionManager; // PR 18 — the loop's nine reads; see GameState.js
     this.requestedMode = mode;
     log(`[Cuubz] Starting game in ${mode} mode...`);
 
@@ -250,34 +250,17 @@ export class Game {
   /**
    * Persist the selected character's inventory, equipment and spawn point.
    *
-   * Called every 30 s, on Escape, and from `stop()` — `DEPLOY.md` §7. It re-reads the
-   * selected character rather than using `state.currentCharacter`, exactly as the
-   * `startGame` closure did.
+   * Called every 30 s, on Escape, and from `stop()` — `DEPLOY.md` §7. The body is
+   * `./savePlayerState.js`; it moved out for the 400-line ceiling (decision 33 again) and
+   * this delegate is what keeps all three call sites unchanged.
    */
   savePlayerState() {
-    const state = this.state;
-    const deps = this.deps;
-    const selected = deps.characterManager ? deps.characterManager.getSelectedCharacter() : null;
-    if (!selected) return;
-
-    // Save inventory
-    const serialized = state.inventory.serialize();
-    selected.inventory = serialized.slots;
-    selected.equipment = serialized.equipment;
-
-    // Save spawn point
-    selected.spawnPoints = selected.spawnPoints || {};
-    selected.spawnPoints[state.currentWorld.id] = {
-      x: state.player.position.x,
-      y: state.player.position.y,
-      z: state.player.position.z,
-    };
-
-    // D-37: was `characterManager.persistence.saveCharacter(...)`. `state.persistence` is
-    // the same object and is set at step 8; reading it here is what keeps that field honest.
-    if (!state.persistence) return;
-    state.persistence.saveCharacter(selected);
-    (deps.log || _gameLog)('[Cuubz] Saved player state');
+    // `this.deps` is passed BY REFERENCE, never spread: `gameDeps` is
+    // `Object.create(uiDeps, …)`, so `characterManager` / `worldManager` / `perfSettings`
+    // / `sessionManager` are live getters on the **prototype** and a spread would copy
+    // only the own properties and drop every one of them — `getSelectedCharacter()` would
+    // never be reached and the save would silently do nothing. That is D-49's exact shape.
+    _savePlayerState(this.state, this.deps);
   }
 
   // ============================================================
@@ -308,13 +291,25 @@ export class Game {
    */
   stop() {
     const state = this.state;
-    if (state.inventory && state.player) this.savePlayerState();
-    if (state.droppedItems) state.droppedItems.clear();
+    // The save is the only fallible statement here — it reaches `inventory.serialize()`,
+    // `currentWorld.id` and `persistence.saveCharacter()`. It gets its own guard so that a
+    // throw cannot skip the two teardowns below it: `clearInterval` is the only thing that
+    // stops the 30 s timer (**D-54**) and `runTeardowns()` is the only thing that removes
+    // the session's listeners (**D-50**), so letting a failed save carry them away would
+    // silently reinstate both of the bugs this method exists to close, behind one warning.
+    try {
+      if (state.inventory && state.player) this.savePlayerState();
+      if (state.droppedItems) state.droppedItems.clear();
+    } catch (e) {
+      console.warn('[Game] stop(): save/clear failed, continuing teardown:', e && e.message);
+    }
     if (state.saveIntervalId !== null) {
       clearInterval(state.saveIntervalId);
       state.saveIntervalId = null;
     }
-    if (this._onStop) this._onStop();
+    // D-50 — drain the session's listener removers, before `running` goes false. (The
+    // `_onStop` hook on this line was declared in PR 17 and never assigned; this is it.)
+    state.runTeardowns();
     this.running = false;
     _gameLog('[Game] Stopped');
   }
