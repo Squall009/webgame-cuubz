@@ -14,18 +14,26 @@ name: CI
 #                               every test that requires a source file dies on "Cannot
 #                               use import statement outside a module". PR 31 removes
 #                               both when Vitest arrives.
-#   2. npm run check-globals   — scripts/check-globals.js. Until PR 9 this counted
-#                               duplicate top-level symbols across index.html's 65
-#                               classic <script> tags — the check that found the eight
-#                               silent global collisions PR 3 fixed. There is no shared
-#                               global scope left to count duplicates in, so PR 9
-#                               repointed it at the boundary itself: one module entry
-#                               and zero classic script tags, no window.* outside
-#                               src/testBridge.js, no CommonJS in src/, and every
-#                               module reachable from src/index.js.
-#                               PR 11 DELETES the script and this step together, in the
-#                               same commit that turns on ESLint no-undef. Do not leave
-#                               it standing as a step that checks less than no-undef.
+#   2. npm run lint            — ESLint 9 flat config, `no-undef: error`. This REPLACED
+#                               scripts/check-globals.js in PR 11, which deleted the
+#                               script and its step in the same commit. That script had
+#                               counted duplicate top-level symbols across index.html's
+#                               65 classic <script> tags (the check that found the eight
+#                               silent collisions PR 3 fixed), and PR 9 repointed it at
+#                               the module boundary once there was no shared global scope
+#                               left to find duplicates in. `no-undef` is strictly
+#                               stronger and it caught two real bugs on its first run:
+#                               D-32 (`sumBase`/`sumAmp` assigned without declaration —
+#                               a ReferenceError under module strict mode) and D-31
+#                               (`inventoryOpen` referenced from a scope it was never in,
+#                               so Escape never closed the inventory).
+#                               Warnings do not fail; errors do. Do NOT disable no-undef
+#                               to make this green — in an ES module an unresolved name
+#                               is a bug, not a style opinion.
+#                               `prettier` ships as `npm run format` and is deliberately
+#                               NOT a CI step: nothing has been reformatted, and doing it
+#                               would touch every file in the repo right before Phase 2
+#                               moves all of it.
 #   3. npm run build           — added by PR 7 with the script itself, as promised
 #                               below. Since PR 9 it is a real gate: index.html loads
 #                               one ES module, so an unresolvable import, a duplicate
@@ -33,17 +41,7 @@ name: CI
 #                               It also produces the artifact PR 10 deploys and that
 #                               `npm run test:e2e` now runs against — D-24 closed.
 #
-# Deliberately NOT here yet — the script does not exist:
-#
-#   npm run lint    → added by PR 11 (ESLint 9 flat config + Prettier)
-#
-# refactor.md §5 PR 5 lists it in the step chain, but `npm run <missing-script>`
-# exits 1, so adding it now would make CI red on its first run, and adding it
-# with `|| true` would be a gate that reports success without checking anything.
-# PR 11 adds its step in the same commit that adds the script — the idiom PR 7
-# followed for `build`.
-#
-# Deliberately NOT here for a different reason — the script DOES exist:
+# Deliberately NOT here — the script exists but the check is not one this job should make:
 #
 #   npm run test:e2e  → the DEPLOY.md §7 save/load harness (PR 6b,
 #                       test/e2e/saveLoad.js). Runs a real browser via
@@ -55,7 +53,13 @@ name: CI
 #                       D-15 and D-14 were all fixed and their blocks rewritten
 #                       into the assertions the fixes make true.)
 #
-#   npm run test:e2e:vite → the same 150 assertions against `npm run dev` instead
+#   npm run format:check → prettier. Not a gate: nothing in this repo has been
+#                       reformatted yet, and running it across 34,000 lines would touch
+#                       every file right before Phase 2 starts moving all of them.
+#                       Format what you touch. PR 26/27 (HTML/CSS) is the natural point
+#                       to reconsider.
+#
+#   npm run test:e2e:vite → the same 152 assertions against `npm run dev` instead
 #                       of test/e2e/staticServer.js, added by PR 7. Same browser
 #                       requirement, same owner.
 #
@@ -65,13 +69,22 @@ name: CI
 #                       `browser-actions/setup-chrome` (or playwright's own
 #                       docker image) plus the SwiftShader flags already in
 #                       test/e2e/saveLoad.js, on a separate job so it cannot slow
-#                       the two gates below.
+#                       the three gates below.
 #
 # test/run_tests.sh globs test/test_*.js — flat, non-recursive — so nothing under
 # test/e2e/ reaches `npm test` either. That is deliberate; keep it that way.
 
+# D-22, closed by PR 11. `on: push` with no branch filter PLUS `on: pull_request` meant a
+# same-repo PR branch ran CI **twice** on every push — observed, not predicted, once PR #1
+# opened. PR 7 and PR 9 both edited this file and deliberately left it alone: narrowing it
+# while `refactor/phase-0` was the only branch being worked on would have removed the
+# push-triggered feedback loop the whole plan depends on, and it was PR 11's call to make.
+#
+# It is PR 11 now, `main` is about to start moving, and the loop is not lost — every push
+# to a branch with an open PR still triggers `pull_request`. What stops is the duplicate.
 on:
   push:
+    branches: [main]
   pull_request:
 
 # A newer push to the same ref supersedes the run already in flight.
@@ -81,7 +94,7 @@ concurrency:
 
 jobs:
   test:
-    name: test + check-globals + build
+    name: test + lint + build
     runs-on: ubuntu-latest
 
     # The suite runs in ~20s but stands up real WebSocket servers on fixed ports and
@@ -124,11 +137,13 @@ jobs:
         shell: bash
         run: npm test
 
-      # PR 9 repointed this from duplicate-global counting to the module boundary;
-      # PR 11 deletes it in the same commit that adds no-undef. See the note above.
-      - name: Module boundary
+      # Replaced scripts/check-globals.js, which PR 11 deleted in this same commit.
+      # `no-undef` is the strictly stronger check and it caught two real bugs on its first
+      # run (D-31, D-32). Warnings do not fail the build; errors do. Do not disable
+      # no-undef to make this green — an unresolved name in an ES module is a bug.
+      - name: Lint
         shell: bash
-        run: npm run check-globals
+        run: npm run lint
 
       # Added by PR 7 in the same commit as the script, per the note above. Since PR 9
       # this compiles the whole module graph — an unresolvable import, a duplicate

@@ -1,0 +1,10 @@
+# Prettier is available as `npm run format` but is NOT wired into CI, and nothing in
+# this repo has been reformatted by it yet. refactor.md §6 PR 11 asks for the tool and
+# the scripts; running it across 34,000 lines would produce a diff that touches every
+# file in the project and make `git blame` useless for the rest of the refactor, in the
+# PR right before Phase 2 starts moving all of it anyway. Format what you touch.
+dist
+node_modules
+textures
+test/e2e/artifacts
+package-lock.json

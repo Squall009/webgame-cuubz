@@ -16,7 +16,9 @@ const { SurvivalSystem, STAMINA_COSTS } = require('../src/game/systems/SurvivalS
 const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../src/engine/world/ChunkData.js');
 
 // Globals needed by player.js
-global.MIN_Y = -64;
+// PR 9/11: Player.js imports MIN_Y from ChunkData.js, so a global stub no longer reaches
+// it. Read the real constant — strictly stronger, and consistent with SEA_LEVEL below.
+const { MIN_Y } = require('../src/engine/world/ChunkData.js');
 // PR 9: Player.js imports SEA_LEVEL from ChunkData.js, so a global stub no longer
 // reaches it. The assertions read the real constant, which is strictly stronger.
 const { SEA_LEVEL } = require('../src/engine/world/ChunkData.js');

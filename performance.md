@@ -60,7 +60,7 @@ Settings are saved to `localStorage` using the key `cuubz:settings` (JSON object
 
 ## Architecture
 
-### New File: `js/renderer/performanceSettings.js`
+### New File: `src/engine/renderer/PerformanceSettings.js`
 
 A single class `PerformanceSettings` that:
 
@@ -258,7 +258,7 @@ Add styles for the new performance section:
 ## Implementation Order
 
 ### Phase 1: Core Settings Module (1 file)
-- [ ] Create `js/renderer/performanceSettings.js`
+- [ ] Create `src/engine/renderer/PerformanceSettings.js`
   - `PerformanceSettings` class with load/save/get/set
   - `apply()` method for render distance and shadows (cheap settings)
   - localStorage key: `cuubz:settings`
@@ -290,7 +290,7 @@ Add styles for the new performance section:
 ### Phase 4: UI Wiring (modify 3 files)
 - [ ] `index.html`: Add performance section to `#settings-screen` and `#pause-menu`
 - [ ] `css/style.css`: Add styles for selects and checkbox in settings
-- [ ] `js/main.js`:
+- [ ] `src/main.js`:
   - Create `performanceSettings` instance at top level
   - In `init()`, call `performanceSettings.load()`
   - In `initMenuNavigation()`, wire main menu settings controls
@@ -300,7 +300,7 @@ Add styles for the new performance section:
   - Sync UI values between menus (both read from same source)
 
 ### Phase 5: StartGame Integration (modify 1 file)
-- [ ] `js/main.js` → `startGame()`:
+- [ ] `src/main.js` → `startGame()`:
   - After renderer and chunkManager are created, call `performanceSettings.apply(renderer, chunkManager)`
   - This ensures saved settings are applied before the game loop starts
   - If texture resolution or advanced shading differ from defaults, trigger the expensive rebuild path
@@ -321,14 +321,14 @@ Add styles for the new performance section:
 
 | File | Action | Changes |
 |------|--------|---------|
-| `js/renderer/performanceSettings.js` | **NEW** | Settings class with load/save/apply |
-| `js/renderer/voxelRenderer.js` | Modify | `setShadowQuality()`, `rebuildAtlasAndMaterials()`, skip shadow render when off |
-| `js/renderer/textureAtlas.js` | Modify | Configurable `tileSize`, rebuild support |
-| `js/renderer/pbrShader.js` | Modify | Simplified shader variants, `advancedShading` flag in factory |
-| `js/chunkmanager.js` | Modify | `setRenderDistance()` method (may already exist, verify) |
+| `src/engine/renderer/PerformanceSettings.js` | **NEW** | Settings class with load/save/apply |
+| `src/engine/renderer/VoxelRenderer.js` | Modify | `setShadowQuality()`, `rebuildAtlasAndMaterials()`, skip shadow render when off |
+| `src/engine/renderer/TextureAtlas.js` | Modify | Configurable `tileSize`, rebuild support |
+| `src/engine/renderer/PBRShader.js` | Modify | Simplified shader variants, `advancedShading` flag in factory |
+| `src/engine/world/ChunkManager.js` | Modify | `setRenderDistance()` method (may already exist, verify) |
 | `index.html` | Modify | Performance section in settings screen + pause menu |
 | `css/style.css` | Modify | Styles for selects, checkbox, performance section header |
-| `js/main.js` | Modify | Settings instance, UI wiring in menu nav + pause menu, apply in startGame |
+| `src/main.js` | Modify | Settings instance, UI wiring in menu nav + pause menu, apply in startGame |
 
 ---
 

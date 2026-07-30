@@ -26,15 +26,15 @@ C key pressed
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `js/systems/crafting.js` | **Rewrite** | Expand recipes, add `requiresTable` flag, add `canCraftRecipe()` filter |
+| `src/game/systems/CraftingSystem.js` | **Rewrite** | Expand recipes, add `requiresTable` flag, add `canCraftRecipe()` filter |
 | `index.html` | **Edit** | Add `#crafting-screen` overlay HTML |
 | `css/style.css` | **Edit** | Add crafting UI styles |
-| `js/main.js` | **Edit** | Wire C key, `toggleCraftingMenu()`, `renderCraftingUI()`, `checkNearCraftingTable()` |
-| `js/input/keyboard.js` | **No change** | C key is already tracked in `this.keys`; handled in main.js gameKeyHandler |
+| `src/main.js` | **Edit** | Wire C key, `toggleCraftingMenu()`, `renderCraftingUI()`, `checkNearCraftingTable()` |
+| `src/engine/input/Keyboard.js` | **No change** | C key is already tracked in `this.keys`; handled in main.js gameKeyHandler |
 
 ---
 
-## Phase 1 — Expand Recipe Definitions (`js/systems/crafting.js`)
+## Phase 1 — Expand Recipe Definitions (`src/game/systems/CraftingSystem.js`)
 
 ### 1A. Add `requiresTable` flag to every recipe
 
@@ -424,7 +424,7 @@ Add a new overlay div after the inventory screen:
 
 ---
 
-## Phase 4 — Game Integration (`js/main.js`)
+## Phase 4 — Game Integration (`src/main.js`)
 
 ### 4A. Create CraftingSystem instance
 

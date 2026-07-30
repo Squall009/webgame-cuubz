@@ -256,42 +256,41 @@ for (const [file, name] of [
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// The class-level guard: index.html must have ZERO duplicate top-level symbols.
-// This is the check that would have caught all eight in the first place.
+// The class-level guard used to be here.
 // ═══════════════════════════════════════════════════════════════════
-console.log('--- Class-level guard: scripts/check-globals.js ---');
+//
+// This block shelled out to `scripts/check-globals.js` and asserted its output. PR 3
+// wrote that script to prove no name was declared twice across index.html's 65 classic
+// <script> tags; PR 9 repointed it at the module boundary, once there was no shared
+// global scope left for duplicates to exist in. **PR 11 deleted it**, in the same commit
+// that turned on ESLint's `no-undef` — the strictly stronger replacement, and what
+// refactor.md §6 PR 11 calls "the payoff". A gate that checks less than the linter does
+// still reads as coverage, which is worse than not having it.
+//
+// The class-level guard is `npm run lint`, and it is a CI step. Two things it caught on
+// its first run that check-globals could not have seen:
+//
+//   D-32  `sumBase` / `sumAmp` assigned without a declaration in BiomeSystem.js — an
+//         implicit global under a classic script, a ReferenceError under module strict
+//         mode.
+//   D-31  `inventoryOpen` referenced from a scope it was never in, so Escape never
+//         closed the inventory.
+//
+// One thing lint does NOT replace, which is why index.html is still asserted below: the
+// linter has no opinion about HTML. A classic `<script src>` tag added back to
+// index.html would hand whatever it loads a shared global scope again, silently, and
+// `no-undef` would never see it.
+const indexHtml = require('fs').readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const scriptTags = [...indexHtml.matchAll(/<script\b([^>]*)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>/gi)];
+const classicTags = scriptTags.filter((m) => !/\btype\s*=\s*["']module["']/i.test(m[1] + m[3]));
 
-let checkOutput = '';
-let checkFailed = false;
-try {
-  checkOutput = execFileSync(
-    process.execPath,
-    [path.join(__dirname, '..', 'scripts', 'check-globals.js')],
-    { encoding: 'utf8' }
-  );
-} catch (e) {
-  checkFailed = true;
-  checkOutput = `${e.stdout || ''}${e.stderr || ''}`;
-}
-
-// PR 9 repointed this gate. There is no shared global scope left to find duplicates in
-// — index.html loads one module — so it now asserts the thing that would bring the
-// shared scope back: a classic <script src> tag, a window.* assignment outside the one
-// allowlisted bridge, leftover CommonJS in src/, or a module nobody imports. Read the
-// header of scripts/check-globals.js. PR 11 deletes the script and this block together,
-// in the same commit that turns on `no-undef`.
-assertFalse(checkFailed, 'check-globals.js exits 0 (module boundary intact)');
+assertEquals(scriptTags.length, 1, 'index.html loads exactly one <script src>');
+assertEquals(classicTags.length, 0,
+  'index.html loads NO classic <script src> — a classic tag reinstates the shared global scope this file exists to police');
 assert(
-  /Module boundary intact/.test(checkOutput),
-  'check-globals.js reports the module boundary intact'
+  /src="\/src\/index\.js"/.test(indexHtml),
+  'index.html\'s single module entry is /src/index.js'
 );
-assert(
-  /index\.html: 1 module entry, 0 classic <script src> tags/.test(checkOutput),
-  'index.html loads exactly one module entry and no classic scripts'
-);
-if (checkFailed) {
-  console.error('\n  check-globals.js output:\n' + checkOutput.split('\n').map((l) => '    ' + l).join('\n'));
-}
 
 // ═══════════════════════════════════════════════════════════════════
 console.log(`\n===================================`);

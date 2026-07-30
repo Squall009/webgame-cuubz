@@ -8,7 +8,7 @@
 
 - [x] Create directory structure:
   ```
-  js/mobs/
+  src/game/mobs/
     mobManager.js
     mob.js
     mobDefinitions.js
@@ -31,15 +31,15 @@
         hurtAnim.js
     drops/
       mobDropTable.js
-  js/multiplayer/
+  src/multiplayer/
     mobSync.js      (deferred — build after single-player works)
   ```
-- [x] Add new `NAMED_ITEMS` to `js/systems/inventory.js` for mob drops:
+- [x] Add new `NAMED_ITEMS` to `src/game/systems/InventorySystem.js` for mob drops:
   - `rotten_flesh`, `bone`, `rabbit_hide`, `rabbit_meat`, `raw_venison`, `corrupt_fang`
-- [x] Add `DAMAGE_SOURCES.MOB` to `js/systems/survival.js`
-- [x] Add weapon `damage` property lookup `getAttackDamage()` in `js/systems/inventory.js`
+- [x] Add `DAMAGE_SOURCES.MOB` to `src/game/systems/SurvivalSystem.js`
+- [x] Add weapon `damage` property lookup `getAttackDamage()` in `src/game/systems/InventorySystem.js`
 - [x] Create `mobIntegration.js` module to wire into game loop
-- [x] Wire `mobIntegration.update()` call into `js/main.js`'s render loop
+- [x] Wire `mobIntegration.update()` call into `src/main.js`'s render loop
 
 ---
 
@@ -436,7 +436,7 @@
 
 ### 11a. Player Attacks Mobs
 
-- [ ] In `js/input/interaction.js` or `js/main.js`:
+- [ ] In `src/game/systems/BlockInteractionSystem.js` or `src/main.js`:
   - [ ] On left-click (or touch tap), after block raycast, also raycast against mob AABBs
   - [ ] `getMobsInRay(origin, direction, maxDist)`:
     - [ ] Iterate all active mobs within maxDist
@@ -493,7 +493,7 @@
 
 ## Phase 13 — Game Loop Integration
 
-### 13a. In `js/game.js`
+### 13a. In `src/core/Game.js`
 
 - [ ] Add `this.mobManager = null` in constructor
 - [ ] Add `initMobs(world, renderer)` method:
@@ -502,7 +502,7 @@
   - [ ] Wire references
 - [ ] In main update loop: `this.mobManager.update(deltaTime, playerPos, chunkManager)`
 
-### 13b. In `js/main.js`
+### 13b. In `src/main.js`
 
 - [ ] After chunk system is initialized and world is ready:
   - [ ] `game.initMobs(chunkManager, voxelRenderer)`
@@ -534,7 +534,7 @@
 
 ## Phase 16 — Polish & Balance
 
-- [ ] **Mob sound effects** integration with `js/audio/sfx.js`:
+- [ ] **Mob sound effects** integration with `src/engine/audio/SFX.js`:
   - [ ] Per-mob sounds: idle, hurt, death, attack
   - [ ] Positional audio (proximity-based volume)
   - [ ] Ambient mob sounds at distance (chirps, growls, rustles)
@@ -554,7 +554,7 @@
 
 - [ ] **Quest integration**:
   - [ ] `QUEST_TYPES.KILL` — track mob kills per quest
-  - [ ] Boss system already exists in `js/entities/boss.js` — mob system does not duplicate it
+  - [ ] Boss system already exists in `src/game/entities/Boss.js` — mob system does not duplicate it
 
 ---
 

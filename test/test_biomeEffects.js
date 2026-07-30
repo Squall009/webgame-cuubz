@@ -20,7 +20,8 @@
 // longer needs a global. These assertions still do (`instanceof THREE.Color`), and the
 // vendored js/three.min.js this used to read is gone — so the global comes from the
 // pinned npm package, which is the same r134 (test_threePin.js asserts that).
-global.THREE = require('three');
+const THREE = require('three');
+global.THREE = THREE;   // BiomeEffects reads it as a global in a few places
 
 const { BiomeEffects } = require('../src/engine/renderer/BiomeEffects.js');
 

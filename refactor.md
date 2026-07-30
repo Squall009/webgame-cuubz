@@ -1714,7 +1714,7 @@ aborts halfway leaves the operator guessing which half ran.
 (this section).
 
 
-### PR 11 — Lint + format
+### PR 11 — Lint + format ✅ DONE
 ```bash
 npm i -D eslint prettier
 ```
@@ -1751,15 +1751,173 @@ export default [
   PR 9 both left it alone deliberately; this is the PR that gets to make the call.
 - **Accept:** `npm run lint` exits 0. CI runs test + lint + build.
 
+**Outcome (2026-07-30):** ✅ DONE. `eslint@^10.8.0` and `prettier@^3.9.6` as devDependencies,
+`eslint.config.js` (flat), `.prettierrc`, `.prettierignore`, four scripts, a `Lint` step in
+CI, and **`scripts/check-globals.js` deleted** — script, CI step and its assertion block, in
+this same commit, exactly as [§4.2 of `PR8_HANDOFF.md`](./PR8_HANDOFF.md) and `BUGS.md`
+decision 8 required.
+
+| Gate | Result |
+|---|---|
+| `npm test` | **52/52 + 4 quarantined, exit 0** |
+| `npm run lint` | **0 errors, 178 warnings, exit 0** |
+| `npm run build` | exit 0 |
+| `npm run test:e2e` (built `dist/`) | **152 / 0** |
+| `npm run test:e2e:vite` (dev server) | **152 / 0 — identical** |
+
+#### `no-undef` found two real bugs on its first run, and one of them was live
+
+This is what §6 PR 11 means by "the payoff", and it collected immediately.
+
+**D-32 — `sumBase` and `sumAmp` were assigned without a declaration** in
+`BiomeSystem.js`'s `sampleBiomeParams`. In a classic script that is sloppy mode and the
+line silently creates two globals, which is why it worked for the entire life of the
+project. **An ES module is strict mode by definition**, so from the moment PR 9 landed the
+same line was `ReferenceError: sumBase is not defined` — and `sampleBiomeParams` is
+reached from `BiomeSystem.getBiomeAtWorldPos`, which `src/main.js` calls **twice per
+frame** (biome particle effects, and the biome lookup that decides which mobs a chunk
+spawns).
+
+It was invisible because **both call sites wrap it in `try { … } catch(e) {}`**
+(`main.js:4280`, `main.js:4397`). So biome effects fell back to plains forever and mob
+spawning got `undefined` for every biome, every frame, with no console error — which is
+also why all 152 e2e assertions passed over it. Proved rather than reasoned about: the
+pre-fix line reconstructed into a temporary module and imported as real ESM throws
+`ReferenceError: sumBase is not defined`; the fixed one returns
+`{"id":"plains","name":"Plains","isCold":false}`.
+
+**PR 9 introduced this and PR 11 caught it two commits later.** That is the argument for
+landing them in the same session, and it is the clearest possible answer to "was
+`no-undef` worth turning on".
+
+**D-31 — Escape never closed the inventory.** `main.js`'s pause handler read
+`if (typeof inventoryOpen !== 'undefined' && inventoryOpen)`, but `inventoryOpen` is a
+`let` declared inside `startGame()`'s `setTimeout` closure — one of the ~184 locals
+[§1.6](#16-renderloop-cannot-be-extracted-as-written) is about — and the handler is in a
+different scope. The name was never in scope there, so the guard was permanently false and
+pressing Escape with the inventory open paused the game and left the crafting screen on
+top of the pause menu. The dead block is deleted with a comment naming **PR 12** as the
+fix: making `inventoryOpen` reachable is precisely what hoisting the closure locals onto
+`GameState` does. The `inventoryOpen = false` line inside it would have thrown in strict
+mode if the guard had ever been true.
+
+Both are `BUGS.md` rows with owners. Neither is a lint-style complaint; both are the class
+of bug [§2](#2-why-modules-the-global-scope-is-actively-broken) is entirely about.
+
+#### `check-globals.js` is gone, and what replaced each half
+
+PR 3 wrote it to prove no name was declared twice across `index.html`'s 65 classic script
+tags. PR 9 repointed it at the module boundary once there was no shared global scope left
+for duplicates to exist in, under the ruling that it must not be allowed to go vacuous and
+must not be retired before its replacement existed. Both conditions are met now, so the
+script, its CI step and the block in `test_globalCollisions.js` that shelled out to it all
+went in one commit.
+
+`no-undef` subsumes the part that mattered — with modules, an unresolved name *is* a bug —
+but not all of it. **The linter has no opinion about HTML.** A classic `<script src>` added
+back to `index.html` would hand whatever it loads a shared global scope again, silently,
+and ESLint would never see it. So `test_globalCollisions.js` keeps three assertions of its
+own: `index.html` has exactly one `<script src>`, zero of them classic, and the one is
+`/src/index.js`. The per-bug regression assertions above it — the eight collisions PR 3
+fixed — are untouched and are still the reason that file exists.
+
+#### The config is three environments, not one
+
+`src/**` is browser ES modules; `server/`, `test/`, `scripts/` are Node CommonJS; and
+`src/engine/renderer/meshWorker.js` + `src/engine/world/workerGeneration.js` are **Web
+Worker classic scripts** with `sourceType: 'script'`. That last block is load-bearing
+rather than tidy: it makes an accidental `import` in either file a parse error at lint
+time instead of a silent runtime failure in a Blob worker, where the pool falls back to
+main-thread generation and only `console.warn`s ([§1.3](#13-web-workers-are-fetchblob-and-will-break-under-vite)).
+
+The globals lists are written out rather than pulled from the `globals` package: one fewer
+dependency, and an explicit list is a statement about what this code may reach for — the
+same job `check-globals.js` used to do, in the place that now enforces it. **Do not add a
+name to `globals` to silence a report.** It is for what the host provides; anything else
+undefined is a missing import or a typo, which is the whole point.
+
+#### 178 warnings, all `no-unused-vars`, deliberately not errors
+
+`refactor.md` §6 PR 11 specifies `'no-unused-vars': 'warn'` and that is what shipped.
+Roughly 60 are in `src/` and 118 in `test/` — mostly destructured imports a test stopped
+using. They do not fail the build. **This is logged as D-33 rather than left as noise**:
+a warning nobody acts on decays into the same "green means nothing" state this PR just
+deleted a script for. PR 32 restructures the tests and owns the test half; the `src/` half
+falls out of Phase 3 and 4 as each file is split.
+
+#### Prettier ships as a script and is not a gate
+
+`npm run format` / `npm run format:check` exist; **nothing has been reformatted and
+neither is in CI.** Running Prettier across 34,000 lines would touch every file in the
+project and make `git blame` useless for the rest of the refactor, in the PR immediately
+before Phase 2 starts moving all of it anyway. `.prettierignore` says so in a comment.
+Format what you touch. PR 26/27 is the natural point to reconsider.
+
+#### D-22 closed: `on: push` narrowed to `main`
+
+`on: push` with no branch filter **plus** `on: pull_request` ran CI twice on every push to
+a same-repo PR branch — observed, not predicted, from the moment PR #1 opened. PR 7 and
+PR 9 each edited `ci.yml` and deliberately left it alone, because narrowing it while
+`refactor/phase-0` was the only branch being worked on would have removed the
+push-triggered feedback loop the plan depends on. It is `push: branches: [main]` now. The
+loop is not lost: a push to a branch with an open PR still triggers `pull_request`. Only
+the duplicate stops.
+
+#### D-29 closed: five planning docs swept
+
+`IMPLEMENTATION_PLAN.md` (25), `multiplayer.md` (17), `MOB_PLAN.md` (11),
+`performance.md` (10) and `CRAFTING_PLAN.md` (5) had `js/…` paths that PR 9 deleted; all
+now point at their `src/` destinations. `DEPLOY.md` and `README.md` were done in PR 9.
+The `PR*_HANDOFF.md` files are deliberately untouched — they are dated records of what was
+true when they were written, and rewriting them would be falsifying a log.
+
+#### Deferred, with reasons
+
+- **D-27 — the 28 remaining `typeof X !== 'undefined'` guards. Owner moved from PR 11 to
+  PR 33.** They are constant-`true` now and read as protection they do not provide, but
+  **`no-undef` does not flag them** — they are syntactically valid, so PR 11 has no
+  mechanical leverage here at all; it would be a hand-audit wearing a lint PR's hat. And
+  each removal changes behaviour in exactly one environment: Node tests, where the guard
+  was short-circuiting code that now runs. PR 9 already fixed the one case with a live
+  consumer (`Skybox.init()`'s null dereference). PR 33 is the sweep-up PR, it already owns
+  removing the CommonJS shims — the same class of leftover — and by then PR 31 has moved
+  the suite to Vitest, so the Node coupling that makes these risky is gone.
+- **D-30 — `minify` stays `false`. Owner moved to PR 33.** Checked for the thing that
+  would make it unsafe (`Function.name` / `constructor.name` dependence — there is none;
+  every `.name` in `src/` is a data property). The reason to wait is not safety, it is
+  that **the deploy path has still never been executed.** The first real `./sync.sh` will
+  be debugged from browser devtools on a LAN box, and a readable bundle is worth more than
+  1.3 MB there. Once a deploy has happened, flipping it is one line with both e2e hosts as
+  the gate.
+
+**New files:** `eslint.config.js`, `.prettierrc`, `.prettierignore`. **Deleted:**
+`scripts/check-globals.js`. **Modified:** `package.json` (+2 devDependencies, `lint` /
+`lint:fix` / `format` / `format:check`, `check-globals` removed), `package-lock.json`,
+`.github/workflows/ci.yml` (Lint step replaces Module boundary; `on: push` narrowed;
+comment block rewritten), `src/engine/world/BiomeSystem.js` (D-32), `src/main.js` (D-31),
+`test/test_globalCollisions.js`, `test/test_logger.js` (was asserting against stubs —
+see below), `test/test_biomeEffects.js`, `test/test_playerMovementIntegration.js`,
+five planning docs, `BUGS.md`, `refactor.md` (this section).
+
+**One more vacuous test found and fixed.** `test_logger.js`'s four groups read
+`typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {}` and, in Node,
+**always took the fallback** — so all 15 assertions ran against an empty stub and the real
+class was never exercised. That was only possible because `CuubzLogger` was a script-tag
+global with no way to import it; PR 9 made it an export and `no-undef` made the vacuity
+visible. The assertions are unchanged and now mean something. 15/15, same as before.
+
+
 ### Phase 1 gate
 
 Tick a box only if you ran the thing — the rule PR 6d established for the Phase 0 gate
-(`BUGS.md` decision 2). Four are closed by PR 9.
+(`BUGS.md` decision 2). **Four of six are ticked at PR 11.** The two that are not both
+need something this workstation does not have: an SSH key, and a second human at a second
+browser.
 
-- [ ] `npm run dev`, `npm run build`, `npm test`, `npm run lint` all pass
-      — three of the four are green at PR 9 (`npm test` 52/52 + 4 quarantined,
-      `npm run build` exit 0, `npm run dev` serves 152/152 via `test:e2e:vite`).
-      `npm run lint` does not exist until PR 11.
+- [x] `npm run dev`, `npm run build`, `npm test`, `npm run lint` all pass
+      — `npm test` 52/52 + 4 quarantined; `npm run lint` 0 errors / 178 warnings, exit 0;
+      `npm run build` exit 0 and its output is what `npm run test:e2e` runs against;
+      `npm run dev` serves 152/152 via `test:e2e:vite`. All four at PR 11.
 - [x] `three` pinned to exactly `0.134.0`; no visual change (compare screenshots against the tag)
       — pin enforced by `test/test_threePin.js` (10 assertions, in CI), which since PR 9
       reads the revision out of the package's declared `module` entry, the copy the browser
@@ -1773,7 +1931,15 @@ Tick a box only if you ran the thing — the rule PR 6d established for the Phas
       fallback is silent: a broken worker URL gives you a working, single-threaded game that
       passes every other assertion.
 - [ ] Deploy works end to end and serves real JS
-      — **blocked on PR 10, and currently FALSE** (D-4). Needs SSH to `10.0.30.160`.
+      — **the only box in this gate that is not ticked, and it cannot be ticked from a
+      workstation with no SSH key.** PR 10 rewrote `sync.sh` and closed eleven `BUGS.md`
+      rows (D-2 … D-13), so the *script* now builds, deletes, backs up, restarts and
+      verifies — but **not one line of its remote half has been executed**. The served
+      layout (`dist/` plus a separate `textures/`) is rehearsed locally by all 152 e2e
+      assertions, because `test/e2e/staticServer.js` serves exactly that split. What is
+      unverified is `ssh`, `sudo`, `systemctl` and the filesystem at the other end.
+      **Run `./sync.sh --dry-run` first** — it prints every remote command and connects to
+      nothing — then deploy and work through `DEPLOY.md` §9.
 - [x] Pre-refactor worlds load; blocks persist across reload
       — the terrain round trip, the two-world H-1 regression test and the H-1 migration all
       pass byte-for-byte on both hosts after the conversion; `DB_NAME`, `DB_VERSION`, both

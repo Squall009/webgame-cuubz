@@ -57,7 +57,7 @@ textures/blocks/dirt.png           ← grass block bottom
 
 **Goal**: One file defines every block — ID, name, texture mapping, properties. No split between `BLOCK_TYPES` constants and `BLOCK_PROPERTIES`.
 
-### 1.1 Create `js/world/blockRegistry.js`
+### 1.1 Create `src/engine/world/BlockRegistry.js`
 
 This replaces `BLOCK_TYPES` and `BLOCK_PROPERTIES` from `chunkData.js`.
 
@@ -173,7 +173,7 @@ import { BLOCK_BY_ID, BLOCK_BY_NAME, MAX_BLOCK_ID } from './world/blockRegistry.
 ```
 
 **Files modified**: `chunkData.js` (simplified), `index.html` (add script tag for blockRegistry.js)
-**New file**: `js/world/blockRegistry.js`
+**New file**: `src/engine/world/BlockRegistry.js`
 **Deleted**: old `textures/*.png` files, old `textures/manifest.json`
 
 ---
@@ -389,7 +389,7 @@ class PBRTextureAtlas {
 
 **Goal**: Custom `ShaderMaterial` implementing simplified PBR with the 3 texture atlases.
 
-### 3.1 Create `js/renderer/pbrShader.js`
+### 3.1 Create `src/engine/renderer/PBRShader.js`
 
 ```js
 // ── Vertex Shader ──
@@ -647,7 +647,7 @@ export class PBRMaterialFactory {
 }
 ```
 
-**New file**: `js/renderer/pbrShader.js`
+**New file**: `src/engine/renderer/PBRShader.js`
 
 ---
 
@@ -882,19 +882,19 @@ Update script load order to match dependencies:
 
 ```html
 <!-- World data (block registry first — everything depends on it) -->
-<script src="js/world/blockRegistry.js"></script>
-<script src="js/world/noise.js"></script>
-<script src="js/world/biomeSystem.js"></script>
-<script src="js/world/workerGeneration.js"></script>
-<script src="js/world/chunkBinaryCodec.js"></script>
-<script src="js/chunkmanager.js"></script>
+<script src="src/engine/world/BlockRegistry.js"></script>
+<script src="src/engine/world/Noise.js"></script>
+<script src="src/engine/world/BiomeSystem.js"></script>
+<script src="src/engine/world/workerGeneration.js"></script>
+<script src="src/engine/world/ChunkBinaryCodec.js"></script>
+<script src="src/engine/world/ChunkManager.js"></script>
 
 <!-- Renderer (PBR shader before texture atlas) -->
-<script src="js/renderer/pbrShader.js"></script>
-<script src="js/renderer/textureAtlas.js"></script>
-<script src="js/renderer/chunkMeshBuilder.js"></script>
-<script src="js/renderer/meshWorker.js"></script>
-<script src="js/renderer/voxelRenderer.js"></script>
+<script src="src/engine/renderer/PBRShader.js"></script>
+<script src="src/engine/renderer/TextureAtlas.js"></script>
+<script src="src/engine/renderer/ChunkMeshBuilder.js"></script>
+<script src="src/engine/renderer/meshWorker.js"></script>
+<script src="src/engine/renderer/VoxelRenderer.js"></script>
 ```
 
 **Files modified**: `index.html`
@@ -952,22 +952,22 @@ Phase 7: Script Loading Order                 ← final wiring
 ### New Files
 | File | Purpose |
 |---|---|
-| `js/world/blockRegistry.js` | Single source of truth: all block IDs, names, textures, properties |
-| `js/renderer/pbrShader.js` | PBR vertex/fragment shaders + `PBRMaterialFactory` |
+| `src/engine/world/BlockRegistry.js` | Single source of truth: all block IDs, names, textures, properties |
+| `src/engine/renderer/PBRShader.js` | PBR vertex/fragment shaders + `PBRMaterialFactory` |
 | `scripts/generate-manifest.js` | Node.js script: scan `textures/blocks/` → `manifest.json` |
 | `textures/blocks/manifest.json` | Auto-generated block → texture mapping |
 
 ### Modified Files
 | File | Changes |
 |---|---|
-| `js/world/chunkData.js` | Remove `BLOCK_TYPES`/`BLOCK_PROPERTIES`, import from registry. Keep `Chunk` class + constants |
-| `js/renderer/textureAtlas.js` | Complete rewrite: triple atlas, manifest-driven, new naming |
-| `js/renderer/voxelRenderer.js` | Remove old lights, add `this.lighting` params for shader uniforms |
-| `js/chunkmanager.js` | Use `PBRMaterialFactory`, pass lighting uniforms, add emissive stream |
-| `js/renderer/chunkMeshBuilder.js` | Derive cutout/transparent sets from registry, add emissive stream |
-| `js/renderer/meshWorker.js` | Receive category sets from registry, add emissive stream |
-| `js/world/workerGeneration.js` | Use registry block IDs, add deepslate ores, proper tree types |
-| `js/world/biomeSystem.js` | Map biomes to new surface blocks |
+| `src/engine/world/ChunkData.js` | Remove `BLOCK_TYPES`/`BLOCK_PROPERTIES`, import from registry. Keep `Chunk` class + constants |
+| `src/engine/renderer/TextureAtlas.js` | Complete rewrite: triple atlas, manifest-driven, new naming |
+| `src/engine/renderer/VoxelRenderer.js` | Remove old lights, add `this.lighting` params for shader uniforms |
+| `src/engine/world/ChunkManager.js` | Use `PBRMaterialFactory`, pass lighting uniforms, add emissive stream |
+| `src/engine/renderer/ChunkMeshBuilder.js` | Derive cutout/transparent sets from registry, add emissive stream |
+| `src/engine/renderer/meshWorker.js` | Receive category sets from registry, add emissive stream |
+| `src/engine/world/workerGeneration.js` | Use registry block IDs, add deepslate ores, proper tree types |
+| `src/engine/world/BiomeSystem.js` | Map biomes to new surface blocks |
 | `index.html` | Reorder script loading, add new files |
 
 ### Deleted Files

@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-07-13
 > **Status:** Relay running on server with path-based routing. Client wired for movement, block changes, player sync, inventory sync. Ready for LAN testing.
-> **Scope:** All multiplayer code in `js/multiplayer/`, `server/`, `js/main.js` (SessionManager), and related tests.
+> **Scope:** All multiplayer code in `src/multiplayer/`, `server/`, `src/main.js` (SessionManager), and related tests.
 
 ---
 
@@ -101,7 +101,7 @@ All validation (block breaks, places, movement, inventory) happens on the host c
 The game client connects to the relay via a single URL configured in `main.js`:
 
 ```javascript
-// js/main.js — getRelayUrl()
+// src/main.js — getRelayUrl()
 // Fixed relay subdomain — works regardless of how the game is accessed.
 // Nginx handles TLS (wss://) and forwards to the relay on port 8765.
 const protocol = (typeof location !== 'undefined' && location.protocol === 'https:') ? 'wss' : 'ws';
@@ -114,7 +114,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 
 ## What's Implemented (Code Complete)
 
-### ✅ `js/multiplayer/client.js` — WebSocket Client
+### ✅ `src/multiplayer/Client.js` — WebSocket Client
 
 **Status:** Solid, well-designed, production-ready.
 
@@ -128,7 +128,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 - Auto-detects `ws` vs `wss` based on page protocol
 - Testable in Node.js with mock WebSocket factory
 
-### ✅ `js/multiplayer/host.js` — Client-Side Authoritative Host
+### ✅ `src/multiplayer/Host.js` — Client-Side Authoritative Host
 
 **Status:** Solid validation pipeline, wired into SessionManager.
 
@@ -140,7 +140,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 - Kick player support
 - Host-initiated actions bypass validation (correct — host is authoritative)
 
-### ✅ `js/multiplayer/playerSync.js` — Remote Player Rendering
+### ✅ `src/multiplayer/PlayerSync.js` — Remote Player Rendering
 
 **Status:** Complete implementation, instantiated in startGame().
 
@@ -152,7 +152,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 - Health bars (color-coded: green >60%, yellow >30%, red ≤30%)
 - Proper geometry/material disposal
 
-### ✅ `js/multiplayer/chunkStreamer.js` — Chunk Data Streaming
+### ✅ `src/multiplayer/ChunkStreamer.js` — Chunk Data Streaming
 
 **Status:** Complete standalone system, not yet integrated.
 
@@ -163,7 +163,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 - Tick-based streaming with max chunks per tick (4) to avoid flooding
 - Chunk states: UNLOADED → LOADING → LOADED → DIRTY → STREAMING
 
-### ✅ `js/multiplayer/inventorySync.js` — Inventory Synchronization
+### ✅ `src/multiplayer/InventorySync.js` — Inventory Synchronization
 
 **Status:** Complete with validation, wired into startGame().
 
@@ -174,7 +174,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 - Join/disconnect/save lifecycle with restore from save
 - Periodic sync timer (5s default interval)
 
-### ✅ `js/multiplayer/playerListHUD.js` — Player List UI
+### ✅ `src/multiplayer/PlayerListHUD.js` — Player List UI
 
 **Status:** Complete, DOM elements exist in `index.html`.
 
@@ -193,7 +193,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 - Graceful shutdown with SIGINT/SIGTERM handling
 - Health check endpoint (`/health`) and session listing (`/sessions`)
 
-### ✅ `js/main.js` — SessionManager Integration
+### ✅ `src/main.js` — SessionManager Integration
 
 **Status:** Fully wired. Multiplayer enabled.
 
@@ -226,7 +226,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 
 ### 1. ChunkStreamer Not Integrated
 
-**Location:** `js/multiplayer/chunkStreamer.js`
+**Location:** `src/multiplayer/ChunkStreamer.js`
 
 `ChunkStreamer` is a complete standalone system but is never instantiated. The host relies on the relay server's dumb forwarding of `CHUNK_DATA` messages.
 
@@ -236,7 +236,7 @@ Override via query parameter: `?relayUrl=wss://custom-host`
 
 ### 2. PlayerListHUD Not Connected to Live Data
 
-**Location:** `js/main.js`
+**Location:** `src/main.js`
 
 `PlayerListHUD` exists and renders, but is not connected to `PlayerSyncManager` for live player count updates.
 
@@ -443,12 +443,12 @@ curl http://relay-server:8765/sessions
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `js/multiplayer/client.js` | ~650 | WebSocket client, message queue, dual connection management, path-based routing |
-| `js/multiplayer/host.js` | ~650 | Host authority, validation, rate limiting, player tracking, speed validation |
-| `js/multiplayer/playerSync.js` | ~550 | Remote player rendering, interpolation, meshes |
-| `js/multiplayer/chunkStreamer.js` | ~500 | Chunk data streaming, RLE compression, multi-player LOD |
-| `js/multiplayer/inventorySync.js` | ~550 | Inventory sync, diff computation, validation |
-| `js/multiplayer/playerListHUD.js` | ~350 | Player list overlay UI, mobile-responsive |
+| `src/multiplayer/Client.js` | ~650 | WebSocket client, message queue, dual connection management, path-based routing |
+| `src/multiplayer/Host.js` | ~650 | Host authority, validation, rate limiting, player tracking, speed validation |
+| `src/multiplayer/PlayerSync.js` | ~550 | Remote player rendering, interpolation, meshes |
+| `src/multiplayer/ChunkStreamer.js` | ~500 | Chunk data streaming, RLE compression, multi-player LOD |
+| `src/multiplayer/InventorySync.js` | ~550 | Inventory sync, diff computation, validation |
+| `src/multiplayer/PlayerListHUD.js` | ~350 | Player list overlay UI, mobile-responsive |
 
 ### Server Files
 

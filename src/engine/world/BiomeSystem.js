@@ -174,7 +174,12 @@ export function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScal
   const blendedHum  = sumHum  / sumW;
 
   // Blend biome heights across grid.
-  sumBase = 0; sumAmp = 0; sumW = 0;
+  // PR 11 / D-32: these two were assigned without a declaration. In a classic script
+  // that silently created two GLOBALS; an ES module is strict mode by definition, so the
+  // same line is a ReferenceError the moment this function runs. Found by `no-undef`,
+  // which is exactly what §6 PR 11 says the rule is for.
+  let sumBase = 0, sumAmp = 0;
+  sumW = 0;
   let dominantBiome = null, dominantW = -1;
 
   for (let dx = -RADIUS; dx <= RADIUS; dx++) {

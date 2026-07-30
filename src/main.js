@@ -4503,11 +4503,25 @@ import { Game as CuubzGame } from './core/Game.js';
         const isPaused = !pauseMenu.classList.contains('hidden');
 
         if (!isPaused) {
-          // Close inventory if open
-          if (typeof inventoryOpen !== 'undefined' && inventoryOpen) {
-            inventoryOpen = false;
-            document.getElementById('crafting-screen').classList.add('hidden');
-          }
+          // D-31 — "close the inventory if it is open" USED TO BE HERE AND NEVER RAN.
+          //
+          //   if (typeof inventoryOpen !== 'undefined' && inventoryOpen) {
+          //     inventoryOpen = false;
+          //     document.getElementById('crafting-screen').classList.add('hidden');
+          //   }
+          //
+          // `inventoryOpen` is a `let` declared inside startGame()'s setTimeout closure
+          // (src/main.js:3326) — one of the ~184 locals refactor.md §1.6 is about. This
+          // handler is in a different scope, so the name was never in scope here and the
+          // `typeof` guard was permanently false: pressing Escape with the inventory open
+          // pauses the game and leaves the crafting screen on top of the pause menu.
+          //
+          // `no-undef` found it in PR 11 (§6 PR 11 calls the rule "the payoff" — this is
+          // what it bought). Deleted rather than fixed here because the fix is to make
+          // `inventoryOpen` reachable, which is exactly what **PR 12** does when it hoists
+          // the closure locals onto GameState. The assignment on the second line would
+          // have thrown in strict mode if the guard had ever been true.
+          //
           // Pause game
           game.paused = true;
           pauseMenu.classList.remove('hidden');

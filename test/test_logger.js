@@ -6,6 +6,14 @@
 
 'use strict';
 
+// PR 11. These groups used to read `typeof CuubzLogger !== 'undefined' ? CuubzLogger.log
+// : function() {}` and, in Node, ALWAYS took the fallback — so every assertion below ran
+// against an empty stub and the real class was never exercised at all. That was only
+// possible because CuubzLogger was a script-tag global with no way to import it. PR 9
+// made it an export; `no-undef` made the vacuity visible. The assertions are unchanged
+// and now mean something.
+const { CuubzLogger } = require('../src/util/Logger.js');
+
 let passed = 0;
 let failed = 0;
 
@@ -22,7 +30,7 @@ function assert(condition, message) {
 (function() {
   // In Node.js test context, CuubzLogger is not globally defined
   // so _log should be a no-op function
-  const mockLog = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+  const mockLog = CuubzLogger.log;
 
   assert(typeof mockLog === 'function', '_log is a function');
   assert(mockLog.length >= 0, '_log accepts variable arguments');
@@ -94,9 +102,9 @@ function assert(condition, message) {
 
 // ─── Test Group 3: Bound exported functions ───
 (function() {
-  const logFn = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log.bind(CuubzLogger) : function() {};
-  const warnFn = typeof CuubzLogger !== 'undefined' ? CuubzLogger.warn.bind(CuubzLogger) : function() {};
-  const errorFn = typeof CuubzLogger !== 'undefined' ? CuubzLogger.error.bind(CuubzLogger) : function() {};
+  const logFn = CuubzLogger.log.bind(CuubzLogger);
+  const warnFn = CuubzLogger.warn.bind(CuubzLogger);
+  const errorFn = CuubzLogger.error.bind(CuubzLogger);
 
   assert(typeof logFn === 'function', 'log is exported as function');
   assert(typeof warnFn === 'function', 'warn is exported as function');
@@ -113,11 +121,11 @@ function assert(condition, message) {
   }
 })();
 
-// ─── Test Group 4: No-op fallback in Node.js context ───
+// ─── Test Group 4: the real log() is safe to call in any shape ───
 (function() {
   // Simulate the pattern used in game files:
-  // const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
-  const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+  // const _log = CuubzLogger.log;
+  const _log = CuubzLogger.log;
 
   assert(typeof _log === 'function', '_log fallback is a function');
 
