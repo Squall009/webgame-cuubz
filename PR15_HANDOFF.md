@@ -103,7 +103,7 @@ Still true: **never renumber `BLOCK_REGISTRY`**; **`DB_VERSION` stays at 2**; **
 
 ---
 
-## 3. `BUGS.md` — ten open rows, all owned
+## 3. `BUGS.md` — eleven open rows, all owned
 
 | Owner | Rows |
 |---|---|
