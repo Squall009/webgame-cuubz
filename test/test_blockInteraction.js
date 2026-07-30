@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 /**
  * Cuubz — Block Interaction Tests
- * Crosshair targeting + break/place mechanics.
- * 
- * Tests: Crosshair class, BlockInteraction class, integration scenarios.
+ * Break/place mechanics.
+ *
+ * Tests: BlockInteraction class, integration scenarios.
+ *
+ * PR 20 deleted `src/ui/hud/Crosshair.js` (D-25) and this file's six Crosshair groups
+ * with it — see the tombstone below. The header said "Crosshair targeting" and
+ * "Crosshair class" until then; it says what the file tests now.
  */
 
 'use strict';
@@ -52,56 +56,14 @@ function assertNotNull(value, message) {
 // Load modules
 // ============================================================
 
-const { Crosshair } = require('../src/ui/hud/Crosshair.js');
 const { BlockInteraction } = require('../src/game/systems/BlockInteractionSystem.js');
 
-// ============================================================
-// Helper: Mock renderer with raycast capability
-// ============================================================
-
-function createMockRenderer() {
-  return {
-    scene: { add: () => {}, remove: () => {} },
-    _raycastResults: [],
-    raycast(maxDistance) {
-      if (this._raycastResults.length === 0) return null;
-      const hit = this._raycastResults.shift();
-      return hit;
-    }
-  };
-}
-
-// ============================================================
-// Helper: Mock player with inventory
-// ============================================================
-
-function createMockPlayer(position, inventory) {
-  return {
-    position: position || { x: 0, y: 20, z: 0 },
-    inventory: inventory || { selectedSlot: 0 }
-  };
-}
-
-// ============================================================
-// Helper: Mock crosshair with controllable target
-// ============================================================
-
-function createMockCrosshair() {
-  return {
-    _targetBlock: null,
-    getTargetBlock() { return this._targetBlock; },
-    setTargetBlock(block) { this._targetBlock = block; },
-    getPlacePosition() {
-      if (!this._targetBlock) return null;
-      const [nx, ny, nz] = this._targetBlock.faceNormal || [0, 0, 0];
-      return {
-        x: this._targetBlock.x + nx,
-        y: this._targetBlock.y + ny,
-        z: this._targetBlock.z + nz,
-      };
-    }
-  };
-}
+// PR 20 deleted `src/ui/hud/Crosshair.js` (D-25 triage — the class throws a TypeError on
+// its first hit; the live crosshair is the `#crosshair` DOM div). Test groups 1-6 and 18
+// exercised that class and went with it, along with `createMockRenderer`, which only they
+// used. `createMockPlayer` and `createMockCrosshair` were already dead before this PR —
+// nothing below this line has referenced either since BlockInteraction stopped driving
+// itself from a Crosshair — so they went too. Everything below is BlockInteraction's.
 
 // ============================================================
 // Tests
@@ -109,168 +71,6 @@ function createMockCrosshair() {
 
 console.log('Block Interaction Tests');
 console.log('=======================\n');
-
-// ----------------------------------------------------------
-// Group 1: Crosshair — Constructor & defaults
-// ----------------------------------------------------------
-console.log('\nGroup 1: Crosshair constructor & defaults');
-
-{
-  const renderer = createMockRenderer();
-  const ch = new Crosshair(renderer);
-  
-  assertNotNull(ch, 'Crosshair instance created');
-  assertEquals(ch.targetBlock, null, 'targetBlock starts null');
-  assertEquals(ch.highlightMesh, null, 'highlightMesh starts null');
-  assertEquals(ch.renderer, renderer, 'renderer reference set');
-}
-
-// ----------------------------------------------------------
-// Group 2: Crosshair — getTargetBlock()
-// ----------------------------------------------------------
-console.log('\nGroup 2: Crosshair getTargetBlock()');
-
-{
-  const renderer = createMockRenderer();
-  const ch = new Crosshair(renderer);
-  
-  // Initially null
-  assertEquals(ch.getTargetBlock(), null, 'getTargetBlock returns null when no target');
-  
-  // Simulate setting target (as update() would)
-  ch.targetBlock = { x: 5, y: 10, z: 3, faceNormal: [0, 1, 0] };
-  
-  const target = ch.getTargetBlock();
-  assertNotNull(target, 'getTargetBlock returns object when set');
-  assertEquals(target.x, 5, 'target x correct');
-  assertEquals(target.y, 10, 'target y correct');
-  assertEquals(target.z, 3, 'target z correct');
-}
-
-// ----------------------------------------------------------
-// Group 3: Crosshair — getPlacePosition() from face normal
-// ----------------------------------------------------------
-console.log('\nGroup 3: Crosshair getPlacePosition()');
-
-{
-  const renderer = createMockRenderer();
-  const ch = new Crosshair(renderer);
-  
-  // No target → null
-  assertEquals(ch.getPlacePosition(), null, 'null when no target block');
-  
-  // Top face (faceNormal [0,1,0]) → place above
-  ch.targetBlock = { x: 5, y: 10, z: 3, faceNormal: [0, 1, 0] };
-  let pos = ch.getPlacePosition();
-  assertEquals(pos.x, 5, 'place X same as target (top face)');
-  assertEquals(pos.y, 11, 'place Y = target Y + 1 (top face)');
-  assertEquals(pos.z, 3, 'place Z same as target (top face)');
-  
-  // Bottom face (faceNormal [0,-1,0]) → place below
-  ch.targetBlock = { x: 5, y: 10, z: 3, faceNormal: [0, -1, 0] };
-  pos = ch.getPlacePosition();
-  assertEquals(pos.y, 9, 'place Y = target Y - 1 (bottom face)');
-  
-  // Right face (faceNormal [1,0,0]) → place right
-  ch.targetBlock = { x: 5, y: 10, z: 3, faceNormal: [1, 0, 0] };
-  pos = ch.getPlacePosition();
-  assertEquals(pos.x, 6, 'place X = target X + 1 (right face)');
-  
-  // Left face (faceNormal [-1,0,0]) → place left
-  ch.targetBlock = { x: 5, y: 10, z: 3, faceNormal: [-1, 0, 0] };
-  pos = ch.getPlacePosition();
-  assertEquals(pos.x, 4, 'place X = target X - 1 (left face)');
-  
-  // Front face (faceNormal [0,0,1]) → place front
-  ch.targetBlock = { x: 5, y: 10, z: 3, faceNormal: [0, 0, 1] };
-  pos = ch.getPlacePosition();
-  assertEquals(pos.z, 4, 'place Z = target Z + 1 (front face)');
-  
-  // Back face (faceNormal [0,0,-1]) → place back
-  ch.targetBlock = { x: 5, y: 10, z: 3, faceNormal: [0, 0, -1] };
-  pos = ch.getPlacePosition();
-  assertEquals(pos.z, 2, 'place Z = target Z - 1 (back face)');
-}
-
-// ----------------------------------------------------------
-// Group 4: Crosshair — update() with raycast hit
-// ----------------------------------------------------------
-console.log('\nGroup 4: Crosshair update() with raycast');
-
-{
-  const renderer = createMockRenderer();
-  renderer._raycastResults.push({
-    object: 'mockMesh',
-    point: { x: 5.3, y: 10.7, z: 3.2 },
-    faceNormal: { x: 0, y: 1, z: 0 }
-  });
-  
-  const ch = new Crosshair(renderer);
-  ch.update(); // No THREE — highlight won't create, but targetBlock should be set
-  
-  assertNotNull(ch.targetBlock, 'targetBlock set after raycast hit');
-  assertEquals(ch.targetBlock.x, 5, 'target x floored from hit point');
-  assertEquals(ch.targetBlock.y, 10, 'target y floored from hit point');
-  assertEquals(ch.targetBlock.z, 3, 'target z floored from hit point');
-}
-
-// ----------------------------------------------------------
-// Group 5: Crosshair — update() with no raycast hit
-// ----------------------------------------------------------
-console.log('\nGroup 5: Crosshair update() with no raycast');
-
-{
-  const renderer = createMockRenderer();
-  // No raycast results → returns null
-  
-  const ch = new Crosshair(renderer);
-  ch.targetBlock = { x: 1, y: 2, z: 3, faceNormal: [0, 0, 0] }; // Pre-set target
-  ch.update();
-  
-  assertEquals(ch.targetBlock, null, 'targetBlock cleared when no raycast hit');
-}
-
-// ----------------------------------------------------------
-// Group 6: Crosshair — update() with missing renderer.raycast
-// ----------------------------------------------------------
-console.log('\nGroup 6: Crosshair update() edge cases');
-
-{
-  const ch = new Crosshair({}); // No raycast method
-  
-  ch.targetBlock = { x: 1, y: 2, z: 3, faceNormal: [0, 0, 0] };
-  ch.update();
-  
-  // Should not crash — renderer.raycast is undefined, early return preserves target
-  assertNotNull(ch.targetBlock, 'targetBlock preserved when renderer.raycast missing');
-}
-
-// ----------------------------------------------------------
-// Group 7: BlockInteraction — Constructor & defaults
-// ----------------------------------------------------------
-// ----------------------------------------------------------
-console.log('\nGroup 18: Crosshair raycast edge cases');
-
-{
-  // Test: Hit exactly on block boundary → floor should pick correct block
-  const renderer = createMockRenderer();
-  renderer._raycastResults.push({
-    object: 'mockMesh',
-    point: { x: 5.0, y: 10.0, z: 3.0 }, // Exactly on corner
-    faceNormal: { x: -1, y: 0, z: 0 }   // Hit from right side → block at (4, 10, 3)
-  });
-  
-  const ch = new Crosshair(renderer);
-  ch.update();
-  
-  assertNotNull(ch.targetBlock, 'Hit on exact corner gives a target');
-  // With faceNormal [-1,0,0], the offset subtracts -0.01 from x → 5.0 - (-0.01) = 5.01 → floor = 5
-  // Wait: bx = Math.floor(5.0 - (-1 * 0.01)) = Math.floor(5.01) = 5
-  // The face normal offset pushes slightly INTO the block to avoid floating point edge issues
-  assertEquals(ch.targetBlock.x, 5, 'Corner hit X floored correctly');
-  assertEquals(ch.targetBlock.y, 10, 'Corner hit Y floored correctly');
-  assertEquals(ch.targetBlock.z, 3, 'Corner hit Z floored correctly');
-}
 
 // ============================================================
 // BlockInteraction helpers

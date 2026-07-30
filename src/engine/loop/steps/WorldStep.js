@@ -33,9 +33,19 @@ export function worldStep(state) {
     state.droppedItems.update(state.game.delta, state.player.position, state.inventory);
   }
 
-  // Scroll wheel for hotbar cycling
+  // Scroll wheel for hotbar cycling — D-55, the sole surviving path.
+  //
+  // `initHud.js` also registered a `document`-level `wheel` listener that called
+  // `cycleSelection()`. A wheel event over the canvas bubbles to `document`, so both fired
+  // and the hotbar advanced two slots per notch. PR 20 deleted that listener and kept this
+  // one; the `inventoryOpen` guard below is the one thing the deleted listener had that
+  // this path did not, and without it scrolling with the inventory open cycled the hotbar
+  // behind it. `scrollDelta` must still be cleared when the guard fires, or a scroll made
+  // with the inventory open would be replayed the frame it closes.
   if (state.mouse.scrollDelta !== 0) {
-    state.inventory.cycleSelection(state.mouse.scrollDelta > 0 ? 1 : -1);
+    if (!state.inventoryOpen) {
+      state.inventory.cycleSelection(state.mouse.scrollDelta > 0 ? 1 : -1);
+    }
     state.mouse.scrollDelta = 0;
   }
 
@@ -95,20 +105,22 @@ export function worldStep(state) {
       state.biomeEffects.setPlayerPosition(state.player.position.x, state.player.position.y, state.player.position.z);
       state.biomeEffects.setCameraPosition(state.camPos);
 
-      // Spawn bubble particles in lava/toxic biomes
-      if (biomeData.id === 'lava' && Math.random() < 0.02) {
-        state.biomeEffects.spawnLavaBubbles(
-          state.player.position.x + (Math.random() - 0.5) * 40,
-          state.player.position.y - 2,
-          state.player.position.z + (Math.random() - 0.5) * 40
-        );
-      } else if (biomeData.id === 'corrupt' && Math.random() < 0.015) {
-        state.biomeEffects.spawnToxicBubbles(
-          state.player.position.x + (Math.random() - 0.5) * 40,
-          state.player.position.y - 2,
-          state.player.position.z + (Math.random() - 0.5) * 40
-        );
-      }
+      // D-59: a `biomeData.id === 'lava'` branch calling `spawnLavaBubbles` and a
+      // `=== 'corrupt'` branch calling `spawnToxicBubbles` used to sit here. Both were
+      // unreachable. `BiomeSystem.getBiomeAtWorldPos` derives its id from `NAME_TO_ID`,
+      // whose ten entries are the only ten biome names the module defines:
+      //
+      //   deep_ocean ocean beach plains forest badlands tundra desert mountains frozen_peaks
+      //
+      // Neither `lava` nor `corrupt` is among them, and the `toLowerCase()` fallback can
+      // only ever see one of those same ten names, so neither method was ever called.
+      // Verified against `src/engine/world/BiomeSystem.js` before deleting.
+      //
+      // This is the second artefact of the same biome-name drift — D-39 was world previews
+      // advertising "Lava" and "Corrupt" as biomes that do not exist, fixed in PR 14 by
+      // regenerating the preview list from `BiomeSystem`. This was the render loop's copy
+      // of that same wrong list. `spawnLavaBubbles` / `spawnToxicBubbles` stay on
+      // `BiomeEffects` — they are that class's API and are out of PR 20's scope.
     }
 
     // Update animation timers & particles

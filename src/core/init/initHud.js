@@ -42,15 +42,23 @@ export function initHud(game) {
   document.addEventListener('keydown', gameKeyHandler);
   state.addTeardown(() => document.removeEventListener('keydown', gameKeyHandler));
 
-  // Scroll wheel for hotbar cycling
-  const gameWheelHandler = function(e) {
-    if (game.paused || !game.running) return;
-    if (state.inventoryOpen) return; // Don't cycle when inventory is open
-    state.inventory.cycleSelection(e.deltaY > 0 ? 1 : -1);
-    state.updateHotbarUI();
-  };
-  document.addEventListener('wheel', gameWheelHandler);
-  state.addTeardown(() => document.removeEventListener('wheel', gameWheelHandler));
+  // ─── D-55: the scroll-wheel hotbar cycle is NOT registered here ───────────
+  //
+  // A `document`-level `wheel` listener used to live here and call
+  // `state.inventory.cycleSelection()`. `Mouse.js`'s canvas `wheel` handler accumulates
+  // `scrollDelta`, which `WorldStep.js` consumes with a second `cycleSelection()` — and a
+  // wheel event over the canvas bubbles to `document`, so **both fired and the hotbar
+  // advanced two slots per notch**. Neither was a no-op: only the loop path clears
+  // `scrollDelta`.
+  //
+  // PR 20 kept the loop path and deleted this one. `Mouse.scrollDelta` is the input
+  // abstraction and `WorldStep.js` is where §9 (formerly PR 22) wants per-frame logic;
+  // a raw `document` listener in an init step is neither. The one thing this listener had
+  // that the loop path lacked — `if (state.inventoryOpen) return;`, without which
+  // scrolling with the inventory open cycled the hotbar behind it — moved to
+  // `WorldStep.js` with the rest.
+  //
+  // The teardown registration went with the listener. See `src/engine/loop/steps/WorldStep.js`.
 
   // ─── Periodic Save (every 30 seconds) ──────────
   state.saveIntervalId = setInterval(() => {

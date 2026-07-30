@@ -6,7 +6,11 @@
  */
 
 const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS } = require('../src/game/systems/SurvivalSystem.js');
-const { SpawnManager } = require('../src/engine/world/SpawnManager.js');
+// PR 20 deleted src/engine/world/SpawnManager.js (D-25 triage — CharacterManager.spawnPoints
+// already owns per-character/per-world spawn and is live, and SpawnManager.setDefaultSpawn
+// ignored its worldId argument). Tests B26, B27 and B34 exercised it and went with it; the
+// assertions they carried about the *default spawn height* moved onto SurvivalSystem itself,
+// which is where D-21 put the number.
 const { SEA_LEVEL } = require('../src/engine/world/ChunkData.js');
 
 let passed = 0;
@@ -38,8 +42,12 @@ assert(ss.isDead === false, 'Player should not be dead on creation');
 assert(ss.lastDamageSource === DAMAGE_SOURCES.NONE, 'Initial damage source should be NONE');
 
 // --- Test 4: Default spawn point ---
+// D-21: the default spawn tracks sea level, so it stays above water when SEA_LEVEL changes.
+// It used to be a literal y=20, which is 44 blocks below SEA_LEVEL (64) — solid stone.
 assert(ss.spawnPoint.x === 0, 'Default spawn X should be 0');
-assert(ss.spawnPoint.y === 20, 'Default spawn Y should be 20');
+assert(ss.spawnPoint.y === SEA_LEVEL + 4, `Default spawn Y should be SEA_LEVEL+4, got ${ss.spawnPoint.y}`);
+assert(ss.spawnPoint.y === 68, `Default spawn Y should be 68 with SEA_LEVEL=64, got ${ss.spawnPoint.y}`);
+assert(ss.spawnPoint.y > SEA_LEVEL, 'Default spawn Y must be above sea level, not buried under it');
 assert(ss.spawnPoint.z === 0, 'Default spawn Z should be 0');
 
 // --- Test 5: Hunger depletes over time ---
@@ -1153,28 +1161,32 @@ sstate = ssB20.getSleepingState();
 assert(sstate.isSleeping === true, 'Should still be sleeping at halfway');
 assert(Math.abs(sstate.progress - 0.5) < 0.1, `Progress should be ~0.5, got ${sstate.progress.toFixed(2)}`);
 
-// --- Test B26: SpawnManager integration ---
+// --- Test B26: sleeping in a bed with a world/player context set moves the spawn point ---
+// Was "SpawnManager integration". SpawnManager is gone (PR 20); the SurvivalSystem half of
+// the claim — that _finishSleeping writes the bed position + 1 into spawnPoint even when a
+// world/player context is set — is what survives, asserted on the same coordinates.
 const ssB21 = new SurvivalSystem();
-const spawnMgr = new SpawnManager();
-ssB21.setSpawnManager(spawnMgr);
 ssB21.setCurrentContext('world-abc', 'player-1');
 ssB21.setNearBed({ x: 42, y: 18, z: -9 });
 ssB21.lastBedUseTime = 0;
 ssB21.startUsingBed();
 ssB21.update(3.5, { currentTime: 300 });
+assert(ssB21.spawnPoint.x === 42, `Spawn X should be 42, got ${ssB21.spawnPoint.x}`);
+assert(ssB21.spawnPoint.y === 19, `Spawn Y should be 19 (bed Y+1), got ${ssB21.spawnPoint.y}`);
+assert(ssB21.spawnPoint.z === -9, `Spawn Z should be -9, got ${ssB21.spawnPoint.z}`);
 
-// Check SpawnManager has the spawn point set
-const savedSpawn = spawnMgr.getSpawn('world-abc', 'player-1');
-assert(savedSpawn.x === 42, `SpawnManager should have X=42, got ${savedSpawn.x}`);
-assert(savedSpawn.y === 19, `SpawnManager should have Y=19 (bed Y+1), got ${savedSpawn.y}`);
-assert(savedSpawn.z === -9, `SpawnManager should have Z=-9, got ${savedSpawn.z}`);
-
-// --- Test B27: SpawnManager fallback to default when no bed set ---
-const spawnMgr2 = new SpawnManager();
-const defaultSpawn = spawnMgr2.getSpawn('nonexistent-world', 'player-2');
-assert(defaultSpawn.x === 0, 'Default spawn X should be 0');
-// Default spawn tracks sea level, so it stays above water when SEA_LEVEL changes.
-assert(defaultSpawn.y === SEA_LEVEL + 4, `Default spawn Y should be SEA_LEVEL+4, got ${defaultSpawn.y}`);
+// --- Test B27: _finishSleeping with no bedPosition falls back to SEA_LEVEL + 4, not y=20 ---
+// D-21's second site. The old fallback was a literal 20, which fed setSpawnPoint(0, 21, 0) —
+// 43 blocks under sea level. The deleted B34 asserted only `x === 0` against a comment that
+// said "(0, 20, 0)", so it passed either way; this asserts the y that the fix makes true.
+const ssB21b = new SurvivalSystem();
+ssB21b.bedPosition = null;
+ssB21b._finishSleeping();
+assert(ssB21b.spawnPoint.x === 0, 'No-bed fallback spawn X should be 0');
+assert(ssB21b.spawnPoint.y === SEA_LEVEL + 5, `No-bed fallback spawn Y should be SEA_LEVEL+4+1, got ${ssB21b.spawnPoint.y}`);
+assert(ssB21b.spawnPoint.y === 69, `No-bed fallback spawn Y should be 69 with SEA_LEVEL=64, got ${ssB21b.spawnPoint.y}`);
+assert(ssB21b.spawnPoint.y > SEA_LEVEL, 'No-bed fallback spawn must be above sea level');
+assert(ssB21b.spawnPoint.z === 0, 'No-bed fallback spawn Z should be 0');
 
 // --- Test B28: Legacy useBed still works with new restoration values ---
 const ssB22 = new SurvivalSystem();
@@ -1233,17 +1245,19 @@ ssB28.setCurrentContext('test-world', 'test-player');
 assert(ssB28.currentWorldId === 'test-world', 'currentWorldId should be set');
 assert(ssB28.currentPlayerId === 'test-player', 'currentPlayerId should be set');
 
-// --- Test B34: Bed use does NOT update SpawnManager without context ---
+// --- Test B34: bed use without a world/player context still sets the local spawn point ---
+// Was "Bed use does NOT update SpawnManager without context". SpawnManager is gone (PR 20);
+// what is still observable and still worth pinning is that the *local* spawn point is written
+// regardless of context, so the no-context path is not silently a no-op.
 const ssB29 = new SurvivalSystem();
-const spawnMgr3 = new SpawnManager();
-ssB29.setSpawnManager(spawnMgr3);
-// No setCurrentContext call — SpawnManager should not be updated
 ssB29.setNearBed({ x: 1, y: 10, z: 1 });
 ssB29.lastBedUseTime = 0;
 ssB29.startUsingBed();
 ssB29.update(3.5, { currentTime: 400 });
-const noContextSpawn = spawnMgr3.getSpawn('any-world', 'any-player');
-assert(noContextSpawn.x === 0, 'Without context, SpawnManager should use default (0, 20, 0)');
+assert(ssB29.currentWorldId === null || ssB29.currentWorldId === undefined, 'No context was set');
+assert(ssB29.spawnPoint.x === 1, `Without context, local spawn X should still be the bed's, got ${ssB29.spawnPoint.x}`);
+assert(ssB29.spawnPoint.y === 11, `Without context, local spawn Y should be bed Y+1, got ${ssB29.spawnPoint.y}`);
+assert(ssB29.spawnPoint.z === 1, `Without context, local spawn Z should still be the bed's, got ${ssB29.spawnPoint.z}`);
 
 // --- Summary ---
 console.log(`\nSurvival System Tests: ${passed} passed, ${failed} failed`);

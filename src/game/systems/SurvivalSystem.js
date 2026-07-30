@@ -10,6 +10,11 @@ import { calculateFallDamage } from './DamageSystem.js';
 // SurvivalSystem <-> DamageSystem cycle. Re-exported below: every existing importer
 // (and every test) reads it from here.
 import { DAMAGE_SOURCES } from '../data/DamageSources.js';
+// D-21 (decision 5): the two default spawn heights below are `SEA_LEVEL + 4`, not a
+// literal 20. `SEA_LEVEL` is 64, so `y = 20` was 44 blocks underground — the player
+// respawned inside solid stone. `SpawnManager` already computed its default this way;
+// PR 20 deleted that module and this is now the only owner of the number.
+import { SEA_LEVEL } from '../../engine/world/ChunkData.js';
 
 
 // Default meter configurations
@@ -159,8 +164,8 @@ export class SurvivalSystem {
     this.onDamage = options.onDamage || null;
     this.onRespawn = options.onRespawn || null;
 
-    // Spawn point for respawn
-    this.spawnPoint = { x: 0, y: 20, z: 0 };
+    // Spawn point for respawn — D-21: SEA_LEVEL + 4 (68), above water, not 44 blocks under it.
+    this.spawnPoint = { x: 0, y: SEA_LEVEL + 4, z: 0 };
 
     // Desert biome multiplier (faster thirst depletion)
     this.thirstMultiplier = 1.0;
@@ -860,7 +865,9 @@ export class SurvivalSystem {
    */
   _finishSleeping() {
     const bedX = this.bedPosition ? this.bedPosition.x : 0;
-    const bedY = this.bedPosition ? this.bedPosition.y : 20;
+    // D-21's second site: this fallback flows straight into setSpawnPoint(bedX, bedY+1, bedZ)
+    // below, so a literal 20 here buried the bed spawn exactly as the constructor's did.
+    const bedY = this.bedPosition ? this.bedPosition.y : SEA_LEVEL + 4;
     const bedZ = this.bedPosition ? this.bedPosition.z : 0;
 
     // Apply restoration — clamped to max

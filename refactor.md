@@ -3016,6 +3016,30 @@ outcome. "Wire it up" is not automatically right — an unwired subsystem that h
 in production is untested by definition, and turning six of them on at once is not a
 mechanical change either.
 
+#### PR 20 outcome — six of the twelve dead modules are gone
+
+`src/game/systems/System.js` exists per §4.2 (56 lines, nothing extends it yet) and its header carries the measurement that decides when it can be adopted: **only 3 of 11 live per-frame call sites already take `(dt)`** — five take extra arguments and three (`ChunkManager`, `ChunkStreamer`, `PlayerListHUD`) have no `update` at all. **§9 PR 22's accept criterion is superseded, not missed** (decision 43): collapsing the loop to `SystemRunner.update(dt); renderer.render();` moves the tooltip raycast, `updateRenderChunks` and `mobIntegration.update` from after the draw to before it, because `renderer.render()` sits deliberately mid-`WorldStep`. The frame was not reordered. **D-25 split three ways (decision 42):** six modules deleted — `AmbientAudio.js`, `SFX.js`, `PerformanceOptimizer.js`, `Crosshair.js`, `pathfinding.js`, `SpawnManager.js`, **2,592 lines of `src/` and 2,658 of `test/`** — each a duplicate, unreachable, or provably broken as written; `Noise.js` reassigned to **PR 23** with D-60; and the five gameplay subsystems deferred to **PR 34** below, because deleting a duplicate is triage and deleting five features with ~1,000 assertions is a product decision. **D-21** fixed at *both* sites (the row only knew about one), **D-55** fixed with a non-vacuity proof, **D-59** deleted after verifying unreachability. The adversarial pass could not refute the change on any of ten checks, including a byte-exact diff proving the `test_blockInteraction.js` surgery lost no assertion about surviving code. One measurement corrects D-25's own text: deleting 2,592 lines moved `dist/` by **2.78 kB** — Rollup has tree-shaken these since PR 9, so "dead weight in the bundle" stopped being true when they became modules.
+
+| Gate | Before | After |
+|---|---|---|
+| `npm test` | 53 files, 0 failed, 4 quarantined | **50 files, 0 failed, 4 quarantined** |
+| assertions | 6,855 | **5,699** (−1,156 — deleted tests of deleted modules) |
+| `npm run lint` | 0 errors, 170 warnings | **0 errors, 159 warnings** |
+| `npm run build` | exit 0 | **exit 0** (1,801.62 → 1,798.84 kB) |
+| `npm run test:e2e` (dist) | 189 / 0 | **189 / 0** |
+| `npm run test:e2e:vite` | 189 / 0 | **189 / 0** |
+| `src/` total | — | **−2,592 lines** |
+
+### PR 34 — the five deferred gameplay subsystems (created by PR 20, decision 42)
+
+`SurvivalSystem.js` (1,152), `DamageSystem.js` (627), `QuestSystem.js` (262), `QuestMarker.js` (602) and `Boss.js` (1,135) — ~3,800 lines of `src/` and ~1,000 test assertions — are the half of **D-25** PR 20 deliberately did not rule on. Every one is a *feature* that has never executed: none is constructed outside `test/`, and the only edges into them are data-table imports (`mobIntegration` takes `DAMAGE_SOURCES`; `SurvivalSystem`'s own import of `calculateFallDamage` is unused, and cutting it makes `DamageSystem` unreachable from `src/` by any path).
+
+**This PR decides whether the game gets survival meters, environmental damage, quests and bosses, or whether those 3,800 lines go.** It is a product call, not a refactor call, which is why PR 20 declined it. What the decision needs is banked in `PR20_HANDOFF.md` §4 and is not to be re-derived: constructor signatures, per-frame requirements, which `index.html` element ids exist (the survival meters' `.meter-fill` elements are all hard-coded `width:100%` and **no code in `src/` ever writes to them**; there is no boss HUD element at all), and ~20 defects found by reading modules that have never run — including a **high**-severity `phaseTransitionTimer` NaN deadlock that leaves a deserialized boss permanently frozen, and `DamageSystem`'s `LAVA_ID = 15` / `TOXIC_SLIME_ID = 17` against a registry where lava is 47 (**D-64**), pinned by a test that asserts the wrong mapping.
+
+Also owns **D-69** — `SurvivalSystem` still carries `setSpawnManager()` and a `_spawnManager.setSpawn(...)` branch for a class PR 20 deleted.
+
+- **Accept:** each of the five is wired to a real `System` or deleted, with a line in the outcome saying which and why. If wired, D-21's spawn fix and D-64's block-id tables are preconditions, not follow-ups. `npm test` assertion count moves in whichever direction the ruling implies, and the outcome says by how much.
+
 ### PR 21 — `EventBus` — **DROPPED, see §8.7**
 ```js
 class EventBus {

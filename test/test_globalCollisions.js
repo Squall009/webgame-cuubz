@@ -216,16 +216,17 @@ assertFalse(isMobileViewport(NaN), 'NaN width → false');
 // ═══════════════════════════════════════════════════════════════════
 console.log('--- Bugs 4-8: consolidated utilities ---');
 
-// smoothstep — was duplicated in skybox.js and ambient.js; both now re-export mathUtils.
+// smoothstep — was duplicated in skybox.js and ambient.js. skybox.js re-exports mathUtils;
+// ambient.js (src/engine/audio/AmbientAudio.js) was DELETED in PR 20 as D-25 triage, so its
+// re-export assertion went with it. One collision owner left, one assertion instead of two.
 assertEquals(smoothstep(0), 0, 'smoothstep(0) === 0');
 assertEquals(smoothstep(1), 1, 'smoothstep(1) === 1');
 assertApprox(smoothstep(0.5), 0.5, 1e-9, 'smoothstep(0.5) ≈ 0.5');
 assertEquals(smoothstep(-1), 0, 'smoothstep clamps below 0');
 assertEquals(smoothstep(2), 1, 'smoothstep clamps above 1');
 
-// Both former owners must still expose the identical function.
+// The surviving former owner must still expose the identical function.
 assertEquals(require('../src/engine/renderer/SkyRenderer.js').smoothstep, smoothstep, 'skybox.js re-exports the canonical smoothstep');
-assertEquals(require('../src/engine/audio/AmbientAudio.js').smoothstep, smoothstep, 'ambient.js re-exports the canonical smoothstep');
 
 // distanceBetween — was duplicated in boss.js and playerSync.js.
 assertEquals(distanceBetween({ x: 0, y: 0, z: 0 }, { x: 3, y: 4, z: 0 }), 5, 'distanceBetween 3-4-5 triangle');
