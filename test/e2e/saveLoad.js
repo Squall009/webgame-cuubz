@@ -983,14 +983,26 @@ async function main() {
         out.seedVersion = db.version;
         out.seedStores = Array.from(db.objectStoreNames).sort();
 
+        // Each probe chunk gets DIFFERENT blocks in it, and that is not decoration.
+        // An empty `new Chunk(cx, cz)` RLE-encodes to the same 28 bytes whatever its
+        // coordinates are, so three empty chunks share one checksum and "the
+        // checksums match after the upgrade" would be satisfied by any three records
+        // at all. Distinct contents make the per-record byte comparison below
+        // actually discriminate between records.
         const chunks = [
-          { cx: 0, cz: 0, world: 'probe-world-A' },
-          { cx: -3, cz: 7, world: 'probe-world-A' },
-          { cx: 12, cz: -8, world: 'probe-world-B' },
-        ].map(({ cx, cz, world }) => ({
+          { cx: 0, cz: 0, world: 'probe-world-A', fill: 1 },
+          { cx: -3, cz: 7, world: 'probe-world-A', fill: 5 },
+          { cx: 12, cz: -8, world: 'probe-world-B', fill: 11 },
+        ].map(({ cx, cz, world, fill }) => ({
           chunkKey: `${world}:${cx},${cz}`,
           worldName: world,
-          data: ChunkBinaryCodec.encode(new Chunk(cx, cz)),
+          data: ChunkBinaryCodec.encode((() => {
+            const c = new Chunk(cx, cz);
+            for (let x = 0; x < fill; x++) {
+              for (let z = 0; z < fill; z++) c.setBlock(x, 64, z, BLOCK_TYPES.STONE);
+            }
+            return c;
+          })()),
           savedAt: 1700000000000 + cx,
         }));
         const manifest = {
@@ -1047,6 +1059,9 @@ async function main() {
     assertEquals((upgradeResult.seedStores || []).join(','), 'chunks,manifests',
       'The shipped handler creates exactly the two DEPLOY.md §2.1 stores on a fresh database');
     assertEquals((upgradeResult.before && upgradeResult.before.chunks.length) || 0, 3, 'Three chunk records were seeded');
+    assertEquals(new Set((upgradeResult.before || { chunks: [] }).chunks.map(c => c.checksum)).size, 3,
+      'The three seeded chunks carry three DIFFERENT checksums — so the byte comparison below discriminates ' +
+      'between records rather than being satisfied by any three all-air chunks');
     assertEquals(upgradeResult.afterVersion, 3, 'H-2 FIXED — DB_VERSION was incremented to 3 against a pre-existing v2 database');
     assertEquals((upgradeResult.applied || []).join(','), '3', 'Only the step for version 3 ran');
     assertEquals((upgradeResult.afterStores || []).join(','), 'chunks,manifests,probeStore',

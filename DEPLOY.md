@@ -776,7 +776,7 @@ Two things close the gap, neither of them a documentation task:
 >
 > A real browser (Edge, driven by `playwright-core`, WebGL via SwiftShader) walks the
 > menu flow, generates two worlds from pinned seeds, and reads IndexedDB and
-> localStorage directly. **148 assertions, exit 0, ~6 minutes.** Screenshots land in
+> localStorage directly. **149 assertions, exit 0, ~6 minutes.** Screenshots land in
 > `test/e2e/artifacts/` (gitignored).
 >
 > It covers steps 1, 2, 3, 5, 6, 7, **8, 9**, 10, 11 and 14 outright, plus every invariant in
@@ -946,9 +946,9 @@ verified by execution:
 ### Verified by execution in a real browser — added by PR 6b
 
 `npm run test:e2e` (`test/e2e/saveLoad.js`), Edge 150.0.4078.105 headless, WebGL via
-SwiftShader, **148 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
+SwiftShader, **149 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
 rewrote the H-1 and D-15 blocks from asserting the defects to asserting the fixes; PR 6d
-added 11). This moved the following out of "not verified":
+added 12). This moved the following out of "not verified":
 
 - **Every value in [§2](#2-do-not-change-player-data-invariants)** — read from the
   running page rather than from source text. Database name, version `2` (read

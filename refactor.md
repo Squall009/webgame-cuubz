@@ -1039,8 +1039,8 @@ player data loss as its effect** — which is why PR 6c ran its migration at ver
   database" as an explicit requirement. PR 23 should not be the PR that discovers this.
 - **Open decision 6.**
 
-**Outcome (2026-07-29):** ✅ DONE. `npm run test:e2e` → **148 assertions, 0 failures, exit
-0** (137 at PR 6c; 11 added). `npm test` → **51/51 passing, 4 quarantined, exit 0**
+**Outcome (2026-07-29):** ✅ DONE. `npm run test:e2e` → **149 assertions, 0 failures, exit
+0** (137 at PR 6c; 12 added). `npm test` → **51/51 passing, 4 quarantined, exit 0**
 (`test/test_chunkStorage.js` 83 → **129 assertions**, seven new sections).
 `check-globals` → 0 duplicates / 65 files / 368 symbols, unchanged: everything new is a
 static on `ChunkManager` or a property assigned to it, so nothing enters the global scope.
@@ -1139,6 +1139,14 @@ revalidation a changed file is refetched regardless of the query string.
   "the upgrade did not touch the data" assertable at all.
 - **The browser block is deliberately not a `DEPLOY.md` §7 step.** §7 never asked for this
   because it was forbidden. It is headed as PR 6d's own block and printed as such.
+- **The probe chunks carry different blocks, and that is load-bearing.** The first version
+  of this block seeded three *empty* chunks, and an empty chunk RLE-encodes to the same 28
+  bytes whatever its coordinates are — so all three shared one checksum and "the checksums
+  match after the upgrade" would have been satisfied by any three records at all. They now
+  hold 1×1, 5×5 and 11×11 slabs of stone, giving three distinct lengths (32 / 64 / 112) and
+  three distinct checksums, and the run asserts that distinctness *before* comparing. An
+  assertion that passes for the wrong reason is worse than one that is absent, because it
+  is counted.
 - **`QUARANTINE.md` untouched** — 4 files against the cap of 5, all owned by PR 26.
   `test:e2e` is still not in CI and still a comment naming PR 10. Nothing in `test/e2e/` is
   named `test/test_e2e*.js`.
@@ -1177,7 +1185,7 @@ Ticked by PR 6d. Every box was verified by running the command named beside it a
 
 > **Footnote on the save/load box.** `npm run test:e2e` runs **eleven of the fourteen**
 > `DEPLOY.md` §7 steps in a real browser: 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 14, plus every
-> §2 storage invariant, plus PR 6d's `DB_VERSION` increment. 148 assertions, 0 failures.
+> §2 storage invariant, plus PR 6d's `DB_VERSION` increment. 149 assertions, 0 failures.
 >
 > **Three are not automated and this box does not claim them:**
 > - **Step 4** — placing and breaking blocks. Needs pointer lock and mouse-look, and
