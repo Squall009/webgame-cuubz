@@ -35,6 +35,9 @@ import { PersistenceManager } from './engine/world/Persistence.js';
 // constructed it under that name. The alias keeps the call site (`new CuubzGame()`)
 // byte-identical while the binding becomes an ordinary import. PR 17 rewrites both.
 import { Game as CuubzGame } from './core/Game.js';
+import { GameState } from './core/GameState.js';
+// Test-only: hands the live GameState to the e2e harness. No game code reads it back.
+import { publishGameState } from './testBridge.js';
 
 (function() {
   'use strict';
@@ -237,6 +240,12 @@ import { Game as CuubzGame } from './core/Game.js';
   let worldManager = null;
   let perfSettings = null; // PerformanceSettings instance
   let game = null; // CuubzGame instance (set in startGame)
+  // PR 12 — the landing zone for the render-loop closure locals (refactor.md §1.6).
+  // Created at the top of startGame()'s body, one per session. Everything that used to
+  // be assigned ad-hoc onto `game` (chunkManager, renderer, skybox, frameCount, …) is a
+  // declared field on this object; `gameState.game` is the CuubzGame instance above.
+  // Null until the first startGame(), exactly as `game` is — every reader guards for it.
+  let gameState = null;
   let _renderRafId = null;      // Track render loop rAF for cleanup on exit
   let _cleanupPauseMenu = null; // Cleanup function returned by setupPauseMenu()
   let mobIntegration = null; // Mob system instance
@@ -1032,8 +1041,8 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = parseInt(menuPerfRenderDist.value, 10);
         perfSettings.set('renderDistance', val);
         syncPerfSettingsUI();
-        if (game && game.chunkManager) {
-          game.chunkManager.setRenderDistance(val);
+        if (gameState && gameState.chunkManager) {
+          gameState.chunkManager.setRenderDistance(val);
         }
       });
     }
@@ -1043,8 +1052,8 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = menuPerfShadows.value;
         perfSettings.set('shadowQuality', val);
         syncPerfSettingsUI();
-        if (game && game.renderer) {
-          game.renderer.setShadowQuality(val);
+        if (gameState && gameState.renderer) {
+          gameState.renderer.setShadowQuality(val);
         }
       });
     }
@@ -1054,8 +1063,8 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = menuPerfTextureRes.value;
         perfSettings.set('textureResolution', val);
         syncPerfSettingsUI();
-        if (game && game.renderer && game.chunkManager) {
-          await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+        if (gameState && gameState.renderer && gameState.chunkManager) {
+          await rebuildAtlasAndMaterials(gameState.renderer, gameState.chunkManager);
         }
       });
     }
@@ -1065,8 +1074,8 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = menuPerfAdvShading.checked;
         perfSettings.set('advancedShading', val);
         syncPerfSettingsUI();
-        if (game && game.renderer && game.chunkManager) {
-          await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+        if (gameState && gameState.renderer && gameState.chunkManager) {
+          await rebuildAtlasAndMaterials(gameState.renderer, gameState.chunkManager);
         }
       });
     }
@@ -2233,6 +2242,21 @@ import { Game as CuubzGame } from './core/Game.js';
 
     setTimeout(async () => {
       try {
+        // ─── PR 12: one state object per session ──────────────────────────
+        //
+        // Everything below that `renderLoop` needs is assigned onto this object as it is
+        // created. The locals stay as locals — they are read ~700 times across the 1,800
+        // lines of init below and rewriting all of those is PR 13/PR 17's job — but each
+        // one is a `const` that is never reassigned, so the local and `gameState.x` can
+        // never disagree. The two exceptions are handled where they occur:
+        //   • the six `let x = null; if (…) x = new X()` systems get their
+        //     `gameState.x = x` **after** the block that may assign them, never inside it;
+        //   • `inventoryOpen` genuinely mutates at runtime, so it has no local at all and
+        //     lives only on `gameState` (BUGS.md D-31).
+        gameState = new GameState();
+        gameState.currentWorld = currentWorld;
+        gameState.currentCharacter = selected;
+
         // Hide all UI screens
         Object.values(screens).forEach(el => { if (el) el.classList.add('hidden'); });
 
@@ -2243,17 +2267,18 @@ import { Game as CuubzGame } from './core/Game.js';
         loadingStatus.textContent = 'Building 3D scene...';
         if (loadingProgress) loadingProgress.style.width = '30%';
 
-        const renderer = new VoxelRenderer(container, window.innerWidth, window.innerHeight);
+        const renderer = gameState.renderer = new VoxelRenderer(container, window.innerWidth, window.innerHeight);
         _log('[Cuubz] Renderer created');
 
         // Initialize Input Systems
         loadingStatus.textContent = 'Setting up controls...';
         if (loadingProgress) loadingProgress.style.width = '40%';
 
-        const keyboard = new KeyboardInput();
-        const touch = new TouchInput();
-        const canvas = renderer.domElement;
-        const mouse = new MouseInput(canvas);
+        // No local alias: the render loop was `keyboard`'s only reader.
+        gameState.keyboard = new KeyboardInput();
+        const touch = gameState.touch = new TouchInput();
+        const canvas = gameState.canvas = renderer.domElement;
+        const mouse = gameState.mouse = new MouseInput(canvas);
 
         // Request pointer lock on canvas click
         canvas.addEventListener('click', () => {
@@ -2263,7 +2288,7 @@ import { Game as CuubzGame } from './core/Game.js';
         });
 
         // Initialize Terrain Generation (handled internally by ChunkManager)
-        const sensitivity = 0.002;
+        const sensitivity = gameState.sensitivity = 0.002;
         loadingStatus.textContent = 'Initializing workers...';
         if (loadingProgress) loadingProgress.style.width = '50%';
 
@@ -2274,11 +2299,11 @@ import { Game as CuubzGame } from './core/Game.js';
         // Determine tile size from settings
         const perfTexRes = perfSettings ? perfSettings.get('textureResolution') : 'high';
         const tileSize = PerformanceSettings.getTileSize(perfTexRes);
-        const textureAtlas = new PBRTextureAtlas({ tileSize });
+        const textureAtlas = gameState.textureAtlas = new PBRTextureAtlas({ tileSize });
         await textureAtlas.buildAtlas();
 
         // Build item texture atlas for hotbar/inventory UI
-        const itemAtlas = new ItemTextureAtlas({ tileSize: 64 });
+        const itemAtlas = gameState.itemAtlas = new ItemTextureAtlas({ tileSize: 64 });
         await itemAtlas.buildAtlas();
 
         // Initialize PBR material factory with the triple atlas
@@ -2302,7 +2327,8 @@ import { Game as CuubzGame } from './core/Game.js';
           }
           _log('[Cuubz] Day/night cycle initialized (5-min cycle, starting at 8:00)');
         }
-        // (game.skybox is set later, after game is instantiated)
+        // Assigned after the `if`, never inside it, so `null` (no Skybox) is recorded too.
+        gameState.skybox = skybox;
 
         // Wire up texture atlas to debug overlay (top-right corner)
         const atlasOverlay = document.getElementById('atlas-overlay');
@@ -2376,9 +2402,9 @@ import { Game as CuubzGame } from './core/Game.js';
         loadingStatus.textContent = 'Loading chunks...';
         if (loadingProgress) loadingProgress.style.width = '85%';
 
-        const worldName = currentWorld.id;
+        const worldName = gameState.worldName = currentWorld.id;
         const renderDist = perfSettings ? perfSettings.get('renderDistance') : 8;
-        let chunkManager = new ChunkManager({
+        const chunkManager = gameState.chunkManager = new ChunkManager({
           renderer: renderer,
           worldName: worldName,
           worldSeed: currentWorld.seed,
@@ -2536,7 +2562,7 @@ import { Game as CuubzGame } from './core/Game.js';
           }
         }
 
-        const spawnHeight = bestSpawnY >= 0 ? bestSpawnY + 1.625 + 2 : SEA_LEVEL + 2;
+        const spawnHeight = gameState.spawnHeight = bestSpawnY >= 0 ? bestSpawnY + 1.625 + 2 : SEA_LEVEL + 2;
         // console.log(`[Cuubz] Spawn at X=${bestSpawnX} Z=${bestSpawnZ} Y=${spawnHeight} (surface=${bestSpawnY}, chunks=${chunkManager.memoryCache.size})`);
 
         if (bestSpawnY < 0) {
@@ -2547,7 +2573,7 @@ import { Game as CuubzGame } from './core/Game.js';
           loadingStatus.textContent = 'Creating player...';
           if (loadingProgress) loadingProgress.style.width = '90%';
 
-          const player = new Player();
+          const player = gameState.player = new Player();
 
           // Check if character has a saved position for this world
           const savedSpawn = (selected.spawnPoints && selected.spawnPoints[currentWorld.id]) || null;
@@ -2587,7 +2613,7 @@ import { Game as CuubzGame } from './core/Game.js';
           }
 
           // Initialize Biome Effects System (wire up visual effects per biome)
-          const biomeEffects = new BiomeEffects();
+          const biomeEffects = gameState.biomeEffects = new BiomeEffects();
           if (renderer.scene && renderer.renderer) {
             biomeEffects.init(renderer.scene, renderer.renderer);
 // Biome Effects initialized — no log
@@ -2618,12 +2644,14 @@ import { Game as CuubzGame } from './core/Game.js';
           game = new CuubzGame();
           game.player = player;
           game.setMode(mode || 'survival');
-          game.renderer = renderer;
-          game.chunkManager = chunkManager;
-          game.skybox = skybox; // Expose for pause menu access
-          game.persistence = characterManager ? characterManager.storage : null; // For periodic saving
-          game.frameCount = 0; // Frame counter for debug logging
-          game.attackCooldown = 0; // Cooldown timer for mob attacks (seconds)
+          gameState.game = game;
+          // `renderer`, `chunkManager`, `skybox`, `frameCount` and `attackCooldown` were
+          // assigned onto `game` here. They are declared fields on GameState now and are
+          // set at the point each is constructed — refactor.md §7 PR 12, "fold the ad-hoc
+          // props in". `game.player` stays because CuubzGame.setMode() uses it to push
+          // creative-mode physics onto the player; it is the same object as
+          // `gameState.player` and neither is ever reassigned.
+          gameState.persistence = characterManager ? characterManager.storage : null; // For periodic saving
 
           // ─── Initialize Mob System (stub — inventory + survival set after their init) ──
           try {
@@ -2654,14 +2682,13 @@ import { Game as CuubzGame } from './core/Game.js';
           if (typeof FirstPersonHand !== 'undefined') {
             firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas });
           }
-          game.firstPersonHand = firstPersonHand;
+          gameState.firstPersonHand = firstPersonHand;
 
           // ─── Initialize Multiplayer Player Sync ─────────
           let playerSync = null;
           if (typeof PlayerSyncManager !== 'undefined' && sessionManager && sessionManager.client) {
             playerSync = new PlayerSyncManager();
             playerSync.setGameMode(mode || 'survival');
-            game.playerSync = playerSync;
 
             // Wire session events to player sync
             // Handle WELCOME — it includes existing players already in the session
@@ -2711,6 +2738,7 @@ import { Game as CuubzGame } from './core/Game.js';
 
             _log('[Cuubz] PlayerSyncManager initialized for multiplayer');
           }
+          gameState.playerSync = playerSync;
 
           // ─── Initialize PlayerListHUD (connected to live player data) ───
           let playerListHUD = null;
@@ -2721,7 +2749,6 @@ import { Game as CuubzGame } from './core/Game.js';
 
             if (overlayEl && itemsEl) {
               playerListHUD = new PlayerListHUD({ overlay: overlayEl, count: countEl, items: itemsEl });
-              game.playerListHUD = playerListHUD;
 
               // Build initial player list: include local player + any remote players
               const localChar = characterManager ? characterManager.getSelectedCharacter() : null;
@@ -2785,6 +2812,7 @@ import { Game as CuubzGame } from './core/Game.js';
               _log('[Cuubz] PlayerListHUD initialized and wired to live player data');
             }
           }
+          gameState.playerListHUD = playerListHUD;
 
           // ─── Initialize ChunkStreamer (host-side proactive chunk streaming) ───
           let chunkStreamer = null;
@@ -2883,7 +2911,7 @@ import { Game as CuubzGame } from './core/Game.js';
             chunkStreamer.start();
             _log('[Cuubz] ChunkStreamer initialized for host-side proactive chunk streaming');
           }
-          game.chunkStreamer = chunkStreamer;
+          gameState.chunkStreamer = chunkStreamer;
 
           // ─── Client-side CHUNK_DATA handling (receive streamed chunks from host) ───
           if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
@@ -2991,7 +3019,7 @@ import { Game as CuubzGame } from './core/Game.js';
           }
 
           // Initialize Block Interaction system
-          const blockInteraction = new BlockInteraction({
+          const blockInteraction = gameState.blockInteraction = new BlockInteraction({
             renderer: renderer,
             chunkManager: chunkManager,
             mouse: mouse,
@@ -3000,9 +3028,8 @@ import { Game as CuubzGame } from './core/Game.js';
           });
 
           // ─── Initialize Inventory System ────────────────
-          const inventory = new Inventory();
+          const inventory = gameState.inventory = new Inventory();
           player.inventory = inventory;
-          game.inventory = inventory;
 
           // Wire inventory into mob system for auto-loot
           if (mobIntegration && mobIntegration.getManager()) {
@@ -3010,8 +3037,7 @@ import { Game as CuubzGame } from './core/Game.js';
           }
 
           // ─── Initialize Crafting System ─────────────────
-          const crafting = new CraftingSystem(inventory);
-          game.crafting = crafting;
+          const crafting = gameState.crafting = new CraftingSystem(inventory);
 
           // ─── Multiplayer: Inventory Sync ────────────────
           let inventorySync = null;
@@ -3097,10 +3123,9 @@ import { Game as CuubzGame } from './core/Game.js';
           blockInteraction.onBreakStarted = () => {
             if (firstPersonHand) firstPersonHand.swing();
           };
-          game.blockInteraction = blockInteraction;
 
           // ─── Dropped Items System ──────────────────────
-          const droppedItems = {
+          const droppedItems = gameState.droppedItems = {
             drops: [],
             scene: renderer.scene,
 
@@ -3193,7 +3218,6 @@ import { Game as CuubzGame } from './core/Game.js';
               this.drops = [];
             },
           };
-          game.droppedItems = droppedItems;
 
           // ─── Block Color Helper (fallback for dropped items) ────────────────
           function getBlockColor(blockType) {
@@ -3299,10 +3323,16 @@ import { Game as CuubzGame } from './core/Game.js';
             }
           }
 
+          // The render loop drives the hotbar every 5 frames and the inventory screen on
+          // mobile tap, and both live at main.js top level now — so they reach these two
+          // through `state` rather than through the closure. PR 15 moves them to
+          // src/ui/hud/Hotbar.js and src/ui/overlays/InventoryScreen.js (§13).
+          gameState.updateHotbarUI = updateHotbarUI;
+
           // Wire inventory callbacks for hotbar updates
           inventory.onSlotChange = (index, slot) => {
             updateHotbarUI();
-            if (inventoryOpen) renderInventoryCraftingUI();
+            if (gameState.inventoryOpen) renderInventoryCraftingUI();
           };
           inventory.onSelectionChange = () => {
             updateHotbarUI();
@@ -3323,7 +3353,11 @@ import { Game as CuubzGame } from './core/Game.js';
           }
 
           // ─── Inventory + Crafting Screen ────────────────
-          let inventoryOpen = false;
+          //
+          // BUGS.md D-31: `inventoryOpen` was a `let` here. It is the one hoisted value
+          // that genuinely mutates at runtime, so it gets no local alias — `gameState`
+          // is its only home. That is what lets the Escape handler in setupPauseMenu()
+          // read it; see the restored block there.
           const craftingScreen = document.getElementById('crafting-screen');
           const btnCloseCrafting = document.getElementById('btn-close-crafting');
 
@@ -3499,7 +3533,7 @@ import { Game as CuubzGame } from './core/Game.js';
           // These handle the full drag lifecycle: mousedown → mousemove (start drag) → mouseup (drop or click)
 
           document.addEventListener('mousedown', function invMouseDown(e) {
-            if (!inventoryOpen || e.button !== 0) return;
+            if (!gameState.inventoryOpen || e.button !== 0) return;
             const slotEl = e.target.closest('.inventory-slot');
             const equipEl = e.target.closest('.equipment-slot');
             if (slotEl) {
@@ -3822,10 +3856,10 @@ import { Game as CuubzGame } from './core/Game.js';
            * Toggle inventory + crafting screen open/closed.
            */
           function toggleInventoryScreen() {
-            inventoryOpen = !inventoryOpen;
+            gameState.inventoryOpen = !gameState.inventoryOpen;
             const hotbarContainer = document.getElementById('hotbar-container');
 
-            if (inventoryOpen) {
+            if (gameState.inventoryOpen) {
               // Unlock mouse so player can use inventory UI
               if (document.pointerLockElement) {
                 document.exitPointerLock();
@@ -3836,17 +3870,18 @@ import { Game as CuubzGame } from './core/Game.js';
               craftingScreen.classList.remove('hidden');
             } else {
               // Re-lock mouse when closing inventory
-              game.renderer.domElement.requestPointerLock();
+              gameState.renderer.domElement.requestPointerLock();
               // Show hotbar when inventory screen is closed
               if (hotbarContainer) hotbarContainer.classList.remove('hidden');
               craftingScreen.classList.add('hidden');
             }
           }
+          gameState.toggleInventoryScreen = toggleInventoryScreen;
 
           if (btnCloseCrafting) {
             btnCloseCrafting.addEventListener('click', () => {
-              inventoryOpen = false;
-              game.renderer.domElement.requestPointerLock();
+              gameState.inventoryOpen = false;
+              gameState.renderer.domElement.requestPointerLock();
               const hotbarContainer = document.getElementById('hotbar-container');
               if (hotbarContainer) hotbarContainer.classList.remove('hidden');
               craftingScreen.classList.add('hidden');
@@ -3858,7 +3893,7 @@ import { Game as CuubzGame } from './core/Game.js';
           if (mobileCraftBtn) {
             mobileCraftBtn.addEventListener('touchstart', (e) => {
               e.preventDefault();
-              if (!inventoryOpen) toggleInventoryScreen();
+              if (!gameState.inventoryOpen) toggleInventoryScreen();
             });
           }
 
@@ -3883,7 +3918,7 @@ import { Game as CuubzGame } from './core/Game.js';
           // Scroll wheel for hotbar cycling
           document.addEventListener('wheel', function gameWheelHandler(e) {
             if (game.paused || !game.running) return;
-            if (inventoryOpen) return; // Don't cycle when inventory is open
+            if (gameState.inventoryOpen) return; // Don't cycle when inventory is open
             inventory.cycleSelection(e.deltaY > 0 ? 1 : -1);
             updateHotbarUI();
           });
@@ -3937,8 +3972,9 @@ import { Game as CuubzGame } from './core/Game.js';
           loadingStatus.textContent = 'Almost ready...';
           if (loadingProgress) loadingProgress.style.width = '100%';
 
-          // Create a simple world-like object for collision detection
-          const chunkWorld = {
+          // Create a simple world-like object for collision detection.
+          // No local alias: the render loop was its only reader.
+          gameState.chunkWorld = {
             getBlockAtWorld: function(bx, by, bz) {
               return chunkManager.getVoxel(Math.floor(bx), Math.floor(by), Math.floor(bz));
             }
@@ -3950,463 +3986,8 @@ import { Game as CuubzGame } from './core/Game.js';
             const hud = document.getElementById('hud');
             if (hud) hud.classList.remove('hidden');
 
-            // Main render loop — captures game, renderer, chunkManager etc via closure.
             // Cancel any old render loop from a previous session before starting fresh.
             if (_renderRafId) { cancelAnimationFrame(_renderRafId); _renderRafId = null; }
-
-            function renderLoop() {
-              _renderRafId = requestAnimationFrame(renderLoop); // Always schedule next frame first
-              if (!game.running) return;
-
-              // When paused, just render the scene (don't update game logic)
-              if (game.paused) {
-                renderer.render();
-                return;
-              }
-
-              const now = performance.now();
-              game.delta = Math.min((now - game.lastTime) / 1000, 0.1);
-              game.lastTime = now;
-
-              // Decay attack cooldown
-              if (game.attackCooldown > 0) {
-                game.attackCooldown -= game.delta;
-                if (game.attackCooldown < 0) game.attackCooldown = 0;
-              }
-
-              // Update keyboard just-pressed flags
-              keyboard.update();
-              
-              // Update touch input (clears per-frame state)
-              touch.update();
-
-              // Update mouse pointer lock state
-              if (document.pointerLockElement === canvas) {
-                mouse.locked = true;
-              } else {
-                mouse.locked = false;
-              }
-
-              // Apply mouse movement to player yaw/pitch (pointer lock)
-              if (mouse._onMouseMoveBound) {
-                // Mouse movement handled via pointerlockchange event
-              }
-
-              // Build merged input state (keyboard OR touch — both can contribute)
-              const jumpRaw = keyboard.jumpAction.held || touch.jump;
-              const jumpDown = keyboard.jumpAction.down || touch.jumpJustPressed;
-              const inputState = {
-                forward: keyboard.forward || (touch.joystickY < -0.3),
-                backward: keyboard.backward || (touch.joystickY > 0.3),
-                left: keyboard.left || (touch.joystickX < -0.3),
-                right: keyboard.right || (touch.joystickX > 0.3),
-                jumpHeld: jumpRaw,
-                jumpDown: jumpDown,
-                sprint: keyboard.sprint, // No mobile sprint yet — could add a dedicated button later
-                sneak: keyboard.sneakAction.held,
-              };
-
-              // Update player physics with input (pass chunkWorld for collision)
-              player.update(game.delta, inputState, chunkWorld);
-              
-              // ─── Multiplayer: Send movement updates (~20Hz) ───
-              if (sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected && game.frameCount % 3 === 0) {
-                sessionManager.client.sendMove(
-                  { x: player.position.x, y: player.position.y, z: player.position.z },
-                  { yaw: player.yaw, pitch: player.pitch }
-                );
-              }
-              
-              // Apply touch look deltas to player rotation (swipe right half of screen)
-              const look = touch.consumeLookDeltas();
-              if (look.x !== 0 || look.y !== 0) {
-                player.yaw -= look.x * sensitivity;
-                player.pitch -= look.y * sensitivity;
-                // Clamp pitch to avoid flipping at gimbal lock limits
-                player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
-              }
-              
-              // Mobile inventory toggle
-              if (touch.inventoryToggled) {
-                toggleInventoryScreen();
-              }
-              
-              // Update fly mode indicator HUD (creative only)
-              const flyIndicator = document.getElementById('fly-mode-indicator');
-              if (player.flyMode && !player.gravityEnabled) {
-                if (flyIndicator) flyIndicator.classList.remove('hidden');
-              } else {
-                if (flyIndicator) flyIndicator.classList.add('hidden');
-              }
-
-              // Update HUD armor indicator periodically
-              if (game.frameCount % 10 === 0) {
-                const armorStats = inventory.getEquipmentStats();
-                const armorHud = document.getElementById('armor-indicator');
-                const hudDefense = document.getElementById('hud-defense');
-                if (armorHud && hudDefense) {
-                  if (armorStats.totalArmor > 0) {
-                    hudDefense.textContent = armorStats.totalArmor;
-                    armorHud.classList.remove('hidden');
-                  } else {
-                    armorHud.classList.add('hidden');
-                  }
-                }
-              }
-              
-              // Debug: log player state every 60 frames (disabled — too verbose)
-
-              // Update camera to follow player at eye level.
-              // This MUST happen before blockInteraction.update() so raycasting
-              // uses the current frame's camera position/direction, not stale data
-              // from the previous frame. Without this, moving while interacting
-              // causes the raycast to be misaligned with the crosshair.
-              const camPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
-              renderer.updateCamera(camPos, player.yaw, player.pitch);
-
-              // Update sky dome to follow the player (prevents seeing through the skybox)
-              renderer.updateSkyPosition(camPos);
-
-              // Update shadow camera to follow the player
-              renderer.updateShadowCamera(player.position);
-
-              // Update day/night cycle (advances time, updates sky color, sun/moon, fog, clouds)
-              if (skybox) {
-                skybox.update(game.delta, player.position);
-              }
-
-              // Update block interaction (break/place/attack)
-              // Runs AFTER camera update so raycasting uses the current frame's
-              // camera position/direction. This ensures accurate targeting while
-              // the player is moving.
-              if (blockInteraction) {
-                blockInteraction.update(game.delta);
-              }
-
-              // Update first-person hand animation
-              if (firstPersonHand) {
-                firstPersonHand.update(game.delta);
-              }
-
-              // ─── Player Attack Mobs (Left Click) ────────────────
-              // Uses mouse.leftClick (held state) so holding left-click
-              // repeatedly attacks mobs with a cooldown between hits.
-              // The cooldown is based on the weapon's attack speed.
-              // Must run BEFORE mouse.update() clears justClickedLeft.
-              if (mobIntegration && mouse && mouse.leftClick && renderer.camera && game.attackCooldown <= 0) {
-                try {
-                  const mobManager = mobIntegration.getManager();
-                  if (mobManager) {
-                    const origin = renderer.camera.position;
-                    const direction = new THREE.Vector3();
-                    renderer.camera.getWorldDirection(direction);
-                    const maxDist = 7;
-                    const hit = mobManager.raycastMobs(origin, direction, maxDist);
-                    if (hit) {
-                      // Get attack damage
-                      const damage = inventory.getAttackDamage();
-
-                      // Calculate cooldown from weapon attack speed
-                      // Minecraft base = 4.0 attacks/sec, weapon attackSpeed is a modifier
-                      // e.g. sword: -2.4 → actual = 1.6 att/sec → cooldown = 0.625s
-                      let attackCooldown = 0.25; // Default fist speed (4 att/sec)
-                      const item = inventory.getSelectedItem();
-                      if (item && typeof item.typeId === 'string') {
-                        const def = (typeof NAMED_ITEMS !== 'undefined' && NAMED_ITEMS[item.typeId]);
-                        if (def && def.attackSpeed !== undefined) {
-                          const actualSpeed = 4.0 + def.attackSpeed;
-                          if (actualSpeed > 0) {
-                            attackCooldown = 1.0 / actualSpeed;
-                          }
-                        }
-                      }
-                      game.attackCooldown = attackCooldown;
-
-                      // Apply damage and knockback
-                      hit.mob.takeDamage(damage, 'player_attack');
-                      const dx = hit.mob.position.x - player.position.x;
-                      const dz = hit.mob.position.z - player.position.z;
-                      const dist = Math.sqrt(dx*dx + dz*dz) || 1;
-                      hit.mob.knockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
-
-                      // Trigger hand swing animation
-                      if (firstPersonHand) firstPersonHand.swing();
-
-                      // Prevent block breaking this frame (mob attack takes priority)
-                      if (blockInteraction) blockInteraction._attackOverride = true;
-                    }
-                  }
-                } catch(e) {
-                  if (game.frameCount < 10) console.warn('[Cuubz] Mob attack error:', e.message);
-                }
-              }
-
-              // Update mouse input (clears just-clicked flags) — AFTER blockInteraction and mob attack read them
-              mouse.update();
-
-              // ─── Multiplayer: Sync remote player positions ───
-              if (playerSync) {
-                playerSync.update(game.delta);
-              }
-
-              // ─── Multiplayer: Update player list HUD positions (every 30 frames ≈ 0.5s) ───
-              if (playerListHUD && game.frameCount % 30 === 0) {
-                // Update local player position
-                playerListHUD.addPlayer({
-                  id: 'local',
-                  position: { x: player.position.x, y: player.position.y, z: player.position.z },
-                });
-                // Update remote player positions from PlayerSyncManager
-                if (playerSync) {
-                  for (const remotePlayer of playerSync.getActivePlayers()) {
-                    playerListHUD.addPlayer({
-                      id: remotePlayer.playerId,
-                      position: { ...remotePlayer.authoritativePosition },
-                    });
-                  }
-                }
-              }
-
-              // ─── Multiplayer: Update ChunkStreamer with player positions (host) ───
-              if (chunkStreamer) {
-                // Update host player position — use actual playerId so server can route messages
-                const hostPid = sessionManager.client.playerId || 'host';
-                chunkStreamer.updatePlayerPosition(hostPid, {
-                  x: player.position.x,
-                  y: player.position.y,
-                  z: player.position.z,
-                });
-                // Update remote player positions from PlayerSyncManager
-                if (playerSync) {
-                  const activePlayers = playerSync.getActivePlayers();
-                  if (activePlayers.length > 0 && game.frameCount % 60 === 0) {
-                    console.log(`[CHUNK_STREAM] Updating ${activePlayers.length} remote player positions in chunkStreamer`);
-                    for (const rp of activePlayers) {
-                      console.log(`[CHUNK_STREAM]   ${rp.playerId.substring(0,8)} @ (${Math.floor(rp.authoritativePosition.x)},${Math.floor(rp.authoritativePosition.z)})`);
-                    }
-                  }
-                  for (const remotePlayer of activePlayers) {
-                    chunkStreamer.updatePlayerPosition(remotePlayer.playerId, remotePlayer.authoritativePosition);
-                  }
-                }
-              }
-
-              // ─── Multiplayer: Sync time of day to clients (host, every ~0.5s) ───
-              if (sessionManager && sessionManager.hostingSessionId && skybox && game.frameCount % 30 === 0) {
-                if (sessionManager.client && sessionManager.client._gameSessionConn) {
-                  sessionManager.client._gameSessionConn.send({
-                    type: 'TIME_SYNC',
-                    timeOfDay: skybox.timeOfDay,
-                    timePaused: skybox.timePaused,
-                  });
-                  if (game.frameCount % 300 === 0) {
-                    console.log(`[TIME_SYNC] Sent: timeOfDay=${skybox.timeOfDay.toFixed(2)}, paused=${skybox.timePaused}`);
-                  }
-                }
-              }
-
-              // ─── Multiplayer: Send block changes to game session ───
-              if (blockInteraction && sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected) {
-                if (blockInteraction._lastBroken) {
-                  console.log(`[BREAK] Sending network break: (${blockInteraction._lastBroken.x},${blockInteraction._lastBroken.y},${blockInteraction._lastBroken.z})`);
-                  sessionManager.client.breakBlock(blockInteraction._lastBroken.x, blockInteraction._lastBroken.y, blockInteraction._lastBroken.z);
-                  blockInteraction._lastBroken = null;
-                }
-                if (blockInteraction._lastPlaced) {
-                  console.log(`[PLACE] Sending network place: (${blockInteraction._lastPlaced.x},${blockInteraction._lastPlaced.y},${blockInteraction._lastPlaced.z}) type=${blockInteraction._lastPlaced.blockType}`);
-                  sessionManager.client.placeBlock(blockInteraction._lastPlaced.x, blockInteraction._lastPlaced.y, blockInteraction._lastPlaced.z, blockInteraction._lastPlaced.blockType);
-                  blockInteraction._lastPlaced = null;
-                }
-              }
-
-              // Update dropped items (floating drops with pickup)
-              if (droppedItems && droppedItems.drops.length > 0) {
-                droppedItems.update(game.delta, player.position, inventory);
-              }
-
-              // Scroll wheel for hotbar cycling
-              if (mouse.scrollDelta !== 0) {
-                inventory.cycleSelection(mouse.scrollDelta > 0 ? 1 : -1);
-                mouse.scrollDelta = 0;
-              }
-
-              // Update hotbar UI periodically
-              if (game.frameCount % 5 === 0) {
-                updateHotbarUI();
-              }
-
-              // Emergency rescue: only teleport if player falls completely out of the world.
-              // The old threshold was spawnHeight-10 which fired whenever you entered
-              // a cave or deep hole (e.g. spawnHeight=34 → fires at Y=24, above bedrock).
-              // Now only fires at MIN_Y-5 — the player must be genuinely below bedrock.
-              if (player.position.y < MIN_Y - 5) {
-                player.position.y = spawnHeight;
-                player.velocity.y = 0;
-              }
-
-              // Update PBR materials with shadow data + day/night lighting
-              const pbrFactory = renderer.getPBRFactory();
-              if (pbrFactory) {
-                const shadowData = renderer.getShadowData();
-                if (shadowData) {
-                  pbrFactory.updateShadowData(shadowData.map, shadowData.matrix);
-                } else {
-                  // Log once when shadow data is not available
-                  if (typeof game._shadowMissingCount === 'undefined') game._shadowMissingCount = 0;
-                  game._shadowMissingCount++;
-                  if (game._shadowMissingCount <= 5) {
-                    console.warn('[Shadow] getShadowData returned null (frame', game.frameCount, ')');
-                  }
-                }
-
-                // Update PBR lighting uniforms from skybox (sun direction, color, intensity, ambient)
-                if (skybox) {
-                  skybox.updatePBRFactory(pbrFactory);
-                }
-              } else {
-                if (typeof game._noPbrCount === 'undefined') game._noPbrCount = 0;
-                game._noPbrCount++;
-                if (game._noPbrCount <= 3) {
-                  console.warn('[Shadow] No PBR factory available');
-                }
-              }
-
-              // Update Biome Effects (particles only — sky/fog handled by day/night cycle)
-              if (biomeEffects && chunkManager) {
-                // Determine current biome using biomeSystem at player position
-                const wx = Math.floor(player.position.x);
-                const wz = Math.floor(player.position.z);
-                let biomeData = null;
-                try {
-                  biomeData = BiomeSystem.getBiomeAtWorldPos(wx, wz, chunkManager.worldSeed);
-                } catch(e) { /* Fallback to default */ }
-
-                if (biomeData) {
-                  biomeEffects.setBiome(biomeData.id);
-                  
-                  // Set player/camera positions for particle spawning & billboarding
-                  biomeEffects.setPlayerPosition(player.position.x, player.position.y, player.position.z);
-                  biomeEffects.setCameraPosition(camPos);
-
-                  // Spawn bubble particles in lava/toxic biomes
-                  if (biomeData.id === 'lava' && Math.random() < 0.02) {
-                    biomeEffects.spawnLavaBubbles(
-                      player.position.x + (Math.random() - 0.5) * 40,
-                      player.position.y - 2,
-                      player.position.z + (Math.random() - 0.5) * 40
-                    );
-                  } else if (biomeData.id === 'corrupt' && Math.random() < 0.015) {
-                    biomeEffects.spawnToxicBubbles(
-                      player.position.x + (Math.random() - 0.5) * 40,
-                      player.position.y - 2,
-                      player.position.z + (Math.random() - 0.5) * 40
-                    );
-                  }
-                }
-
-                // Update animation timers & particles
-                // Pass skybox base color so biome tint blends with day/night cycle
-                biomeEffects.update(game.delta, skybox ? skybox._baseSkyColor : null, skybox ? skybox.getFogDensity() : undefined);
-
-                // Update the sky dome shader with the final blended sky color.
-                // The sky dome (gradient sphere) was hardcoded to blue and never
-                // received day/night or biome color updates — this fixes that.
-                const finalSky = biomeEffects.getFinalSkyColor();
-                if (finalSky) {
-                  // Create gradient: top slightly darker than horizon
-                  const topColor = finalSky.clone();
-                  topColor.r = Math.max(0, topColor.r * 0.6);
-                  topColor.g = Math.max(0, topColor.g * 0.6);
-                  topColor.b = Math.max(0, topColor.b * 0.85);
-                  renderer.updateSkyColors(finalSky, topColor);
-                }
-              }
-
-              // Render scene
-              renderer.render();
-
-              // DEBUG: Hover raycasting — show block ID at crosshair center
-              const tooltip = document.getElementById('block-tooltip');
-              const tooltipId = document.getElementById('tooltip-block-id');
-              const tooltipName = document.getElementById('tooltip-block-name');
-              if (renderer.camera && renderer.chunkGroup) {
-                const raycaster = new THREE.Raycaster();
-                raycaster.setFromCamera(new THREE.Vector2(0, 0), renderer.camera);
-                raycaster.far = 7; // Same as block interaction range
-
-                const intersects = raycaster.intersectObjects(renderer.chunkGroup.children, true);
-                if (intersects.length > 0) {
-                  const hit = intersects[0];
-                  const obj = hit.object;
-                  if (obj.userData && obj.userData.chunkKey && obj.userData.blockIdToName) {
-                    // Calculate block position from intersection point.
-                    // Mesh position is the chunk origin in world space.
-                    // IMPORTANT: hit.point sits on the surface, so floor() can land
-                    // in the air block above. We check both the hit position and
-                    // one block below to find the actual solid block.
-                    const meshPos = obj.position;
-
-                    const localX = Math.floor(hit.point.x - meshPos.x);
-                    const localY = Math.floor(hit.point.y - meshPos.y);
-                    const localZ = Math.floor(hit.point.z - meshPos.z);
-
-                    // Clamp to chunk bounds (X/Z: 0-15, Y: -32 to 64)
-                    if (localX >= 0 && localX < 16 && localZ >= 0 && localZ < 16 && localY >= -32 && localY <= 64) {
-                      try {
-                        // First check the exact hit position
-                        let blockId = obj.userData.chunkData.getBlock(localX, localY, localZ);
-
-                        // If that's air/cave_air, check one block below (hit point is on surface boundary)
-                        if ((blockId === BLOCK_TYPES.AIR || blockId === BLOCK_TYPES.CAVE_AIR) && localY > -32) {
-                          blockId = obj.userData.chunkData.getBlock(localX, localY - 1, localZ);
-                        }
-
-                        const blockName = obj.userData.blockIdToName[blockId] || 'unknown';
-
-                        tooltipId.textContent = `ID: ${blockId}`;
-                        tooltipName.textContent = blockName.replace(/_/g, ' ');
-                        tooltip.classList.remove('hidden');
-                      } catch (e) {
-                        // Block out of range — hide tooltip
-                        tooltip.classList.add('hidden');
-                      }
-                    } else {
-                      tooltip.classList.add('hidden');
-                    }
-                  } else {
-                    tooltip.classList.add('hidden');
-                  }
-                } else {
-                  tooltip.classList.add('hidden');
-                }
-              }
-
-              // Update render chunks for player position (per-frame mesh rebuild + unload)
-              if (game.chunkManager) {
-                game.chunkManager.updateRenderChunks(player.position.x, player.position.z);
-              }
-
-
-
-              // ─── Update Mob System ──────────────────────
-              if (mobIntegration) {
-                try {
-                  // Pass a biome lookup function so each chunk spawns its own biome's mobs
-                  const getBiomeFn = (wx, wz) => {
-                    try {
-                      const bd = BiomeSystem.getBiomeAtWorldPos(wx, wz, chunkManager.worldSeed);
-                      return bd ? bd.id : undefined;
-                    } catch(e) { return undefined; }
-                  };
-                  mobIntegration.update(game.delta, chunkWorld, player.position, chunkManager.renderDistance || 6, getBiomeFn);
-                } catch(e) {
-                  if (game.frameCount < 10) console.warn('[Cuubz] Mob update error:', e.message);
-                }
-              }
-
-              // ─── Debug Stats Overlay Update ──────────────
-              updateDebugStats(game);
-            }
 
             // ─── Wire up Pause Menu & Settings ────────────
             // Clean up any previous session's pause menu listeners before setting up fresh
@@ -4414,10 +3995,17 @@ import { Game as CuubzGame } from './core/Game.js';
               _cleanupPauseMenu();
               _cleanupPauseMenu = null;
             }
-            _cleanupPauseMenu = setupPauseMenu(game);
+            _cleanupPauseMenu = setupPauseMenu(gameState);
 
             game.lastTime = performance.now();
-            _renderRafId = requestAnimationFrame(renderLoop);
+            // renderLoop lives at main.js top level now (PR 12). `gameState` is the only
+            // thing it needs, and passing it here is what proves the closure is severed.
+            _renderRafId = requestAnimationFrame(() => renderLoop(gameState));
+
+            // The e2e harness drives block placement through this handle — it is the
+            // reason test/e2e/saveLoad.js can assert a *player edit* round-trips, rather
+            // than only generated terrain. See src/testBridge.js.
+            publishGameState(gameState);
 
             _log('[Cuubz] Game started successfully in ' + mode + ' mode');
           }, 500);
@@ -4440,9 +4028,483 @@ import { Game as CuubzGame } from './core/Game.js';
   let _fpsLastTime = performance.now();
   let _currentFps = 0;
 
-  function updateDebugStats(game) {
+  // ─── Main render loop (PR 12) ───────────────────────────────────────────────
+  //
+  // This used to be declared inside `startGame()`'s `setTimeout` closure and read two
+  // dozen of its locals by name (refactor.md §1.6). It sits at main.js top level now and
+  // takes the `GameState` as its only argument, which is the PR 12 acceptance criterion
+  // made structural: it cannot reference a `startGame` local because none is in scope
+  // here. The only other names it reaches for are main.js-level ones that Phase 3 owns —
+  // `_renderRafId`, `sessionManager` (§13 → SessionManager.js), `mobIntegration`
+  // (→ MobSystem) and `updateDebugStats` (→ ui/hud/DebugStats.js) — plus module imports.
+  //
+  // PR 18 moves this to src/engine/loop/RenderLoop.js. Nothing about it needs to change
+  // to make that a file move.
+  function renderLoop(state) {
+    // Always schedule the next frame first, so a throw below cannot stop the loop.
+    _renderRafId = requestAnimationFrame(() => renderLoop(state));
+    if (!state.game.running) return;
+
+    // When paused, just render the scene (don't update game logic)
+    if (state.game.paused) {
+      state.renderer.render();
+      return;
+    }
+
+    const now = performance.now();
+    state.game.delta = Math.min((now - state.game.lastTime) / 1000, 0.1);
+    state.game.lastTime = now;
+
+    // Decay attack cooldown
+    if (state.attackCooldown > 0) {
+      state.attackCooldown -= state.game.delta;
+      if (state.attackCooldown < 0) state.attackCooldown = 0;
+    }
+
+    // Update keyboard just-pressed flags
+    state.keyboard.update();
+    
+    // Update touch input (clears per-frame state)
+    state.touch.update();
+
+    // Update mouse pointer lock state
+    if (document.pointerLockElement === state.canvas) {
+      state.mouse.locked = true;
+    } else {
+      state.mouse.locked = false;
+    }
+
+    // Apply mouse movement to player yaw/pitch (pointer lock)
+    if (state.mouse._onMouseMoveBound) {
+      // Mouse movement handled via pointerlockchange event
+    }
+
+    // Build merged input state (keyboard OR touch — both can contribute)
+    const jumpRaw = state.keyboard.jumpAction.held || state.touch.jump;
+    const jumpDown = state.keyboard.jumpAction.down || state.touch.jumpJustPressed;
+    const inputState = {
+      forward: state.keyboard.forward || (state.touch.joystickY < -0.3),
+      backward: state.keyboard.backward || (state.touch.joystickY > 0.3),
+      left: state.keyboard.left || (state.touch.joystickX < -0.3),
+      right: state.keyboard.right || (state.touch.joystickX > 0.3),
+      jumpHeld: jumpRaw,
+      jumpDown: jumpDown,
+      sprint: state.keyboard.sprint, // No mobile sprint yet — could add a dedicated button later
+      sneak: state.keyboard.sneakAction.held,
+    };
+
+    // Update player physics with input (pass chunkWorld for collision)
+    state.player.update(state.game.delta, inputState, state.chunkWorld);
+    
+    // ─── Multiplayer: Send movement updates (~20Hz) ───
+    if (sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected && state.frameCount % 3 === 0) {
+      sessionManager.client.sendMove(
+        { x: state.player.position.x, y: state.player.position.y, z: state.player.position.z },
+        { yaw: state.player.yaw, pitch: state.player.pitch }
+      );
+    }
+    
+    // Apply touch look deltas to player rotation (swipe right half of screen)
+    const look = state.touch.consumeLookDeltas();
+    if (look.x !== 0 || look.y !== 0) {
+      state.player.yaw -= look.x * state.sensitivity;
+      state.player.pitch -= look.y * state.sensitivity;
+      // Clamp pitch to avoid flipping at gimbal lock limits
+      state.player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.player.pitch));
+    }
+    
+    // Mobile inventory toggle
+    if (state.touch.inventoryToggled) {
+      state.toggleInventoryScreen();
+    }
+    
+    // Update fly mode indicator HUD (creative only)
+    const flyIndicator = document.getElementById('fly-mode-indicator');
+    if (state.player.flyMode && !state.player.gravityEnabled) {
+      if (flyIndicator) flyIndicator.classList.remove('hidden');
+    } else {
+      if (flyIndicator) flyIndicator.classList.add('hidden');
+    }
+
+    // Update HUD armor indicator periodically
+    if (state.frameCount % 10 === 0) {
+      const armorStats = state.inventory.getEquipmentStats();
+      const armorHud = document.getElementById('armor-indicator');
+      const hudDefense = document.getElementById('hud-defense');
+      if (armorHud && hudDefense) {
+        if (armorStats.totalArmor > 0) {
+          hudDefense.textContent = armorStats.totalArmor;
+          armorHud.classList.remove('hidden');
+        } else {
+          armorHud.classList.add('hidden');
+        }
+      }
+    }
+    
+    // Debug: log player state every 60 frames (disabled — too verbose)
+
+    // Update camera to follow player at eye level.
+    // This MUST happen before blockInteraction.update() so raycasting
+    // uses the current frame's camera position/direction, not stale data
+    // from the previous frame. Without this, moving while interacting
+    // causes the raycast to be misaligned with the crosshair.
+    const camPos = new THREE.Vector3(state.player.position.x, state.player.position.y + 1.6, state.player.position.z);
+    state.renderer.updateCamera(camPos, state.player.yaw, state.player.pitch);
+
+    // Update sky dome to follow the player (prevents seeing through the skybox)
+    state.renderer.updateSkyPosition(camPos);
+
+    // Update shadow camera to follow the player
+    state.renderer.updateShadowCamera(state.player.position);
+
+    // Update day/night cycle (advances time, updates sky color, sun/moon, fog, clouds)
+    if (state.skybox) {
+      state.skybox.update(state.game.delta, state.player.position);
+    }
+
+    // Update block interaction (break/place/attack)
+    // Runs AFTER camera update so raycasting uses the current frame's
+    // camera position/direction. This ensures accurate targeting while
+    // the player is moving.
+    if (state.blockInteraction) {
+      state.blockInteraction.update(state.game.delta);
+    }
+
+    // Update first-person hand animation
+    if (state.firstPersonHand) {
+      state.firstPersonHand.update(state.game.delta);
+    }
+
+    // ─── Player Attack Mobs (Left Click) ────────────────
+    // Uses mouse.leftClick (held state) so holding left-click
+    // repeatedly attacks mobs with a cooldown between hits.
+    // The cooldown is based on the weapon's attack speed.
+    // Must run BEFORE mouse.update() clears justClickedLeft.
+    if (mobIntegration && state.mouse && state.mouse.leftClick && state.renderer.camera && state.attackCooldown <= 0) {
+      try {
+        const mobManager = mobIntegration.getManager();
+        if (mobManager) {
+          const origin = state.renderer.camera.position;
+          const direction = new THREE.Vector3();
+          state.renderer.camera.getWorldDirection(direction);
+          const maxDist = 7;
+          const hit = mobManager.raycastMobs(origin, direction, maxDist);
+          if (hit) {
+            // Get attack damage
+            const damage = state.inventory.getAttackDamage();
+
+            // Calculate cooldown from weapon attack speed
+            // Minecraft base = 4.0 attacks/sec, weapon attackSpeed is a modifier
+            // e.g. sword: -2.4 → actual = 1.6 att/sec → cooldown = 0.625s
+            let attackCooldown = 0.25; // Default fist speed (4 att/sec)
+            const item = state.inventory.getSelectedItem();
+            if (item && typeof item.typeId === 'string') {
+              const def = (typeof NAMED_ITEMS !== 'undefined' && NAMED_ITEMS[item.typeId]);
+              if (def && def.attackSpeed !== undefined) {
+                const actualSpeed = 4.0 + def.attackSpeed;
+                if (actualSpeed > 0) {
+                  attackCooldown = 1.0 / actualSpeed;
+                }
+              }
+            }
+            state.attackCooldown = attackCooldown;
+
+            // Apply damage and knockback
+            hit.mob.takeDamage(damage, 'player_attack');
+            const dx = hit.mob.position.x - state.player.position.x;
+            const dz = hit.mob.position.z - state.player.position.z;
+            const dist = Math.sqrt(dx*dx + dz*dz) || 1;
+            hit.mob.knockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
+
+            // Trigger hand swing animation
+            if (state.firstPersonHand) state.firstPersonHand.swing();
+
+            // Prevent block breaking this frame (mob attack takes priority)
+            if (state.blockInteraction) state.blockInteraction._attackOverride = true;
+          }
+        }
+      } catch(e) {
+        if (state.frameCount < 10) console.warn('[Cuubz] Mob attack error:', e.message);
+      }
+    }
+
+    // Update mouse input (clears just-clicked flags) — AFTER blockInteraction and mob attack read them
+    state.mouse.update();
+
+    // ─── Multiplayer: Sync remote player positions ───
+    if (state.playerSync) {
+      state.playerSync.update(state.game.delta);
+    }
+
+    // ─── Multiplayer: Update player list HUD positions (every 30 frames ≈ 0.5s) ───
+    if (state.playerListHUD && state.frameCount % 30 === 0) {
+      // Update local player position
+      state.playerListHUD.addPlayer({
+        id: 'local',
+        position: { x: state.player.position.x, y: state.player.position.y, z: state.player.position.z },
+      });
+      // Update remote player positions from PlayerSyncManager
+      if (state.playerSync) {
+        for (const remotePlayer of state.playerSync.getActivePlayers()) {
+          state.playerListHUD.addPlayer({
+            id: remotePlayer.playerId,
+            position: { ...remotePlayer.authoritativePosition },
+          });
+        }
+      }
+    }
+
+    // ─── Multiplayer: Update ChunkStreamer with player positions (host) ───
+    if (state.chunkStreamer) {
+      // Update host player position — use actual playerId so server can route messages
+      const hostPid = sessionManager.client.playerId || 'host';
+      state.chunkStreamer.updatePlayerPosition(hostPid, {
+        x: state.player.position.x,
+        y: state.player.position.y,
+        z: state.player.position.z,
+      });
+      // Update remote player positions from PlayerSyncManager
+      if (state.playerSync) {
+        const activePlayers = state.playerSync.getActivePlayers();
+        if (activePlayers.length > 0 && state.frameCount % 60 === 0) {
+          console.log(`[CHUNK_STREAM] Updating ${activePlayers.length} remote player positions in chunkStreamer`);
+          for (const rp of activePlayers) {
+            console.log(`[CHUNK_STREAM]   ${rp.playerId.substring(0,8)} @ (${Math.floor(rp.authoritativePosition.x)},${Math.floor(rp.authoritativePosition.z)})`);
+          }
+        }
+        for (const remotePlayer of activePlayers) {
+          state.chunkStreamer.updatePlayerPosition(remotePlayer.playerId, remotePlayer.authoritativePosition);
+        }
+      }
+    }
+
+    // ─── Multiplayer: Sync time of day to clients (host, every ~0.5s) ───
+    if (sessionManager && sessionManager.hostingSessionId && state.skybox && state.frameCount % 30 === 0) {
+      if (sessionManager.client && sessionManager.client._gameSessionConn) {
+        sessionManager.client._gameSessionConn.send({
+          type: 'TIME_SYNC',
+          timeOfDay: state.skybox.timeOfDay,
+          timePaused: state.skybox.timePaused,
+        });
+        if (state.frameCount % 300 === 0) {
+          console.log(`[TIME_SYNC] Sent: timeOfDay=${state.skybox.timeOfDay.toFixed(2)}, paused=${state.skybox.timePaused}`);
+        }
+      }
+    }
+
+    // ─── Multiplayer: Send block changes to game session ───
+    if (state.blockInteraction && sessionManager && sessionManager.client && sessionManager.client.isGameSessionConnected) {
+      if (state.blockInteraction._lastBroken) {
+        console.log(`[BREAK] Sending network break: (${state.blockInteraction._lastBroken.x},${state.blockInteraction._lastBroken.y},${state.blockInteraction._lastBroken.z})`);
+        sessionManager.client.breakBlock(state.blockInteraction._lastBroken.x, state.blockInteraction._lastBroken.y, state.blockInteraction._lastBroken.z);
+        state.blockInteraction._lastBroken = null;
+      }
+      if (state.blockInteraction._lastPlaced) {
+        console.log(`[PLACE] Sending network place: (${state.blockInteraction._lastPlaced.x},${state.blockInteraction._lastPlaced.y},${state.blockInteraction._lastPlaced.z}) type=${state.blockInteraction._lastPlaced.blockType}`);
+        sessionManager.client.placeBlock(state.blockInteraction._lastPlaced.x, state.blockInteraction._lastPlaced.y, state.blockInteraction._lastPlaced.z, state.blockInteraction._lastPlaced.blockType);
+        state.blockInteraction._lastPlaced = null;
+      }
+    }
+
+    // Update dropped items (floating drops with pickup)
+    if (state.droppedItems && state.droppedItems.drops.length > 0) {
+      state.droppedItems.update(state.game.delta, state.player.position, state.inventory);
+    }
+
+    // Scroll wheel for hotbar cycling
+    if (state.mouse.scrollDelta !== 0) {
+      state.inventory.cycleSelection(state.mouse.scrollDelta > 0 ? 1 : -1);
+      state.mouse.scrollDelta = 0;
+    }
+
+    // Update hotbar UI periodically
+    if (state.frameCount % 5 === 0) {
+      state.updateHotbarUI();
+    }
+
+    // Emergency rescue: only teleport if player falls completely out of the world.
+    // The old threshold was spawnHeight-10 which fired whenever you entered
+    // a cave or deep hole (e.g. spawnHeight=34 → fires at Y=24, above bedrock).
+    // Now only fires at MIN_Y-5 — the player must be genuinely below bedrock.
+    if (state.player.position.y < MIN_Y - 5) {
+      state.player.position.y = state.spawnHeight;
+      state.player.velocity.y = 0;
+    }
+
+    // Update PBR materials with shadow data + day/night lighting
+    const pbrFactory = state.renderer.getPBRFactory();
+    if (pbrFactory) {
+      const shadowData = state.renderer.getShadowData();
+      if (shadowData) {
+        pbrFactory.updateShadowData(shadowData.map, shadowData.matrix);
+      } else {
+        // Log the first five frames with no shadow data, then stay quiet.
+        state.shadowMissingCount++;
+        if (state.shadowMissingCount <= 5) {
+          console.warn('[Shadow] getShadowData returned null (frame', state.frameCount, ')');
+        }
+      }
+
+      // Update PBR lighting uniforms from skybox (sun direction, color, intensity, ambient)
+      if (state.skybox) {
+        state.skybox.updatePBRFactory(pbrFactory);
+      }
+    } else {
+      state.noPbrCount++;
+      if (state.noPbrCount <= 3) {
+        console.warn('[Shadow] No PBR factory available');
+      }
+    }
+
+    // Update Biome Effects (particles only — sky/fog handled by day/night cycle)
+    if (state.biomeEffects && state.chunkManager) {
+      // Determine current biome using biomeSystem at player position
+      const wx = Math.floor(state.player.position.x);
+      const wz = Math.floor(state.player.position.z);
+      let biomeData = null;
+      try {
+        biomeData = BiomeSystem.getBiomeAtWorldPos(wx, wz, state.chunkManager.worldSeed);
+      } catch(e) { /* Fallback to default */ }
+
+      if (biomeData) {
+        state.biomeEffects.setBiome(biomeData.id);
+        
+        // Set player/camera positions for particle spawning & billboarding
+        state.biomeEffects.setPlayerPosition(state.player.position.x, state.player.position.y, state.player.position.z);
+        state.biomeEffects.setCameraPosition(camPos);
+
+        // Spawn bubble particles in lava/toxic biomes
+        if (biomeData.id === 'lava' && Math.random() < 0.02) {
+          state.biomeEffects.spawnLavaBubbles(
+            state.player.position.x + (Math.random() - 0.5) * 40,
+            state.player.position.y - 2,
+            state.player.position.z + (Math.random() - 0.5) * 40
+          );
+        } else if (biomeData.id === 'corrupt' && Math.random() < 0.015) {
+          state.biomeEffects.spawnToxicBubbles(
+            state.player.position.x + (Math.random() - 0.5) * 40,
+            state.player.position.y - 2,
+            state.player.position.z + (Math.random() - 0.5) * 40
+          );
+        }
+      }
+
+      // Update animation timers & particles
+      // Pass skybox base color so biome tint blends with day/night cycle
+      state.biomeEffects.update(state.game.delta, state.skybox ? state.skybox._baseSkyColor : null, state.skybox ? state.skybox.getFogDensity() : undefined);
+
+      // Update the sky dome shader with the final blended sky color.
+      // The sky dome (gradient sphere) was hardcoded to blue and never
+      // received day/night or biome color updates — this fixes that.
+      const finalSky = state.biomeEffects.getFinalSkyColor();
+      if (finalSky) {
+        // Create gradient: top slightly darker than horizon
+        const topColor = finalSky.clone();
+        topColor.r = Math.max(0, topColor.r * 0.6);
+        topColor.g = Math.max(0, topColor.g * 0.6);
+        topColor.b = Math.max(0, topColor.b * 0.85);
+        state.renderer.updateSkyColors(finalSky, topColor);
+      }
+    }
+
+    // Render scene
+    state.renderer.render();
+
+    // DEBUG: Hover raycasting — show block ID at crosshair center
+    const tooltip = document.getElementById('block-tooltip');
+    const tooltipId = document.getElementById('tooltip-block-id');
+    const tooltipName = document.getElementById('tooltip-block-name');
+    if (state.renderer.camera && state.renderer.chunkGroup) {
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), state.renderer.camera);
+      raycaster.far = 7; // Same as block interaction range
+
+      const intersects = raycaster.intersectObjects(state.renderer.chunkGroup.children, true);
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        const obj = hit.object;
+        if (obj.userData && obj.userData.chunkKey && obj.userData.blockIdToName) {
+          // Calculate block position from intersection point.
+          // Mesh position is the chunk origin in world space.
+          // IMPORTANT: hit.point sits on the surface, so floor() can land
+          // in the air block above. We check both the hit position and
+          // one block below to find the actual solid block.
+          const meshPos = obj.position;
+
+          const localX = Math.floor(hit.point.x - meshPos.x);
+          const localY = Math.floor(hit.point.y - meshPos.y);
+          const localZ = Math.floor(hit.point.z - meshPos.z);
+
+          // Clamp to chunk bounds (X/Z: 0-15, Y: -32 to 64)
+          if (localX >= 0 && localX < 16 && localZ >= 0 && localZ < 16 && localY >= -32 && localY <= 64) {
+            try {
+              // First check the exact hit position
+              let blockId = obj.userData.chunkData.getBlock(localX, localY, localZ);
+
+              // If that's air/cave_air, check one block below (hit point is on surface boundary)
+              if ((blockId === BLOCK_TYPES.AIR || blockId === BLOCK_TYPES.CAVE_AIR) && localY > -32) {
+                blockId = obj.userData.chunkData.getBlock(localX, localY - 1, localZ);
+              }
+
+              const blockName = obj.userData.blockIdToName[blockId] || 'unknown';
+
+              tooltipId.textContent = `ID: ${blockId}`;
+              tooltipName.textContent = blockName.replace(/_/g, ' ');
+              tooltip.classList.remove('hidden');
+            } catch (e) {
+              // Block out of range — hide tooltip
+              tooltip.classList.add('hidden');
+            }
+          } else {
+            tooltip.classList.add('hidden');
+          }
+        } else {
+          tooltip.classList.add('hidden');
+        }
+      } else {
+        tooltip.classList.add('hidden');
+      }
+    }
+
+    // Update render chunks for player position (per-frame mesh rebuild + unload)
+    if (state.chunkManager) {
+      state.chunkManager.updateRenderChunks(state.player.position.x, state.player.position.z);
+    }
+
+
+
+    // ─── Update Mob System ──────────────────────
+    if (mobIntegration) {
+      try {
+        // Pass a biome lookup function so each chunk spawns its own biome's mobs
+        const getBiomeFn = (wx, wz) => {
+          try {
+            const bd = BiomeSystem.getBiomeAtWorldPos(wx, wz, state.chunkManager.worldSeed);
+            return bd ? bd.id : undefined;
+          } catch(e) { return undefined; }
+        };
+        mobIntegration.update(state.game.delta, state.chunkWorld, state.player.position, state.chunkManager.renderDistance || 6, getBiomeFn);
+      } catch(e) {
+        if (state.frameCount < 10) console.warn('[Cuubz] Mob update error:', e.message);
+      }
+    }
+
+    // ─── Debug Stats Overlay Update ──────────────
+    updateDebugStats(state);
+
+    // BUGS.md D-34 — this increment did not exist. `frameCount` was set to 0 once in
+    // startGame() and never touched again, so every `frameCount % N === 0` throttle
+    // above was permanently true and every `frameCount < 10` rate limit never expired.
+    // Counting at the END of the frame rather than the start keeps frame 0 doing a full
+    // pass of all six throttled paths, which is what they did before this line existed —
+    // the first hotbar render, the first TIME_SYNC and the first sendMove still happen
+    // immediately rather than 5, 30 and 3 frames in.
+    state.frameCount++;
+  }
+
+  function updateDebugStats(state) {
     const statsEl = document.getElementById('debug-stats');
-    if (!statsEl || !game.chunkManager) return;
+    if (!statsEl || !state.chunkManager) return;
 
     // FPS calculation (rolling over ~1 second window)
     _fpsFrames++;
@@ -4455,10 +4517,16 @@ import { Game as CuubzGame } from './core/Game.js';
 
     // Count active chunks (with mesh rendered) and dirty count
     let activeChunks = 0, dirtyCount = 0;
-    for (const [key, chunk] of game.chunkManager.memoryCache) {
-      if (game.chunkManager.loadedMeshes.has(key)) activeChunks++;
+    for (const [key, chunk] of state.chunkManager.memoryCache) {
+      if (state.chunkManager.loadedMeshes.has(key)) activeChunks++;
       if (chunk.dirty) dirtyCount++;
     }
+
+    // §4.2 gives GameState a `stats` field; this is its only writer. The overlay reads
+    // the DOM, but PR 19's DebugStats component will read these instead.
+    state.stats.fps = _currentFps;
+    state.stats.activeChunks = activeChunks;
+    state.stats.dirtyCount = dirtyCount;
 
     // Update DOM elements
     const fpsEl = document.getElementById('stats-fps');
@@ -4467,14 +4535,19 @@ import { Game as CuubzGame } from './core/Game.js';
     const manifestEl = document.getElementById('stats-manifest');
 
     if (fpsEl) fpsEl.textContent = `FPS: ${_currentFps}`;
-    if (chunksEl) chunksEl.textContent = `Chunks: ${activeChunks} / ${game.chunkManager.memoryCache.size}`;
+    if (chunksEl) chunksEl.textContent = `Chunks: ${activeChunks} / ${state.chunkManager.memoryCache.size}`;
     if (dirtyEl) dirtyEl.textContent = `Dirty: ${dirtyCount}`;
-    if (manifestEl && game.chunkManager.stats) {
-      manifestEl.textContent = `Manifest writes: ${game.chunkManager.stats.manifestWrites || 0}`;
+    if (manifestEl && state.chunkManager.stats) {
+      manifestEl.textContent = `Manifest writes: ${state.chunkManager.stats.manifestWrites || 0}`;
     }
   }
 
-  function setupPauseMenu(game) {
+  // Takes the GameState, not the CuubzGame — PR 12. Every reference below that used to
+  // read `game.chunkManager` / `game.renderer` / `game.skybox` now reads it off `state`,
+  // and the four lifecycle flags go through `state.game`. That is what makes the Escape
+  // handler able to see `state.inventoryOpen`, which is BUGS.md D-31. PR 19 moves this
+  // whole function to src/ui/overlays/PauseMenu.js (§13) and it needs no other argument.
+  function setupPauseMenu(state) {
     const pauseMenu = document.getElementById('pause-menu');
     const resumeBtn = document.getElementById('btn-resume-game');
     const debugStats = document.getElementById('debug-stats');
@@ -4503,36 +4576,32 @@ import { Game as CuubzGame } from './core/Game.js';
         const isPaused = !pauseMenu.classList.contains('hidden');
 
         if (!isPaused) {
-          // D-31 — "close the inventory if it is open" USED TO BE HERE AND NEVER RAN.
-          //
-          //   if (typeof inventoryOpen !== 'undefined' && inventoryOpen) {
-          //     inventoryOpen = false;
-          //     document.getElementById('crafting-screen').classList.add('hidden');
-          //   }
-          //
-          // `inventoryOpen` is a `let` declared inside startGame()'s setTimeout closure
-          // (src/main.js:3326) — one of the ~184 locals refactor.md §1.6 is about. This
-          // handler is in a different scope, so the name was never in scope here and the
-          // `typeof` guard was permanently false: pressing Escape with the inventory open
-          // pauses the game and leaves the crafting screen on top of the pause menu.
-          //
-          // `no-undef` found it in PR 11 (§6 PR 11 calls the rule "the payoff" — this is
-          // what it bought). Deleted rather than fixed here because the fix is to make
-          // `inventoryOpen` reachable, which is exactly what **PR 12** does when it hoists
-          // the closure locals onto GameState. The assignment on the second line would
-          // have thrown in strict mode if the guard had ever been true.
-          //
+          // D-31 — CLOSED HERE. This block existed and never ran: it read
+          // `typeof inventoryOpen !== 'undefined' && inventoryOpen` for a `let` declared
+          // inside startGame()'s setTimeout closure, which was never in scope in this
+          // function, so the guard was permanently false and pressing Escape with the
+          // inventory open left the crafting screen sitting on top of the pause menu.
+          // PR 11's `no-undef` found it and deleted the dead code; PR 12 is what makes it
+          // fixable, because `inventoryOpen` is a field on the GameState now and this
+          // handler is holding it. No `typeof` guard and no `window` global: `state` is a
+          // parameter, so if it were ever wrong this would throw rather than go quiet.
+          if (state.inventoryOpen) {
+            state.inventoryOpen = false;
+            const craftingScreenEl = document.getElementById('crafting-screen');
+            if (craftingScreenEl) craftingScreenEl.classList.add('hidden');
+          }
+
           // Pause game
-          game.paused = true;
+          state.game.paused = true;
           pauseMenu.classList.remove('hidden');
           // Hide hotbar when paused
           const hotbarContainer = document.getElementById('hotbar-container');
           if (hotbarContainer) hotbarContainer.classList.add('hidden');
           document.exitPointerLock();
           // Stop all timers while paused
-          if (game.chunkManager) {
-            game.chunkManager.stopRegionCheck();
-            game.chunkManager.stopFlushTimer();
+          if (state.chunkManager) {
+            state.chunkManager.stopRegionCheck();
+            state.chunkManager.stopFlushTimer();
           }
         } else {
           // Resume game
@@ -4542,23 +4611,23 @@ import { Game as CuubzGame } from './core/Game.js';
     };
 
     function resumeGame() {
-      game.paused = false;
+      state.game.paused = false;
       pauseMenu.classList.add('hidden');
       // Show hotbar when resuming
       const hotbarContainer = document.getElementById('hotbar-container');
       if (hotbarContainer) hotbarContainer.classList.remove('hidden');
-      game.renderer.domElement.requestPointerLock();
+      state.renderer.domElement.requestPointerLock();
       // Restart all timers on resume
-      if (game.chunkManager) {
-        game.chunkManager.startRegionCheck(500);
-        game.chunkManager.startFlushTimer(5000);
+      if (state.chunkManager) {
+        state.chunkManager.startRegionCheck(500);
+        state.chunkManager.startFlushTimer(5000);
       }
     }
 
     const onExit = function() {
       // Stop the game loop
-      game.running = false;
-      game.paused = false;
+      state.game.running = false;
+      state.game.paused = false;
 
       // Cancel render loop animation frame
       if (_renderRafId) {
@@ -4567,8 +4636,8 @@ import { Game as CuubzGame } from './core/Game.js';
       }
 
       // Stop chunk manager timers and dispose resources
-      if (game.chunkManager) {
-        game.chunkManager.dispose();
+      if (state.chunkManager) {
+        state.chunkManager.dispose();
       }
 
       // Exit pointer lock
@@ -4599,11 +4668,11 @@ import { Game as CuubzGame } from './core/Game.js';
       if (armorIndicatorEl) armorIndicatorEl.classList.add('hidden');
 
       // Clean up Three.js renderer
-      if (game.renderer) {
+      if (state.renderer) {
         const container = document.getElementById('game-container');
         if (container) container.innerHTML = '';
-        if (game.renderer.renderer) {
-          game.renderer.renderer.dispose();
+        if (state.renderer.renderer) {
+          state.renderer.renderer.dispose();
         }
       }
 
@@ -4613,10 +4682,10 @@ import { Game as CuubzGame } from './core/Game.js';
       }
 
       // ── Clean up chunk streamer ──
-      if (game.chunkStreamer) {
-        game.chunkStreamer.stop();
-        game.chunkStreamer.dispose();
-        game.chunkStreamer = null;
+      if (state.chunkStreamer) {
+        state.chunkStreamer.stop();
+        state.chunkStreamer.dispose();
+        state.chunkStreamer = null;
       }
 
       // ── Clean up player sync ──
@@ -4627,33 +4696,33 @@ import { Game as CuubzGame } from './core/Game.js';
       // exit — including solo, since playerSync is created whenever
       // sessionManager.client exists — skipping the six cleanup steps below and
       // showScreen('mainMenu'), which left the page blank. DEPLOY.md D-14.
-      if (game.playerSync) {
-        game.playerSync.clearAll();
-        game.playerSync = null;
+      if (state.playerSync) {
+        state.playerSync.clearAll();
+        state.playerSync = null;
       }
 
       // ── Clean up player list HUD ──
-      if (game.playerListHUD) {
-        game.playerListHUD.destroy();
-        game.playerListHUD = null;
+      if (state.playerListHUD) {
+        state.playerListHUD.destroy();
+        state.playerListHUD = null;
       }
 
       // ── Clean up block interaction ──
-      if (game.blockInteraction) {
-        game.blockInteraction.dispose();
-        game.blockInteraction = null;
+      if (state.blockInteraction) {
+        state.blockInteraction.dispose();
+        state.blockInteraction = null;
       }
 
       // ── Clean up first-person hand ──
-      if (game.firstPersonHand) {
-        game.firstPersonHand.dispose();
-        game.firstPersonHand = null;
+      if (state.firstPersonHand) {
+        state.firstPersonHand.dispose();
+        state.firstPersonHand = null;
       }
 
       // ── Clean up dropped items ──
-      if (game.droppedItems) {
-        game.droppedItems.clear();
-        game.droppedItems = null;
+      if (state.droppedItems) {
+        state.droppedItems.clear();
+        state.droppedItems = null;
       }
 
       // ── Clean up mob integration ──
@@ -4686,9 +4755,9 @@ import { Game as CuubzGame } from './core/Game.js';
       tickSlider.addEventListener('input', () => {
         const val = parseInt(tickSlider.value);
         tickVal.textContent = val;
-        if (game.chunkManager) {
-          game.chunkManager.stopRegionCheck();
-          game.chunkManager.startRegionCheck(val);
+        if (state.chunkManager) {
+          state.chunkManager.stopRegionCheck();
+          state.chunkManager.startRegionCheck(val);
         }
       });
     }
@@ -4700,9 +4769,9 @@ import { Game as CuubzGame } from './core/Game.js';
       chunksSlider.addEventListener('input', () => {
         const val = parseInt(chunksSlider.value);
         chunksVal.textContent = val + 's';
-        if (game.chunkManager) {
-          game.chunkManager.stopFlushTimer();
-          game.chunkManager.startFlushTimer(val * 1000);
+        if (state.chunkManager) {
+          state.chunkManager.stopFlushTimer();
+          state.chunkManager.startFlushTimer(val * 1000);
         }
       });
     }
@@ -4721,8 +4790,8 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = parseInt(pausePerfRenderDist.value, 10);
         perfSettings.set('renderDistance', val);
         syncPerfSettingsUI();
-        if (game.chunkManager) {
-          game.chunkManager.setRenderDistance(val);
+        if (state.chunkManager) {
+          state.chunkManager.setRenderDistance(val);
         }
       });
     }
@@ -4732,8 +4801,8 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = pausePerfShadows.value;
         perfSettings.set('shadowQuality', val);
         syncPerfSettingsUI();
-        if (game.renderer) {
-          game.renderer.setShadowQuality(val);
+        if (state.renderer) {
+          state.renderer.setShadowQuality(val);
         }
       });
     }
@@ -4743,7 +4812,7 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = pausePerfTextureRes.value;
         perfSettings.set('textureResolution', val);
         syncPerfSettingsUI();
-        await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+        await rebuildAtlasAndMaterials(state.renderer, state.chunkManager);
       });
     }
 
@@ -4752,17 +4821,17 @@ import { Game as CuubzGame } from './core/Game.js';
         const val = pausePerfAdvShading.checked;
         perfSettings.set('advancedShading', val);
         syncPerfSettingsUI();
-        await rebuildAtlasAndMaterials(game.renderer, game.chunkManager);
+        await rebuildAtlasAndMaterials(state.renderer, state.chunkManager);
       });
     }
 
     // Pause Time of Day checkbox
     const pauseTimeCheckbox = document.getElementById('pause-pause-time');
-    if (pauseTimeCheckbox && game && game.skybox) {
-      pauseTimeCheckbox.checked = !game.skybox.timePaused; // checked = time running
+    if (pauseTimeCheckbox && state.skybox) {
+      pauseTimeCheckbox.checked = !state.skybox.timePaused; // checked = time running
       pauseTimeCheckbox.addEventListener('change', () => {
-        game.skybox.timePaused = !pauseTimeCheckbox.checked;
-        _log(`[Cuubz] Time of day ${game.skybox.timePaused ? 'PAUSED' : 'RESUMED'}`);
+        state.skybox.timePaused = !pauseTimeCheckbox.checked;
+        _log(`[Cuubz] Time of day ${state.skybox.timePaused ? 'PAUSED' : 'RESUMED'}`);
         // Immediately broadcast time change to clients.
         // Use hostingSessionId as the guard — the host is the authority on time,
         // and time sync is independent of chunk streaming.
@@ -4770,10 +4839,10 @@ import { Game as CuubzGame } from './core/Game.js';
             sessionManager.client && sessionManager.client._gameSessionConn) {
           sessionManager.client._gameSessionConn.send({
             type: 'TIME_SYNC',
-            timeOfDay: game.skybox.timeOfDay,
-            timePaused: game.skybox.timePaused,
+            timeOfDay: state.skybox.timeOfDay,
+            timePaused: state.skybox.timePaused,
           });
-          _log(`[Cuubz] TIME_SYNC sent: timePaused=${game.skybox.timePaused}`);
+          _log(`[Cuubz] TIME_SYNC sent: timePaused=${state.skybox.timePaused}`);
         }
       });
     }

@@ -1944,15 +1944,24 @@ browser.
       fallback is silent: a broken worker URL gives you a working, single-threaded game that
       passes every other assertion.
 - [ ] Deploy works end to end and serves real JS
-      — **the only box in this gate that is not ticked, and it cannot be ticked from a
-      workstation with no SSH key.** PR 10 rewrote `sync.sh` and closed eleven `BUGS.md`
-      rows (D-2 … D-13), so the *script* now builds, deletes, backs up, restarts and
-      verifies — but **not one line of its remote half has been executed**. The served
-      layout (`dist/` plus a separate `textures/`) is rehearsed locally by all 152 e2e
-      assertions, because `test/e2e/staticServer.js` serves exactly that split. What is
-      unverified is `ssh`, `sudo`, `systemctl` and the filesystem at the other end.
-      **Run `./sync.sh --dry-run` first** — it prints every remote command and connects to
-      nothing — then deploy and work through `DEPLOY.md` §9.
+      — **DELIBERATELY DEFERRED, NOT BLOCKED.** The owner's ruling of 2026-07-30
+      (`BUGS.md` **decision 20**) is that nothing deploys to `10.0.30.160` until the
+      *entire* rewrite is finished — not at this gate, not at the Phase 2 gate — and that
+      **PR 10's `sync.sh` stays unverified on purpose.** So this box stays empty by
+      choice, and the rule PR 6d established (tick only what you ran) is what keeps it
+      empty rather than annotated into a tick.
+      PR 10 rewrote `sync.sh` and closed eleven `BUGS.md` rows (D-2 … D-13), so the
+      *script* builds, deletes, backs up, restarts and verifies — but **not one line of
+      its remote half has been executed.** The served layout (`dist/` plus a separate
+      `textures/`) is rehearsed locally by all 166 e2e assertions, because
+      `test/e2e/staticServer.js` serves exactly that split; what is unverified is `ssh`,
+      `sudo`, `systemctl` and the filesystem at the other end.
+      **The accepted cost, stated because it is a decision and not an oversight:** the
+      delta between this branch and anything that has ever run on the host grows with
+      every PR, and the first real `./sync.sh` will be debugged against a codebase that
+      has changed shape six times. `DEPLOY.md` §4.3 carries the same paragraph.
+      When that day comes: `./sync.sh --dry-run` first — it prints every remote command
+      and connects to nothing — then `DEPLOY.md` §9's eleven checks.
 - [x] Pre-refactor worlds load; blocks persist across reload
       — the terrain round trip, the two-world H-1 regression test and the H-1 migration all
       pass byte-for-byte on both hosts after the conversion; `DB_NAME`, `DB_VERSION`, both
@@ -1970,12 +1979,210 @@ browser.
 >
 > This phase does not exist in v1. Without it, Phase 3 is impossible ([§1.6](#16-renderloop-cannot-be-extracted-as-written)).
 
-### PR 12 — Introduce `GameState` and migrate the render-loop locals
+### PR 12 — Introduce `GameState` and migrate the render-loop locals ✅ DONE
 - Create `src/core/GameState.js` (shape in [§4.2](#42-key-patterns)).
 - Inside `startGame()`, create one `state` object and reassign the locals that `renderLoop` closes over onto it: `renderer, chunkManager, player, inventory, skybox, biomeEffects, blockInteraction, chunkStreamer, playerSync, droppedItems, firstPersonHand, itemAtlas`, + the rest.
 - Rewrite `renderLoop` to read `state.x` everywhere. Keep it in the same file at this point.
 - Fold the ad-hoc props in: `game.frameCount`, `game.attackCooldown`, `game._shadowMissingCount`, `game._noPbrCount`.
 - **Accept:** `renderLoop`'s body references **no** function-scoped locals from `startGame` — verifiable by moving `renderLoop` to module top-level in the same file with only `state` passed in. Gameplay identical.
+
+**Outcome (2026-07-30):** ✅ DONE. `src/core/GameState.js` is a new 140-line class with
+every field declared; `renderLoop` is `function renderLoop(state)` at `main.js` top level;
+`setupPauseMenu` and `updateDebugStats` take the same object; `window.__cuubz.state`
+publishes it to the e2e harness. **D-31 is closed, and D-34 and D-35 were found and closed
+inside the PR.**
+
+| Gate | Before (PR 11) | After (PR 12) |
+|---|---|---|
+| `npm test` | 52/52 + 4 quarantined | **52/52 + 4 quarantined, exit 0** |
+| `npm run lint` | 0 errors, 178 warnings | **0 errors, 178 warnings, exit 0** |
+| `npm run build` | exit 0 | **exit 0** |
+| `npm run test:e2e` (built `dist/`) | 152 / 0 | **166 / 0** |
+| `npm run test:e2e:vite` (dev server) | 152 / 0 | **166 / 0 — identical** |
+
+#### The acceptance criterion is structural, not asserted
+
+The criterion says `renderLoop`'s body references no `startGame` local, "verifiable by
+moving `renderLoop` to module top-level in the same file". **PR 12 moved it**, which is
+strictly stronger than verifying it: the function is now declared beside `startGame`
+rather than 1,700 lines inside it, so it *cannot* close over a `startGame` local — none
+is in scope. There is nothing left to check by inspection.
+
+Its free variables are now `state`, the module imports (`THREE`, `BiomeSystem`,
+`BLOCK_TYPES`, `MIN_Y`, `NAMED_ITEMS`), and four `main.js`-level bindings that
+[§13](#13-file-migration-map) already assigns elsewhere: `_renderRafId`, `sessionManager`
+(→ `SessionManager.js`), `mobIntegration` (→ `MobSystem`) and `updateDebugStats`
+(→ `ui/hud/DebugStats.js`). **PR 18 moving this to `src/engine/loop/RenderLoop.js` is now
+a file move**, not a rewrite.
+
+#### What actually moved, and the one rule that made it safe
+
+§1.6's "~184 closure locals" is the count for the whole `setTimeout` body. **`renderLoop`
+closes over 21 of them**, and those 21 plus `inventoryOpen` are what PR 12 hoisted. The
+remaining ~160 are init-only and belong to PR 13 (un-nest) and PR 17 (`startGame` →
+`Game.js`); hoisting them here would have been 700 edits in service of nothing.
+
+The 21 divide cleanly, and the division is the safety argument:
+
+- **Fifteen are `const` and never reassigned** (`renderer`, `mouse`, `touch`, `canvas`,
+  `player`, `inventory`, `crafting`, `blockInteraction`, `droppedItems`, `biomeEffects`,
+  `textureAtlas`, `itemAtlas`, `chunkManager`, `spawnHeight`, `sensitivity`). These keep
+  their local, written as `const renderer = gameState.renderer = new VoxelRenderer(…)`.
+  One object, two names for it, and **divergence is impossible because the binding is
+  `const`** — which is why ~700 downstream reads did not have to be touched. `keyboard`
+  and `chunkWorld` lost their locals entirely: `no-unused-vars` reported them the moment
+  the render loop stopped reading them, which is a small demonstration that PR 11's
+  linter is doing work here.
+- **Five are `let x = null; if (…) x = new X()`** (`skybox`, `firstPersonHand`,
+  `playerSync`, `playerListHUD`, `chunkStreamer`). Each gets `gameState.x = x` **after**
+  the block that may assign it, never inside — so `null` is recorded too, and there is no
+  window in which the object and the local disagree. Two of them (`playerSync`,
+  `playerListHUD`) had their old `game.x =` line *inside* the `if`, which is exactly the
+  shape that would have gone stale.
+- **One genuinely mutates at runtime: `inventoryOpen`.** It has no local at all. That is
+  D-31.
+
+`grep -c 'skybox = \|firstPersonHand = \|playerSync = '` over the file was the check, not
+the assumption: the only runtime reassignment anywhere in `main.js` among the hoisted
+names is `inventoryOpen`, in `toggleInventoryScreen` and the close-button handler.
+
+#### `GameState` holds the `Game`; it does not duplicate it
+
+`Game.start()` / `stop()` / `setMode()` own `running`, `paused`, `mode` and
+`delta`/`lastTime`, and `setMode()` also pushes creative-mode physics onto the player.
+Copying those onto `GameState` would create two sources of truth for "is the game
+running" — the exact failure this phase exists to unpick. So `state.game` holds the
+instance and `isRunning` / `isPaused` / `mode` / `delta` are **getters that read through
+to it**. [§4.2](#42-key-patterns)'s shape is satisfied without a second copy of anything.
+PR 17 rewrites `Game.js`, absorbs this object, and the getters become fields.
+
+Everything else that had accumulated on `game` **did** move: `chunkManager`, `renderer`,
+`skybox`, `inventory`, `crafting`, `blockInteraction`, `droppedItems`, `firstPersonHand`,
+`playerSync`, `playerListHUD`, `chunkStreamer`, `persistence`, `frameCount`,
+`attackCooldown`, `_shadowMissingCount`, `_noPbrCount`. The last two lose their
+`typeof game._x === 'undefined'` initialisers, because a declared field cannot be
+undefined. (**Unrelated to D-27's 28 guards**, which are on *identifiers* and stay PR 33's.)
+
+#### D-31 closed, without a `window` global and without a `typeof` guard
+
+`setupPauseMenu(state)` holds the `GameState`, so the Escape handler reads
+`state.inventoryOpen` directly. The block PR 11 deleted is back as four lines that
+actually run. Note what is *not* there: no `typeof` guard, because `state` is a parameter
+— if it were ever wrong this throws instead of silently doing nothing, which is the
+difference between the fix and the bug it replaces.
+
+#### D-34 — `frameCount` was never incremented, and six throttles were dead
+
+Found while folding the ad-hoc props in. `game.frameCount = 0` was set once in
+`startGame` and **nothing anywhere incremented it**, so every `frameCount % N === 0` in
+the render loop was permanently true (`0 % N === 0`) and every `frameCount < 10` rate
+limit never expired. Six paths written to be throttled ran on every frame: multiplayer
+`sendMove` (its comment says "~20Hz"; it was ~60Hz), the armour HUD, `PlayerListHUD`
+positions, the host→client `TIME_SYNC` broadcast (60 messages/second to every client
+instead of two), the `[CHUNK_STREAM]` position dump, and `updateHotbarUI` — which removes
+and recreates nine `<canvas>` elements per call.
+
+**Fixed here, and the decision to fix it inside a phase whose deliverable is "identical
+game" is `BUGS.md` decision 22.** The short form: all six sites state their intended rate
+in a comment, so the identical game is the throttled one; and hoisting a counter nothing
+increments onto the object built to make the loop extractable would have enshrined the
+bug in the fix. The increment sits at the **end** of the loop body so frame 0 still does a
+full pass — the first hotbar render, the first `TIME_SYNC` and the first `sendMove` happen
+immediately rather than 5, 30 and 3 frames in. **The residual risk is real and is stated
+in the row: the multiplayer rate changes have no automated coverage.**
+
+This is the third bug in three PRs that only became visible because something structural
+changed — D-32 (modules made an implicit global a `ReferenceError`), D-31 (`no-undef`),
+D-34 (folding scattered `game.*` assignments into one declared shape). None of them was
+found by reading harder.
+
+#### The biggest coverage win available, collected
+
+`test/e2e/saveLoad.js` had carried `⚠️ UNVERIFIED` on §7 step 4 and the placed-block half
+of 6/7 **since PR 6b**, for one reason: the running `chunkManager` was a closure local, so
+`page.evaluate` could not name it. `window.__cuubz.state` is the live `GameState` now, and
+the harness places a block and breaks a block through
+`chunkData.setBlock()` → `chunkManager.markChunkDirty()` → `flushDirty()` — the exact
+calls `BlockInteraction._doPlace()` makes once its raycast has succeeded, and the exact
+method the 5 s dirty timer calls — then reloads the page and asserts both voxels.
+
+**The break is the stronger half.** Placing a distinctive block proves an edit was
+written; *breaking* a generated one proves the world was **loaded rather than
+regenerated**, because the seed is fixed and a regenerated chunk would put the block back.
+The run reports it concretely: block 49 at `(8, 67, 8)` is AIR after a full page reload.
+
+**152 → 166 assertions, both hosts, still equal.** Fourteen added: two that the bridge
+reaches live state at all, ten covering the edit and its round trip, and two proving the
+chunk bytes changed on disk and the manifest checksum was rewritten in the same
+transaction (a D-19 regression guard that came free). Nothing was removed and no assertion
+was weakened. The **mouse-driven** half of step 4 is still unverified and the note now says
+why precisely — pointer lock is a headless-browser limit, not a code-shape one, so no
+amount of further hoisting will close it.
+
+#### `src/testBridge.js` was NOT deleted, and that is a ruling — decision 21
+
+[§7 PR 12](#7-phase-2--hoist-closure-state-onto-game-pr-1213) and `BUGS.md` decision 7
+both say the bridge collapses into the `Game` object this PR puts on `window`. It does
+not, because it has two halves and only one of them is instance state:
+
+- The **live** half genuinely collapses. `__cuubz.state` *is* the game object.
+- The **static** half cannot. `ChunkManager` the class, `CHUNK_MAGIC`, `DB_VERSION`,
+  `BLOCK_REGISTRY`, `HEADER_SIZE` are module-scoped bindings that no `Game` will ever
+  carry, and the `DEPLOY.md` §2 invariant assertions read them *directly* precisely
+  because hard-coding them would turn "the magic number did not change" into a tautology
+  — which is decision 7's own reasoning.
+
+Deleting the file therefore means moving 25 imports into `src/index.js` (the bootstrap
+[§4.1](#41-target-directory-structure) wants under 50 lines) or scattering
+`window.__cuubz.x =` across `src/`, which is the second sanctioned `window` assignment
+every document here forbids. **PR 12 changed the justification, not the need.** The file's
+header now says so, and **removal is owned by PR 33** with a stated condition: it goes
+when something other than a `window` property can hand `page.evaluate` a module binding.
+
+#### D-35 — nothing had been checking the `window` allowlist since PR 11
+
+Found while making that call. `PR11_HANDOFF.md` §2 and the landmine list both describe
+`eslint.config.mjs` allowlisting exactly one `window.*` assignment by path. **It does
+not.** `window` is declared `readonly` there, but assigning to a *property* of a readonly
+global is not an error under any ESLint rule, and `scripts/check-globals.js` — which did
+check it, by path — was deleted in PR 11. Decision 19 caught the HTML half of that gap and
+kept three assertions for it; this half was missed.
+
+Fixed in `test/test_globalCollisions.js`, beside those three, for the same reason. It
+walks `src/**/*.js`, strips comments, and asserts the set of files containing a
+`window.x =` assignment is exactly `['src/testBridge.js']`, with the allowlist as a named
+constant so widening it is a deliberate edit. **Proved non-vacuous rather than assumed:**
+adding `window.__probe = 1` to `src/core/GameState.js` turns the run red naming both
+files. 94 → 95 assertions in that file.
+
+#### Naming: `gameState`, not `state`
+
+The plan says "create one `state` object". It is called `gameState` at the `main.js`
+level, because `startGame`'s body already contains three `const state = playerSync.addPlayer(…)`
+locals inside its multiplayer callbacks. A `state` at the closure level would have been
+shadowed by them — silently, and correctly, and confusingly. The **parameter** in
+`renderLoop(state)`, `setupPauseMenu(state)` and `updateDebugStats(state)` is `state`,
+because those functions have no such collision and §13 names them by that argument.
+
+#### Deferred, with reasons
+
+- **`inventorySync` is not hoisted.** It is a `let` in the same shape as the five that
+  were, but `renderLoop` never reads it and neither does anything outside the closure —
+  the periodic sync it starts is self-driving. PR 17 takes it with the rest of
+  `startGame`. Hoisting it here would have been shape-matching, not need.
+- **`updateHotbarUI` and `toggleInventoryScreen` are on `GameState` as callbacks**, not
+  moved. The render loop calls both and they are 40 and 20 lines of DOM work over
+  `inventory`, `itemAtlas` and `craftingScreen`. PR 15 moves them to
+  `src/ui/hud/Hotbar.js` and `src/ui/overlays/InventoryScreen.js` ([§13](#13-file-migration-map));
+  a function reference on the state object is the smallest thing that severs the closure
+  without pre-empting that.
+
+**New files:** `src/core/GameState.js`. **Modified:** `src/main.js` (the render loop moved
+out of `startGame`; ~21 locals hoisted; D-31 restored; D-34 fixed),
+`src/testBridge.js` (`publishGameState`, header rewritten — decision 21),
+`test/e2e/saveLoad.js` (the block round trip; two `note()`s rewritten; header corrected),
+`test/test_globalCollisions.js` (D-35), `BUGS.md`, `DEPLOY.md` (§4.3's operational rule —
+decision 20; §7's automation table), `refactor.md` (this section, the Phase 1 gate, PR 33).
 
 ### PR 13 — Un-nest `startGame`
 - Remove the `setTimeout(async () => { try { ... } })` wrapper; convert to a plain `async function` with real `await` and a top-level error handler.
@@ -2270,6 +2477,27 @@ Automate the [§1.5](#15-player-data-must-survive-byte-for-byte) save/load check
 
 ### PR 33 — Remove CommonJS shims and final cleanup
 Delete the remaining `typeof module !== 'undefined'` blocks (62 at the start) now that tests import ESM. Final gate: `npm run dev`, `npm run build`, `npm test`, `npm run lint`, `./sync.sh` all pass.
+
+Also owned here, all four moved by an earlier PR that stated its reason:
+- **D-27** — the 28 remaining `typeof X !== 'undefined'` cross-module guards. Moved from
+  PR 11 (decision 16): `no-undef` does not flag them, and each removal changes behaviour
+  in exactly one environment — Node tests — which stops mattering once PR 31 has moved the
+  suite to Vitest.
+- **D-30** — flip `minify` to `true`. Moved from PR 11 (decision 17), and note that its
+  condition changed at **decision 20**: it said "after the first real deploy", and the
+  first real deploy is now after the whole rewrite. Flipping it is one line with both e2e
+  hosts as the gate.
+- **`src/testBridge.js`** — moved from PR 12 (**decision 21**). PR 12 put the live
+  `GameState` on `window.__cuubz.state`, which retired the *live* half of the bridge; the
+  *static* half (`ChunkManager` the class, `CHUNK_MAGIC`, `DB_VERSION`, `BLOCK_REGISTRY`,
+  `HEADER_SIZE`) is module-scoped bindings that no game object carries, and the
+  `DEPLOY.md` §2 invariant assertions read them directly so they do not become
+  tautologies. **The condition for removal:** something other than a `window` property can
+  hand `page.evaluate` a module binding on **both** e2e hosts — dynamic `import()` inside
+  `page.evaluate` works against the dev server only, which is why decision 13 rejected it.
+  If that never becomes true, this PR's job is to write that down as permanent rather than
+  leave it looking pending. Whatever happens, `test/test_globalCollisions.js`'s
+  `ALLOWED_WINDOW_WRITERS` (D-35) must be updated in the same commit.
 
 ---
 

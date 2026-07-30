@@ -46,16 +46,19 @@
  * invariant, the chunk-header decode, the H-1 regression test and PR 6d's `DB_VERSION`
  * increment — stopped being runnable the moment `index.html` became one module tag.
  * The bridge is one namespace object, assigned by the first module the bundle
- * evaluates. It is temporary: PR 12 puts a real `Game` on `window` and this folds into
- * that.
+ * evaluates. See `src/testBridge.js` for why PR 12 kept the file rather than deleting it,
+ * and `BUGS.md` decision 21.
  *
- * It still cannot reach live game state. The running `renderer` / `chunkManager` / `player` /
- * `inventory` are among the ~184 closure locals inside `startGame()`'s `setTimeout`
- * (refactor.md §1.6). So this harness can click and type, but it cannot say
- * "place block 2 at (14,68,-3)" or read the player's position. That unblocks at
- * Phase 2 (PR 12–13), when those locals are hoisted onto an explicit `Game`.
+ * IT CAN REACH LIVE GAME STATE AS OF PR 12. `window.__cuubz.state` is the running
+ * `GameState` — `chunkManager`, `inventory`, `blockInteraction`, `player`, the `Game`
+ * instance. Until PR 12 those were closure locals inside `startGame()`'s `setTimeout`
+ * (refactor.md §1.6) and `page.evaluate` could not name them, which is why §7 steps 4 and
+ * 6/7 were reported UNVERIFIED from PR 6b onward. The "place and break a block, then
+ * reload" section near the end of the run is what that unblocked. **Pointer lock is still
+ * out of reach** — that is a headless-browser limit, not a code-shape one — so the
+ * harness exercises the write path below the raycast, and says so where it does it.
  *
- * The design consequence: every persistence assertion here reads IndexedDB and
+ * The design consequence, unchanged: every persistence assertion here reads IndexedDB and
  * localStorage directly instead of simulating a player. That is why H-1 was provable
  * with no pointer lock and no mouse-look at all, and why steps 8-9 are now the
  * regression test for its fix — see [H-1] below.
@@ -768,13 +771,20 @@ async function main() {
     assertEquals(JSON.stringify(snapA2.manifest.spawnPoint), JSON.stringify(snapA1.manifest.spawnPoint),
       'The per-world spawn point survived the round trip');
 
+    // §7 step 4/6 for PLACED and BROKEN blocks used to be reported UNVERIFIED here.
+    // **PR 12 closed it** — see the "place and break a block, then reload" section near
+    // the end of this run, which drives the real `setBlock` + `markChunkDirty` +
+    // `flushDirty` path through `window.__cuubz.state`. It sits at the end rather than
+    // here because every byte-identity assertion above ("chunk 0,0 is unchanged after a
+    // reload") is only meaningful while the terrain is untouched; editing a block at this
+    // point in the run would make those comparisons compare an edit to itself.
     note(
-      '§7 step 4/6 for PLACED and BROKEN blocks — the harness generates terrain and ' +
-      'proves it persists byte-for-byte, but it never modifies a block',
-      'Placing a block needs pointer lock plus mouse-look, and the running ' +
-      'chunkManager/inventory/blockInteraction are closure locals inside startGame() ' +
-      "(refactor.md §1.6), so page.evaluate cannot reach them. PR 12-13 hoist them onto " +
-      'Game; after that, place → flush → reload → assert the voxel is a one-line addition here.'
+      '§7 step 4/6 driven from the MOUSE — the raycast, the 7-block range check, the ' +
+      'AIR/CAVE_AIR guard and inventory.consumeSelectedBlock() all sit above the write ' +
+      'path this harness now exercises',
+      'Pointer lock. A headless driver cannot be granted it, so BlockInteraction.update() ' +
+      'never resolves a target. The persistence half — an edited voxel surviving a reload — ' +
+      'is asserted for real as of PR 12; only the input half is still manual.'
     );
 
     // ═══ §7 step 7 — quit to menu, re-enter, no reload ════════
@@ -1177,6 +1187,136 @@ async function main() {
     assertEquals(snapAfterProbe.dbVersion, 2, 'The real cuubz-worlds database is still at version 2 — the probe touched a different database');
     assertEquals(snapAfterProbe.chunkCount, snapA3.chunkCount, 'The real database holds the same number of chunk records as before the probe');
 
+    // ═══ §7 steps 4 + 6/7 — PLAYER EDITS round-trip (PR 12) ════
+    //
+    // These two steps were reported UNVERIFIED from PR 6b until now, and the reason was
+    // not pointer lock. It was that the running `chunkManager` was a closure local inside
+    // `startGame()`'s `setTimeout` body (refactor.md §1.6), so `page.evaluate` could not
+    // name it and the harness had no way to modify a block at all. **PR 12 hoisted it onto
+    // `GameState` and published that as `window.__cuubz.state`, and this block is what
+    // that bought.**
+    //
+    // WHAT THIS DRIVES, EXACTLY. Not synthetic writes: the two calls below are the two
+    // `BlockInteraction._doPlace()` makes once its raycast has succeeded
+    // (`BlockInteractionSystem.js:447-444`) — `chunkData.setBlock(lx, y, lz, type)` then
+    // `chunkManager.markChunkDirty(cx, cz)` — and `flushDirty()` is the method the 5 s
+    // dirty timer calls. So everything from the voxel write to the IndexedDB record to the
+    // manifest checksum is production code.
+    //
+    // WHAT IT STILL DOES NOT COVER, and it is worth being exact about: the raycast, the
+    // range check, the AIR/CAVE_AIR guard and `inventory.consumeSelectedBlock()` all sit
+    // ABOVE these calls in `_doPlace`, and pointer lock is what a headless driver cannot
+    // grant. So this proves **an edited voxel survives a reload**, which is what §7 steps
+    // 4 and 6/7 ask; it does not prove that clicking the mouse produces the edit. That
+    // half stays manual and is noted below.
+    //
+    // THE BREAK IS THE STRONGER HALF. Placing a distinctive block proves an edit was
+    // written. *Breaking* a generated block proves the world was LOADED rather than
+    // regenerated: this world has a fixed seed, so if re-entry regenerated the terrain the
+    // broken block would be back. AIR at that coordinate after a full page reload can only
+    // come from storage.
+    console.log('\n[§7 steps 4 + 6/7 — place and break a block, then reload]');
+
+    const bridged = await page.evaluate(() => {
+      const s = window.__cuubz.state;
+      return s ? { present: true, hasChunkManager: !!s.chunkManager, hasInventory: !!s.inventory,
+        hasBlockInteraction: !!s.blockInteraction, hasPlayer: !!s.player, hasGame: !!s.game } : { present: false };
+    });
+    assertEquals(bridged.present, true,
+      'PR 12 — window.__cuubz.state is the live GameState; the harness can reach running game state at all');
+    assertEquals(bridged.hasChunkManager && bridged.hasInventory && bridged.hasBlockInteraction &&
+      bridged.hasPlayer && bridged.hasGame, true,
+      'PR 12 — chunkManager, inventory, blockInteraction, player and the Game instance are all reachable ' +
+      '(they were closure locals until this PR — refactor.md §1.6)');
+
+    // Chunk (0,0), local column x=8 z=8. `EDIT_PLACE_Y` is above any terrain this
+    // generator produces and below CHUNK_HEIGHT, so it is guaranteed AIR.
+    const EDIT_PLACE_Y = 200;
+    const edit = await page.evaluate((placeY) => {
+      const s = window.__cuubz.state;
+      const cm = s.chunkManager;
+      const BT = window.__cuubz.BLOCK_TYPES;
+      const cd = cm.getChunkData(0, 0);
+      if (!cd) return { error: 'chunk (0,0) is not in memory' };
+
+      const placeType = BT.GLOWSTONE !== undefined ? BT.GLOWSTONE : BT.STONE;
+
+      // ── Place: the two calls BlockInteraction._doPlace() makes after its raycast.
+      const placeBefore = cd.getBlock(8, placeY, 8);
+      const placeChanged = cd.setBlock(8, placeY, 8, placeType);
+      cm.markChunkDirty(0, 0);
+
+      // ── Break: scan down for the highest solid block in the same column and remove it.
+      let breakY = -1, brokenType = -1;
+      for (let y = placeY - 1; y > 0; y--) {
+        const b = cd.getBlock(8, y, 8);
+        if (b !== BT.AIR && b !== BT.CAVE_AIR && b !== BT.WATER) { breakY = y; brokenType = b; break; }
+      }
+      let breakChanged = false;
+      if (breakY >= 0) {
+        breakChanged = cd.setBlock(8, breakY, 8, BT.AIR);
+        cm.markChunkDirty(0, 0);
+      }
+
+      return {
+        placeType, placeBefore, placeChanged, breakY, brokenType, breakChanged,
+        dirty: cd.dirty,
+        // Read back through the same public accessor the game uses.
+        placeInMemory: cm.getVoxel(8, placeY, 8),
+        breakInMemory: breakY >= 0 ? cm.getVoxel(8, breakY, 8) : null,
+        airId: BT.AIR,
+      };
+    }, EDIT_PLACE_Y);
+
+    assert(!edit.error, `Chunk (0,0) is resident in memory for the edit${edit.error ? ' — ' + edit.error : ''}`);
+    assertEquals(edit.placeBefore, edit.airId, `(8, ${EDIT_PLACE_Y}, 8) was AIR before the placement`);
+    assertEquals(edit.placeChanged, true, 'setBlock reports the placement actually changed a voxel');
+    assert(edit.breakY > 0, `A generated solid block was found to break in column (8, *, 8) — at y=${edit.breakY}, type ${edit.brokenType}`);
+    assertEquals(edit.breakChanged, true, 'setBlock reports the break actually changed a voxel');
+    assertEquals(edit.placeInMemory, edit.placeType, 'The placed block reads back through chunkManager.getVoxel in memory');
+    assertEquals(edit.breakInMemory, edit.airId, 'The broken block reads back as AIR through chunkManager.getVoxel in memory');
+    assertEquals(edit.dirty, true, 'The chunk is marked dirty, so the 5 s flush timer would pick it up');
+
+    // Flush through the production path rather than waiting on the timer. The game is
+    // paused at this point in the run and `resumeGame()` is what restarts the interval
+    // (main.js setupPauseMenu), so waiting would be waiting on a stopped timer.
+    // `flushDirty()` is the exact method `startFlushTimer(5000)` calls.
+    await page.evaluate(async () => { await window.__cuubz.state.chunkManager.flushDirty(); });
+    await sleep(1500); // let the batched write transaction commit
+
+    const snapEdited = await readStorage(page, worldA);
+    assert(snapEdited.recBytes !== snapA1.recBytes,
+      'Chunk "0,0" bytes CHANGED on disk after the edit — the flush wrote the player\'s modification ' +
+      `(${digest(snapA1.recBytes)} → ${digest(snapEdited.recBytes)})`);
+    assertEquals(snapEdited.manifest.checksum00, snapEdited.recStoredChecksum,
+      'The manifest checksum was rewritten in the same transaction as the edited chunk (D-19 regression guard)');
+
+    // ── Reload: new JS context, empty memory cache. Anything that reads back now came
+    //    off disk.
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector('#main-menu:not(.hidden)', { timeout: 30000 });
+    await sleep(1500);
+    drain(consoleErrors); drain(pageErrors);
+    await enterWorld(page, worldA, 'survival');
+    await waitForQuiesce(page, 'world A after the block edit');
+
+    const afterReload = await page.evaluate((args) => {
+      const cm = window.__cuubz.state.chunkManager;
+      return {
+        placed: cm.getVoxel(8, args.placeY, 8),
+        broken: cm.getVoxel(8, args.breakY, 8),
+      };
+    }, { placeY: EDIT_PLACE_Y, breakY: edit.breakY });
+
+    assertEquals(afterReload.placed, edit.placeType,
+      `§7 step 4/6 — the PLACED block is still at (8, ${EDIT_PLACE_Y}, 8) after a full page reload and re-entry ` +
+      '(type ' + edit.placeType + '). This assertion has been waiting since PR 6b');
+    assertEquals(afterReload.broken, edit.airId,
+      `§7 step 4/6 — the BROKEN block at (8, ${edit.breakY}, 8) is still AIR after the reload. The seed is fixed, ` +
+      `so a regenerated world would have block ${edit.brokenType} here — AIR proves the chunk was loaded from storage`);
+
+    await settleAndPause(page, 'world A after the edit round trip');
+
     // Exit cleanly one last time, so the final screenshot is the menu the player
     // is actually returned to rather than a mid-session frame.
     console.log('\n[Teardown — exit to menu]');
@@ -1190,10 +1330,11 @@ async function main() {
 
     note(
       '§7 steps 12-13 — multiplayer host/guest persistence',
-      'Needs a running relay (server/index.js on 8765), two browser contexts, and a guest ' +
-      'PLACING a block — which is the same pointer-lock wall as step 4. The relay half is ' +
-      'reachable today (spawn it as a child process and point js/main.js:2126 at localhost); ' +
-      'the block-placement half waits for PR 12-13.'
+      'Needs a running relay (server/index.js on 8765) and two browser contexts. The relay ' +
+      'half is reachable today (spawn it as a child process and point src/main.js\'s relay ' +
+      'URL at localhost); the guest-places-a-block half stopped being blocked at PR 12, ' +
+      'which made chunkManager reachable from page.evaluate. What is left is the two-context ' +
+      'orchestration, which is a harness change, not a source one.'
     );
 
     // ═══ §7 step 14 — the run left the tree alone ═════════════

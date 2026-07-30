@@ -555,8 +555,38 @@ biggest risk in the refactor and PR 10 ("must land with PR 9, not after") owns t
 > until it lands there is no correct way to deploy this branch.** That is D-4, and it is
 > why the plan requires PR 9 and PR 10 to land together.
 
-**Operational rule: do not run `./sync.sh` until PR 10 lands.** Before PR 9 it shipped
-the source tree and the source tree was the application. It is not any more.
+> **PR 10 HAS ALSO LANDED, AND THE OPERATIONAL RULE HAS BEEN REPLACED.** Everything in
+> the block above is a historical record of the PR 9 → PR 10 window; that window closed.
+> The rule below is the current one and it is a different rule for a different reason.
+
+**Operational rule (owner, 2026-07-30 — `BUGS.md` decision 20): do not deploy to
+`10.0.30.160` until the entire rewrite is finished.** Not at the Phase 1 gate, not at the
+Phase 2 gate. **PR 10's `sync.sh` stays unverified on purpose.**
+
+This replaces "do not run `./sync.sh` until PR 10 lands", which after PR 10 landed read as
+permission to deploy. It is not a technical block — `./sync.sh --dry-run` works, and §9's
+eleven checks are ready for whenever the first real deploy happens. It is a scheduling
+decision by the owner, and it comes with a cost that is accepted rather than overlooked:
+
+> **The delta between `refactor/phase-0` and anything that has ever run on the host grows
+> with every PR, and the first real `./sync.sh` will be debugged against a codebase that
+> has changed shape six times.** `sync.sh` deletes before it extracts, installs a systemd
+> unit, and repoints which node binary production runs — all of it against a machine no
+> session in this project has ever connected to. Doing that once, at the end, against a
+> tree that no longer resembles the last known-good deploy, is harder than doing it six
+> times incrementally. That trade is the owner's to make and it has been made.
+
+What follows from it, so nothing waits on a deploy that is not coming:
+
+- The Phase 1 gate's "Deploy works end to end" box stays **unticked and deliberately
+  deferred**, not blocked. `refactor.md`'s Phase 1 gate says so in those words.
+- **D-30 (`minify: false`) and D-12 (`StrictHostKeyChecking`) both say "revisit after the
+  first real deploy".** That is now "after the rewrite", not "after Phase 1". Neither
+  should be re-litigated in the meantime.
+- Every `npm run test:e2e` still rehearses the deployed layout — `test/e2e/staticServer.js`
+  serves `dist/` with a repo-root fallback for `textures/`, which is exactly the two-artifact
+  split PR 10 creates on the host. That is the only deploy evidence this project has, and it
+  is worth keeping green for that reason.
 
 ### 4.4 The `chmod` is the fragile step
 
@@ -1068,9 +1098,9 @@ step below has a console-visible failure mode.
 | 1 | Load the page | No console errors. Menu renders. | ✅ |
 | 2 | Create a character | Appears in the character list. `localStorage['cuubz:characters']` is a non-empty array. | ✅ |
 | 3 | Create a world in slot 0, enter it, **survival** | Terrain generates. `localStorage['cuubz:slotMap']` maps the world id → `0`. | ✅ |
-| 4 | Place ~10 blocks in a recognisable shape at spawn. Break 2–3 blocks. | Blocks appear/disappear. Broken blocks drop the **correct** item (PR 4 bug 1 — andesite must not drop cobblestone). | ❌ manual |
+| 4 | Place ~10 blocks in a recognisable shape at spawn. Break 2–3 blocks. | Blocks appear/disappear. Broken blocks drop the **correct** item (PR 4 bug 1 — andesite must not drop cobblestone). | ✅ **for the edit itself, as of PR 12** — the harness places one block and breaks one through the production `setBlock` + `markChunkDirty` path. ❌ for the mouse (pointer lock) and for the drop table |
 | 5 | Pick up the drops, note the hotbar contents. **Press Escape. Wait 5 s.** | Pause menu opens. Console logs `[Cuubz] Saved player state`. | ✅ (pause menu; hotbar is manual) |
-| 6 | **Reload the page** (F5), re-enter the same world | **Your shape is exactly as you left it. Broken blocks are still broken. Inventory and hotbar match.** ← the load-bearing assertion | ✅ for terrain (byte-identical); ❌ for placed blocks + inventory |
+| 6 | **Reload the page** (F5), re-enter the same world | **Your shape is exactly as you left it. Broken blocks are still broken. Inventory and hotbar match.** ← the load-bearing assertion | ✅ for terrain (byte-identical) **and, as of PR 12, for a placed block and a broken block**; ❌ for inventory + hotbar |
 | 7 | Quit to menu, re-enter the same world without reloading | Same result as step 6. | ✅ for terrain (was blocked by **D-14**, fixed in PR 6b — see [§7.2](#72-step-7-was-unrunnable-until-pr-6b--d-14)) |
 | 8 | **Two-world test.** Create a world in slot 1. Enter it, look at spawn. | The slot 1 world generates its own terrain. The slot 0 world's saved chunks are **untouched** — the store now holds both worlds in full. Failed until PR 6c (**H-1**); see [§7.1](#71-steps-89-were-h-1-fixed-in-pr-6c). | ✅ |
 | 9 | Return to the slot 0 world | **Your own terrain, not the other world's.** Same result as step 6. | ✅ |
@@ -1245,9 +1275,9 @@ are each asserted end to end, against a database the browser itself wrote:
 - **D-17** — `deleteChunk` issues one delete request, asserted by operation count against
   a stub store in `test/test_chunkStorage.js`.
 
-**Nine of the fourteen §7 steps were automated at PR 6b; it is eleven now** — 1, 2, 3, 5,
-6, 7, **8, 9**, 10, 11, 14. The two that remain are step 4 and steps 12–13, and both wait
-on the same blocker (see below).
+**Nine of the fourteen §7 steps were automated at PR 6b; it is twelve now** — 1, 2, 3,
+**4 (PR 12)**, 5, 6, 7, **8, 9**, 10, 11, 14. Steps 12–13 remain, plus the mouse-driven half
+of step 4 (see below). The 152-assertion run of PR 11 is **166** as of PR 12.
 
 Two limits on that run, both stated because they bound what a green result means:
 
@@ -1364,14 +1394,17 @@ after overwriting the live tree — and the error message says nothing about tha
 
 PR 6 wrote [§7](#7-saveload-checklist) from the code paths and asked the first runner to
 correct it. PR 6b ran it and confirmed H-1; PR 6c fixed H-1 and automated the two steps
-that detected it ([§7.1](#71-steps-89-were-h-1-fixed-in-pr-6c)). **Eleven of fourteen
-steps are automated.** Two remain, and the harness prints each as `⚠️ UNVERIFIED` on
-every run so a pass never overclaims:
+that detected it ([§7.1](#71-steps-89-were-h-1-fixed-in-pr-6c)). **PR 12 closed step 4 and
+the placed-block half of 6/7** — the biggest single item on this list, and one that had
+been waiting since PR 6b. **Twelve of fourteen steps are automated.** What remains is
+printed as `⚠️ UNVERIFIED` on every run so a pass never overclaims:
 
 | Step | Why it is not automated | What would close it |
 |---|---|---|
-| 4, and the placed-block half of 6/7 | Placing or breaking a block needs pointer lock plus mouse-look, and `blockInteraction` / `inventory` / `chunkManager` are closure locals | **PR 12–13.** Once they are on `Game`, place → flush → reload → assert the voxel is a few lines in `saveLoad.js` |
-| 12–13 (multiplayer) | Needs a running relay, two browser contexts, **and** a guest placing a block | The relay half works today (spawn `server/index.js` as a child process); the placement half waits for PR 12–13 |
+| ~~4, and the placed-block half of 6/7~~ | ~~needs pointer lock, and `blockInteraction`/`inventory`/`chunkManager` are closure locals~~ | **CLOSED IN PR 12.** The locals moved onto `GameState`, which is published as `window.__cuubz.state`, so the harness places one block and breaks one through `chunkData.setBlock()` + `chunkManager.markChunkDirty()` + `flushDirty()` — the exact calls `BlockInteraction._doPlace()` makes after its raycast — then reloads and asserts both voxels. **The break is the stronger half:** the seed is fixed, so AIR at a coordinate that generation fills proves the world was loaded rather than regenerated |
+| The **mouse-driven** half of step 4 | Pointer lock. A headless driver cannot be granted it, so `BlockInteraction.update()` never resolves a raycast target. This is a browser limit, not a code-shape one — hoisting more state will not fix it | A headed run, or a driver that can fake pointer lock. The raycast, the 7-block range check, the AIR/CAVE_AIR guard and `inventory.consumeSelectedBlock()` are what sit above the write path and stay unexercised |
+| 12–13 (multiplayer) | Needs a running relay and two browser contexts | The relay half works today (spawn `server/index.js` as a child process). The guest-places-a-block half **stopped being blocked at PR 12**; what is left is two-context orchestration, which is a harness change, not a source one |
 
-Note both are the *same* blocker. **PR 12–13 is what finishes this gate**, which is a
-second, independent argument for Phase 2 existing at all.
+The blocker these three shared was `refactor.md` §1.6, and **PR 12 removing it is a
+second, independent argument for Phase 2 existing at all** — it was justified purely as a
+prerequisite for Phase 3, and it paid for itself in coverage before Phase 3 started.

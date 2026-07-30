@@ -1,7 +1,33 @@
 /**
- * Cuubz — e2e test bridge (PR 9)
+ * Cuubz — e2e test bridge (PR 9, extended in PR 12)
  *
- * ─── WHY THIS FILE EXISTS, AND WHEN IT GOES AWAY ────────────────────────────
+ * ─── PR 12 READ THIS FIRST: WHY THE FILE IS STILL HERE ──────────────────────
+ *
+ * `refactor.md` §7 PR 12 and `BUGS.md` decision 7 both say this file collapses into the
+ * real `Game` object that Phase 2 puts on `window`. **PR 12 did not delete it, and the
+ * reason is that the two halves of the bridge are not the same thing.** The ruling is
+ * `BUGS.md` decision 21; the short version:
+ *
+ *   • The **live half** — `__cuubz.state`, added by PR 12 — genuinely does collapse into
+ *     the game object. `publishGameState()` below is called once per session from
+ *     `startGame()`, and it is what lets `test/e2e/saveLoad.js` place and break a real
+ *     block instead of only reading generated terrain out of IndexedDB.
+ *   • The **static half** — `ChunkManager` the *class*, `CHUNK_MAGIC`, `DB_VERSION`,
+ *     `BLOCK_REGISTRY`, `HEADER_SIZE` — does not. None of those is instance state and no
+ *     `Game` object will ever carry them. They are module-scoped bindings that the
+ *     `DEPLOY.md` §2 invariant assertions read *directly*, which is the whole point:
+ *     hard-coding them in the test would turn "the magic number did not change" into a
+ *     tautology.
+ *
+ * So deleting the file would mean either moving 25 imports into `src/index.js` (the
+ * bootstrap that §4.1 wants under 50 lines) or scattering `window.__cuubz.x =` across
+ * `src/`, which is a second sanctioned `window` assignment — the thing every document
+ * here tells you not to add. One file, one assignment, one namespace is the shape that
+ * was wanted; PR 12 changed the *justification*, not the *need*. **Removal is owned by
+ * PR 33**, the sweep-up PR, and the condition is stated there: it goes when something
+ * other than a `window` property can hand `page.evaluate` a module binding.
+ *
+ * ─── WHY IT EXISTED IN THE FIRST PLACE (PR 9) ───────────────────────────────
  *
  * `test/e2e/saveLoad.js` drives a real browser and reads roughly a third of its 150
  * assertions out of the page with `page.evaluate` — the `DEPLOY.md` §2 storage
@@ -25,15 +51,15 @@
  * object, one line per symbol, and the harness reads `__cuubz.ChunkManager` instead of
  * `ChunkManager`.
  *
- * **This file is temporary.** Phase 2 (PR 12–13) hoists the render-loop closure locals
- * onto an explicit `Game` object and puts that object on `window`, at which point the
- * harness reads the real thing and this bridge collapses into it. Its removal is
- * slotted in `refactor.md` §7 PR 12. Do not add to it casually: every symbol here is a
- * symbol the test suite could not otherwise see, and each one is a small piece of the
- * module boundary handed back to the global scope.
+ * Do not add to it casually: every symbol here is a symbol the test suite could not
+ * otherwise see, and each one is a small piece of the module boundary handed back to the
+ * global scope.
  *
- * It is the ONLY sanctioned `window.*` assignment in `src/` and
- * `scripts/check-globals.js` enforces that.
+ * It is the ONLY sanctioned `window.*` assignment in `src/`. `scripts/check-globals.js`
+ * used to enforce that by path and **PR 11 deleted the script**; nothing enforces it
+ * mechanically today, because ESLint has no opinion about which properties you hang off a
+ * global it declared readonly. `test/test_globalCollisions.js` is where an assertion for
+ * it belongs if one is ever wanted — see BUGS.md D-35.
  */
 
 import * as THREE from 'three';
@@ -79,4 +105,25 @@ window.__cuubz = {
   BLOCK_TYPES,
   BLOCK_BY_ID,
   BLOCK_BY_NAME,
+  // Live session state — set by publishGameState() below, null until a game starts.
+  state: null,
 };
+
+/**
+ * PR 12 — hand the harness the live `GameState`.
+ *
+ * `startGame()` calls this once, on the frame the render loop starts. Before PR 12 every
+ * live object in the game (`chunkManager`, `inventory`, `blockInteraction`, `player`) was
+ * a closure local inside `startGame`'s `setTimeout` body, so `page.evaluate` could reach
+ * none of them, and `test/e2e/saveLoad.js` had two steps marked `⚠️ UNVERIFIED` for that
+ * exact reason: **placing a block needs pointer lock, which a headless driver cannot
+ * grant, plus a reachable chunk manager, which nothing could reach.** With the state on
+ * an object, the harness places blocks through `chunkManager.applyBlockChange()` — the
+ * same call `BlockInteraction` makes after its raycast — and pointer lock stops mattering.
+ *
+ * This is a one-way publish, not a live binding: the harness reads through the object it
+ * is given, and nothing in `src/` ever reads `window.__cuubz.state` back.
+ */
+export function publishGameState(state) {
+  window.__cuubz.state = state;
+}

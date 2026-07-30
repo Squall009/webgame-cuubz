@@ -1,5 +1,13 @@
 # PR 11 Handoff — Phase 1 is closed. `./sync.sh` has never been run. PR 12 is next.
 
+> **AMENDED BY PR 12 — read [§7](#7-the-one-thing-to-do-before-writing-any-more-code--superseded)
+> before acting on the deploy advice below.** The owner ruled on 2026-07-30 (`BUGS.md`
+> decision 20) that **nothing deploys until the entire rewrite is finished.** The
+> paragraph immediately following, and §7, both tell you to deploy. They are the record of
+> what was true on 2026-07-30 before that ruling; they are not instructions any more.
+> Everything else in this file still holds, except that PR 12 has since landed — see
+> `refactor.md` §7 PR 12 for what changed and `PR12_HANDOFF.md` for the current state.
+
 **Read this first, before anything else:** the deploy path was rewritten in PR 10 and
 **not one line of its remote half has been executed.** `./sync.sh` now builds, deletes,
 backs up, restarts the relay and verifies — from a workstation that has no SSH key for
@@ -241,7 +249,21 @@ what changes it.
 
 ---
 
-## 7. The one thing to do before writing any more code
+## 7. ~~The one thing to do before writing any more code~~ — SUPERSEDED
+
+> **This section is obsolete. It said "deploy, or decide not to", and the owner decided
+> not to.** `BUGS.md` **decision 20** (owner, 2026-07-30): nothing deploys to
+> `10.0.30.160` until the **entire rewrite** is finished — not at the Phase 1 gate, not at
+> the Phase 2 gate — and **PR 10's `sync.sh` stays unverified on purpose.** The rule was
+> recorded in PR 12; `DEPLOY.md` §4.3 and `refactor.md`'s Phase 1 gate carry it in full.
+>
+> Do not run `./sync.sh`. Do not treat the unticked deploy box as blocked work.
+>
+> The section below is kept as the dated record it was — this file is a log, and D-29's
+> ruling is that handoffs are not rewritten. What it got right is the cost, and the owner
+> has accepted it explicitly rather than overlooked it: **the delta between this branch
+> and anything that has ever run on the host grows with every PR, and the first real
+> `./sync.sh` will be debugged against a codebase that has changed shape six times.**
 
 **Deploy, or decide not to.** Phase 1's deliverable is "identical game, ES modules, working
 build **and working deploy**". Four of the six gate boxes are ticked; the deploy box is not,

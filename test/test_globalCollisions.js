@@ -293,6 +293,39 @@ assert(
 );
 
 // ═══════════════════════════════════════════════════════════════════
+// One `window.*` assignment in src/, at one path (PR 12, BUGS.md D-35)
+// ═══════════════════════════════════════════════════════════════════
+//
+// `check-globals.js` also asserted this, and it is the other half `no-undef` cannot
+// replace: `window` is declared readonly in eslint.config.mjs, but assigning to a
+// *property* of a readonly global is not a lint error in any rule. So between PR 11
+// deleting the script and this block, nothing checked it — which PR 12 noticed while
+// deciding whether `src/testBridge.js` could be deleted, and logged as D-35.
+//
+// The rule is not "never touch window". It is that the module boundary has exactly one
+// sanctioned hole in it, at a path whose entire file explains why. A second one added
+// somewhere else is how a codebase drifts back to the shared global scope that
+// refactor.md §2 is about — silently, because each individual assignment looks harmless.
+// If a future PR genuinely needs another, change ALLOWED_WINDOW_WRITERS deliberately and
+// say why in the PR outcome. Do not delete the assertion to make a build pass.
+const ALLOWED_WINDOW_WRITERS = ['src/testBridge.js'];
+
+const srcRoot = path.join(__dirname, '..', 'src');
+const walk = (dir) => require('fs').readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+  const full = path.join(dir, e.name);
+  return e.isDirectory() ? walk(full) : (e.name.endsWith('.js') ? [full] : []);
+});
+const windowWriters = walk(srcRoot).filter((full) => {
+  // Strip line comments so the prose in testBridge.js and elsewhere is not a match.
+  const body = require('fs').readFileSync(full, 'utf8').replace(/^\s*(\/\/|\*|\/\*).*$/gm, '');
+  return /(^|[^\w.$])window\s*\.\s*[A-Za-z_$][\w$]*\s*=(?!=)/.test(body);
+}).map((full) => path.relative(path.join(__dirname, '..'), full).replace(/\\/g, '/')).sort();
+
+assertEquals(windowWriters.join(', '), ALLOWED_WINDOW_WRITERS.join(', '),
+  'Exactly one file in src/ assigns to a window property, and it is src/testBridge.js — ' +
+  'no-undef cannot see this, because assigning to a property of a readonly global is not a lint error');
+
+// ═══════════════════════════════════════════════════════════════════
 console.log(`\n===================================`);
 console.log(`Results: ${passed}/${total} passed, ${failed} failed`);
 console.log(`===================================`);
