@@ -6,9 +6,9 @@
 'use strict';
 
 const path = require('path');
-require(path.resolve(__dirname, '..', 'js', 'util', 'logger'));
-const { Chunk, BLOCK_TYPES } = require(path.resolve(__dirname, '..', 'js', 'world', 'chunkData'));
-const ChunkBinaryCodec = require(path.resolve(__dirname, '..', 'js', 'world', 'chunkBinaryCodec'));
+require(path.resolve(__dirname, '..', 'src', 'util', 'Logger.js'));
+const { Chunk, BLOCK_TYPES } = require(path.resolve(__dirname, '..', 'src', 'engine', 'world', 'ChunkData.js'));
+const { ChunkBinaryCodec } = require(path.resolve(__dirname, '..', 'src', 'engine', 'world', 'ChunkBinaryCodec.js'));
 
 let passCount = 0;
 let failCount = 0;
@@ -157,7 +157,7 @@ console.log('\n=== ChunkBinaryCodec (simplified) ===\n');
 // Test 8: Worker output format validation
 {
   const fs = require('fs');
-  const workerSource = fs.readFileSync(path.resolve(__dirname, '..', 'js', 'world', 'workerGeneration.js'), 'utf8');
+  const workerSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'engine', 'world', 'workerGeneration.js'), 'utf8');
   
   assert(!workerSource.includes('biomeNames: result.biomeNames'), 'Worker should not return biomeNames in postMessage');
   assert(workerSource.includes('chunkBytes: result.chunkBytes'), 'Worker must return chunkBytes');

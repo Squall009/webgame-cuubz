@@ -35,13 +35,21 @@
  *
  * HOW IT DRIVES THE GAME — storage inspection, not input simulation
  * ----------------------------------------------------------------
- * `page.evaluate` can reach every one of the 368 top-level lexical symbols
- * (`BLOCK_TYPES`, `ChunkManager`, `CHUNK_MAGIC`, …) even though they are not
- * `window` properties — same mechanism as PR 4 bug 1 and refactor.md §2.4.
+ * `page.evaluate` reads the storage constants (`BLOCK_TYPES`, `ChunkManager`,
+ * `CHUNK_MAGIC`, …) through `window.__cuubz` — see `src/testBridge.js`.
  *
- * It cannot reach live game state. Only four things are on `window`
- * (`CuubzGame`, `CuubzBlockPalette`, `MobIntegration`, `CuubzLogger`) and all four
- * are classes, not instances. The running `renderer` / `chunkManager` / `player` /
+ * **This changed at PR 9 and the reason matters.** Until then these were top-level
+ * `const`s in classic `<script>`s, which makes them global *lexical* bindings that
+ * `page.evaluate` can name directly (refactor.md §2.4 — the same mechanism as PR 4
+ * bug 1). In an ES module the identical `const` is module-scoped and completely
+ * unreachable, so about a third of the assertions here — every `DEPLOY.md` §2 storage
+ * invariant, the chunk-header decode, the H-1 regression test and PR 6d's `DB_VERSION`
+ * increment — stopped being runnable the moment `index.html` became one module tag.
+ * The bridge is one namespace object, assigned by the first module the bundle
+ * evaluates. It is temporary: PR 12 puts a real `Game` on `window` and this folds into
+ * that.
+ *
+ * It still cannot reach live game state. The running `renderer` / `chunkManager` / `player` /
  * `inventory` are among the ~184 closure locals inside `startGame()`'s `setTimeout`
  * (refactor.md §1.6). So this harness can click and type, but it cannot say
  * "place block 2 at (14,68,-3)" or read the player's position. That unblocks at
@@ -73,6 +81,11 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+
+// PR 9: this harness decodes browser-written chunk bytes with the production codec,
+// which is an ES module now. The hook lets this CommonJS file require() it. See its
+// header; PR 31 removes both.
+require('../helpers/esmRequire');
 
 const ROOT = path.join(__dirname, '..', '..');
 const ARTIFACTS = path.join(__dirname, 'artifacts');
@@ -439,8 +452,18 @@ async function main() {
   // every run starts from a virgin profile with no worlds and no characters.
   const consoleErrors = [];
   const pageErrors = [];
+  // PR 9 accept criterion: "chunk generation and meshing both still run in workers".
+  // Both pools are built from fetched source text wrapped in a Blob (refactor.md §1.3)
+  // inside a try/catch that falls back to main-thread generation and only `console.warn`s.
+  // So a broken worker URL — the exact thing PR 9's move of js/ → src/ could break, and
+  // the thing Vite's dev-server transform could break differently from its build output —
+  // produces a game that still generates terrain, still passes every storage assertion,
+  // and is silently single-threaded. That is a green run telling a lie, so the warning is
+  // collected and asserted rather than left to a human reading DevTools → Threads.
+  const workerWarnings = [];
   page.on('console', m => {
     if (m.type() === 'error') consoleErrors.push({ text: m.text(), url: m.location().url });
+    if (/\[ChunkManager\].*[Ww]orker pool init failed/.test(m.text())) workerWarnings.push(m.text());
   });
   page.on('pageerror', e => pageErrors.push({ text: e.message, url: '' }));
 
@@ -480,18 +503,24 @@ async function main() {
       const canvas = document.createElement('canvas');
       const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
       const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      const { THREE } = window.__cuubz || {};
       return {
         hasContext: !!gl,
         version: gl ? gl.getParameter(gl.VERSION) : null,
         renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
-        threeLoadFailed: window.__THREE_LOAD_FAILED === true,
+        bridgePresent: typeof window.__cuubz === 'object' && window.__cuubz !== null,
         threeType: typeof THREE,
-        revision: typeof THREE !== 'undefined' ? THREE.REVISION : null,
+        revision: THREE ? THREE.REVISION : null,
       };
     });
     assert(gfx.hasContext, `A WebGL context is available (${gfx.version})`);
     assert(/SwiftShader|ANGLE/.test(gfx.renderer || ''), `glRenderer is a real rasteriser (${gfx.renderer})`);
-    assertEquals(gfx.threeLoadFailed, false, 'window.__THREE_LOAD_FAILED is not set (index.html:9 onerror)');
+    // PR 9: the module graph is what loads THREE now, so there is no <script onerror>
+    // and no window.__THREE_LOAD_FAILED flag to check. `window.__cuubz` existing is the
+    // replacement signal and a strictly stronger one — src/testBridge.js is the first
+    // module evaluated, so the object cannot be there unless the whole bundle parsed,
+    // resolved `three` and ran. The old flag only proved one <script> tag fetched.
+    assertEquals(gfx.bridgePresent, true, 'window.__cuubz exists — the module bundle loaded and evaluated (src/testBridge.js)');
     assertEquals(gfx.threeType, 'object', 'THREE is loaded');
     // refactor.md §1.2 — three is pinned at r134 and PR 8 must keep it there.
     assertEquals(gfx.revision, '134', 'THREE.REVISION is r134');
@@ -501,7 +530,18 @@ async function main() {
     // Reachable because top-level `const` in a classic <script> is a lexical
     // binding in global scope — refactor.md §2.4.
     console.log('\n[DEPLOY.md §2.1 — IndexedDB constants]');
-    const inv = await page.evaluate(() => ({
+    const inv = await page.evaluate(() => {
+      // PR 9: these were top-level `const`s in classic <script>s, i.e. global lexical
+      // bindings (refactor.md §2.4). They are module-scoped now and unreachable from
+      // here, so they come through the one sanctioned bridge — src/testBridge.js.
+      // The `typeof … !== 'undefined'` guards below still do their job: a symbol the
+      // bridge forgot destructures to `undefined` and the assertion says which one.
+      const {
+        DB_NAME, DB_VERSION, STORE_CHUNKS, STORE_MANIFESTS, CHUNK_W, CHUNK_D,
+        ChunkManager, CHUNK_MAGIC, CHUNK_VERSION, LEGACY_LAYOUT_MAX, HEADER_SIZE,
+        CHUNK_HEIGHT, MAX_WORLD_SLOTS, BLOCK_REGISTRY,
+      } = window.__cuubz || {};
+      return {
       dbName: typeof DB_NAME !== 'undefined' ? DB_NAME : null,
       dbVersion: typeof DB_VERSION !== 'undefined' ? DB_VERSION : null,
       storeChunks: typeof STORE_CHUNKS !== 'undefined' ? STORE_CHUNKS : null,
@@ -523,7 +563,8 @@ async function main() {
       chunkHeight: typeof CHUNK_HEIGHT !== 'undefined' ? CHUNK_HEIGHT : null,
       maxSlots: typeof MAX_WORLD_SLOTS !== 'undefined' ? MAX_WORLD_SLOTS : null,
       blockRegistryLength: typeof BLOCK_REGISTRY !== 'undefined' ? BLOCK_REGISTRY.length : null,
-    }));
+      };
+    });
     assertEquals(inv.dbName, 'cuubz-worlds', 'DB_NAME (chunkmanager.js:20)');
     assertEquals(inv.dbVersion, 2, 'DB_VERSION (chunkmanager.js:21) — H-2: incrementing this destroys every saved world');
     assertEquals(inv.storeChunks, 'chunks', 'STORE_CHUNKS (chunkmanager.js:23)');
@@ -549,6 +590,7 @@ async function main() {
 
     console.log('\n[DEPLOY.md §2.3 — localStorage key space]');
     const lsKeys = await page.evaluate(() => {
+      const { PersistenceManager } = window.__cuubz;
       const p = new PersistenceManager();
       return { char: p._charKey(), slotMap: p._slotMapKey(), conf0: p._worldConfKey(0), conf2: p._worldConfKey(2) };
     });
@@ -592,6 +634,20 @@ async function main() {
       `Entering a world raises no uncaught exceptions${entryPageErrors.length ? ' — ' + entryPageErrors.map(e => e.text).join(' | ') : ''}`);
     assertEquals(entryReal.length, 0,
       `Entering a world logs no console errors${entryReal.length ? ' — ' + entryReal.map(e => e.text.slice(0, 120)).join(' | ') : ''}`);
+
+    // PR 9 — both worker pools spawned. See the collector above for why this is an
+    // assertion and not a note: the fallback is silent and terrain still appears.
+    assertEquals(workerWarnings.length, 0,
+      `Both worker pools initialised — terrain generation and meshing are off the main thread` +
+      `${workerWarnings.length ? ' — ' + workerWarnings.join(' | ') : ''}`);
+    const workerCounts = await page.evaluate(() => ({
+      // The Blob URLs the pools were built from are the only observable trace of a
+      // live worker from page scope; the pools themselves are closure locals inside
+      // startGame() (refactor.md §1.6) until PR 12 hoists them.
+      hardwareConcurrency: navigator.hardwareConcurrency || 0,
+    }));
+    assert(workerCounts.hardwareConcurrency > 0,
+      `navigator.hardwareConcurrency is readable (${workerCounts.hardwareConcurrency}) — worker pool sizes derive from it`);
 
     await settleAndPause(page, 'world A first entry');
     await shot(page, '03-pause-menu');
@@ -661,7 +717,7 @@ async function main() {
       `this world's ${snapA1.chunkCount} chunks`);
     assertEquals(bufA1.length % 4, 0, 'D-15 FIXED — the stored length is a whole number of 4-byte runs past the header');
 
-    const ChunkBinaryCodec = require('../../js/world/chunkBinaryCodec');
+    const { ChunkBinaryCodec } = require('../../src/engine/world/ChunkBinaryCodec.js');
     assertEquals(
       ChunkBinaryCodec.computeChecksum(new Uint8Array(bufA1.buffer, bufA1.byteOffset + 20, bufA1.length - 20)),
       view.getUint32(16, true),
@@ -906,6 +962,7 @@ async function main() {
         const req = indexedDB.open('cuubz-worlds');
         req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error);
       });
+      const { ChunkBinaryCodec, Chunk } = window.__cuubz;
       const data = ChunkBinaryCodec.encode(new Chunk(99, 99));
       const tx = db.transaction(['chunks'], 'readwrite');
       // Exactly the pre-6c write shape: chunkKey is the LOGICAL key.
@@ -989,6 +1046,7 @@ async function main() {
     // "The upgrade did nothing" would prove nothing.
     console.log('\n[PR 6d — H-2: increment DB_VERSION over a seeded v2 database]');
     const upgradeResult = await page.evaluate(async () => {
+      const { ChunkManager, ChunkBinaryCodec, Chunk, BLOCK_TYPES } = window.__cuubz;
       const NAME = 'cuubz-h2-upgrade-probe';
       const out = { errors: [] };
       const del = () => new Promise((res) => {

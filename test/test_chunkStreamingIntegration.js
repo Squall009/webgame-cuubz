@@ -10,8 +10,8 @@
 
 'use strict';
 
-const { CHUNK_WIDTH, CHUNK_DEPTH } = require('../js/world/chunkData');
-const { ChunkStreamer, CHUNK_STATE, DEFAULT_STREAM_CONFIG } = require('../js/multiplayer/chunkStreamer');
+const { CHUNK_WIDTH, CHUNK_DEPTH } = require('../src/engine/world/ChunkData.js');
+const { ChunkStreamer, CHUNK_STATE, DEFAULT_STREAM_CONFIG } = require('../src/multiplayer/ChunkStreamer.js');
 
 // ─── Test Harness ──────────────────────────────────────────────
 

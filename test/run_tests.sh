@@ -62,8 +62,13 @@ for test_file in test/test_*.js; do
 
   echo "Running: $TEST_NAME..."
 
-  # Run test, capture output and exit code
-  OUTPUT=$(node "$test_file" 2>&1)
+  # Run test, capture output and exit code.
+  #
+  # -r test/helpers/esmRequire.js installs the require hook that lets these CommonJS
+  # tests require() the ES modules in src/ (PR 9). Without it every test that requires
+  # a source file dies on "Cannot use import statement outside a module". Read that
+  # file's header before changing this line; PR 31 deletes both.
+  OUTPUT=$(node -r ./test/helpers/esmRequire.js "$test_file" 2>&1)
   EXIT_CODE=$?
 
   if [ $EXIT_CODE -eq 0 ]; then

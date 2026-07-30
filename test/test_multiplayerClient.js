@@ -34,7 +34,7 @@ const {
   MessageQueue,
   WSConnection,
   MultiplayerClient,
-} = require('../js/multiplayer/client');
+} = require('../src/multiplayer/Client.js');
 
 // ─── Mock WebSocket Factory ───────────────────────────────────────
 

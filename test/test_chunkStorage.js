@@ -38,10 +38,10 @@
 'use strict';
 
 const path = require('path');
-require(path.resolve(__dirname, '..', 'js', 'util', 'logger'));
-const { Chunk, BLOCK_TYPES } = require(path.resolve(__dirname, '..', 'js', 'world', 'chunkData'));
-const ChunkBinaryCodec = require(path.resolve(__dirname, '..', 'js', 'world', 'chunkBinaryCodec'));
-const { ChunkManager } = require(path.resolve(__dirname, '..', 'js', 'chunkmanager'));
+require(path.resolve(__dirname, '..', 'src', 'util', 'Logger.js'));
+const { Chunk, BLOCK_TYPES } = require(path.resolve(__dirname, '..', 'src', 'engine', 'world', 'ChunkData.js'));
+const { ChunkBinaryCodec } = require(path.resolve(__dirname, '..', 'src', 'engine', 'world', 'ChunkBinaryCodec.js'));
+const { ChunkManager } = require(path.resolve(__dirname, '..', 'src', 'engine', 'world', 'ChunkManager.js'));
 
 let passCount = 0;
 let failCount = 0;

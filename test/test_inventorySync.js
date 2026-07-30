@@ -33,7 +33,7 @@ const {
   hasItemInSlots,
   InventorySync,
   InventoryValidator,
-} = require('../js/multiplayer/inventorySync');
+} = require('../src/multiplayer/InventorySync.js');
 
 // ─── Mini Test Framework ──────────────────────────────────────
 

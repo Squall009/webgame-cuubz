@@ -17,7 +17,7 @@ const {
   getAllBossIds,
   distanceBetween,
   squaredDistance,
-} = require('../js/entities/boss');
+} = require('../src/game/entities/Boss.js');
 
 let passed = 0;
 let failed = 0;

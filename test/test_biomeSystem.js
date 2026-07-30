@@ -6,9 +6,9 @@
 
 'use strict';
 
-const { BLOCK_TYPES } = require('../js/world/blockRegistry');
+const { BLOCK_TYPES } = require('../src/engine/world/BlockRegistry.js');
 const { BIOME_DEFS, CONT_SPLINE, selectBiome, sampleBiomeParams, computeHumidityMap, BiomeSystem } =
-  require('../js/world/biomeSystem');
+  require('../src/engine/world/BiomeSystem.js');
 
 let passCount = 0, failCount = 0;
 const failures = [];

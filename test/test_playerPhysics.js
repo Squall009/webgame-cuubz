@@ -4,12 +4,14 @@
  * Tests for AABB collision, gravity, movement, ground detection
  */
 
-const Player = require('../js/entities/player');
-const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../js/world/chunkData');
+const { Player } = require('../src/game/entities/Player.js');
+const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../src/engine/world/ChunkData.js');
 
 // Globals needed by player.js
 global.MIN_Y = -64;
-global.SEA_LEVEL = 30;
+// PR 9: Player.js imports SEA_LEVEL from ChunkData.js, so a global stub no longer
+// reaches it. The assertions read the real constant, which is strictly stronger.
+const { SEA_LEVEL } = require('../src/engine/world/ChunkData.js');
 global.BLOCK_TYPES = BLOCK_TYPES;
 global.BLOCK_PROPERTIES = BLOCK_PROPERTIES;
 

@@ -21,10 +21,10 @@ const {
   ChunkCompressor,
   ChunkStreamEntry,
   ChunkStreamer,
-} = require(path.join(__dirname, '..', 'js', 'multiplayer', 'chunkStreamer'));
+} = require(path.join(__dirname, '..', 'src', 'multiplayer', 'ChunkStreamer.js'));
 
 // Import for coordinate constants
-const { CHUNK_WIDTH, CHUNK_DEPTH } = require(path.join(__dirname, '..', 'js', 'world', 'chunkData'));
+const { CHUNK_WIDTH, CHUNK_DEPTH } = require(path.join(__dirname, '..', 'src', 'engine', 'world', 'ChunkData.js'));
 
 let passed = 0;
 let failed = 0;

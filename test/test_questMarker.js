@@ -25,9 +25,9 @@ const {
   DEFAULT_MARKER_COLOR,
   QuestMarker,
   QuestMarkerManager,
-} = require('../js/entities/questMarker.js');
+} = require('../src/game/entities/QuestMarker.js');
 
-const { QuestSystem } = require('../js/systems/questSystem.js');
+const { QuestSystem } = require('../src/game/systems/QuestSystem.js');
 
 console.log('Quest Marker Tests');
 console.log('==================\n');

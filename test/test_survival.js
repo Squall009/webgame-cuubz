@@ -5,9 +5,9 @@
  * Includes comprehensive food system tests (FOOD_ITEMS registry, eating mechanics, saturation).
  */
 
-const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS } = require('../js/systems/survival');
-const SpawnManager = require('../js/world/spawnManager');
-const { SEA_LEVEL } = require('../js/world/chunkData');
+const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, RESTORATION, FOOD_ITEMS, EATING, DRINKING, BED, BED_COLORS } = require('../src/game/systems/SurvivalSystem.js');
+const { SpawnManager } = require('../src/engine/world/SpawnManager.js');
+const { SEA_LEVEL } = require('../src/engine/world/ChunkData.js');
 
 let passed = 0;
 let failed = 0;

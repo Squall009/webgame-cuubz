@@ -4,9 +4,9 @@
  * All input classes skip browser event binding when window is undefined.
  */
 
-const TouchInput = require('../js/input/touch');
-const { KeyboardInput } = require('../js/input/keyboard');
-const MouseInput = require('../js/input/mouse');
+const { TouchInput } = require('../src/engine/input/Touch.js');
+const { KeyboardInput } = require('../src/engine/input/Keyboard.js');
+const { MouseInput } = require('../src/engine/input/Mouse.js');
 
 let pass = 0;
 let fail = 0;

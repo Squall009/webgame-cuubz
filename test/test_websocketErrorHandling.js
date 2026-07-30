@@ -28,7 +28,7 @@ function test(name, fn) {
 
 // ─── Import modules ──────────────────────────────────────────────
 
-const { WSConnection, MultiplayerClient, CLIENT_STATE, MESSAGE_TYPES } = require('../js/multiplayer/client');
+const { WSConnection, MultiplayerClient, CLIENT_STATE, MESSAGE_TYPES } = require('../src/multiplayer/Client.js');
 const SessionManager = require('../server/session');
 const Matchmaking = require('../server/matchmaking');
 

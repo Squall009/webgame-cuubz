@@ -1347,7 +1347,7 @@ made it meaningful.
 **New files:** `test/test_threePin.js`. **Modified:** `package.json`, `package-lock.json`,
 `refactor.md` (this section).
 
-### PR 9 — Convert `js/` → `src/` ES modules (mechanical, in dependency order)
+### PR 9 — Convert `js/` → `src/` ES modules (mechanical, in dependency order) ✅ DONE
 For each file, in `index.html` script order (leaves first):
 1. `git mv` to its [§4.1](#41-target-directory-structure) destination.
 2. Add `export` to each externally-used symbol; add `import` for each consumed one.
@@ -1367,11 +1367,262 @@ const worker = new Worker(new URL('./meshWorker.js', import.meta.url), { type: '
 - **Accept:** `npm test` still exits 0. Game plays identically: solo, host, join, creative, pause, settings. **Worlds created before this PR still load** (manual save/load test). Chunk generation and meshing both still run in workers (check DevTools → Sources → Threads).
 - **Rollback:** this is the biggest PR in the plan. If it must be split, split by directory (`util/` → `world/` → `renderer/` → `systems/` → `multiplayer/` → `ui/` → `main.js` last) with a working game after each.
 
+**Outcome (2026-07-30):** ✅ DONE, in one commit. 66 files moved out of `js/` into `src/`,
+`js/three.min.js` deleted, `js/` gone. `index.html` went from 65 classic `<script src>`
+tags plus the vendored Three bundle to **one** `<script type="module" src="/src/index.js">`.
+368 top-level symbols became explicit exports and 62 CommonJS shims and all four
+`window.X =` assignments were removed.
+
+| Gate | Before (PR 8) | After (PR 9) |
+|---|---|---|
+| `npm test` | 52/52 + 4 quarantined, exit 0 | **52/52 + 4 quarantined, exit 0** |
+| `node scripts/check-globals.js` | 0 duplicates / 65 files / 368 symbols | **69 modules / 1 module entry / 0 classic tags / 69 reachable, exit 0** (repointed — see below) |
+| `npm run build` | exit 0, `dist/` did not run | **exit 0, and `dist/` runs** — 1.7 MB bundle + CSS + both workers as hashed assets |
+| `npm run test:e2e` | 150 / 0 (served the working tree) | **152 / 0 (serves `dist/`)** |
+| `npm run test:e2e:vite` | 150 / 0 | **152 / 0 — identical** |
+| `QUARANTINE.md` | 4 files | 4 files |
+
+**The two e2e hosts still agree, which is the whole point.** They agree on a *different*
+pair than before: "built bundle" vs "dev server" instead of "raw source" vs "dev server",
+because a raw static server can no longer serve this tree at all (see "staticServer" below).
+That is a stronger pair, not a weaker one.
+
+**Why the count moved 150 → 152.** One assertion was **removed**: `window.__THREE_LOAD_FAILED
+is not set`. It read a flag set by an `onerror` attribute on the `js/three.min.js` script
+tag, and both the tag and the file are gone — leaving it in place would have asserted that
+a flag nobody can set was not set, which is the definition of a vacuous gate. Three were
+**added**, and each is a real claim PR 9 made checkable for the first time:
+
+- `window.__cuubz exists` — strictly stronger than the flag it replaces. `src/testBridge.js`
+  is the first module the bundle evaluates, so the object cannot be there unless the whole
+  graph parsed, resolved `three` and ran. The old flag only proved one `<script>` fetched.
+- `Both worker pools initialised` — see "the workers" below. This is the assertion that
+  stops a green run from being a lie.
+- `navigator.hardwareConcurrency is readable` — the pools size themselves off it.
+
+---
+
+#### The e2e harness would have died here, and that is what §4.1 of `PR8_HANDOFF.md` was about
+
+`test/e2e/saveLoad.js` reads roughly a third of its assertions out of the page by naming
+**top-level lexical bindings** — `ChunkManager`, `CHUNK_MAGIC`, `BLOCK_REGISTRY`,
+`PersistenceManager` and a dozen more. That works only because a top-level `const` in a
+classic `<script>` is a global lexical binding ([§2.4](#24-the-mechanism-is-implicit-globals-not-window)).
+In an ES module the identical `const` is module-scoped and unreachable from
+`page.evaluate`, so every `DEPLOY.md` §2 storage invariant, the chunk-header decode, the
+H-1 two-world regression test, the H-1 migration and PR 6d's `DB_VERSION` increment would
+have stopped being runnable at exactly the PR whose entire claim is "identical game".
+
+**Ruling (owner, BUGS.md decision 7): a test-only bridge.** `src/testBridge.js` imports the
+symbols the harness needs and assigns them to **one** namespace object, `window.__cuubz`,
+and is the first thing `src/index.js` imports. The harness destructures from it. The two
+alternatives were rejected for stated reasons: dynamic `import()` inside `page.evaluate`
+only resolves against the dev server, which would make the harness vite-only and contradict
+[PR 7's ruling](#pr-7--vite-skeleton-no-source-changes--done) that a harness may not depend
+on the thing it validates; and rewriting the assertions to hard-code the constants turns
+checks that exist to catch a constant *changing* into tautologies.
+
+It is a production file that exists for tests and that is a real cost. It is paid down in
+Phase 2: **PR 12 puts a real `Game` on `window`, and this collapses into it.** The file's
+header says so and §7 PR 12 carries the removal.
+
+#### `check-globals.js` was repointed, not retired and not left vacuous
+
+The gate parsed the `<script src>` list out of `index.html` and failed on duplicate
+column-0 declarations across those 65 files. After this PR it would have scanned one file,
+found zero symbols and exited 0 having checked nothing — a green gate that checks nothing
+reads as coverage, which is worse than no gate. But retiring it belongs to PR 11, in the
+same commit that turns on `no-undef` (the strictly stronger replacement), and deleting it
+here would leave the intervening commits unguarded.
+
+**Ruling (BUGS.md decision 11):** same job, asked of the structure that now exists. It
+checks that `index.html` loads exactly one `<script type="module">` and **zero** classic
+`<script src>` tags (a classic tag is the fastest way to undo this PR, and it would do so
+silently); that nothing in `src/` assigns to `window.*` except the allowlisted
+`src/testBridge.js`; that no `module.exports` / `typeof module` / `require(` survives in
+`src/`; and that **every** module is reachable by import from `src/index.js`. That last one
+is what found D-25. `test_globalCollisions.js` was updated in the same commit and asserts
+the new output. **PR 11 deletes the script, its CI step and that assertion together.**
+
+#### The workers: both pools still spawn, and there is now an assertion that says so
+
+[§1.3](#13-web-workers-are-fetchblob-and-will-break-under-vite) is the section this PR
+could most easily have broken quietly.
+
+**`workerGeneration.js` keeps its triple contract, deliberately** — this is the explicit
+statement §1.3 demands. It is still a self-contained IIFE taking `globalScope`; it is still
+fetched and wrapped in a Blob for the worker; and it is still evaluated on the main thread
+(now as a side-effect import from `src/index.js` rather than a `<script>` tag at
+`index.html:523`) so that `window._voxelgenGenerateChunk` exists as the inline fallback.
+**The fallback stays** (owner, BUGS.md decision 9): losing it means a browser that fails to
+spawn a worker gets no terrain at all, and this PR is meant to be mechanical. The file's
+body was moved byte-for-byte — it declares nothing at column 0, so it needed no exports and
+got none.
+
+**Neither worker became an ES module** (BUGS.md decision 14). §6 above suggests
+`new Worker(new URL(…), { type: 'module' })`; `meshWorker.js` has no imports and gains
+nothing from being a module, and `workerGeneration.js` *cannot* be one while decision 9
+holds. What changed is only the paths, which were hard-coded `js/…` strings that Vite could
+not see:
+
+```js
+import meshWorkerUrl       from '../renderer/meshWorker.js?url';
+import workerGenerationUrl from './workerGeneration.js?url';
+```
+
+`?url` makes both build-time asset references: resolved in dev, emitted as content-hashed
+standalone assets on build (`dist/assets/meshWorker-*.js`, `dist/assets/workerGeneration-*.js`).
+The `fetch` + Blob construction and its `try`/`catch` are untouched.
+
+**And that `catch` is why there is a new assertion.** Both pools fall back to main-thread
+generation and only `console.warn` on failure — so a broken worker URL produces a game that
+still generates terrain, still passes every storage assertion in the harness, and is
+silently single-threaded. The accept criterion for this PR was *"check DevTools → Sources →
+Threads"*, which is not a gate. `saveLoad.js` now collects
+`[ChunkManager] … worker pool init failed` and asserts it never fires, on both hosts.
+
+#### `npm test` could not have survived step 3 as written, and this is what replaced it
+
+Step 3 above says to keep the `typeof module !== 'undefined'` shim "only where a currently-
+passing test needs it". **That is not possible.** Once a file contains `import` or `export`,
+`require()` refuses to compile it — `SyntaxError: Cannot use import statement outside a
+module` — before any shim inside it can run. 35 test files require 30-odd source files;
+without something, this PR takes `npm test` from 52/52 to about 17/52.
+
+**Ruling (BUGS.md decision 12): a `require` hook.** `test/helpers/esmRequire.js` compiles
+`src/**` as CommonJS on the fly, installed by `test/run_tests.sh` through `node -r`. The
+alternatives were larger than the conversion itself: `"type": "module"` at the repo root
+converts `server/`, all 56 test files and both `scripts/` as collateral; rewriting 35 test
+files onto `await import()` means making every one of them async, which is PR 31/32's job
+done properly and once. The hook's header carries the full reasoning, including why a regex
+transform is defensible here and not in `scripts/generate-manifest.js` (§1.9): it only ever
+sees the uniform syntax this PR's codemod generates, and anything outside that shape is a
+hard error naming the file and line, not a silent miss. **All 62 shims are gone.** PR 31
+deletes the hook — logged as **D-28**.
+
+#### `staticServer.js` serves `dist/` now, and that closes D-24
+
+A raw static server cannot serve this tree any more: `index.html` loads one ES module whose
+graph contains bare specifiers (`import * as THREE from 'three'`), which nothing but a
+bundler or an import map can resolve. **Ruling (BUGS.md decision 13):** the baseline host
+serves the **built** output, with a fallback to the repo root for `textures/` (because
+`publicDir` is deliberately `false` — [§1.8](#18-textures-118-mb-3370-files-already-in-git)
+— so `dist/` has no textures). `npm run test:e2e` runs `npm run build` first.
+
+That is a better baseline than the one it replaces. **D-24 is closed by measurement**: "the
+build exits 0" and "the build output runs" used to be different claims with only the first
+one checked, and the second is now a 152-assertion gate against the exact artifact PR 10
+deploys. The texture half of D-24 was never PR 9's and stays with PR 10 — the fallback here
+mirrors the topology that PR has to build on the host (bundle per release, textures once).
+
+#### Three real bugs, found because the module graph is the first thing that could see them
+
+- **D-26 — `SurvivalSystem` ↔ `DamageSystem` was a fatal import cycle.** `survival.js`
+  declared `DAMAGE_SOURCES` and called `calculateFallDamage`; `damageSystem.js` read
+  `DAMAGE_SOURCES` as a computed key **at module top level**. As classic scripts that worked
+  because `index.html` loaded survival first into one shared scope; under `require()` it
+  worked because damageSystem carried a shim that pulled the table off `require('./survival')`
+  first. Real ES modules have neither crutch: whichever side evaluates first pulls in the
+  other, which reads a `const` in its temporal dead zone —
+  `ReferenceError: Cannot access 'DAMAGE_SOURCES' before initialization`, at load, in the
+  browser, on the first page view (`mobIntegration.js` imports from the survival side).
+  **Fixed here** by extracting the table to `src/game/data/DamageSources.js`, a leaf module
+  both import; reordering was not an option because import order is not something a module
+  graph lets you control. Both files re-export it, so no call site or test changed. §4.1
+  already puts data tables under `src/game/data/`.
+- **D-25 — twelve of the 65 files are referenced by nothing.** Computing reachability from
+  `src/index.js` is what surfaced it: `main.js` never names `AmbientManager`, `SoundManager`,
+  `SurvivalSystem`, `DamageSystem`, `QuestSystem`, `SpawnManager`, `Crosshair`, `Boss`,
+  `QuestMarker`, `PerformanceOptimizer`, `pathfinding` or the main-thread `Noise`. **The
+  entire audio subsystem is 1,791 lines that are never instantiated** — the game is silent
+  by construction — and survival meters, environmental damage, quests and boss fights are in
+  the same state. As classic scripts nothing distinguished them from live code. They are kept
+  in the graph with explicit side-effect imports in `src/index.js`, with the reasoning in a
+  comment, because deleting 6,000 lines is not a mechanical conversion and because dropping
+  them silently would be a behaviour change smuggled into this PR. **PR 20** owns wiring or
+  deleting each one; the list is in §9 PR 20.
+- **D-27 — the 29 `typeof X !== 'undefined'` guards are constant-`true` now**, and one was
+  hiding a null dereference: `Skybox.init()` short-circuited on `typeof THREE === 'undefined'`
+  in Node and so never evaluated `!this.renderer.scene`. In the browser nothing changes —
+  THREE was always defined there, so the second half already ran — but the null check was
+  always missing. Guard added here; `test_skybox.js` found it within a minute of the tests
+  going green. Removing the other 28 is PR 11's, and note that `no-undef` will *not* flag
+  them: they are syntactically fine, so it is a grep-and-delete pass.
+
+#### The rest of the checklist
+
+- **`host.js` imports `MESSAGE_TYPES`** ([§3.5](#35-protocol-duplication--v1-was-half-wrong)) —
+  `import { MESSAGE_TYPES } from './Client.js'`. It never declared it. `shared/protocol.js`
+  is still PR 30's.
+- **`textureAtlas.js`'s relative fetches** ([§1.8](#18-textures-118-mb-3370-files-already-in-git))
+  are absolute: `/textures/blocks/…`. `ItemTextureAtlas.js` had the same bug and got the same
+  fix. A leading `/` rather than `import.meta.env.BASE_URL` (BUGS.md decision 15) — the deploy
+  target serves from the web root and `base` is `/`, while `import.meta.env` is a Vite-only
+  global that would break the moment a Node test imports one of these files.
+- **`THREE` comes from the pinned package.** Every renderer file does
+  `import * as THREE from 'three'`; `js/three.min.js` is deleted. `test/test_threePin.js` was
+  repointed in the same commit rather than deleted — it now reads the revision out of
+  `node_modules/three`'s declared `module` entry, which is the copy the browser actually
+  executes, and asserts the vendored bundle is *gone*. Same claim, aimed at the file it is now
+  true of. It also learned to read the unminified `const REVISION = '134'` form.
+- **`main.js` → `src/main.js`, not `src/index.js`.** §13 empties `main.js` into `src/ui/`,
+  `src/core/Game.js` and the systems across Phase 3; `src/index.js` is the <50-line bootstrap
+  §4.1 describes, and today it is the bridge, the twelve orphans and `import './main.js'`.
+  `new CuubzGame()` in `main.js` is now `import { Game as CuubzGame } from './core/Game.js'` —
+  the alias keeps the call site byte-identical while the binding becomes an ordinary import.
+- **`scripts/generate-manifest.js`** points at `src/engine/world/BlockRegistry.js`. Its regex
+  (§1.9) still matches `export const BLOCK_REGISTRY = [`, and `test_manifestGenerator.js`
+  proves it.
+- **`DEPLOY.md` and `README.md` were path-swept** in this commit because they describe the
+  live system; the §2 invariant *values* are unchanged and the §2.1 line numbers were re-read
+  after the move. Five feature-planning docs still cite `js/…` — **D-29**, PR 11.
+
+**Not done here, deliberately:** `minify` stays `false` (an unminified bundle keeps a stack
+trace legible while "identical game" is being checked; PR 10 owns the call now that `dist/`
+is what ships); the 28 remaining vacuous `typeof` guards (D-27, PR 11); the twelve unwired
+subsystems (D-25, PR 20); `shared/protocol.js` (PR 30); splitting `ChunkManager.js` (PR 23),
+`InventorySystem.js` (PR 24) and `SkyRenderer.js` (PR 25) — each moved whole to its §4.1
+destination.
+
+**⚠️ PR 10 has NOT landed with this commit.** `sync.sh` still carries `--exclude='dist'`, so
+the next `./sync.sh` uploads everything except the only directory that now contains the
+application and serves a black page. **Do not deploy.** That is **D-4** and `DEPLOY.md` §4.3
+now says so in the imperative rather than the conditional.
+
+**New files:** `src/index.js`, `src/testBridge.js`, `src/game/data/DamageSources.js`,
+`test/helpers/esmRequire.js`. **Deleted:** `js/three.min.js`, and `js/` with it.
+**Moved:** 66 files (see [§4.1](#41-target-directory-structure)). **Modified:** `index.html`,
+`vite.config.js`, `package.json` (`test:e2e` builds first), `scripts/check-globals.js`
+(rewritten), `scripts/generate-manifest.js`, `test/run_tests.sh`, `test/e2e/staticServer.js`,
+`test/e2e/saveLoad.js`, 37 test files (require paths, plus the five noted above),
+`.github/workflows/ci.yml`, `BUGS.md`, `DEPLOY.md`, `README.md`, `refactor.md` (this section).
+
+
 ### PR 10 — Fix deployment (**must land with PR 9, not after**)
+
+> **⛔ PR 9 HAS LANDED AND THIS HAS NOT. THE REPO CANNOT BE DEPLOYED RIGHT NOW.**
+> `index.html` loads one module out of a bundle that only exists in `dist/`, and
+> `sync.sh:30` still says `--exclude='dist'`. The next `./sync.sh` uploads everything
+> except the application and serves a black page. That is **D-4**, now live rather than
+> predicted. `DEPLOY.md` §4.3 carries the operational rule.
+
 - Rewrite `sync.sh`: run `npm run build`, then ship `dist/` + `server/` + `textures/` (**stop excluding `dist/`**).
 - Decide whether `textures/` ships separately (118 MB per deploy is slow — consider rsync or a one-time upload).
+  **PR 9 made this concrete rather than theoretical:** `publicDir` is `false`, so `dist/`
+  contains no textures at all and something has to put them on the host. `test/e2e/staticServer.js`
+  models the intended answer — serve `dist/` and fall back to a separately-uploaded
+  `textures/` — and is a working reference for the topology.
 - Verify `cuubz-relay.service`'s `WorkingDirectory=/var/www/html/server` still resolves; update the unit if the layout moved.
 - Document the restart + rollback procedure.
+- **`tar xzf` never deletes (D-5) is now realised, not latent.** PR 9 removed all 66 files
+  under `js/` plus `js/three.min.js`; none of them will leave the host on their own, and the
+  host will serve a complete dead copy of the pre-PR-9 codebase alongside the live one.
+  Whatever replaces `tar xzf` has to delete.
+- **Decide `minify`.** `vite.config.js` keeps `minify: false` (1.7 MB raw / 353 kB gzipped)
+  because an unminified bundle keeps a stack trace legible while PR 9's "identical game"
+  claim is being checked. PR 10 is the PR that starts shipping the artifact, so it owns the
+  call. Whichever way it goes, both e2e hosts run against the real output, so it is
+  verifiable rather than assumed.
 - **Accept:** deploy to `10.0.30.160`, load the site in a browser, **JS actually loads**, multiplayer relay connects.
 - **Rollback:** keep the old `sync.sh` as `sync-legacy.sh` for one release cycle.
 
@@ -1390,15 +1641,59 @@ export default [
 - `.prettierrc`: `{ "semi": true, "singleQuote": true, "trailingComma": "es5", "printWidth": 120 }`
 - Add `lint` / `format` scripts; wire `lint` into CI.
 - **`no-undef` is the payoff:** with modules, every leftover implicit global becomes a lint error. Fix them; do not disable the rule.
+- **Delete `scripts/check-globals.js` and its CI step in the same commit that turns
+  `no-undef` on.** PR 9 repointed the script at the module boundary rather than let it go
+  vacuous (owner ruling, `BUGS.md` decision 8 / 11) — it now checks that `index.html` has one
+  module entry and zero classic script tags, that nothing in `src/` assigns to `window.*`
+  outside `src/testBridge.js`, that no CommonJS survives, and that every module is reachable
+  from `src/index.js`. `no-undef` subsumes the parts that matter. Remove the script, the CI
+  step, and the block in `test/test_globalCollisions.js` that asserts its output, together.
+  Do not leave it standing as a step that checks less than the linter does.
+- **D-27 — remove the 28 remaining `typeof X !== 'undefined'` cross-module guards.** With the
+  symbols imported these are constant-`true` and read as protection they do not provide; §14
+  names the pattern as an anti-pattern. **`no-undef` will not flag them** — they are
+  syntactically valid — so this is a deliberate grep-and-delete pass, not a free side effect
+  of turning the linter on. Watch for the shape PR 9 hit in `Skybox.init()`, where the guard
+  was short-circuiting a null dereference that nothing else checked.
+- **D-29 — path-sweep the five planning docs** that still cite `js/…`: `IMPLEMENTATION_PLAN.md`,
+  `multiplayer.md`, `MOB_PLAN.md`, `performance.md`, `CRAFTING_PLAN.md`. `DEPLOY.md` and
+  `README.md` were done in PR 9; the `PR*_HANDOFF.md` files are dated records and stay as they
+  are.
+- **D-22 — narrow `on: push` to `branches: [main]`** now that `main` is moving again. PR 7 and
+  PR 9 both left it alone deliberately; this is the PR that gets to make the call.
 - **Accept:** `npm run lint` exits 0. CI runs test + lint + build.
 
 ### Phase 1 gate
+
+Tick a box only if you ran the thing — the rule PR 6d established for the Phase 0 gate
+(`BUGS.md` decision 2). Four are closed by PR 9.
+
 - [ ] `npm run dev`, `npm run build`, `npm test`, `npm run lint` all pass
-- [ ] `three` pinned to exactly `0.134.0`; no visual change (compare screenshots against the tag)
-- [ ] Both worker pools still run off-main-thread
+      — three of the four are green at PR 9 (`npm test` 52/52 + 4 quarantined,
+      `npm run build` exit 0, `npm run dev` serves 152/152 via `test:e2e:vite`).
+      `npm run lint` does not exist until PR 11.
+- [x] `three` pinned to exactly `0.134.0`; no visual change (compare screenshots against the tag)
+      — pin enforced by `test/test_threePin.js` (10 assertions, in CI), which since PR 9
+      reads the revision out of the package's declared `module` entry, the copy the browser
+      now executes. `THREE.REVISION === '134'` asserted from the running browser on both e2e
+      hosts. **Screenshots are self-comparison only** — SwiftShader is not a GPU, so six
+      artifacts under `test/e2e/artifacts/` establish "this run looks like the last run",
+      not "the game looks right on real hardware".
+- [x] Both worker pools still run off-main-thread
+      — `npm run test:e2e` and `npm run test:e2e:vite` both assert that
+      `[ChunkManager] … worker pool init failed` never appears. Added in PR 9 because the
+      fallback is silent: a broken worker URL gives you a working, single-threaded game that
+      passes every other assertion.
 - [ ] Deploy works end to end and serves real JS
-- [ ] Pre-refactor worlds load; blocks persist across reload
+      — **blocked on PR 10, and currently FALSE** (D-4). Needs SSH to `10.0.30.160`.
+- [x] Pre-refactor worlds load; blocks persist across reload
+      — the terrain round trip, the two-world H-1 regression test and the H-1 migration all
+      pass byte-for-byte on both hosts after the conversion; `DB_NAME`, `DB_VERSION`, both
+      store key formats and the chunk binary header are unchanged and asserted from the page.
+      **Caveat, same as Phase 0's:** the harness never places or breaks a block (pointer lock
+      — PR 12–13), so "blocks persist" is proved for *generated* terrain, not for player edits.
 - [ ] Multiplayer host + join + block sync verified with two browsers
+      — still manual, still unautomated. `DEPLOY.md` §7 steps 12–13.
 
 ---
 
@@ -1528,6 +1823,33 @@ const SYSTEM_ORDER = ['inputManager','blockInteraction','player','mobSystem','dr
 
 ### PR 20 — `System` base class
 `src/game/systems/System.js` per [§4.2](#42-key-patterns). Convert systems one at a time; `SystemRunner` drops its special cases.
+
+**PR 20 also owns D-25 — the twelve modules nothing references.** PR 9 computed the import
+graph for the first time and found that twelve of the 65 former `<script>` files are not
+reached from `main.js` at all. They were fetched, parsed and evaluated on every page load
+and then did nothing. `src/index.js` keeps them in the graph with explicit side-effect
+imports so PR 9 stayed mechanical; **this is the PR where each one is either wired to a
+real `System` or deleted, and its line in `src/index.js` goes with it.**
+
+| Module | Lines | State |
+|---|---|---|
+| `src/engine/audio/AmbientAudio.js` | 1,170 | `AmbientManager` never instantiated — **the game has no ambient audio** |
+| `src/engine/audio/SFX.js` | 621 | `SoundManager` never instantiated — **no sound effects either** |
+| `src/game/systems/SurvivalSystem.js` | 1,160 | Reachable only via `mobIntegration`'s use of `DAMAGE_SOURCES`; the meters, hunger, thirst and death handling are unwired. **D-21 lives here** and stays owned by PR 22 |
+| `src/game/systems/DamageSystem.js` | — | Environmental/fall/boss damage, unwired |
+| `src/game/systems/QuestSystem.js` | — | Unwired; `QuestMarker.js` is unwired with it |
+| `src/game/entities/Boss.js` | 1,152 | Unwired. PR 3 fixed `getBossDefinition` colliding with `damageSystem.js`'s — a live bug in code nothing calls |
+| `src/game/entities/QuestMarker.js` | — | Unwired |
+| `src/engine/world/SpawnManager.js` | — | Unwired; `main.js` computes spawn itself |
+| `src/engine/renderer/PerformanceOptimizer.js` | — | Unwired. PR 3's `isMobileViewport` collision was here too |
+| `src/ui/hud/Crosshair.js` | — | Unwired; the crosshair is a DOM overlay in `index.html` |
+| `src/game/mobs/ai/pathfinding.js` | — | Unwired even from `mobAI.js` |
+| `src/engine/world/Noise.js` | — | The main-thread copy. `workerGeneration.js` carries its own; nothing on the main thread calls this one |
+
+Deciding *wire vs delete* per module is this PR's job and each choice needs a line in the
+outcome. "Wire it up" is not automatically right — an unwired subsystem that has never run
+in production is untested by definition, and turning six of them on at once is not a
+mechanical change either.
 
 ### PR 21 — `EventBus`
 ```js

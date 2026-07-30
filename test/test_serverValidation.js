@@ -8,9 +8,9 @@
 
 'use strict';
 
-const { validateBlockBreak, validateBlockPlace, validateMove, validateQuestUpdate } = require('../js/multiplayer/host');
-const { InventoryValidator, VALID_BLOCK_IDS, VALID_NAMED_ITEMS, MAX_STACK, isValidTypeId, validateSlot, slotsEqual, DEFAULT_INVENTORY_ROWS, DEFAULT_INVENTORY_COLS, validateInventorySlots: invSyncValidateInventory } = require('../js/multiplayer/inventorySync');
-const { HOST_STATE, DEFAULT_HOST_CONFIG, RateLimiter } = require('../js/multiplayer/host');
+const { validateBlockBreak, validateBlockPlace, validateMove, validateQuestUpdate } = require('../src/multiplayer/Host.js');
+const { InventoryValidator, VALID_BLOCK_IDS, VALID_NAMED_ITEMS, MAX_STACK, isValidTypeId, validateSlot, slotsEqual, DEFAULT_INVENTORY_ROWS, DEFAULT_INVENTORY_COLS, validateInventorySlots: invSyncValidateInventory } = require('../src/multiplayer/InventorySync.js');
+const { HOST_STATE, DEFAULT_HOST_CONFIG, RateLimiter } = require('../src/multiplayer/Host.js');
 
 // ─── Test Harness ──────────────────────────────────────────────
 

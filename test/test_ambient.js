@@ -27,7 +27,7 @@ const {
   validateBiomeConfig,
 
   AmbientManager,
-} = require('../js/audio/ambient');
+} = require('../src/engine/audio/AmbientAudio.js');
 
 let passed = 0;
 let failed = 0;

@@ -2,17 +2,37 @@
 /**
  * Minimal static file server for the e2e harness.
  *
- * Why this exists rather than reusing a dev server: the e2e harness must be able
- * to serve the CURRENT working tree with no build step and no extra dependency,
- * so it works identically before and after the Vite switch in PR 7. Once PR 7
- * lands, `npm run dev` is an alternative host, but this keeps the harness
- * independent of it — a harness that depends on the thing it is validating is
- * not a gate.
+ * Why this exists rather than reusing a dev server: a harness that only runs against
+ * the thing it is validating is not a gate. `npm run dev` is the second host
+ * (`--server=vite`, added by PR 7); this one is the baseline, and the two must produce
+ * the same numbers.
+ *
+ * ─── PR 9 CHANGED WHAT "THE BASELINE" IS ────────────────────────────────────
+ *
+ * Until PR 9 this served the **working tree**: index.html plus 65 classic `<script
+ * src>` tags read straight off disk, no build step. That is no longer servable by any
+ * static server. `index.html` now loads one ES module and the module graph contains
+ * bare specifiers (`import * as THREE from 'three'`), which only a bundler or an import
+ * map can resolve. A raw file server would hand the browser an unresolvable import and
+ * a blank page.
+ *
+ * So the baseline is now `dist/` — the **built** output, which is exactly what PR 10
+ * uploads to the deploy host. That is a strictly better baseline than the one it
+ * replaces: `npm run test:e2e` now proves the artifact that ships actually runs, which
+ * is the claim `npm run build` alone never made (**D-24**).
+ *
+ * ─── TEXTURES ARE SERVED FROM THE REPO ROOT, DELIBERATELY ───────────────────
+ *
+ * `vite.config.js` sets `publicDir: false` because `textures/` is 118 MB across 3,370
+ * files and Vite copies the public directory into `dist/` on *every* build
+ * (`refactor.md` §1.8). So `dist/` has no textures, and this server falls back to the
+ * repo root for them. That mirrors the deploy topology PR 10 is going to create —
+ * bundle deployed per release, textures uploaded once — rather than working around it.
  *
  * The game must be served over http://. file:// breaks two things:
- *   - js/renderer/textureAtlas.js fetches textures with relative paths.
- *   - js/chunkmanager.js builds both worker pools by fetch()ing source text and
- *     wrapping it in a Blob (refactor.md §1.3). fetch() of a file:// URL fails.
+ *   - src/engine/renderer/TextureAtlas.js fetches textures over HTTP.
+ *   - src/engine/world/ChunkManager.js builds both worker pools by fetch()ing source
+ *     text and wrapping it in a Blob (refactor.md §1.3). fetch() of file:// fails.
  */
 
 const http = require('http');
@@ -34,28 +54,53 @@ const MIME = {
 };
 
 /**
- * Serve `root` on `port`. Resolves to { server, port, url, missing }.
+ * Serve the built site on `port`. Resolves to { server, port, url, missing }.
  *
- * `missing` accumulates every path that 404'd. The harness asserts on it, so a
- * genuinely missing asset fails the run instead of scrolling past in a log.
- * /favicon.ico is excluded — Chromium requests it unprompted and the repo has
- * none, so counting it would make every run dirty.
+ * `root` is the repo root. Application files come from `<root>/dist`; anything not
+ * there is looked up under `<root>` so `textures/` resolves (see the header).
+ *
+ * `missing` accumulates every path that 404'd in BOTH locations. The harness asserts on
+ * it, so a genuinely missing asset fails the run instead of scrolling past in a log.
+ * /favicon.ico is excluded — Chromium requests it unprompted and the repo has none, so
+ * counting it would make every run dirty.
  */
 function start(root, port = 0) {
   const missing = [];
+  const dist = path.join(root, 'dist');
+
+  if (!fs.existsSync(path.join(dist, 'index.html'))) {
+    return Promise.reject(
+      new Error(
+        `No dist/index.html under ${root}.\n` +
+          '  Since PR 9 the static host serves the BUILT site, not the working tree —\n' +
+          '  index.html loads one ES module whose graph contains bare specifiers, which\n' +
+          '  no raw file server can resolve. Run `npm run build` first (`npm run test:e2e`\n' +
+          '  does it for you).'
+      )
+    );
+  }
 
   const server = http.createServer((req, res) => {
     const urlPath = decodeURIComponent(req.url.split('?')[0]);
     const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-    const filePath = path.join(root, rel);
 
-    // Refuse to serve outside root — path traversal guard.
-    if (!filePath.startsWith(root)) {
+    // Refuse to serve outside either root — path traversal guard.
+    const candidates = [path.join(dist, rel), path.join(root, rel)]
+      .filter((p, i) => p.startsWith(i === 0 ? dist : root));
+    if (candidates.length === 0) {
       res.writeHead(403);
       return res.end('403');
     }
 
-    fs.readFile(filePath, (err, data) => {
+    const readFirst = (list, cb) => {
+      const [head, ...tail] = list;
+      fs.readFile(head, (err, data) => {
+        if (err && tail.length) return readFirst(tail, cb);
+        cb(err, data, head);
+      });
+    };
+
+    readFirst(candidates, (err, data, filePath) => {
       if (err) {
         if (urlPath !== '/favicon.ico') missing.push(urlPath);
         res.writeHead(404, { 'Content-Type': 'text/plain' });

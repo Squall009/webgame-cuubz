@@ -4,9 +4,9 @@
  * Tests for creative mode: unlimited blocks, no gravity, fly mode, block palette, mode toggle.
  */
 
-const Game = require('../js/game');
-const Player = require('../js/entities/player');
-const { BLOCK_TYPES } = require('../js/world/chunkData');
+const { Game } = require('../src/core/Game.js');
+const { Player } = require('../src/game/entities/Player.js');
+const { BLOCK_TYPES } = require('../src/engine/world/ChunkData.js');
 
 let passed = 0;
 let failed = 0;
@@ -106,7 +106,7 @@ player.setCreativeMode(true);
 
 // --- Group 6: InputAction edge detection ---
 setGroup('InputAction Edge Detection');
-const { InputAction } = require('../js/input/keyboard');
+const { InputAction } = require('../src/engine/input/Keyboard.js');
 const action = new InputAction();
 
 // Initially all false
@@ -160,7 +160,7 @@ assertEqual(game2.canPlaceBlock(null, null), false, 'Survival mode without inven
 
 // --- Group 9: Block palette ---
 setGroup('Block Palette');
-const palette = new (require('../js/game')).BlockPalette();
+const palette = new (require('../src/core/Game.js').BlockPalette)();
 
 // Default selected block should be stone
 assertEqual(palette.selectedBlock, BLOCK_TYPES.STONE, 'Default selected block should be stone');
@@ -284,7 +284,7 @@ game7.setMode(Game.MODES.SURVIVAL);
 assertEqual(game7.mode, 'survival', 'setMode should handle bare player object');
 
 // Block palette with empty block list
-const emptyPalette = new (require('../js/game')).BlockPalette();
+const emptyPalette = new (require('../src/core/Game.js').BlockPalette)();
 emptyPalette._availableBlocks = [];
 emptyPalette.cycleForward();
 assert(true, 'cycleForward on empty palette should not crash');

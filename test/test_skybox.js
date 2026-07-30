@@ -17,12 +17,15 @@ function assertNotNull(v,m){assert(v!==null&&v!==undefined,m)}
 function assertGreaterThan(a,t,m){assert(a>t,`${m}: expected > ${t}, got ${a}`)}
 function assertLessThan(a,t,m){assert(a<t,`${m}: expected < ${t}, got ${a}`)}
 
-const Skybox = require('../js/renderer/skybox.js');
+// PR 9: skybox.js used `module.exports = Skybox` and then hung every helper off the
+// class as a property. They are ordinary named module exports now.
+const SkyRenderer = require('../src/engine/renderer/SkyRenderer.js');
+const Skybox = SkyRenderer.Skybox;
 const {smoothstep, lerp, lerpColor, hexToRGB, hoursToFraction, fractionToHours,
   getSkyColorForTime, isDaytime, getSkyPhase, getFogDensityForTime, getAmbientIntensityForTime,
   getSunAngleForTime, getMoonAngleForTime, getSunElevation, getMoonElevation,
   getSunColorForTime, getSunIntensity, getMoonIntensity, getTimeOfDayLabel, formatGameTime,
-  DEFAULT_CYCLE_DURATION, FOG_DENSITY_DAY, FOG_DENSITY_NIGHT, AMBIENT_LIGHT, SKY_COLORS} = Skybox;
+  DEFAULT_CYCLE_DURATION, FOG_DENSITY_DAY, FOG_DENSITY_NIGHT, AMBIENT_LIGHT, SKY_COLORS} = SkyRenderer;
 
 console.log('Skybox & Day/Night Cycle Tests');
 console.log('================================\n');

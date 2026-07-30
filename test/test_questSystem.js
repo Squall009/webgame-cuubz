@@ -11,7 +11,7 @@ function assertFalse(c, m) { assert(c === false, m); }
 function assertNotNull(v, m) { assert(v !== null && v !== undefined, m); }
 function assertGreaterThan(a, t, m) { assert(a > t, `${m}: expected > ${t}, got ${a}`); }
 
-const { QUEST_TYPES, REWARD_TYPES, QUEST_STATES, QUEST_REGISTRY, QuestSystem } = require('../js/systems/questSystem.js');
+const { QUEST_TYPES, REWARD_TYPES, QUEST_STATES, QUEST_REGISTRY, QuestSystem } = require('../src/game/systems/QuestSystem.js');
 
 console.log('Quest System Tests');
 console.log('==================\n');

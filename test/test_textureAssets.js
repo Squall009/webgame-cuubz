@@ -197,8 +197,8 @@ console.log('Group 7: Block registry consistency');
 {
   // Check multiple possible locations for block type definitions
   const possiblePaths = [
-    path.join(__dirname, '..', 'js', 'world', 'chunkData.js'),
-    path.join(__dirname, '..', 'js', 'systems', 'inventory.js'),
+    path.join(__dirname, '..', 'src', 'engine', 'world', 'ChunkData.js'),
+    path.join(__dirname, '..', 'src', 'game', 'systems', 'InventorySystem.js'),
     path.join(__dirname, '..', 'js', 'entities', 'blockTypes.js'),
   ];
 

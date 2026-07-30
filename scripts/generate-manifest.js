@@ -2,7 +2,7 @@
  * Cuubz — Manifest Generator
  * 
  * Scans textures/blocks/ for all diffuse PNGs, cross-references with
- * blockRegistry.js, and outputs textures/blocks/manifest.json.
+ * src/engine/world/BlockRegistry.js, and outputs textures/blocks/manifest.json.
  * 
  * Usage: node scripts/generate-manifest.js
  */
@@ -15,7 +15,7 @@ const OUTPUT_PATH = path.join(BLOCKS_DIR, 'manifest.json');
 
 // ─── Load block registry ──────────────────────────────────────────────
 // We can't use ES module imports in Node, so read and parse the file.
-const registryPath = path.join(__dirname, '..', 'js', 'world', 'blockRegistry.js');
+const registryPath = path.join(__dirname, '..', 'src', 'engine', 'world', 'BlockRegistry.js');
 const registrySource = fs.readFileSync(registryPath, 'utf8');
 
 // Extract BLOCK_REGISTRY array via eval (it's a const array of plain objects)

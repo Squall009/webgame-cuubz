@@ -5,7 +5,7 @@
  * All tests run in Node.js without AudioContext.
  */
 
-const ambient = require('../js/audio/ambient');
+const ambient = require('../src/engine/audio/AmbientAudio.js');
 let PASS = 0;
 let FAIL = 0;
 let TOTAL = 0;

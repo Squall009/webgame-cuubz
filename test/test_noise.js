@@ -6,7 +6,7 @@
 
 'use strict';
 
-const { NoiseGenerator } = require('../js/world/noise');
+const { NoiseGenerator } = require('../src/engine/world/Noise.js');
 
 // ============================================================
 // Test Framework (embedded)

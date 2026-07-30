@@ -22,16 +22,16 @@
 const { execFileSync } = require('child_process');
 const path = require('path');
 
-const { Boss, BOSS_DEFINITIONS, getBossDefinition } = require('../js/entities/boss');
-const { BOSS_ATTACKS, getBossAttackProfile } = require('../js/systems/damageSystem');
-const { validateHostInventory } = require('../js/multiplayer/host');
-const { validateInventorySlots } = require('../js/multiplayer/inventorySync');
+const { Boss, BOSS_DEFINITIONS, getBossDefinition } = require('../src/game/entities/Boss.js');
+const { BOSS_ATTACKS, getBossAttackProfile } = require('../src/game/systems/DamageSystem.js');
+const { validateHostInventory } = require('../src/multiplayer/Host.js');
+const { validateInventorySlots } = require('../src/multiplayer/InventorySync.js');
 const {
   isMobileViewport,
   MOBILE_MAX_WIDTH_PERF,
   MOBILE_MAX_WIDTH_HUD,
-} = require('../js/util/viewport');
-const { smoothstep, distanceBetween } = require('../js/util/mathUtils');
+} = require('../src/util/Viewport.js');
+const { smoothstep, distanceBetween } = require('../src/util/MathUtils.js');
 
 let passed = 0;
 let failed = 0;
@@ -224,19 +224,19 @@ assertEquals(smoothstep(-1), 0, 'smoothstep clamps below 0');
 assertEquals(smoothstep(2), 1, 'smoothstep clamps above 1');
 
 // Both former owners must still expose the identical function.
-assertEquals(require('../js/renderer/skybox').smoothstep, smoothstep, 'skybox.js re-exports the canonical smoothstep');
-assertEquals(require('../js/audio/ambient').smoothstep, smoothstep, 'ambient.js re-exports the canonical smoothstep');
+assertEquals(require('../src/engine/renderer/SkyRenderer.js').smoothstep, smoothstep, 'skybox.js re-exports the canonical smoothstep');
+assertEquals(require('../src/engine/audio/AmbientAudio.js').smoothstep, smoothstep, 'ambient.js re-exports the canonical smoothstep');
 
 // distanceBetween — was duplicated in boss.js and playerSync.js.
 assertEquals(distanceBetween({ x: 0, y: 0, z: 0 }, { x: 3, y: 4, z: 0 }), 5, 'distanceBetween 3-4-5 triangle');
 assertEquals(distanceBetween({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), 0, 'distanceBetween to self is 0');
 assertApprox(distanceBetween({ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 }), Math.sqrt(3), 1e-9, 'distanceBetween diagonal');
-assertEquals(require('../js/entities/boss').distanceBetween, distanceBetween, 'boss.js re-exports the canonical distanceBetween');
-assertEquals(require('../js/multiplayer/playerSync').distanceBetween, distanceBetween, 'playerSync.js re-exports the canonical distanceBetween');
+assertEquals(require('../src/game/entities/Boss.js').distanceBetween, distanceBetween, 'boss.js re-exports the canonical distanceBetween');
+assertEquals(require('../src/multiplayer/PlayerSync.js').distanceBetween, distanceBetween, 'playerSync.js re-exports the canonical distanceBetween');
 
 // fbm2 / applySpline — biomeSystem.js no longer aliases over noise.js's versions.
 const biomeSource = require('fs').readFileSync(
-  path.join(__dirname, '..', 'js', 'world', 'biomeSystem.js'), 'utf8');
+  path.join(__dirname, '..', 'src', 'engine', 'world', 'BiomeSystem.js'), 'utf8');
 assertFalse(/^var fbm2\s*=/m.test(biomeSource), 'biomeSystem.js no longer declares a top-level `fbm2` alias');
 assertFalse(/^var applySpline\s*=/m.test(biomeSource), 'biomeSystem.js no longer declares a top-level `applySpline` alias');
 
@@ -244,13 +244,14 @@ assertFalse(/^var applySpline\s*=/m.test(biomeSource), 'biomeSystem.js no longer
 // fourth file (input/interaction.js) that never declared it at all.
 const readSrc = (p) => require('fs').readFileSync(path.join(__dirname, '..', p), 'utf8');
 for (const [file, name] of [
-  ['js/multiplayer/client.js', '_clientLog'],
-  ['js/multiplayer/host.js', '_hostLog'],
-  ['js/game.js', '_gameLog'],
-  ['js/input/interaction.js', '_interactionLog'],
+  ['src/multiplayer/Client.js', '_clientLog'],
+  ['src/multiplayer/Host.js', '_hostLog'],
+  ['src/core/Game.js', '_gameLog'],
+  ['src/game/systems/BlockInteractionSystem.js', '_interactionLog'],
 ]) {
   const src = readSrc(file);
-  assert(new RegExp(`^var ${name}\\b`, 'm').test(src), `${file} declares its own ${name}`);
+  // PR 9 put `export ` in front of every column-0 declaration.
+  assert(new RegExp(`^(export )?var ${name}\\b`, 'm').test(src), `${file} declares its own ${name}`);
   assertFalse(/(^|[^\w])_log\s*\(/.test(src.replace(/^\s*[/*].*$/gm, '')), `${file} no longer calls a bare _log()`);
 }
 
@@ -273,10 +274,20 @@ try {
   checkOutput = `${e.stdout || ''}${e.stderr || ''}`;
 }
 
-assertFalse(checkFailed, 'check-globals.js exits 0 (no duplicate top-level declarations)');
+// PR 9 repointed this gate. There is no shared global scope left to find duplicates in
+// — index.html loads one module — so it now asserts the thing that would bring the
+// shared scope back: a classic <script src> tag, a window.* assignment outside the one
+// allowlisted bridge, leftover CommonJS in src/, or a module nobody imports. Read the
+// header of scripts/check-globals.js. PR 11 deletes the script and this block together,
+// in the same commit that turns on `no-undef`.
+assertFalse(checkFailed, 'check-globals.js exits 0 (module boundary intact)');
 assert(
-  /No duplicate top-level declarations/.test(checkOutput),
-  'check-globals.js reports no duplicates'
+  /Module boundary intact/.test(checkOutput),
+  'check-globals.js reports the module boundary intact'
+);
+assert(
+  /index\.html: 1 module entry, 0 classic <script src> tags/.test(checkOutput),
+  'index.html loads exactly one module entry and no classic scripts'
 );
 if (checkFailed) {
   console.error('\n  check-globals.js output:\n' + checkOutput.split('\n').map((l) => '    ' + l).join('\n'));

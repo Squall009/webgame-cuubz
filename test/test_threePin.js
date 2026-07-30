@@ -63,12 +63,20 @@ function assertEquals(actual, expected, message) {
  * would also match a shader define, a magic number, or nothing at all after a rebuild.
  */
 function revisionFromBundle(source) {
+  // (a) Unminified ESM build (`node_modules/three/build/three.module.js`, which is
+  //     what Vite resolves): `const REVISION = '134';` — the identifier survives.
+  const declared = /\bREVISION\s*=\s*["']([^"']+)["']/.exec(source);
+  if (declared) return { revision: declared[1], form: 'declaration' };
+
+  // (b) Minified UMD build: `t.REVISION=<minified ident>`, so the literal is found in
+  //     two steps rather than by grepping for `"134"` — which would also match a
+  //     shader define, a magic number, or nothing at all after a rebuild.
   const assignment = /\.REVISION\s*=\s*([A-Za-z_$][\w$]*)/.exec(source);
-  if (!assignment) return { error: 'no `.REVISION=<ident>` assignment found' };
+  if (!assignment) return { error: 'no `REVISION = "<literal>"` and no `.REVISION=<ident>` assignment found' };
   const ident = assignment[1];
   const literal = new RegExp(`\\b${ident}\\s*=\\s*["']([^"']+)["']`).exec(source);
   if (!literal) return { error: `\`${ident}\` is assigned to REVISION but never to a string literal` };
-  return { revision: literal[1], ident };
+  return { revision: literal[1], ident, form: 'minified' };
 }
 
 console.log('\n=== Three.js pin (refactor.md §1.2) ===\n');
@@ -97,27 +105,46 @@ console.log('\n=== Three.js pin (refactor.md §1.2) ===\n');
   }
 }
 
-// ── 3. The vendored bundle is the same revision ──────────────────
+// ── 3. The bundle the browser actually executes is the same revision ──
 //
-// This is the copy the game actually runs today: index.html loads
-// js/three.min.js through a classic <script> tag. PR 9 switches the renderer to
-// the npm package, and the two must be the same revision across that switch or
-// the change is not the mechanical one PR 9 claims to be.
+// PR 8 checked `js/three.min.js`, because that was the copy the game ran: a classic
+// <script> tag in index.html. **PR 9 deleted it** and switched every renderer file to
+// `import * as THREE from 'three'`, so the copy the browser executes is now the one
+// Vite resolves out of node_modules — `three`'s `module` entry, `build/three.module.js`.
+//
+// The assertion is therefore repointed rather than dropped. It is the same claim it
+// always was ("the code the browser runs is r134"), aimed at the file that is now true
+// of. Section 2 above already checks the package *manifest*; this checks the built
+// artifact inside it, because a manifest version and a bundle revision are two
+// different facts and §1.2's failure mode is exactly the two disagreeing.
 {
-  const bundlePath = path.join(ROOT, 'js', 'three.min.js');
-  assert(fs.existsSync(bundlePath), 'js/three.min.js is still on disk (PR 9 removes it, not PR 8)');
-  if (fs.existsSync(bundlePath)) {
-    const source = fs.readFileSync(bundlePath, 'utf8');
-    const found = revisionFromBundle(source);
-    assert(!found.error, `js/three.min.js exposes a readable REVISION${found.error ? ` — ${found.error}` : ''}`);
-    if (!found.error) {
-      assertEquals(found.revision, REVISION, 'js/three.min.js is r134');
+  const legacyBundle = path.join(ROOT, 'js', 'three.min.js');
+  assert(!fs.existsSync(legacyBundle),
+    'The vendored js/three.min.js is gone — PR 9 removed it and switched to the npm package');
+
+  const pkgPath = path.join(ROOT, 'node_modules', 'three', 'package.json');
+  if (!fs.existsSync(pkgPath)) {
+    assert(false, 'node_modules/three is installed (run npm ci)');
+  } else {
+    // Resolve the ESM entry the same way Vite does: package.json `module`, falling
+    // back to `main`. Hard-coding `build/three.module.js` would stop checking anything
+    // the day the package reorganises its files.
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const entry = pkg.module || pkg.main;
+    assert(!!entry, 'three declares an entry point (`module` or `main`)');
+    const entryPath = path.join(ROOT, 'node_modules', 'three', entry);
+    assert(fs.existsSync(entryPath), `three's declared entry exists on disk (${entry})`);
+    if (fs.existsSync(entryPath)) {
+      const found = revisionFromBundle(fs.readFileSync(entryPath, 'utf8'));
+      assert(!found.error, `${entry} exposes a readable REVISION${found.error ? ` — ${found.error}` : ''}`);
+      if (!found.error) assertEquals(found.revision, REVISION, `${entry} is r134`);
     }
-    // The pinned package version and the bundle revision are two spellings of the
-    // same number. If they ever disagree, PR 9's switchover changes the renderer.
-    assertEquals(`0.${REVISION}.0`, PINNED,
-      'The pinned package version and the vendored bundle revision are the same release');
   }
+
+  // The pinned package version and the bundle revision are two spellings of the same
+  // number. If they ever disagree, the renderer is running something else.
+  assertEquals(`0.${REVISION}.0`, PINNED,
+    'The pinned package version and the shipped bundle revision are the same release');
 }
 
 // ── Results ──────────────────────────────────────────────────────

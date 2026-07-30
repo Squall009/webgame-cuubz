@@ -102,7 +102,7 @@ class MockIndexedDBStorage {
 // Load Modules
 // ============================================================
 
-const { CharacterManager, MAX_CHARACTERS, DEFAULT_COLOR, CHARACTER_COLORS } = require('../js/entities/characterManager');
+const { CharacterManager, MAX_CHARACTERS, DEFAULT_COLOR, CHARACTER_COLORS } = require('../src/game/entities/CharacterManager.js');
 
 // ============================================================
 // Integration Tests — Full character lifecycle

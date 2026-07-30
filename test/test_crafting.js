@@ -4,8 +4,8 @@
  * Tests for crafting recipes, recipe matching, output validation, and integration with inventory.
  */
 
-const Game = require('../js/game');
-const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../js/world/chunkData');
+const { Game } = require('../src/core/Game.js');
+const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../src/engine/world/ChunkData.js');
 
 let passed = 0;
 let failed = 0;
@@ -37,7 +37,7 @@ console.log('=== Crafting System Tests ===');
 
 // --- Group 1: Recipe constants and registry ---
 setGroup('Recipe Registry');
-const CraftingSystem = require('../js/systems/crafting');
+const CraftingSystem = require('../src/game/systems/CraftingSystem.js');
 
 assert(CraftingSystem.RECIPES !== undefined, 'RECIPES should be defined');
 assert(CraftingSystem.CraftingSystem !== undefined, 'CraftingSystem class should be defined');

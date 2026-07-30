@@ -20,7 +20,7 @@ const {
   getBossAttackProfile,
   calculateBossAttackDamage,
   getBossKeys,
-} = require('../js/systems/damageSystem');
+} = require('../src/game/systems/DamageSystem.js');
 
 let passed = 0;
 let failed = 0;

@@ -102,20 +102,27 @@ detail behind those two commands and the ways they bite.
 
 This is a superset of `refactor.md` §1.5, which listed four of these. The rest were
 found while writing this document, by reading every `localStorage` and `indexedDB`
-call site in `js/`.
+call site in `src/`.
+
+> **PR 9 moved every path in the tables below** — `js/` became `src/` and most files
+> were renamed (`refactor.md` §4.1). The paths here are current. **Line numbers are
+> approximate**: every converted file gained an import block at the top, so citations
+> drifted by a handful of lines. The ones in [§2.1](#21-indexeddb--worlds-and-terrain)
+> were re-read after the move; the rest are close, not exact. Grep for the value, not
+> the line. **The invariant values themselves did not change and must not.**
 
 ### 2.1 IndexedDB — worlds and terrain
 
 | Invariant | Location | Value |
 |---|---|---|
-| Database name | `js/chunkmanager.js:20` | `'cuubz-worlds'` |
-| Database version | `js/chunkmanager.js:21` | `2` — changing it is now a **procedure**, not a prohibition. See below |
-| Object store | `js/chunkmanager.js:23`, `_ensureBaseSchema` | `'chunks'`, `keyPath: 'chunkKey'` |
+| Database name | `src/engine/world/ChunkManager.js:50` | `'cuubz-worlds'` |
+| Database version | `src/engine/world/ChunkManager.js:51` | `2` — changing it is now a **procedure**, not a prohibition. See below |
+| Object store | `src/engine/world/ChunkManager.js:52`, `_ensureBaseSchema` | `'chunks'`, `keyPath: 'chunkKey'` |
 | Index on that store | `_ensureBaseSchema` | `'worldName'` → `worldName`, non-unique |
-| Object store | `js/chunkmanager.js:24`, `_ensureBaseSchema` | `'manifests'`, `keyPath: 'worldName'` |
+| Object store | `src/engine/world/ChunkManager.js:53`, `_ensureBaseSchema` | `'manifests'`, `keyPath: 'worldName'` |
 | **Chunk primary key format** | `ChunkManager.prototype._storeKey` | `` `${worldName}:${cx},${cz}` `` — e.g. `"world-1753...:-3,7"`. **Changed by PR 6c**; see below |
 | Logical chunk key format | `ChunkManager.key` | `` `${cx},${cz}` `` — e.g. `"-3,7"`. **Unchanged** |
-| Manifest primary key | `js/main.js:2329` | the world's `id` (`currentWorld.id`) |
+| Manifest primary key | `src/main.js:2329` | the world's `id` (`currentWorld.id`) |
 
 > ### The two chunk keys, and why there are two
 >
@@ -168,7 +175,7 @@ call site in `js/`.
 > 1. **Steps create; steps never delete.** `_ensureStore` / `_ensureIndex` are
 >    create-if-absent, so a step re-run against a database that already has the store is a
 >    no-op rather than a data loss. `deleteObjectStore` no longer appears anywhere in
->    `js/`.
+>    `src/`.
 > 2. **A version with no registered step throws**, which aborts the versionchange
 >    transaction and leaves the database at its old version with its data intact. Bumping
 >    `DB_VERSION` without writing the step fails loudly at development time instead of
@@ -177,15 +184,15 @@ call site in `js/`.
 > **The procedure:**
 >
 > 1. Add `ChunkManager.SCHEMA_STEPS[DB_VERSION + 1]` at the bottom of
->    `js/chunkmanager.js`, using only `_ensureStore` and `_ensureIndex`. To reshape an
+>    `src/engine/world/ChunkManager.js`, using only `_ensureStore` and `_ensureIndex`. To reshape an
 >    existing store, create the new one alongside it and leave the old one in place.
-> 2. Increment `DB_VERSION` (`js/chunkmanager.js:21`) **and the row in the table above**.
+> 2. Increment `DB_VERSION` (`src/engine/world/ChunkManager.js:51`) **and the row in the table above**.
 > 3. **Data** that must be rewritten — as opposed to schema that must exist — does not go
 >    in a step. A versionchange transaction cannot await anything and a half-applied one
 >    aborts the whole upgrade. Write it as an `_openDB` migration beside
 >    `_migrateToWorldScopedKeys`, which all seven chunk-store boundary sites await, and
 >    make it idempotent.
-> 4. Bump the `?v=` cache-bust string on `js/chunkmanager.js` in `index.html`
+> 4. Bump the `?v=` cache-bust string on `src/engine/world/ChunkManager.js` in `index.html`
 >    (**D-23** — nothing enforces this yet).
 > 5. Run `npm run test:e2e` **and** `npm test`. Both drive a real 2 → 3 increment against
 >    a database seeded with real chunk and manifest records — the browser harness against
@@ -199,7 +206,7 @@ call site in `js/`.
 
 ### 2.2 Chunk binary format
 
-`js/world/chunkBinaryCodec.js`. Saved chunk bytes are RLE-compressed with a
+`src/engine/world/ChunkBinaryCodec.js`. Saved chunk bytes are RLE-compressed with a
 20-byte header. Every constant below is part of the on-disk format.
 
 | Invariant | Location | Value |
@@ -210,7 +217,7 @@ call site in `js/`.
 | Legacy layout cutoff | `:30` | `LEGACY_LAYOUT_MAX = 2` — v1/v2 chunks are regenerated on load |
 | Header size | `:30` | `20` bytes |
 | Chunk height | `:31` | `256` — must match `CHUNK_HEIGHT` in `chunkData.js` |
-| Chunk width/depth | `js/chunkmanager.js:18-19` | `16` × `16` |
+| Chunk width/depth | `src/engine/world/ChunkManager.js:48-49` | `16` × `16` |
 | Checksum algorithm | `:37-46` | FNV-1a 32-bit, basis `0x811c9dc5`, prime `0x01000193` |
 | Run encoding | `:19` | each run = `[blockID: Uint16, count: Uint16]` |
 | Encoded length | `encode`, `estimateSize` | exactly `HEADER_SIZE + runCount * 4`. **Changed by PR 6c** (D-15) — see below |
@@ -246,13 +253,13 @@ at the end. Never renumber.**
 
 | Key | Location | Contents |
 |---|---|---|
-| `'cuubz:characters'` | `js/world/persistence.js:20` | JSON array of every character the player has created |
-| `'cuubz:slotMap'` | `js/world/persistence.js:24` | JSON map of `worldId` → slot number |
-| `'cuubz:worldSlot:{N}:conf'` | `js/world/persistence.js:28` | world config for slot `N`, `N ∈ {0,1,2}` |
-| `'cuubz:settings'` | `js/renderer/performanceSettings.js:34,52` | performance/graphics settings |
-| `'cuubz_last_session'` | `js/main.js:1593` (`REJOIN_STORAGE_KEY`), written at `1272,1284,1768,1785,4892,4902` | last multiplayer session, for rejoin |
+| `'cuubz:characters'` | `src/engine/world/Persistence.js:20` | JSON array of every character the player has created |
+| `'cuubz:slotMap'` | `src/engine/world/Persistence.js:24` | JSON map of `worldId` → slot number |
+| `'cuubz:worldSlot:{N}:conf'` | `src/engine/world/Persistence.js:28` | world config for slot `N`, `N ∈ {0,1,2}` |
+| `'cuubz:settings'` | `src/engine/renderer/PerformanceSettings.js:34,52` | performance/graphics settings |
+| `'cuubz_last_session'` | `src/main.js:1643` (`REJOIN_STORAGE_KEY`), written at `1272,1284,1768,1785,4892,4902` | last multiplayer session, for rejoin |
 
-`MAX_WORLD_SLOTS = 3` (`js/world/persistence.js:10`) is part of the key space: slots
+`MAX_WORLD_SLOTS = 3` (`src/engine/world/Persistence.js:10`) is part of the key space: slots
 are `0,1,2`. Raising it is additive and safe; lowering it orphans slot data.
 
 Note the inconsistent separator — four keys use `cuubz:` and one uses `cuubz_`.
@@ -299,7 +306,7 @@ both worlds rather than the union of their coordinates.
 
 Two smaller things fixed alongside it, both cited in `BUGS.md`:
 
-- **D-18** — `js/main.js` used to delete a world's manifest and leave every chunk record
+- **D-18** — `src/main.js` used to delete a world's manifest and leave every chunk record
   behind, under a comment reading *"chunks remain orphaned but harmless — they're keyed by
   chunk coordinates"*. The premise was H-1 itself: those records were not orphaned, they
   were **shared** with whatever world next generated the same coordinates. World-scoped
@@ -321,7 +328,7 @@ entry with good bytes means the manifest is the thing out of date. Regenerating 
 signal would deterministically discard whatever a player built immediately before the
 write that outran the manifest.
 
-**H-3 — `js/main.js:545` opened the database with no version. FIXED in PR 6d.**
+**H-3 — `src/main.js:545` opened the database with no version. FIXED in PR 6d.**
 (This entry was labelled `H2` before PR 6c gave the ledger its IDs; `BUGS.md` calls it
 **H-3**, and H-2 is the upgrade handler in §2.1.)
 
@@ -354,7 +361,7 @@ and the procedure that replaced it are the box in
    your machine                    10.0.30.160 (dadmin)
   ┌─────────────┐                ┌──────────────────────────────────────┐
   │  repo root  │ ── sync.sh ──> │  /var/www/html/                      │
-  │             │  tar/scp/ssh   │    index.html, js/, css/, textures/  │  ← served as
+  │             │  tar/scp/ssh   │    index.html, dist/, css/, textures/│  ← served as
   └─────────────┘                │    server/  ← relay source           │    raw static
                                  │    node_modules/  ← NOT shipped      │    files
                                  │    (+ test/, scripts/, *.md ...)     │
@@ -377,13 +384,13 @@ and the procedure that replaced it are the box in
 | Relay port | `8765` | `cuubz-relay.service:13`, `server/index.js:22` |
 | Relay entry point | `index.js` | `cuubz-relay.service:9` |
 | Relay node binary | `/home/dadmin/.local/node-v22.22.0-linux-x64/bin/node` | `cuubz-relay.service:9` |
-| Relay public hostname | `cuubz-relay.thehomelabguy.com` | `js/main.js:2126`, `multiplayer.md:35` |
+| Relay public hostname | `cuubz-relay.thehomelabguy.com` | `src/main.js:2126`, `multiplayer.md:35` |
 | Service unit name | `cuubz-relay` | `cuubz-relay.service` |
 
 ### 3.1 What serves `/var/www/html` is UNVERIFIED
 
 Nothing in this repo states it. Every `nginx` reference found
-(`js/main.js:2112,2126`, `server/index.js:9`, `multiplayer.md:35,94,413`) describes
+(`src/main.js:2112,2126`, `server/index.js:9`, `multiplayer.md:35,94,413`) describes
 nginx **only** as the TLS reverse proxy in front of the *relay* on port 8765.
 `multiplayer.md:47-48` hedges the static server as `"(nginx / built-in)"`. There is no
 nginx config, no Apache config, and no `systemctl` invocation in the repo.
@@ -506,29 +513,35 @@ the source tree, excludes the only directory containing runnable JavaScript, and
 a live site with no JS at all — a black page. `refactor.md` §1.4 calls this the single
 biggest risk in the refactor and PR 10 ("must land with PR 9, not after") owns the fix.
 
-> ### PR 7 landed the build, and it changed which half of this is dangerous
+> ### ⛔ PR 9 HAS LANDED. THE WINDOW IS OPEN. DO NOT RUN `./sync.sh`.
 >
-> `npm run build` exists now and exits 0, but **`dist/` is not runnable and deploying the
-> source tree is still correct** — which is the opposite of what "from PR 7 onward, `dist/`
-> is the application" led PR 6 to expect.
+> This is no longer a prediction. As of PR 9:
 >
-> Vite does not bundle a classic `<script src>`. `index.html`'s 65 script tags are classic,
-> so the build emits one warning per tag, copies neither the scripts nor `textures/`, and
-> writes a 28 kB `dist/index.html` carrying 65 references to files that are not there
-> (**D-24**, owned by PR 9 — converting those files to modules is what makes them
-> bundleable; the textures half is PR 10's). So today the danger is not a deploy that
-> *omits* `dist/`. It is a human who runs `npm run build`, sees it succeed, and copies the
-> output over the live site by hand.
+> - `index.html` loads exactly one `<script type="module" src="/src/index.js">`. There
+>   is no `js/` directory any more and there are no classic script tags.
+> - `npm run build` produces a `dist/` that **runs** — `dist/index.html`, one bundled
+>   JS asset, one CSS asset, and the two Web Worker sources as separate hashed assets.
+>   `npm run test:e2e` drives a real browser against that output and passes 152/152,
+>   so "the build works" is now checked rather than assumed. **D-24 is closed.**
+> - `sync.sh` still carries `--exclude='dist'` and has not been touched.
 >
-> **Until PR 10: `./sync.sh` ships the source tree and that is the right thing to ship.
-> Do not point a deploy at `dist/`.** The window in the operational rule below opens at
-> **PR 9**, not PR 7 — but PR 9 and PR 10 are required to land together anyway, so in
-> practice the rule is unchanged.
+> So a `./sync.sh` right now uploads `index.html`, `css/`, `textures/`, `test/`, `src/`
+> and every planning document, **excludes the one directory that contains the
+> application**, and serves a page whose only `<script>` points at `/src/index.js` —
+> which is a raw ES module tree full of bare specifiers (`import … from 'three'`) that
+> no browser can resolve without a bundler. The result is a black page.
+>
+> The earlier note here said the danger was "a human who runs `npm run build` and copies
+> the output by hand". That has inverted: copying `dist/` by hand is now *closer* to
+> correct than running `sync.sh` — it is only missing `textures/`. Neither is the
+> supported path.
+>
+> **PR 10 rewrites `sync.sh` to build and ship `dist/` + `server/` + `textures/`, and
+> until it lands there is no correct way to deploy this branch.** That is D-4, and it is
+> why the plan requires PR 9 and PR 10 to land together.
 
-**Operational rule: do not run `./sync.sh` between PR 9 and PR 10, and do not deploy
-`dist/` at all before PR 10.** The current `index.html` loads 65 individual
-`<script src>` tags directly from `js/`; the moment that becomes a bundle, this script is
-wrong until rewritten.
+**Operational rule: do not run `./sync.sh` until PR 10 lands.** Before PR 9 it shipped
+the source tree and the source tree was the application. It is not any more.
 
 ### 4.4 The `chmod` is the fragile step
 
@@ -578,12 +591,13 @@ that needs it and not the dependency itself. The relay then throws
 Extraction overwrites and adds. It never removes. **A file deleted from the repo lives
 on the server forever.**
 
-This is currently invisible and becomes concrete at PR 9, which moves `js/` → `src/`:
-the entire stale `js/` tree stays live next to the new `src/`, `index.html` is
-overwritten to reference `src/`, and the server ends up hosting two full copies of the
-codebase — one of them dead, both fetchable, and the dead one indistinguishable from
-the live one to anyone debugging via the browser's network tab. Same for `test/` and
-every planning doc ever deployed.
+**PR 9 made this concrete.** `js/` is gone from the repo — 65 files moved to `src/` and
+`js/three.min.js` was deleted — but the next deploy will not remove one byte of it from
+the host. The server will host the entire pre-PR-9 `js/` tree, dead, still fetchable,
+alongside whatever PR 10 starts uploading, and indistinguishable from the live code to
+anyone debugging via the browser's network tab. `index.html` will point at the new
+layout, so the stale copy stays invisible until someone goes looking. Same for `test/`
+and every planning doc ever deployed. **PR 10 owns making a deploy delete.**
 
 Manual cleanup after a rename-heavy deploy `[UNVERIFIED]`:
 
@@ -746,7 +760,7 @@ the leftover archive has a different name than you might expect when cleaning up
 1. **Deletions do not un-happen.** `tar xzf` never removes files
    ([§4.6](#46-tar-xzf-never-deletes)). Re-deploying an older commit restores the old
    files *and leaves every file the bad deploy added*. After PR 9, rolling back from
-   `src/` to `js/` leaves `src/` live on disk. Rollback must be followed by manual
+   the PR 9 layout to the pre-PR-9 one leaves `src/` live on disk. Rollback must be followed by manual
    inspection and removal.
 2. **It requires the known-good ref to be reachable.** `pre-refactor-baseline` is
    **currently a local-only tag** — `git ls-remote --tags origin` returns nothing. If
@@ -795,11 +809,12 @@ Two things close the gap, neither of them a documentation task:
 >
 > A real browser (Edge, driven by `playwright-core`, WebGL via SwiftShader) walks the
 > menu flow, generates two worlds from pinned seeds, and reads IndexedDB and
-> localStorage directly. **150 assertions, exit 0, ~6 minutes.** Screenshots land in
+> localStorage directly. **152 assertions, exit 0, ~6 minutes.** Since PR 9 it builds
+> first and serves `dist/`, so it also proves the deployed artifact runs. Screenshots land in
 > `test/e2e/artifacts/` (gitignored).
 >
 > ```bash
-> npm run test:e2e:vite   # the same 150 assertions against `npm run dev` (PR 7)
+> npm run test:e2e:vite   # the same 152 assertions against `npm run dev` (PR 7)
 > ```
 >
 > Added by PR 7 so "Vite serves the existing site unchanged" is checked rather than
@@ -837,9 +852,9 @@ synchronous with your actions:
 
 | Data | Saved when | Source |
 |---|---|---|
-| Chunks / placed blocks | dirty-flush timer, **every 5 s** | `js/main.js:2359,4491` → `chunkmanager.js:597-600` |
+| Chunks / placed blocks | dirty-flush timer, **every 5 s** | `src/main.js:2359,4491` → `chunkmanager.js:597-600` |
 | Chunks (best effort) | `beforeunload`, and `visibilitychange` → hidden | `chunkmanager.js:751-782` |
-| Inventory + per-world spawn point | **every 30 s**, on **Escape**, and on `game.stop()` | `js/main.js:3864-3884` |
+| Inventory + per-world spawn point | **every 30 s**, on **Escape**, and on `game.stop()` | `src/main.js:3864-3884` |
 
 The `beforeunload` chunk flush starts an IndexedDB transaction during teardown
 (`chunkmanager.js:757-776`); by spec that is best-effort and may not complete.
@@ -897,7 +912,7 @@ argument for the gate existing.
 
 ### 7.2 Step 7 was unrunnable until PR 6b — D-14
 
-`js/main.js:4562` called `game.playerSync.reset()`. `PlayerSyncManager` has no
+`src/main.js:4562` called `game.playerSync.reset()`. `PlayerSyncManager` has no
 `reset()` — that method belongs to `PingTracker` (`playerSync.js:103`; class
 boundaries at `:51`, `:125`, `:366`). `game.playerSync` is set whenever
 `sessionManager.client` exists, **including solo play** (`main.js:2612`), so **every
@@ -964,7 +979,7 @@ verified by execution:
 - No `systemctl` / `service` / `pm2` call exists anywhere in the repo.
 - `server/` performs no filesystem writes (no `writeFile` / `mkdir` in any `server/*.js`).
 - `ws` is required by `server/index.js:14` and `server/matchmaking.js:21`.
-- `startFlushTimer(5000)` is genuinely wired up (`js/main.js:2359,4491`) — the 5 s
+- `startFlushTimer(5000)` is genuinely wired up (`src/main.js:2359,4491`) — the 5 s
   figure in [§7](#7-saveload-checklist) is real, not a default that never runs.
 - No `.env` exists in the repo.
 - `pre-refactor-baseline` is local-only: `git ls-remote --tags origin` returns nothing.
@@ -974,9 +989,12 @@ verified by execution:
 ### Verified by execution in a real browser — added by PR 6b
 
 `npm run test:e2e` (`test/e2e/saveLoad.js`), Edge 150.0.4078.105 headless, WebGL via
-SwiftShader, **150 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
+SwiftShader, **152 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
 rewrote the H-1 and D-15 blocks from asserting the defects to asserting the fixes; PR 6d
-added 12). This moved the following out of "not verified":
+added 12; PR 9 removed the `__THREE_LOAD_FAILED` check, which no longer has a flag to
+read, and added three: the module bundle evaluated, both worker pools spawned, and
+`navigator.hardwareConcurrency` is readable). This moved the following out of
+"not verified":
 
 - **Every value in [§2](#2-do-not-change-player-data-invariants)** — read from the
   running page rather than from source text. Database name, version `2` (read
@@ -989,7 +1007,7 @@ added 12). This moved the following out of "not verified":
   `0x43555542` at offset 0, version `3` at 4, `chunkX`/`chunkZ` matching the record
   key, height `256`, flags `0`, the run count, and the FNV-1a checksum at offset 16
   re-derived from the payload. The same buffer then decodes cleanly through
-  `js/world/chunkBinaryCodec.js` under Node — a browser-writes / Node-reads crossing
+  `src/engine/world/ChunkBinaryCodec.js` under Node — a browser-writes / Node-reads crossing
   that is what protects the on-disk format through PR 9's module conversion.
 - **§7 steps 1, 2, 3, 5, 6, 7, 10, 11, 14.** The two load-bearing ones both hold for
   terrain: chunk `"0,0"` is byte-for-byte identical with `savedAt` unchanged both after
@@ -1071,7 +1089,7 @@ telling people not to do:
   afterwards that `cuubz-worlds` is still at version 2 with its record count unchanged.
 - **The same increment runs in CI**, against the stub in `test/test_chunkStorage.js` §17,
   together with the H-3 repair path, the create-only property of every shipped step, and
-  the abort-on-unregistered-version rule. `npm test` is 51/51 with that file at 129
+  the abort-on-unregistered-version rule. `npm test` is 52/52 with that file at 129
   assertions.
 
 ### Verified by execution in a real browser — added by PR 7
@@ -1079,13 +1097,35 @@ telling people not to do:
 - **The Vite dev server serves the identical game.** The full harness — all 150
   assertions, both terrain round trips, the two-world H-1 regression test, the migration,
   PR 6d's `DB_VERSION` increment, the clean-load error budget — runs against `npm run dev`
-  via `npm run test:e2e:vite` and produces **the same 150 / 0 / exit 0** as against
+  via `npm run test:e2e:vite` and produces **the same 150 / 0 / exit 0** (152 since PR 9) as against
   `staticServer.js`. That is what makes PR 7's "no source changes, identical game" a
   measurement rather than a claim.
 - **`npm run build` exits 0 and its output does not run.** Both halves verified: the
   command's exit status, and the contents of `dist/` (one HTML file, one CSS asset, 65
   dangling script references, no `js/`, no `textures/`). See **D-24** and
-  [§4.3](#43-the-dist-landmine).
+  [§4.3](#43-the-dist-landmine). **Superseded by PR 9 — see below.**
+
+### Verified by execution in a real browser — added by PR 9
+
+- **The built site runs, and it is what the harness now tests.** `test/e2e/staticServer.js`
+  serves `dist/`, falling back to the repo root for `textures/` because `publicDir` is
+  `false` (`refactor.md` §1.8). `npm run test:e2e` therefore builds first and then drives
+  a real browser against the artifact PR 10 will deploy: **152 assertions, 0 failures.**
+  That closes **D-24** — "the build succeeds" and "the build output works" used to be
+  different claims with only the first one checked, and now the second one is the gate.
+  The old baseline, serving the working tree, is not possible for any static server any
+  more: `index.html` loads one ES module whose graph contains bare specifiers.
+- **Both hosts still agree.** `npm run test:e2e:vite` runs the same 152 against
+  `npm run dev` and produces **152 / 0**, identical. The pair is now "built bundle" vs
+  "dev server", which is a stronger pair than "raw source" vs "dev server" was.
+- **Both worker pools still spawn.** Each pool is built from fetched source wrapped in a
+  Blob, inside a try/catch that falls back to main-thread generation and only
+  `console.warn`s — so a broken worker URL produces a game that works, passes every
+  storage assertion, and is silently single-threaded. The harness asserts that warning
+  never fires, on both hosts.
+- **Textures still load.** `TextureAtlas.js` fetches `/textures/…` absolutely now
+  (`refactor.md` §1.8), and the harness asserts zero 404s — so a base-URL regression is a
+  red run rather than an untextured world nobody notices in a SwiftShader screenshot.
 
 ### NOT verified — requires SSH to `dadmin@10.0.30.160`
 

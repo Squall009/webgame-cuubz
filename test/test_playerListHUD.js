@@ -18,7 +18,7 @@ const {
   isMobileHudViewport,
   PlayerListHUD,
   PlayerListState,
-} = require(path.join(__dirname, '..', 'js', 'multiplayer', 'playerListHUD.js'));
+} = require(path.join(__dirname, '..', 'src', 'multiplayer', 'PlayerListHUD.js'));
 
 let passed = 0;
 let failed = 0;

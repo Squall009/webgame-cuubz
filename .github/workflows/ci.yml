@@ -4,24 +4,34 @@ name: CI
 #
 # Three hard gates, all of which must stay green:
 #
-#   1. npm test               — test/run_tests.sh: 51 passing, 4 quarantined, exit 0.
+#   1. npm test               — test/run_tests.sh: 52 passing, 4 quarantined, exit 0.
 #                               Quarantined files are listed in test/QUARANTINE.md and
 #                               reported as SKIP. That list is capped at five files and
 #                               every entry names an owner PR; do not grow it to make
 #                               this job green.
-#   2. npm run check-globals   — scripts/check-globals.js: 0 duplicate top-level
-#                               symbols across the 65 classic <script> tags in
-#                               index.html. This is the check that found the eight
-#                               silent global collisions fixed in PR 3. It exists so
-#                               they cannot come back during the PR 9 migration.
+#                               PR 9 note: the runner invokes node with
+#                               `-r ./test/helpers/esmRequire.js`. Without that hook
+#                               every test that requires a source file dies on "Cannot
+#                               use import statement outside a module". PR 31 removes
+#                               both when Vitest arrives.
+#   2. npm run check-globals   — scripts/check-globals.js. Until PR 9 this counted
+#                               duplicate top-level symbols across index.html's 65
+#                               classic <script> tags — the check that found the eight
+#                               silent global collisions PR 3 fixed. There is no shared
+#                               global scope left to count duplicates in, so PR 9
+#                               repointed it at the boundary itself: one module entry
+#                               and zero classic script tags, no window.* outside
+#                               src/testBridge.js, no CommonJS in src/, and every
+#                               module reachable from src/index.js.
+#                               PR 11 DELETES the script and this step together, in the
+#                               same commit that turns on ESLint no-undef. Do not leave
+#                               it standing as a step that checks less than no-undef.
 #   3. npm run build           — added by PR 7 with the script itself, as promised
-#                               below. Today it only proves `vite build` does not
-#                               crash: index.html's 65 script tags are classic, not
-#                               modules, so Vite emits a warning per tag and does not
-#                               bundle them, and dist/ is NOT runnable (D-24, owned by
-#                               PR 9). It earns its keep during PR 9, when each
-#                               converted file becomes something the build can
-#                               actually fail on.
+#                               below. Since PR 9 it is a real gate: index.html loads
+#                               one ES module, so an unresolvable import, a duplicate
+#                               binding or a syntax error anywhere in src/ fails it.
+#                               It also produces the artifact PR 10 deploys and that
+#                               `npm run test:e2e` now runs against — D-24 closed.
 #
 # Deliberately NOT here yet — the script does not exist:
 #
@@ -114,16 +124,16 @@ jobs:
         shell: bash
         run: npm test
 
-      - name: No duplicate top-level globals
+      # PR 9 repointed this from duplicate-global counting to the module boundary;
+      # PR 11 deletes it in the same commit that adds no-undef. See the note above.
+      - name: Module boundary
         shell: bash
         run: npm run check-globals
 
-      # Added by PR 7 in the same commit as the script, per the note above.
-      # `vite build` currently emits one "can't be bundled without type=module"
-      # warning per classic <script src> in index.html and exits 0; dist/ is not
-      # runnable and is not deployed (D-24, D-4). What this catches today is a
-      # config or HTML change that breaks the build outright, and from PR 9 onward
-      # it catches a module that does not resolve.
+      # Added by PR 7 in the same commit as the script, per the note above. Since PR 9
+      # this compiles the whole module graph — an unresolvable import, a duplicate
+      # binding or a syntax error anywhere in src/ fails here — and it produces the
+      # dist/ that PR 10 deploys and that `npm run test:e2e` runs against.
       - name: Build
         shell: bash
         run: npm run build

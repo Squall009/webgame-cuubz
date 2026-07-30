@@ -138,8 +138,8 @@ class MockPersistenceStorage {
 // Load Modules
 // ============================================================
 
-const { WorldManager, MAX_WORLDS, DEFAULT_SEED, BIOME_NAMES } = require('../js/entities/worldManager');
-const { CharacterManager, MAX_CHARACTERS } = require('../js/entities/characterManager');
+const { WorldManager, MAX_WORLDS, DEFAULT_SEED, BIOME_NAMES } = require('../src/game/entities/WorldManager.js');
+const { CharacterManager, MAX_CHARACTERS } = require('../src/game/entities/CharacterManager.js');
 
 // ============================================================
 // Integration Tests — Full world persistence lifecycle

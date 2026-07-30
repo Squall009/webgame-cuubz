@@ -101,7 +101,7 @@ class MockStorage {
 // Load CharacterManager Module
 // ============================================================
 
-const { CharacterManager, MAX_CHARACTERS, DEFAULT_COLOR, CHARACTER_COLORS } = require('../js/entities/characterManager');
+const { CharacterManager, MAX_CHARACTERS, DEFAULT_COLOR, CHARACTER_COLORS } = require('../src/game/entities/CharacterManager.js');
 
 // ============================================================
 // Tests — wrapped in async IIFE to support await

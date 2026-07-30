@@ -96,7 +96,7 @@ class MockStorage {
 // Load WorldManager Module
 // ============================================================
 
-const { WorldManager, MAX_WORLDS, MIN_NAME_LENGTH, MAX_NAME_LENGTH, DEFAULT_SEED, BIOME_NAMES } = require('../js/entities/worldManager');
+const { WorldManager, MAX_WORLDS, MIN_NAME_LENGTH, MAX_NAME_LENGTH, DEFAULT_SEED, BIOME_NAMES } = require('../src/game/entities/WorldManager.js');
 
 // ============================================================
 // Tests — wrapped in async IIFE to support await

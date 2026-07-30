@@ -52,8 +52,8 @@ function assertNotNull(value, message) {
 // Load modules
 // ============================================================
 
-const Crosshair = require('../js/renderer/crosshair');
-const BlockInteraction = require('../js/input/interaction');
+const { Crosshair } = require('../src/ui/hud/Crosshair.js');
+const { BlockInteraction } = require('../src/game/systems/BlockInteractionSystem.js');
 
 // ============================================================
 // Helper: Mock renderer with raycast capability
@@ -281,7 +281,7 @@ console.log('\nGroup 18: Crosshair raycast edge cases');
 // breakingBlock / breakProgress / breakStartTime.
 // ============================================================
 
-const { BLOCK_TYPES } = require('../js/world/chunkData');
+const { BLOCK_TYPES } = require('../src/engine/world/ChunkData.js');
 
 /** A 16×16 chunk of air that records setBlock calls. */
 function createMockChunk() {

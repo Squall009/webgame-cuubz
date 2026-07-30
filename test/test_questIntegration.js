@@ -50,8 +50,8 @@ function assertGreaterEqual(actual, expected, message) {
 // Load Modules
 // ============================================================
 
-const { QuestSystem, QUEST_REGISTRY, QUEST_TYPES, QUEST_STATES } = require('../js/systems/questSystem');
-const { QuestMarker, QuestMarkerManager, INTERACTION_RANGE, VISIBILITY_RADIUS } = require('../js/entities/questMarker');
+const { QuestSystem, QUEST_REGISTRY, QUEST_TYPES, QUEST_STATES } = require('../src/game/systems/QuestSystem.js');
+const { QuestMarker, QuestMarkerManager, INTERACTION_RANGE, VISIBILITY_RADIUS } = require('../src/game/entities/QuestMarker.js');
 
 // ============================================================
 // Integration Tests — Full quest progression flow

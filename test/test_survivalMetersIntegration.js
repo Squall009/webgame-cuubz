@@ -12,7 +12,7 @@
  * simulating realistic gameplay scenarios.
  */
 
-const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, STAMINA_REGEN, FOOD_ITEMS, BED, DRINKING } = require('../js/systems/survival');
+const { SurvivalSystem, DAMAGE_SOURCES, DEFAULT_METERS, STAMINA_COSTS, STAMINA_REGEN, FOOD_ITEMS, BED, DRINKING } = require('../src/game/systems/SurvivalSystem.js');
 
 let passed = 0;
 let failed = 0;

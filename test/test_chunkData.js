@@ -6,8 +6,8 @@
 'use strict';
 
 const path = require('path');
-require(path.resolve(__dirname, '..', 'js', 'util', 'logger'));
-const { Chunk, BLOCK_TYPES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT } = require(path.resolve(__dirname, '..', 'js', 'world', 'chunkData'));
+require(path.resolve(__dirname, '..', 'src', 'util', 'Logger.js'));
+const { Chunk, BLOCK_TYPES, CHUNK_WIDTH, CHUNK_DEPTH, CHUNK_HEIGHT } = require(path.resolve(__dirname, '..', 'src', 'engine', 'world', 'ChunkData.js'));
 
 let passCount = 0;
 let failCount = 0;

@@ -6,9 +6,9 @@
 
 'use strict';
 
-const { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS } = require('../js/systems/inventory');
+const { Inventory, ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS } = require('../src/game/systems/InventorySystem.js');
 // Reference block ids by name — they have been renumbered before and will be again.
-const { BLOCK_TYPES } = require('../js/world/chunkData');
+const { BLOCK_TYPES } = require('../src/engine/world/ChunkData.js');
 
 // ============================================================
 // Test Framework (embedded)

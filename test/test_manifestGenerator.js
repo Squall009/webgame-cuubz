@@ -53,7 +53,7 @@ function assertEquals(actual, expected, message) {
 const ROOT = path.join(__dirname, '..');
 const SCRIPT_PATH = path.join(ROOT, 'scripts', 'generate-manifest.js');
 const MANIFEST_PATH = path.join(ROOT, 'textures', 'blocks', 'manifest.json');
-const REGISTRY_PATH = path.join(ROOT, 'js', 'world', 'blockRegistry.js');
+const REGISTRY_PATH = path.join(ROOT, 'src', 'engine', 'world', 'BlockRegistry.js');
 
 console.log('Manifest Generator Smoke Test');
 console.log('=============================\n');
@@ -102,7 +102,7 @@ try {
 
     // ── The load-bearing check: the scraped parse matches a real require ──
     console.log('\n[Registry cross-check]');
-    const { BLOCK_REGISTRY } = require('../js/world/blockRegistry');
+    const { BLOCK_REGISTRY } = require('../src/engine/world/BlockRegistry.js');
     const expectedEntries = BLOCK_REGISTRY.filter(b => b.texture).length;
 
     assertEquals(manifest.length, expectedEntries,

@@ -18,7 +18,7 @@ const {
   distanceBetween,
   normalizeAngle,
   isInRenderDistance,
-} = require('../js/multiplayer/playerSync');
+} = require('../src/multiplayer/PlayerSync.js');
 
 // ============================================================
 // Mini Test Framework (copy from test_framework.js)
@@ -355,7 +355,7 @@ console.log('\n--- PlayerSyncManager: Constructor ---');
 const psm = new PlayerSyncManager();
 assertEquals(psm.playerCount, 0, 'No players initially');
 assertEquals(psm._players.size, 0, 'Map is empty');
-assertFalse(psm._threeLoaded, 'Three.js not loaded in Node.js');
+assertFalse(psm._threeLoaded, 'No renderer available in Node.js — THREE imports fine, but there is no document for the name-tag canvas (PR 9)');
 
 console.log('\n--- PlayerSyncManager: addPlayer ---');
 const added = psm.addPlayer('p1', { name: 'Alice', color: '#ff0000' });

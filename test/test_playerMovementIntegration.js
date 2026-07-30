@@ -9,15 +9,17 @@
  * - Test: Touch controls (joystick, swipe-to-look, tap)
  */
 
-const Player = require('../js/entities/player');
-const { KeyboardInput } = require('../js/input/keyboard');
-const TouchInput = require('../js/input/touch');
-const { SurvivalSystem, STAMINA_COSTS } = require('../js/systems/survival');
-const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../js/world/chunkData');
+const { Player } = require('../src/game/entities/Player.js');
+const { KeyboardInput } = require('../src/engine/input/Keyboard.js');
+const { TouchInput } = require('../src/engine/input/Touch.js');
+const { SurvivalSystem, STAMINA_COSTS } = require('../src/game/systems/SurvivalSystem.js');
+const { BLOCK_TYPES, BLOCK_PROPERTIES } = require('../src/engine/world/ChunkData.js');
 
 // Globals needed by player.js
 global.MIN_Y = -64;
-global.SEA_LEVEL = 30;
+// PR 9: Player.js imports SEA_LEVEL from ChunkData.js, so a global stub no longer
+// reaches it. The assertions read the real constant, which is strictly stronger.
+const { SEA_LEVEL } = require('../src/engine/world/ChunkData.js');
 global.BLOCK_TYPES = BLOCK_TYPES;
 global.BLOCK_PROPERTIES = BLOCK_PROPERTIES;
 

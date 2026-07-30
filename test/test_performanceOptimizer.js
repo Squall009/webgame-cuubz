@@ -17,7 +17,7 @@ function test(name, fn) {
   }
 }
 
-const perf = require('../js/renderer/performanceOptimizer');
+const perf = require('../src/engine/renderer/PerformanceOptimizer.js');
 
 // Destructure exports
 const {

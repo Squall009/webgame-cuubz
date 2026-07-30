@@ -29,7 +29,7 @@ const {
   sampleRange,
 
   SoundManager,
-} = require('../js/audio/sfx');
+} = require('../src/engine/audio/SFX.js');
 
 let passed = 0;
 let failed = 0;

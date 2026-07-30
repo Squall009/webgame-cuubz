@@ -27,7 +27,7 @@ const {
   RateLimiter,
   HostRemotePlayer,
   HostManager,
-} = require(path.join(__dirname, '..', 'js', 'multiplayer', 'host'));
+} = require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js'));
 
 let passed = 0;
 let failed = 0;
@@ -558,7 +558,7 @@ const moveHost = new HostManager({
 moveHost.startSession('Move World', 42);
 
 // Add a remote player
-const movePlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const movePlayer = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   'move_p1',
   { name: 'MovePlayer', color: '#ffff00' },
   { x: 10, y: 20, z: 10 }
@@ -612,7 +612,7 @@ const blockHost = new HostManager({
 blockHost.startSession('Block World', 42);
 
 // Add remote player at known position
-const blockPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const blockPlayer = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   'block_p1',
   { name: 'BlockPlayer', color: '#00ff00' },
   { x: 10, y: 20, z: 10 }
@@ -674,7 +674,7 @@ const invHost = new HostManager({
 });
 invHost.startSession('Inv World', 42);
 
-const invPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const invPlayer = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   'inv_p1',
   { name: 'InvPlayer', color: '#0000ff' },
   { x: 10, y: 20, z: 10 }
@@ -722,7 +722,7 @@ const questHost = new HostManager({
 });
 questHost.startSession('Quest World', 42);
 
-const questPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const questPlayer = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   'quest_p1',
   { name: 'QuestPlayer', color: '#88ff00' },
   { x: 10, y: 20, z: 10 }
@@ -776,7 +776,7 @@ const kickHost = new HostManager({
 });
 kickHost.startSession('Kick World', 42);
 
-const kickPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const kickPlayer = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   'kick_p1',
   { name: 'KickPlayer', color: '#88ff00' },
   { x: 10, y: 20, z: 10 }
@@ -810,7 +810,7 @@ const summaryHost = new HostManager({
 });
 summaryHost.startSession('Summary World', 42);
 
-const sPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const sPlayer = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   's_p1',
   { name: 'SPlayer', color: '#ff0088' },
   { x: 5, y: 20, z: 5 }
@@ -855,7 +855,7 @@ const cdHost = new HostManager({
 });
 cdHost.startSession('CD World', 42);
 
-const cdPlayer = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const cdPlayer = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   'cd_p1',
   { name: 'CDPlayer', color: '#00ff88' },
   { x: 10, y: 20, z: 10 }
@@ -880,7 +880,7 @@ cdHost._handleRemoteBlockBreak({ playerId: 'cd_p1', x: 13, y: 20, z: 10 });
 assertEqual(cdBreakCount, 2, 'Third break passes after simulated cooldown expiry');
 
 // Test cooldown works per-player (different player not affected)
-const cdPlayer2 = new (require(path.join(__dirname, '..', 'js', 'multiplayer', 'host')).HostRemotePlayer)(
+const cdPlayer2 = new (require(path.join(__dirname, '..', 'src', 'multiplayer', 'Host.js')).HostRemotePlayer)(
   'cd_p2',
   { name: 'CDPlayer2', color: '#8800ff' },
   { x: 10, y: 20, z: 10 }

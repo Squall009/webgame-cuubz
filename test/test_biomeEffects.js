@@ -16,10 +16,13 @@
 
 'use strict';
 
-// biomeEffects.js is a browser classic script that expects a global THREE.
-global.THREE = require('../js/three.min.js');
+// PR 9: BiomeEffects.js now does its own `import * as THREE from 'three'`, so it no
+// longer needs a global. These assertions still do (`instanceof THREE.Color`), and the
+// vendored js/three.min.js this used to read is gone — so the global comes from the
+// pinned npm package, which is the same r134 (test_threePin.js asserts that).
+global.THREE = require('three');
 
-const { BiomeEffects } = require('../js/renderer/biomeEffects');
+const { BiomeEffects } = require('../src/engine/renderer/BiomeEffects.js');
 
 let passed = 0;
 let failed = 0;
