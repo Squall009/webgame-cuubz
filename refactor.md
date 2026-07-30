@@ -30,7 +30,7 @@
 5. [Phase 0 — Stop The Bleeding (PR 1–6, plus 6b and 6c)](#5-phase-0--stop-the-bleeding-pr-16-plus-6b-and-6c)
 6. [Phase 1 — Vite + ES Modules (PR 7–11)](#6-phase-1--vite--es-modules-pr-711)
 7. [Phase 2 — Hoist Closure State onto `Game` (PR 12–13)](#7-phase-2--hoist-closure-state-onto-game-pr-1213)
-8. [Phase 3 — Decompose main.js (PR 14–19)](#8-phase-3--decompose-mainjs-pr-1419)
+8. [Phase 3 — Decompose main.js (PR 14–18)](#8-phase-3--decompose-mainjs-pr-1418-was-1419)
 9. [Phase 4 — Systems, EventBus, Split Monoliths (PR 20–25)](#9-phase-4--systems-eventbus-split-monoliths-pr-2025)
 10. [Phase 5 — UI / HTML / CSS (PR 26–29)](#10-phase-5--ui--html--css-pr-2629)
 11. [Phase 6 — Shared Protocol & Test Migration (PR 30–33)](#11-phase-6--shared-protocol--test-migration-pr-3033)
@@ -2311,7 +2311,7 @@ than rediscovered.
 
 ---
 
-## 8. Phase 3 — Decompose main.js (PR 14–19)
+## 8. Phase 3 — Decompose main.js (PR 14–18, was 14–19)
 
 > **Deliverable:** `main.js` deleted, contents distributed. Feature parity.
 
@@ -2827,7 +2827,9 @@ Each step is one private method or a system's `init()`. Preserve the existing or
 > literally would have inverted all three.
 - **Accept:** solo and multiplayer both start; saved spawn restore works; loading screen sequence unchanged.
 
-### 8.5 PR 18 — `RenderLoop` + `SystemRunner`
+### 8.5 PR 18 — `RenderLoop` + `SystemRunner`, then delete `main.js`
+
+> **Absorbs PR 19** (§8.7). After the loop is extracted, take the pause menu → `src/ui/overlays/PauseMenu.js`, `updateDebugStats` → `src/ui/hud/DebugStats.js`, and the mobile detection / auto-rejoin / `beforeunload` / init trigger → `src/index.js`. **Then delete `src/main.js`.** Also owns **D-42** (`applyPerfSettings()` is defined and never called — either the inline sites in `startGame` call it or it goes; nothing may still be dead when the file is deleted).
 ```js
 export class RenderLoop {
   constructor(game) { this.game = game; this.rafId = null; }
@@ -2850,7 +2852,7 @@ const SYSTEM_ORDER = ['inputManager','blockInteraction','player','mobSystem','dr
 > **Ordering is behavior.** Derive `SYSTEM_ORDER` from the actual call order in the current `renderLoop` body, not from this list. Verify against the pre-refactor code.
 - **Accept:** the loop function is under 30 lines. Frame-rate and gameplay feel unchanged; check `updateDebugStats` FPS against the tag.
 
-### 8.6 PR 19 — Pause menu, debug stats, bootstrap; delete `main.js`
+### 8.6 PR 19 — Pause menu, debug stats, bootstrap; delete `main.js` — **ABSORBED INTO PR 18**
 - `setupPauseMenu` (L4428) → `src/ui/overlays/PauseMenu.js` (owns its own listener setup/teardown).
 - `updateDebugStats` (L4394) → `src/ui/hud/DebugStats.js`.
 - Mobile detection, auto-rejoin, `beforeunload`, init trigger → `src/index.js` + `SessionManager`.
@@ -2858,18 +2860,76 @@ const SYSTEM_ORDER = ['inputManager','blockInteraction','player','mobSystem','dr
 - **Also owns `BUGS.md` D-42** — `applyPerfSettings()` in `main.js` is defined and never called; `startGame()` applies both settings inline instead. Either the inline sites call it or it is deleted. Nothing may still be dead when `main.js` goes.
 - **Accept:** `js/main.js` gone. `src/index.js` under 50 lines. Every extracted file under 400 lines. Escape → pause → resume/exit/settings all work.
 
+### 8.7 The remaining plan was collapsed — 17 PRs to 7 (owner, 2026-07-30)
+
+**The owner cut this after PR 16.** Sixteen PRs had landed; seventeen remained; the plan
+was written before any of it existed and was never re-costed against what the work actually
+turned out to be.
+
+**Numbers are NOT reassigned.** Every absorbed PR keeps its heading above, marked
+**ABSORBED**, because `BUGS.md` rows, source comments and six handoff documents cite PR
+numbers and a renumber would silently break all of them. A merged PR keeps the lowest
+number of its group and its section below lists what it swallowed. `BUGS.md`'s owner cells
+were updated in the same commit.
+
+| PR | What it is now | Absorbs |
+|---|---|---|
+| **17** | `startGame()` → `src/core/Game.js` | — (1,894 lines; the largest single move left) |
+| **18** | `RenderLoop` + `SystemRunner`, **then** pause menu, debug stats, bootstrap, **delete `main.js`** | 19 |
+| **20** | `System` base class; wire or delete the twelve dead modules (D-25); move cross-cutting logic out of the loop | 21 (dropped), 22 |
+| **23** | Split the three monoliths: `chunkmanager.js`, `inventory.js` (+ the duplicated face table), `skybox.js`; finish mobs | 24, 25 |
+| **26** | Slim `index.html`, reorganize CSS, un-quarantine the four source-text tests, and unify the duplicated UI paths (D-41) | 27, 28, 29 |
+| **31** | Vitest, **plus** the test restructure and the automated data test | 32 |
+| **33** | `shared/protocol.js`, remove the CommonJS shims, the `typeof` sweep (D-27), `minify` (D-30), delete `src/testBridge.js` | 30 |
+
+**What was dropped outright, and why.** **PR 21, the `EventBus`.** Its stated benefit was
+cosmetic — *"no `if (sessionManager && …)` chains left in gameplay code"* — and its own
+section flags the hazard it introduces: *"`forEach` is synchronous and registration-ordered.
+Anywhere the old inline code depended on 'chunk update happens before network send', assert
+it in a test."* That trades explicit ordering for implicit ordering **in a codebase where
+load order has already produced D-36 and where PR 17's accept criterion is "preserve the
+existing ordering exactly".** A pub/sub layer is worth its cost when there are many
+independent consumers that must not know about each other. Here there is one game loop, one
+client, and an ordering constraint the plan already admits it would have to re-assert with
+new tests. §4.2's EventBus pattern block stays in the document as a description of a shape
+not taken.
+
+**PR 28/29's component framework went with it.** Turning the HUD and overlays into
+`Button`/`Modal`/`Slider` components is architecture for its own sake in a game with one
+HUD. What was *real* in those two PRs is **D-41** — three character-creation paths that
+disagree about the three-character slot limit — and that moves to PR 26, which is already
+touching the same HTML.
+
+**What was NOT cut**, because each has caught something real: both e2e hosts before and
+after every PR that touches `src/`; `npm test` / `lint` / `build` at every commit; a
+`BUGS.md` row with a severity and an owner for every bug found; and the rule that a new
+assertion is proved non-vacuous by breaking the thing it checks. H-1 (live data corruption),
+D-32, D-34 and D-43 were all found under a fully green harness by structural change — the
+gates are what made "identical game" checkable, and they are cheap.
+
+**What WAS cut is the prose.** Outcome sections are a short paragraph and a gate table, not
+an essay. Handoff documents are written when a session is ending, not per PR. At the time of
+the collapse this repo carried **6,128 lines of planning prose about a 34,782-line `src/`**;
+that ratio is the thing that made the work slow, not the code.
+
+**`BUGS.md` decision 32.**
+
 ### Phase 3 gate
 - [ ] `main.js` deleted
 - [ ] `src/index.js` < 50 lines; no extracted file > 400 lines
-- [ ] Zero `typeof X !== 'undefined'` in `src/` (`no-undef` clean)
-- [ ] Solo, host, join, creative, pause, settings, save/load all verified manually
-- [ ] `npm test && npm run lint && npm run build` green; deploy verified
+- [ ] ~~Zero `typeof X !== 'undefined'` in `src/`~~ — **this box cannot close in Phase 3 and is not a failure.** `grep -rn "typeof [A-Za-z_$][A-Za-z0-9_$]* !== 'undefined'" src/ --include=*.js` counts **61 across 20 files**; D-27's "29 genuine cross-module guards" is the subset where `X` is an imported binding, and the rest are ordinary `typeof window` / `typeof document` feature detection that should stay. **Decision 16 moved the sweep to PR 33.** Report the count at the gate; do not tick it, and do not do PR 33's work early to make it tickable
+- [ ] Solo, creative, pause, settings, save/load verified — **automated**, 183 assertions on both e2e hosts
+- [ ] ~~host, join verified~~ — **not automated and not going to be in Phase 3.** No test has ever driven a multiplayer path in a browser (**D-48**, owner PR 31). The session layer's *logic* is covered by `test_sessionRecord.js` in `npm test` (decision 31); its browser wiring is not
+- [ ] `npm test && npm run lint && npm run build` green
+- [ ] ~~deploy verified~~ — **decision 20: deliberately deferred, not blocked.** Nothing deploys until the whole rewrite is done. Do not tick this and do not run `./sync.sh`
 
 ---
 
-## 9. Phase 4 — Systems, EventBus, Split Monoliths (PR 20–25)
+## 9. Phase 4 — Systems + Split Monoliths (PR 20, 23 — was 20–25)
 
-### PR 20 — `System` base class
+### PR 20 — `System` base class, dead-module triage, cross-cutting logic
+
+> **Absorbs PR 22, and PR 21 is dropped** (§8.7). Three things in one PR because they are the same pass over the same code: (1) the `System` base class; (2) **D-25** — wire or delete the twelve modules `index.html` used to load that nothing references, including the 1,791 lines of never-instantiated audio; (3) PR 22's list of inline render-loop logic, each moving into its own system's `update(dt)`. **D-21** (`SurvivalSystem` spawn `y=20` vs `SEA_LEVEL+4`) comes with (3) — decision 5 already ruled it 68.
 `src/game/systems/System.js` per [§4.2](#42-key-patterns). Convert systems one at a time; `SystemRunner` drops its special cases.
 
 **PR 20 also owns D-25 — the twelve modules nothing references.** PR 9 computed the import
@@ -2899,7 +2959,7 @@ outcome. "Wire it up" is not automatically right — an unwired subsystem that h
 in production is untested by definition, and turning six of them on at once is not a
 mechanical change either.
 
-### PR 21 — `EventBus`
+### PR 21 — `EventBus` — **DROPPED, see §8.7**
 ```js
 class EventBus {
   constructor() { this._listeners = new Map(); }
@@ -2928,12 +2988,16 @@ export const eventBus = new EventBus();
 - **Beware ordering:** `forEach` is synchronous and registration-ordered. Anywhere the old inline code depended on "chunk update happens before network send", assert it in a test.
 - **Accept:** each migrated path has a unit test; no `if (sessionManager && ...)` chains left in gameplay code.
 
-### PR 22 — Move cross-cutting logic out of the loop
+### PR 22 — Move cross-cutting logic out of the loop — **ABSORBED INTO PR 20**
 These currently run inline in `renderLoop`; each moves into its own system's `update(dt)` with its own frame counter:
 multiplayer movement sync (`frameCount % 3`) · touch look delta · fly-mode indicator · HUD armor (`% 10`) · debug stats · day/night + PBR update · biome effects · mob attack via mouse · multiplayer time sync (`% 30`) · block-change network send · hotbar UI (`% 5`) · the periodic-save `setInterval`.
 - **Accept:** `renderLoop` calls only `SystemRunner.update(dt)` and `renderer.render()`.
 
-### PR 23 — Split `chunkmanager.js` (1,664 → 5 files)
+### PR 23 — Split the three monoliths
+
+> **Absorbs PR 24 and PR 25** (§8.7). One PR, three files, same operation: `chunkmanager.js` (1,664 → 5), `inventory.js` (1,048, plus the face table duplicated between `meshWorker.js` and `ChunkMeshBuilder.js` → `src/game/data/FaceTable.js`), and `skybox.js` (1,031, splitting the day/night cycle out). Finish mobs. Split them one at a time inside the PR and run `npm test` between each; do not interleave.
+
+#### 23a — `chunkmanager.js`
 
 | Responsibility | File | ~Lines |
 |---|---|---|
@@ -2945,7 +3009,7 @@ multiplayer movement sync (`frameCount % 3`) · touch look delta · fly-mode ind
 
 - **Highest data-loss risk in the plan.** `DB_NAME`/`DB_VERSION` must not change; the `onupgradeneeded` path must behave identically. Run the save/load test before and after, and test with a **pre-existing** v2 database.
 
-### PR 24 — Split `inventory.js` (1,048) + dedupe the face table
+### PR 24 — Split `inventory.js` (1,048) + dedupe the face table — **ABSORBED INTO PR 23**
 
 | From | To |
 |---|---|
@@ -2957,16 +3021,18 @@ multiplayer movement sync (`frameCount % 3`) · touch look delta · fly-mode ind
 Also: unify `FACES` (`meshWorker.js:36`) with the `sides` table (`chunkMeshBuilder.js:371`) into `src/game/data/FaceTable.js` ([§3.5](#35-protocol-duplication--v1-was-half-wrong)). Worker imports must stay worker-safe (no THREE, no DOM).
 - **Accept:** inventory serialization round-trips existing saves; meshes render identically (screenshot diff).
 
-### PR 25 — Split `skybox.js` (1,031) and finish mobs
+### PR 25 — Split `skybox.js` (1,031) and finish mobs — **ABSORBED INTO PR 23**
 - Extract the day/night cycle → `src/game/systems/TimeOfDaySystem.js`; keep rendering in `SkyRenderer.js`.
 - Resolve the `test_skybox` fog-density discrepancy from PR 4 if still open.
 - Unpark `js/mobs/` if it was parked in PR 1: move to `src/game/mobs/`, wrap in `MobSystem`, and either work through `MOB_PLAN.md` or freeze it with the remaining 253 items documented as out of scope.
 
 ---
 
-## 10. Phase 5 — UI / HTML / CSS (PR 26–29)
+## 10. Phase 5 — UI / HTML / CSS (PR 26 — was 26–29)
 
-### PR 26 — Slim `index.html` **and** fix the source-text tests in the same PR
+### PR 26 — `index.html`, CSS, the quarantined tests, and the duplicated UI paths
+
+> **Absorbs PR 27, 28 and 29** (§8.7). All four touch the same HTML and CSS. (1) Slim `index.html`; (2) reorganize `css/style.css`; (3) rewrite or delete the four source-text tests in `QUARANTINE.md` **in the same PR** — that is §3.6's whole point and is why the cap exists; (4) **D-41** — three character-creation paths (`CharacterScreen`'s modal and the two inline forms in `src/ui/screens/LobbyForms.js`) that disagree about whether they check the three-character slot limit. **The `Button`/`Modal`/`Slider` component framework from PR 28/29 is dropped**; unifying the three paths is the part that was real.
 Target:
 ```html
 <!DOCTYPE html>
@@ -2988,7 +3054,7 @@ Phased approach: keep the DOM structure but move each screen's markup into a tem
 **In this same PR**, rewrite or delete `test_responsiveHUD`, `test_mobileViewports`, `test_pageLoad`, `test_textureAssets`, `test_textureGenerator`, `test_chunkBinaryCodec` — they `readFileSync` the HTML/CSS and will break ([§3.6](#36-source-text-tests-conflict-with-phase-5)). Prefer real jsdom DOM assertions; delete anything that only asserts a CSS string exists.
 - **Accept:** `index.html` under 80 lines; `npm test` green; all screens render; mobile touch controls work.
 
-### PR 27 — Reorganize CSS
+### PR 27 — Reorganize CSS — **ABSORBED INTO PR 26**
 Split `css/style.css` (~2,100 lines) into `src/ui/css/`:
 ```
 reset.css  variables.css  layout.css
@@ -3008,18 +3074,18 @@ Add design tokens:
 Import CSS from the module that uses it (`import '../css/components/buttons.css'`).
 - **Accept:** visual diff against the Phase 0 tag on desktop **and** mobile viewport. Extract token values from the existing CSS; don't invent colors.
 
-### PR 28 — HUD components
+### PR 28 — HUD components — **ABSORBED INTO PR 26**
 `src/ui/hud/*` — each element owns its DOM and subscribes to EventBus instead of being poked from the loop.
 
-### PR 29 — Overlay components
+### PR 29 — Overlay components — **ABSORBED INTO PR 26**
 `InventoryScreen`, `CraftingScreen`, `PauseMenu`, `EquipmentPanel` — each owns show/hide and listener lifecycle.
 - **Also owns `BUGS.md` D-41** — three divergent character-creation paths (`CharacterScreen`'s modal plus the two inline forms in `src/ui/screens/LobbyForms.js`), which differ on whether they check the three-character slot limit. PR 15 split them into two files and logged the divergence rather than reconciling it, because reconciling is a UX decision. `LobbyForms.js` is the single target.
 
 ---
 
-## 11. Phase 6 — Shared Protocol & Test Migration (PR 30–33)
+## 11. Phase 6 — Test Migration & Cleanup (PR 31, 33 — was 30–33)
 
-### PR 30 — `shared/protocol.js`
+### PR 30 — `shared/protocol.js` — **ABSORBED INTO PR 33**
 `MESSAGE_TYPES` currently lives in `js/multiplayer/client.js:40` and `server/session.js:30`, and is *used* undefined in `host.js`. One source of truth:
 ```js
 // vite.config.js
@@ -3028,7 +3094,9 @@ resolve: { alias: { '@shared': path.resolve(__dirname, 'shared') } }
 `server/` is CommonJS — either publish `shared/protocol.js` as dual CJS/ESM, or keep it CJS and let Vite consume it. **Pick one and write it down.**
 - **Accept:** a test asserts client and server `MESSAGE_TYPES` are deep-equal. Two-browser multiplayer session still works.
 
-### PR 31 — Vitest
+### PR 31 — Vitest, and the test restructure with it
+
+> **Absorbs PR 32** (§8.7). Moving to Vitest and restructuring the suite are one change — doing them separately means touching all 56 test files twice. Owns **D-20** (four relay tests on fixed ports with no `error` handler), **D-28** (`esmRequire` vs real ESM on cycles — the hook is deleted here), **D-33** (172 `no-unused-vars` warnings), **D-47** (`test_sessionUI.js` — 730 lines testing a *copy* of the code) and **D-48** (no automated test has ever driven a multiplayer path in a browser).
 ```bash
 npm i -D vitest
 ```
@@ -3045,7 +3113,7 @@ Migrate incrementally: run the legacy `bash test/run_tests.sh` **and** `vitest` 
 - **D-28** — `test/helpers/esmRequire.js`, which this PR deletes.
 - **D-48** — **no automated test has ever driven a multiplayer path in a browser.** `test/e2e/saveLoad.js` is single-context and never clicks `#btn-host` or `#btn-join`, so `DEPLOY.md` §7 steps 12–13 have been `⚠️ UNVERIFIED` since PR 6b — and that gap is what let **D-43**, a player-visible rejoin defect, survive five green e2e runs and four PRs. **The source blockers are gone:** PR 12 put the live `GameState` on `window.__cuubz`, and `getRelayUrl` honours a `?relayUrl=` query parameter that `test_relayUrl.js` has asserted since PR 16, so the game can be pointed at `server/index.js` spawned on 8765 as a child process. What is left is two-context orchestration. PR 16 covered the session layer's *logic* in `npm test` instead (`test/test_sessionRecord.js`, `BUGS.md` decision 31); this is the browser half.
 
-### PR 32 — Restructure tests + automate the data test
+### PR 32 — Restructure tests + automate the data test — **ABSORBED INTO PR 31**
 ```
 test/
 ├── helpers/setup.js
@@ -3057,7 +3125,9 @@ Automate the [§1.5](#15-player-data-must-survive-byte-for-byte) save/load check
 
 **PR 32 also owns `BUGS.md` D-47** — `test/test_sessionUI.js` is 730 lines that `require` nothing from `src/` and reimplement `SessionManager`, `updateConnectionStatus`, `renderSessionList`, `renderPlayerList`, host-form validation and tab switching inline beside a `MockElement` DOM. It is the same shape as **D-45**, and D-45 proved the failure mode is real for this file's sibling: that copy had drifted into asserting a relay URL scheme the game does not implement, and stayed green for it. PR 16 moved all six of these things into importable files, so the copies can only drift further. Rewriting it needs `document`, a `MultiplayerClient` and a `UIManager` stubbed, which is test infrastructure rather than an extraction — hence here and not in PR 16.
 
-### PR 33 — Remove CommonJS shims and final cleanup
+### PR 33 — Shared protocol, shims, and final cleanup
+
+> **Absorbs PR 30** (§8.7). `shared/protocol.js` is two files' worth of `MESSAGE_TYPES` (`src/multiplayer/Client.js` and `server/session.js`) and belongs with the other sweep-up. Also owns **D-27** (the `typeof X !== 'undefined'` guards — 61 across 20 files, of which 29 are the genuine cross-module ones), **D-30** (`minify: false`) and deleting `src/testBridge.js` (decision 21 states the condition).
 Delete the remaining `typeof module !== 'undefined'` blocks (62 at the start) now that tests import ESM. Final gate: `npm run dev`, `npm run build`, `npm test`, `npm run lint`, `./sync.sh` all pass.
 
 Also owned here, all four moved by an earlier PR that stated its reason:
