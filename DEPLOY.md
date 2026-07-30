@@ -3,11 +3,18 @@
 **Purpose:** everything you need to deploy Cuubz, restart the relay, roll back a bad
 deploy, and avoid destroying player save data — without reading `refactor.md`.
 
-**Status of this document:** written at commit `749304b` (PR 6, 2026-07-29). Every
-statement about repo contents was verified by reading the file cited. **No statement
-about the remote server `10.0.30.160` was verified** — that needs SSH access this
-document's author did not have. Unverified claims are marked `[UNVERIFIED]` with the
-command that would confirm them. See [§9](#9-verification-status).
+**Status of this document:** written at commit `749304b` (PR 6, 2026-07-29), amended at
+`0889448` (PR 6b, same day). Every statement about repo contents was verified by reading
+the file cited. **No statement about the remote server `10.0.30.160` was verified** —
+that needs SSH access neither author had. Unverified claims are marked `[UNVERIFIED]`
+with the command that would confirm them. See [§9](#9-verification-status).
+
+**What PR 6b changed:** [§7](#7-saveload-checklist) is now mostly executable
+(`npm run test:e2e`) instead of entirely manual, and nine of its fourteen steps are
+verified by a real browser rather than inferred from code. That run confirmed **H-1**
+([§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted)) and found four defects:
+**D-14**, **D-15**, **D-16** and the `console.error` severity bug, three of which are
+fixed. See [§8](#8-known-defects-and-who-owns-them).
 
 > ### ⛔ Read this before your first deploy
 >
@@ -764,8 +771,8 @@ point of the checklist. 6 and 7 are now automated for terrain; 13 is still manua
 | D-12 | `StrictHostKeyChecking=no` on both `scp` and `ssh` — any host key is accepted | low (LAN IP), by design | `sync.sh:34,36`. Unowned |
 | D-13 | Whole repo (`test/`, `scripts/`, all planning `.md`, `.claude/`) ships to the public web root | low — information disclosure | Documented [§4.2](#42-what-gets-shipped). Fix in **PR 10** |
 | **D-14** | `js/main.js:4562` called `game.playerSync.reset()`, which does not exist on `PlayerSyncManager`. **Every "Exit to Menu" threw**, skipping six cleanup steps and `showScreen('mainMenu')` — the player was left on a blank page, recoverable only by F5 | **high — the quit path was broken in every session, solo included** | Found *and* **FIXED in PR 6b** (call deleted; `clearAll()` was already the whole teardown). [§7.2](#72-step-7-was-unrunnable-until-pr-6b--d-14). §7 step 7 now automated |
-| **D-16** | `#pause-pause-time` was a checkbox labelled "Pause Time of Day", `checked` by default, while `main.js:4693` sets `checked = !skybox.timePaused` — so checked meant time was **running**, and ticking "pause" un-paused it | low — confusing control, no data risk | **FIXED in PR 6b** by relabelling to "Day/Night Cycle" (`index.html:477`). Chosen over inverting the logic, which would have changed every existing player's default |
 | **D-15** | `chunkBinaryCodec.js:63` sizes the buffer as `HEADER_SIZE + blockRuns.length * 4`, but a run is *two* `Uint16`s, so the payload written is half that. **Every stored chunk is exactly 2× the size it needs, half zero padding** — measured 24,156 bytes allocated / 12,088 used, ≈14 MB of zeroes per world | medium — 50% of IndexedDB footprint and 50% of every 5 s flush's write volume, wasted | Found by PR 6b. Not a corruption bug (`decode` stops at `blockRunCount`), but the fix changes stored byte length, i.e. a [§2.2](#22-chunk-binary-format) format change. **Unowned** |
+| **D-16** | `#pause-pause-time` was a checkbox labelled "Pause Time of Day", `checked` by default, while `main.js:4693` sets `checked = !skybox.timePaused` — so checked meant time was **running**, and ticking "pause" un-paused it | low — confusing control, no data risk | **FIXED in PR 6b** by relabelling to "Day/Night Cycle" (`index.html:477`). Chosen over inverting the logic, which would have changed every existing player's default |
 | **H-1** | Chunk primary keys are not world-scoped; worlds cross-contaminate | **high — live data corruption** | Documented [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions). Needs a migration PR. **Unowned** |
 | **H-2** | `onupgradeneeded` deletes every object store; bumping `DB_VERSION` destroys all player worlds | **critical if triggered** | Documented [§2.1](#21-indexeddb--worlds-and-terrain). Unowned |
 | H-3 | `js/main.js:545` opens IndexedDB with no version; can create a store-less v1 DB | low — self-heals | Documented [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions). Unowned |
