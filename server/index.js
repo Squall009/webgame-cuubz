@@ -195,8 +195,37 @@ server.listen(PORT, () => {
 
 // ─── Graceful Shutdown ────────────────────────────────────────
 
-process.on('SIGINT', () => {
-  console.log('\n[SERVER] Shutting down...');
+// D-8 (PR 10). This block used to route `uncaughtException` into the SIGINT handler,
+// which exits 0. `cuubz-relay.service` says `Restart=on-failure`, and **exit code 0 is
+// not a failure** — so after any unhandled error the relay shut itself down cleanly and
+// systemd left it down, permanently, with a log line nobody was reading.
+// `unhandledRejection` was worse: it logged and did nothing at all, leaving the process
+// in whatever state the rejection left it.
+//
+// Ruling (BUGS.md decision 3): a **non-zero exit code**, not `Restart=always`. Both make
+// the relay come back after a crash, but `Restart=always` would also restart a
+// deliberate `systemctl stop` — it changes what a shutdown means, and the bug is that a
+// crash is not being reported as one.
+//
+// So: a deliberate stop (SIGINT / SIGTERM) exits 0 and stays down; a crash exits 1 and
+// systemd brings it back in RestartSec=5.
+
+let shuttingDown = false;
+
+/**
+ * Dispose every session, close both servers, exit with `code`.
+ *
+ * The watchdog is not decoration. `server.close()` only fires its callback once every
+ * connection has ended, and a relay's connections are long-lived WebSockets — so a
+ * crash could leave the process alive, holding port 8765, having already torn down its
+ * sessions, with systemd seeing a running unit. That is the same "relay stays down"
+ * outcome by a different route, so shutdown is bounded.
+ */
+function shutdown(reason, code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n[SERVER] Shutting down (${reason}, exit ${code})...`);
+
   for (const [id, entry] of sessions) {
     try {
       entry.session.dispose();
@@ -206,23 +235,31 @@ process.on('SIGINT', () => {
   }
   sessions.clear();
   try { wss.close(); } catch (e) {}
-  server.close(() => {
-    console.log('[SERVER] Shutdown complete.');
-    process.exit(0);
-  });
-});
 
-process.on('SIGTERM', () => {
-  process.emit('SIGINT');
-});
+  const watchdog = setTimeout(() => {
+    console.error('[SERVER] Shutdown timed out after 5s — forcing exit.');
+    process.exit(code);
+  }, 5000);
+  watchdog.unref();
+
+  server.close(() => {
+    clearTimeout(watchdog);
+    console.log('[SERVER] Shutdown complete.');
+    process.exit(code);
+  });
+}
+
+process.on('SIGINT', () => shutdown('SIGINT', 0));
+process.on('SIGTERM', () => shutdown('SIGTERM', 0));
 
 process.on('uncaughtException', (err) => {
   console.error('[SERVER] Uncaught Exception:', err.message, err.stack);
-  process.emit('SIGINT');
+  shutdown('uncaughtException', 1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[SERVER] Unhandled Rejection at:', promise, 'reason:', reason);
+  shutdown('unhandledRejection', 1);
 });
 
 module.exports = { matchmaking, sessions };

@@ -5,8 +5,34 @@ After=network.target
 [Service]
 Type=simple
 User=dadmin
+
+# WorkingDirectory is unchanged by PR 9 and PR 10. `server/` still deploys to
+# /var/www/html/server as CommonJS; only the browser half of the repo moved.
 WorkingDirectory=/var/www/html/server
-ExecStart=/home/dadmin/.local/node-v22.22.0-linux-x64/bin/node index.js
+
+# D-10 (PR 10). This used to name node by absolute, version-pinned path:
+#
+#   ExecStart=/home/dadmin/.local/node-v22.22.0-linux-x64/bin/node index.js
+#
+# which breaks by path the moment that directory is upgraded or removed — systemd
+# reports status=203/EXEC and Restart=on-failure then retries forever, 5 s apart. CI
+# validates against node 22.23.x while this file said 22.22.0, so the pin had already
+# drifted from the only place the version is actually tested.
+#
+# Ruling (BUGS.md decision 4): resolve node from the ENVIRONMENT rather than pin a patch
+# version here. `/usr/bin/env` does the lookup and PATH below supplies the search order.
+#
+# `/home/dadmin/.local/node/bin` is a **stable symlink that sync.sh creates and refreshes
+# on every deploy**, pointing at whichever `node-v*-linux-x64` directory is unpacked
+# under ~/.local. A node upgrade is then: unpack the new tarball, run ./sync.sh — no edit
+# here and no daemon-reload. The system paths after it are the fallback if a
+# package-managed node is ever installed.
+ExecStart=/usr/bin/env node index.js
+Environment="PATH=/home/dadmin/.local/node/bin:/home/dadmin/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# on-failure, not always: a deliberate `systemctl stop` must stay stopped. This only
+# became meaningful in PR 10 — until then server/index.js exited 0 on uncaughtException,
+# so on-failure never fired and the relay stayed down after a crash (D-8). It exits 1 now.
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production

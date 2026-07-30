@@ -1598,14 +1598,7 @@ now says so in the imperative rather than the conditional.
 `.github/workflows/ci.yml`, `BUGS.md`, `DEPLOY.md`, `README.md`, `refactor.md` (this section).
 
 
-### PR 10 — Fix deployment (**must land with PR 9, not after**)
-
-> **⛔ PR 9 HAS LANDED AND THIS HAS NOT. THE REPO CANNOT BE DEPLOYED RIGHT NOW.**
-> `index.html` loads one module out of a bundle that only exists in `dist/`, and
-> `sync.sh:30` still says `--exclude='dist'`. The next `./sync.sh` uploads everything
-> except the application and serves a black page. That is **D-4**, now live rather than
-> predicted. `DEPLOY.md` §4.3 carries the operational rule.
-
+### PR 10 — Fix deployment (**must land with PR 9, not after**) ✅ DONE
 - Rewrite `sync.sh`: run `npm run build`, then ship `dist/` + `server/` + `textures/` (**stop excluding `dist/`**).
 - Decide whether `textures/` ships separately (118 MB per deploy is slow — consider rsync or a one-time upload).
   **PR 9 made this concrete rather than theoretical:** `publicDir` is `false`, so `dist/`
@@ -1625,6 +1618,101 @@ now says so in the imperative rather than the conditional.
   verifiable rather than assumed.
 - **Accept:** deploy to `10.0.30.160`, load the site in a browser, **JS actually loads**, multiplayer relay connects.
 - **Rollback:** keep the old `sync.sh` as `sync-legacy.sh` for one release cycle.
+
+**Outcome (2026-07-30):** ✅ DONE, landed immediately after PR 9 as the plan requires.
+`sync.sh` is rewritten; the previous script is kept verbatim as `sync-legacy.sh` for one
+release cycle. **Eleven `BUGS.md` rows close here** — D-2, D-3, D-4, D-5, D-6, D-7, D-8,
+D-9, D-10, D-11, D-13 — and D-12 improves without closing.
+
+**⚠️ NOT ONE LINE OF IT HAS BEEN RUN AGAINST THE HOST.** No session in this project has
+had an SSH key for `dadmin@10.0.30.160`. Every remote command is written from `DEPLOY.md`
+§3–§6 and is `[UNVERIFIED]`. That is the same footing every previous statement about the
+deploy path has been on, but PR 10 raises the stakes: the new script **deletes** before it
+extracts, installs a systemd unit, restarts a service, and repoints which node binary
+production runs. Three things make that acceptable rather than reckless, and none of them
+is a substitute for running it once:
+
+- `./sync.sh --dry-run` prints every remote command and connects to nothing.
+- The backup is taken **before** anything is deleted, and the last five are kept.
+- The *served layout* — `dist/` at the web root plus a separately-uploaded `textures/` —
+  is exercised locally by all 152 assertions of `npm run test:e2e`, because
+  `test/e2e/staticServer.js` serves exactly that split. What cannot be rehearsed is
+  `ssh`, `sudo`, `systemctl` and the filesystem at the other end.
+
+**Run `./sync.sh --dry-run` first. Read it. Then deploy.** `DEPLOY.md` §4.7 is the
+step-by-step and §9 lists the eleven checks the first real deploy should confirm.
+
+#### The eleven, and what each one actually took
+
+| Row | Fix |
+|---|---|
+| **D-4** — `--exclude='dist'` shipped a JS-less site | `npm run build` runs first, and the script **refuses to continue** unless `dist/index.html` exists *and contains a module script tag*. Both checks are local, before the host is touched. `dist/` is what ships |
+| **D-13** — the whole repo went to a public web root | The payload is `dist/*` + `server/` + the unit file. Not `src/`, `test/`, `scripts/`, `node_modules/`, `.git/`, `.claude/`, or any planning `.md` |
+| **D-7** — the archive was staged inside the web root | Staged in `/home/dadmin/cuubz-deploy/incoming/`, removed after extraction |
+| **D-3** — no rollback of any kind | The web root (minus `textures/`) is tarred to `/home/dadmin/cuubz-deploy/backups/webroot-<stamp>.tar.gz` **before anything is deleted**; last five kept. `DEPLOY.md` §6.5 is the restore procedure |
+| **D-5** — `tar xzf` never deletes | The managed paths are `rm -rf`'d before extraction, so a deploy converges on what the repo contains. **`textures/` is deliberately not in that list** — step 8 owns it, and a blanket `rm -rf ${REMOTE_DIR}/*` would take 118 MB with it and be unrecoverable if the path were ever wrong |
+| **D-6** — `chmod` fanned out over everything and aborted *after* extraction | Scoped to what was extracted with `textures/` pruned, and `|| true`: extraction has already succeeded by then, so a file owned by someone else is a warning, not a reason to fail a completed deploy. That inversion *is* the bug D-6 describes |
+| **D-9** — server deps never reached production | `npm ci --omit=dev` in `/var/www/html/server` |
+| **D-11** — 118 MB of textures on every deploy | Their own artifact: skipped by default, uploaded on `--textures`, uploaded automatically if `textures/blocks/manifest.json` is missing on the host (first deploy, or a restore onto a clean box) |
+| **D-2** — the relay was never restarted | The unit is installed **only if it differs**, `daemon-reload` if so, then `systemctl restart cuubz-relay` and a check that it came back active |
+| **D-8** — `uncaughtException` exited 0, so `Restart=on-failure` never fired | `server/index.js` has one `shutdown(reason, code)`: SIGINT/SIGTERM exit 0, `uncaughtException` and `unhandledRejection` exit 1. Owner's ruling (`BUGS.md` decision 3) — not `Restart=always`, which would also restart a deliberate `systemctl stop`. **`unhandledRejection` used to only log**, leaving the process alive in whatever state the rejection left it; it shuts down now |
+| **D-10** — `ExecStart` pinned node 22.22.0 by absolute path | `ExecStart=/usr/bin/env node index.js` with `/home/dadmin/.local/node/bin` first on the unit's `PATH`. That is a symlink `sync.sh` refreshes each deploy to the newest `node-v*-linux-x64` under `~/.local`. A node upgrade becomes "unpack, `./sync.sh`" — no unit edit, no `daemon-reload`. Owner's ruling (`BUGS.md` decision 4) |
+
+**D-12 improves but stays open.** `StrictHostKeyChecking` went `no` → `accept-new`: the
+first key is trusted and pinned, a *changed* key is an error rather than a shrug. On a LAN
+IP that is an improvement, not a fix, and the row says so.
+
+#### Two things added that no row asked for
+
+- **A shutdown watchdog.** `server.close()` only calls back once every connection has
+  ended, and a relay's connections are long-lived WebSockets. A crash could therefore
+  leave the process alive holding port 8765, sessions already disposed, with systemd
+  seeing a healthy unit — the same "relay stays down" outcome D-8 describes, by a
+  different route. Shutdown is now bounded at 5 s and then forced.
+- **Post-deploy verification on the host.** `Sync complete!` used to print
+  unconditionally. The script now checks, on the host, that `index.html` exists, that it
+  references a `.js`, and that the file it references is on disk — the three cheapest
+  checks that would have caught D-4, which is the failure this whole PR exists for. Plus
+  `textures/blocks/manifest.json` and `server/index.js`.
+
+#### Two deliberate soft failures
+
+A deploy stops being all-or-nothing the moment files are on the host, and a script that
+aborts halfway leaves the operator guessing which half ran.
+
+- **The relay restart warns rather than aborts.** `sudo -n` fails immediately if `dadmin`
+  has no passwordless sudo — rather than hanging on a password prompt with no TTY — and
+  the script prints the exact two commands to run by hand. The static site is deployed and
+  correct at that point; only the relay is stale, which is the pre-PR-10 status quo.
+- **`chmod` is `|| true`**, per D-6 above.
+
+#### Not done, and why
+
+- **No atomic release-directory swap.** A `releases/<stamp>` + `current` symlink deploy
+  needs the web server's document root to point at the symlink — and **nothing in this
+  project has ever verified what serves `/var/www/html`** (`DEPLOY.md` §3.1 marks it
+  `[UNVERIFIED]`). Guessing at nginx config from a machine that cannot reach the host is
+  how a site goes down for real. The pre-delete backup is the rollback until that is
+  known, and §6.5 says so.
+- **No `rsync`.** It would give `--delete` and incremental textures in one flag, but its
+  presence on the host and in Git Bash on this workstation is unverified, and a deploy
+  script that fails on its first run because of a missing tool is worse than one built out
+  of `tar`, `scp` and `ssh` — all three of which the old script already proved are there.
+- **`minify` stays `false`** in `vite.config.js`. PR 10 owns the call and the call is: not
+  in the same PR that rewrites the deploy path. 1.7 MB raw / 353 kB gzipped over a LAN is
+  not a problem worth coupling to this change, and an unminified bundle keeps a stack
+  trace legible while the first real deploy is being debugged. **Logged as D-30, owned by
+  PR 11.**
+- **The `.tar.gz` staging directory is not cleaned up on failure.** If `scp` succeeds and
+  extraction fails, the archive stays in `~/cuubz-deploy/incoming/`. Harmless — it is
+  outside the web root (D-7) and the next successful deploy names a different file — but
+  it is not tidy. Not worth a row.
+
+**New files:** `sync-legacy.sh` (the previous `sync.sh`, verbatim, `git mv`). **Modified:**
+`sync.sh` (rewritten), `server/index.js` (D-8 + watchdog), `cuubz-relay.service` (D-10),
+`DEPLOY.md` (§4 banner, §4.7, §5, §5.2, §6 banner, §6.5, §9), `BUGS.md`, `refactor.md`
+(this section).
+
 
 ### PR 11 — Lint + format
 ```bash

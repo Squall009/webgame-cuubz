@@ -431,7 +431,22 @@ destroys all in-flight sessions. See [§5](#5-restarting-the-relay-the-step-sync
 
 ## 4. What `./sync.sh` actually does
 
-Line-by-line, from `sync.sh` at commit `749304b`. `set -e` (`:6`) is in force locally.
+> ### ▶ PR 10 REWROTE `sync.sh`. READ [§4.7](#47-the-pr-10-syncsh) FIRST.
+>
+> **[§4](#4-what-syncsh-actually-does) through [§4.6](#46-tar-xzf-never-deletes) describe
+> the OLD script**, which is kept verbatim as **`sync-legacy.sh`** for one release cycle.
+> They are the forensic record of eleven defects (D-2 … D-13) and of why each one
+> mattered; every `sync.sh:NN` line number below refers to `sync-legacy.sh`. Do not read
+> them as a description of the current deploy — read them as the reason it looks the way
+> it does. [§4.7](#47-the-pr-10-syncsh) is the current one, defect by defect.
+>
+> **Nothing in the new script has ever been run against the host.** No session in this
+> project has had an SSH key for `dadmin@10.0.30.160`. Run `./sync.sh --dry-run` — it
+> prints every remote command without connecting — read it, then run it for real.
+> [§9](#9-verification-status) is the authority on what is and is not verified.
+
+Line-by-line, from `sync.sh` at commit `749304b` — now `sync-legacy.sh`. `set -e` (`:6`)
+is in force locally.
 
 | Step | Line | What happens |
 |---|---|---|
@@ -612,16 +627,97 @@ Never script this blind. `/var/www/html` is a shared root
 
 ---
 
-## 5. Restarting the relay (the step `sync.sh` does not do)
+### 4.7 The PR 10 `sync.sh`
 
-**`sync.sh` never restarts anything.** There is no `systemctl`, `service`, `kill`, or
-`pm2` call anywhere in this repo — verified across all tracked files. The only
-`systemctl` text that exists is documentation prose in `multiplayer.md:376-377`.
+The rewrite exists because of **D-4**: PR 9 turned the application into `dist/`, and the
+old script's `--exclude='dist'` would have uploaded everything except it. `refactor.md`
+§1.4 calls that the single biggest risk in the whole refactor, which is why the plan
+requires PR 9 and PR 10 to land together.
 
-Therefore: **after any change under `server/`, the deploy is not finished until someone
-restarts the relay by hand.** The new source sits in `/var/www/html/server/` while the
-old code keeps running from memory. This failure mode is silent — the deploy prints
-`Sync complete!` and the relay keeps serving stale behaviour indefinitely.
+```bash
+./sync.sh                # build, deploy the app + relay, restart the relay
+./sync.sh --textures     # also upload textures/ (118 MB — only when they change)
+./sync.sh --dry-run      # print every remote command, connect to nothing
+./sync.sh --no-restart   # deploy but leave the relay running
+```
+
+**What ships, and where it lands:**
+
+| Local | Remote | Notes |
+|---|---|---|
+| `dist/*` | `/var/www/html/` | `index.html` + `assets/` — the built application |
+| `server/` | `/var/www/html/server/` | unchanged by PR 9; still CommonJS, still the relay |
+| `cuubz-relay.service` | `/var/www/html/` | data only; systemd reads it from `/etc` |
+| `textures/` | `/var/www/html/textures/` | **separate artifact** — skipped unless `--textures` or absent on the host |
+
+Nothing else. Not `src/`, `test/`, `scripts/`, `node_modules/`, `.git/`, `.claude/`, or
+any planning `.md`.
+
+**Step by step, with the row each step closes:**
+
+| Step | What it does | Closes |
+|---|---|---|
+| 1 | `npm run build`, then refuse to continue unless `dist/index.html` exists **and contains a module script tag**. Runs before the host is touched at all | **D-4** |
+| 2 | Pack `dist/*` + `server/` + the unit file into a temp archive **outside** the repo and outside the web root | **D-7**, **D-13** |
+| 3 | Stage it in `/home/dadmin/cuubz-deploy/incoming/`, not in `/var/www/html` | **D-7** |
+| 4 | Tar the current web root (minus `textures/`) to `/home/dadmin/cuubz-deploy/backups/webroot-<stamp>.tar.gz`, keep the last 5 — **before** anything is deleted | **D-3** |
+| 5 | `rm -rf` the managed paths in the web root, then extract. A deploy now converges on what the repo contains instead of accreting | **D-5** |
+| 6 | `chmod` scoped to what was extracted, `textures/` pruned, and after extraction has already succeeded | **D-6** |
+| 7 | `npm ci --omit=dev` in `/var/www/html/server` | **D-9** |
+| 8 | Textures uploaded only on `--textures`, or automatically if `textures/blocks/manifest.json` is missing on the host | **D-11** |
+| 9 | Point `~/.local/node` at the newest `node-v*-linux-x64` under `~/.local` | **D-10** |
+| 10 | Install the unit file **only if it differs**, `daemon-reload` if so, then `systemctl restart cuubz-relay` and confirm it came back | **D-2** |
+| 11 | Verify on the host: `index.html` exists, it references a `.js`, and that file is on disk. Then `textures/blocks/manifest.json` and `server/index.js` | the D-4 failure mode |
+
+`StrictHostKeyChecking` went from `no` to `accept-new` (**D-12**): the first key is
+trusted and pinned, a *changed* key is an error. On a LAN IP that is an improvement
+rather than a fix, and the row stays open with that note.
+
+**Two deliberate soft failures.** A deploy is not all-or-nothing once files are on the
+host, and pretending otherwise produces the worst outcome — a script that aborts halfway
+and leaves the operator guessing which half ran.
+
+- **The relay restart warns, it does not abort.** `sudo -n` fails immediately if `dadmin`
+  has no passwordless sudo (rather than hanging on a password prompt with no TTY), and
+  the script then prints the exact two commands to run by hand. The static site is
+  already deployed and correct at that point; only the relay is stale.
+- **`chmod` is `|| true`.** Extraction has already succeeded. A file owned by another
+  user is something to be told about, not something to fail a completed deploy over.
+  This is the specific ordering bug D-6 describes, inverted.
+
+**The deploy layout is tested locally, on every `npm run test:e2e`.** That is not a
+coincidence: `test/e2e/staticServer.js` serves `dist/` with a fallback to the repo root
+for `textures/` — the same two-artifact split this script creates on the host. So the
+152-assertion harness is, among other things, a rehearsal of the served layout. What it
+cannot rehearse is `ssh`, `sudo`, `systemctl`, and the filesystem on the other end.
+
+**Not fixed here, and why.** `D-12` stays open as a note (see above). The web root is
+still overwritten in place rather than swapped via a `releases/current` symlink — an
+atomic swap needs the web server's document root to point at a symlink, and nothing in
+this project has ever verified what serves `/var/www/html` ([§3.1](#31-what-serves-the-static-site-unverified)).
+Guessing at nginx configuration from a machine that cannot reach the host is how you
+take a site down for real. The backup in step 4 is the rollback until that is known.
+
+
+## 5. Restarting the relay
+
+> **PR 10 fixed this (D-2).** `sync.sh` now installs the unit file if it changed,
+> `daemon-reload`s if so, runs `systemctl restart cuubz-relay`, and confirms the unit
+> came back active. If `dadmin` has no passwordless sudo the script **warns and prints
+> the two commands below** rather than failing the deploy — the static site is already
+> live and correct at that point, and only the relay is stale. `[UNVERIFIED]` against the
+> host, like everything else on the remote side.
+>
+> The paragraph below is the pre-PR-10 state and the reason the step exists.
+
+**The old `sync.sh` never restarted anything.** There was no `systemctl`, `service`,
+`kill`, or `pm2` call anywhere in the repo — verified across all tracked files; the only
+`systemctl` text was documentation prose in `multiplayer.md:376-377`.
+
+So **after any change under `server/`, the deploy was not finished until someone
+restarted the relay by hand.** The new source sat in `/var/www/html/server/` while the
+old code kept running from memory. The failure mode was silent — the deploy printed
+`Sync complete!` and the relay served stale behaviour indefinitely.
 
 ```bash
 # Restart (required after any server/ change)
@@ -693,17 +789,64 @@ directory — not a package-managed node, not on `PATH`, not a version manager s
   `test_pageLoad` (currently quarantined) and no test runs in production. But it means
   "green in CI" is not the same statement as "runs on the relay host".
 
-**Not changed here.** Repointing `ExecStart` at `/usr/bin/env node` or a different
-binary changes which interpreter runs the production relay, and that cannot be
-validated without SSH. Documented, deliberately unfixed.
+**Changed by PR 10 (D-10).** The unit no longer names a version:
+
+```ini
+ExecStart=/usr/bin/env node index.js
+Environment="PATH=/home/dadmin/.local/node/bin:/home/dadmin/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+```
+
+`/home/dadmin/.local/node` is a **symlink `sync.sh` creates and refreshes on every
+deploy**, pointing at the newest `node-v*-linux-x64` directory under `~/.local`. So a
+node upgrade is "unpack the tarball, run `./sync.sh`" — no unit edit, no
+`daemon-reload`, and no path that goes stale the moment the old directory is removed.
+That is the owner's ruling (`BUGS.md` decision 4): resolve node from the environment
+rather than pin a patch version that has already drifted from the one CI tests.
+
+**This is the single highest-risk unverified change in PR 10.** It decides which
+interpreter runs the production relay and it has not been executed against the host.
+The specific ways it can fail, in order of likelihood:
+
+1. `~/.local` contains no `node-v*-linux-x64` directory (a differently-named unpack).
+   `sync.sh` prints `no ~/.local/node-v*-linux-x64 found — leaving the symlink alone`
+   and continues; the relay then fails `203/EXEC` on restart. **Read the deploy output.**
+2. The symlink is created but systemd's `PATH` override is wrong for this systemd
+   version — quote handling around `Environment=` differs across releases.
+   `systemctl show cuubz-relay -p Environment` is the check.
+3. It works and silently starts a *different* node than 22.22.0, because the glob picks
+   the newest. That is the intent, and it is why CI's node 22.23.x is now the closer
+   match rather than the skew this section used to describe.
+
+If any of it goes wrong the fallback is one line — put the absolute path back in
+`/etc/systemd/system/cuubz-relay.service` and `daemon-reload`. Verify with:
+
+```bash
+ssh dadmin@10.0.30.160 'ls -l ~/.local/node && ~/.local/node/bin/node --version'
+ssh dadmin@10.0.30.160 'systemctl show cuubz-relay -p ExecStart -p Environment'
+ssh dadmin@10.0.30.160 'systemctl status cuubz-relay --no-pager'
+```
+
+The CI-skew note above still stands and is now smaller: CI runs the latest 22.x and the
+host will run whatever is newest under `~/.local`, so the two converge instead of
+drifting by construction.
 
 ---
 
 ## 6. Rollback
 
+> ### ▶ PR 10 gave this a target (D-3). Read [§6.5](#65-the-pr-10-rollback) first.
+>
+> `sync.sh` now tars the web root into
+> `/home/dadmin/cuubz-deploy/backups/webroot-<stamp>.tar.gz` **before** it deletes
+> anything, and keeps the last five. That is a real artifact to roll back *to*, which
+> [§6.1](#61-there-is-no-rollback-mechanism-this-is-the-honest-answer) correctly said
+> did not exist. §6.1–§6.4 describe the pre-PR-10 state and remain accurate about
+> `sync-legacy.sh`; §6.5 is the current procedure. It is `[UNVERIFIED]` like everything
+> else on the remote side.
+
 ### 6.1 There is no rollback mechanism. This is the honest answer.
 
-Read `sync.sh:37` again:
+*(Pre-PR-10. Describes `sync-legacy.sh`.)* Read `sync.sh:37` again:
 
 ```bash
 cd /var/www/html && tar xzf webgame-cuubz.tar.gz && rm webgame-cuubz.tar.gz
@@ -796,6 +939,58 @@ Two things close the gap, neither of them a documentation task:
   build-then-ship rewrite it already owns. PR 10 is already scoped to rewrite
   `sync.sh`; rollback belongs in that rewrite, and this document should be updated in
   the same PR.
+
+---
+
+### 6.5 The PR 10 rollback
+
+**There is now something to roll back to.** Every `./sync.sh` run tars the web root —
+minus `textures/`, which is 118 MB and is not what a bad deploy breaks — into
+`/home/dadmin/cuubz-deploy/backups/webroot-<UTC stamp>.tar.gz`, **before** it deletes
+anything, and prunes to the last five. That is D-3's fix, and it is deliberately the
+boring one: no release directories, no symlink to flip, no web-server configuration
+touched.
+
+```bash
+# 1. What is available.
+ssh dadmin@10.0.30.160 'ls -lt /home/dadmin/cuubz-deploy/backups/'
+
+# 2. Restore. Remove the managed paths first — untarring over a broken tree leaves
+#    the broken files that the backup does not happen to contain (the same D-5 trap
+#    the deploy itself had to solve).
+ssh dadmin@10.0.30.160 'cd /var/www/html \
+  && rm -rf assets server index.html cuubz-relay.service \
+  && tar xzf /home/dadmin/cuubz-deploy/backups/webroot-<STAMP>.tar.gz -C /var/www/html'
+
+# 3. The relay is a separate concern — server/ came back with the tarball, but the
+#    running process did not.
+ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz-relay && systemctl status cuubz-relay --no-pager'
+
+# 4. Confirm the site serves JS. This is the check whose absence was D-4.
+curl -s http://10.0.30.160/ | grep -o 'src="[^"]*\.js"'
+curl -sI "http://10.0.30.160/$(curl -s http://10.0.30.160/ | grep -o 'assets/[^\"]*\.js' | head -1)" | head -1
+```
+
+**Three things this still does not cover, stated rather than implied:**
+
+1. **Textures are not in the backup.** If a deploy breaks `textures/` — only possible
+   with `--textures` — restore them with `./sync.sh --textures` from a good commit.
+2. **The database is untouched and that is correct.** Player worlds live in the
+   browser's IndexedDB ([§2](#2-do-not-change-player-data-invariants)), not on this
+   host. A rollback of the site does not roll back player data, and a rollback that
+   moves `DB_VERSION` *down* is the one genuinely dangerous case —
+   [§2.1](#21-indexeddb--worlds-and-terrain)'s five-step procedure exists for that.
+3. **`/etc/systemd/system/cuubz-relay.service` is not in the backup.** `sync.sh` only
+   copies the unit into `/etc` when it differs, so rolling back the web root can leave a
+   *newer* unit installed than the code you just restored. Check with
+   `systemctl cat cuubz-relay` and re-copy from the restored `/var/www/html/` if needed.
+
+**Still preferred where it applies: re-deploy a known-good commit**
+([§6.2](#62-what-you-can-actually-do-re-deploy-a-known-good-commit)). It is reproducible
+from git rather than from a tarball on one host, and `pre-refactor-baseline` (`27959d3`)
+is pushed. The backups are for the case where the last good state is not a commit — a
+half-applied deploy, or a host you cannot rebuild from source right now.
+
 
 ---
 
@@ -1129,6 +1324,17 @@ telling people not to do:
 
 ### NOT verified — requires SSH to `dadmin@10.0.30.160`
 
+> **PR 10 rewrote the deploy path and did not run one line of it.** Everything below was
+> already unverified; PR 10 *added* to it rather than reducing it, because the new
+> `sync.sh` deletes before it extracts, installs a systemd unit, restarts a service and
+> repoints which node binary production runs. The mitigations are that it backs up before
+> it deletes ([§6.5](#65-the-pr-10-rollback)), that `--dry-run` prints every remote
+> command without connecting, and that the served *layout* — `dist/` plus a separate
+> `textures/` — is exercised locally by all 152 assertions of `npm run test:e2e`. None of
+> that is a substitute for running it once.
+>
+> **Run `./sync.sh --dry-run` and read it before the first real deploy.**
+
 `./sync.sh` **was not run.** No command in this document was executed against the
 remote host. The following are inferences from the scripts, and each is marked
 `[UNVERIFIED]` where it appears:
@@ -1138,7 +1344,12 @@ remote host. The following are inferences from the scripts, and each is marked
 | What serves `/var/www/html` | `ss -ltnp \| grep -E ':(80\|443) '` ; `ls /etc/nginx/sites-enabled/` |
 | The site is actually reachable and playable | load `http://10.0.30.160/` in a browser |
 | `cuubz-relay` is installed, enabled and running | `systemctl status cuubz-relay --no-pager` |
-| The pinned node binary exists | `ls -l /home/dadmin/.local/node-v22.22.0-linux-x64/bin/node` |
+| A node tarball exists under `~/.local` for the D-10 symlink to point at | `ls -1d ~/.local/node-v*-linux-x64` |
+| The D-10 symlink resolves and the unit picks it up | `ls -l ~/.local/node` ; `systemctl show cuubz-relay -p ExecStart -p Environment` |
+| `rm -rf` of the managed web-root paths removes the stale pre-PR-9 `js/` tree and nothing else | `ls -la /var/www/html` before and after the first deploy |
+| The backup is actually written and readable | `ls -lt /home/dadmin/cuubz-deploy/backups/` |
+| `npm ci --omit=dev` works in `/var/www/html/server` (needs npm on PATH for a non-login ssh) | `ssh dadmin@10.0.30.160 "cd /var/www/html/server && npm --version"` |
+| The relay comes back after `systemctl restart`, and exits **non-zero** on a crash (D-8) | `systemctl status cuubz-relay --no-pager` ; `journalctl -u cuubz-relay -n 50` |
 | `ws` is installed on the host | `ls -d /var/www/html/{,server/}node_modules/ws` |
 | `dadmin` owns everything under `/var/www/html` (the D-6 risk) | `find /var/www/html ! -user dadmin -print -quit` |
 | `dadmin` has `sudo` for `systemctl` | `sudo -n systemctl status cuubz-relay` |
