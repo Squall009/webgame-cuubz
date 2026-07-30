@@ -48,6 +48,12 @@
  * PR 6b, D-15 and H-1 in PR 6c. If a future PR needs the pattern again, head the
  * block `ASSERTING A KNOWN DEFECT` and write the replacement assertion beside it.
  *
+ * ONE BLOCK IS NOT A CHECKLIST STEP. The PR 6d schema-upgrade block near the end
+ * proves something DEPLOY.md §7 never asked for because it was forbidden: that
+ * incrementing DB_VERSION over a populated version-2 database preserves every chunk
+ * and manifest. It runs against a throwaway probe database, not `cuubz-worlds`, for
+ * the reason given where it sits.
+ *
  * WHAT IT CANNOT VERIFY — see the UNVERIFIED summary it prints at the end.
  */
 
@@ -155,15 +161,22 @@ async function shot(page, name) {
 
 // ── Storage reader, run inside the page ───────────────────────
 //
-// Opens `cuubz-worlds` with NO version argument. That reads the current version
-// without triggering `onupgradeneeded`, which matters a great deal here:
-// DEPLOY.md §2.1 / H-2 — the upgrade handler deletes every object store before
-// recreating it, so a harness that opened with an explicit version and got the
-// number wrong would destroy the very data it is inspecting. `onupgradeneeded`
-// firing is reported as an error rather than tolerated.
+// Opens `cuubz-worlds` with NO version argument, which reads the current version
+// without triggering `onupgradeneeded`. `onupgradeneeded` firing here is reported as
+// an error rather than tolerated: a reader that upgrades the database it is
+// inspecting is measuring its own side effects.
 //
-// This is safe only because the database already exists by the time it runs;
-// opening a NON-existent DB with no version is H-3 (creates a store-less v1).
+// Before PR 6d this was load-bearing for a second reason — the upgrade handler
+// deleted every object store before recreating it (H-2), so a harness that named an
+// explicit version and got the number wrong would have destroyed the data it was
+// there to read. That is no longer true (§2.1 is a procedure now, and the PR 6d block
+// near the end of this file drives a real 2 → 3 increment), but the no-version read is
+// still the right shape for a reader.
+//
+// It is safe only because the database already exists by the time this runs. Opening
+// a NON-existent database with no version is H-3 itself: it creates a store-less v1.
+// Production has exactly one opener now, `ChunkManager.openDatabase()`, and it always
+// names DB_VERSION. This is a test reader, not a second production opener.
 const readStorage = (page, worldId) => page.evaluate(async (wid) => {
   const out = { upgradeFired: false };
   const db = await new Promise((res, rej) => {
@@ -918,6 +931,140 @@ async function main() {
       'After the migration no record anywhere in the store has an unscoped key — including the one seeded as bare');
     assertEquals(snapA3.worldChunkCount, snapA1.worldChunkCount + 1,
       `World A owns its ${snapA1.worldChunkCount} chunks plus the migrated record, and lost none of them`);
+
+    // ═══ PR 6d — H-2: a DB_VERSION increment is survivable ═════
+    //
+    // The accept criterion, run against real IndexedDB rather than the stub in
+    // test/test_chunkStorage.js: seed a version-2 database with real chunk and
+    // manifest records, then increment the version through the shipped upgrade
+    // handler and prove every record is still there, byte for byte.
+    //
+    // It runs against a SEPARATE database name. `cuubz-worlds` is the live one this
+    // whole run has been asserting against, and a test that drives an upgrade over
+    // it would be betting the other ~140 assertions on the thing under test. The
+    // ladder is name-agnostic — `ChunkManager._applySchemaUpgrade` receives the
+    // database, not the name — so the proof is unaffected and the blast radius is a
+    // database that is deleted three lines later.
+    //
+    // Version 3 has no step in shipped code (by design: rule 2 makes an unregistered
+    // version throw), so the test registers one that creates a real object store.
+    // "The upgrade did nothing" would prove nothing.
+    console.log('\n[PR 6d — H-2: increment DB_VERSION over a seeded v2 database]');
+    const upgradeResult = await page.evaluate(async () => {
+      const NAME = 'cuubz-h2-upgrade-probe';
+      const out = { errors: [] };
+      const del = () => new Promise((res) => {
+        const r = indexedDB.deleteDatabase(NAME);
+        r.onsuccess = r.onerror = r.onblocked = () => res();
+      });
+      // A leftover from an interrupted previous run would make this meaningless.
+      await del();
+
+      const openWith = (version, upgradeStep) => new Promise((res, rej) => {
+        const req = indexedDB.open(NAME, version);
+        req.onupgradeneeded = (e) => {
+          try {
+            if (upgradeStep) ChunkManager.SCHEMA_STEPS[version] = upgradeStep;
+            out.applied = ChunkManager._applySchemaUpgrade(
+              e.target.result, e.target.transaction, e.oldVersion, e.newVersion
+            );
+          } finally {
+            if (upgradeStep) delete ChunkManager.SCHEMA_STEPS[version];
+          }
+        };
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+
+      try {
+        // ── Seed: a version-2 database built by the shipped handler, holding real
+        //    encoded chunks and a real manifest.
+        let db = await openWith(2, null);
+        out.seedVersion = db.version;
+        out.seedStores = Array.from(db.objectStoreNames).sort();
+
+        const chunks = [
+          { cx: 0, cz: 0, world: 'probe-world-A' },
+          { cx: -3, cz: 7, world: 'probe-world-A' },
+          { cx: 12, cz: -8, world: 'probe-world-B' },
+        ].map(({ cx, cz, world }) => ({
+          chunkKey: `${world}:${cx},${cz}`,
+          worldName: world,
+          data: ChunkBinaryCodec.encode(new Chunk(cx, cz)),
+          savedAt: 1700000000000 + cx,
+        }));
+        const manifest = {
+          worldName: 'probe-world-A', seed: '424242',
+          generatedChunks: chunks.filter(c => c.worldName === 'probe-world-A')
+            .map(c => ({ key: c.chunkKey.split(':')[1], checksum: new DataView(c.data).getUint32(16, true) })),
+        };
+
+        let tx = db.transaction(['chunks', 'manifests'], 'readwrite');
+        chunks.forEach(c => tx.objectStore('chunks').put(c));
+        tx.objectStore('manifests').put(manifest);
+        await new Promise((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+
+        const readAll = async (database) => {
+          const t = database.transaction(['chunks', 'manifests'], 'readonly');
+          // Both requests are issued before either is awaited. A transaction commits
+          // once its request queue drains, and awaiting between two `getAll`s is
+          // exactly how you get a TransactionInactiveError on the second one.
+          const grab = (store) => new Promise((res) => {
+            const q = t.objectStore(store).getAll();
+            q.onsuccess = () => res(q.result || []);
+          });
+          const pending = [grab('chunks'), grab('manifests')];
+          const [c, m] = await Promise.all(pending);
+          return {
+            chunks: c.map(r => ({
+              chunkKey: r.chunkKey, worldName: r.worldName, savedAt: r.savedAt,
+              byteLength: r.data.byteLength, checksum: new DataView(r.data).getUint32(16, true),
+            })).sort((a, b) => a.chunkKey.localeCompare(b.chunkKey)),
+            manifests: m.map(r => ({ worldName: r.worldName, seed: r.seed, generatedChunks: r.generatedChunks })),
+          };
+        };
+
+        out.before = await readAll(db);
+        db.close();
+
+        // ── The increment. 2 → 3, through the shipped ladder.
+        db = await openWith(3, (d) => ChunkManager._ensureStore(d, 'probeStore', { keyPath: 'id' }));
+        out.afterVersion = db.version;
+        out.afterStores = Array.from(db.objectStoreNames).sort();
+        out.after = await readAll(db);
+        db.close();
+      } catch (err) {
+        out.errors.push(String(err && err.message ? err.message : err));
+      } finally {
+        await del();
+      }
+      return out;
+    });
+
+    assertEquals(upgradeResult.errors.length, 0,
+      `The 2 → 3 upgrade completed without throwing${upgradeResult.errors.length ? ' — ' + upgradeResult.errors.join(' | ') : ''}`);
+    assertEquals(upgradeResult.seedVersion, 2, 'The seeded probe database was created at version 2 by the shipped upgrade handler');
+    assertEquals((upgradeResult.seedStores || []).join(','), 'chunks,manifests',
+      'The shipped handler creates exactly the two DEPLOY.md §2.1 stores on a fresh database');
+    assertEquals((upgradeResult.before && upgradeResult.before.chunks.length) || 0, 3, 'Three chunk records were seeded');
+    assertEquals(upgradeResult.afterVersion, 3, 'H-2 FIXED — DB_VERSION was incremented to 3 against a pre-existing v2 database');
+    assertEquals((upgradeResult.applied || []).join(','), '3', 'Only the step for version 3 ran');
+    assertEquals((upgradeResult.afterStores || []).join(','), 'chunks,manifests,probeStore',
+      'H-2 FIXED — the new store was added ALONGSIDE the existing two, which is a real schema change, not a no-op');
+    assertEquals(
+      JSON.stringify(upgradeResult.after && upgradeResult.after.chunks),
+      JSON.stringify(upgradeResult.before && upgradeResult.before.chunks),
+      'H-2 FIXED — every chunk record survives the increment byte for byte: same keys, same worldNames, same lengths, ' +
+      'same header checksums, same savedAt. Pre-6d the handler deleted every object store here and this was 3 → 0.');
+    assertEquals(
+      JSON.stringify(upgradeResult.after && upgradeResult.after.manifests),
+      JSON.stringify(upgradeResult.before && upgradeResult.before.manifests),
+      'H-2 FIXED — the manifest survives the increment, checksums included, so the load-time integrity check keeps its baseline');
+
+    // The live database must be exactly where the rest of the run left it.
+    const snapAfterProbe = await readStorage(page, worldA);
+    assertEquals(snapAfterProbe.dbVersion, 2, 'The real cuubz-worlds database is still at version 2 — the probe touched a different database');
+    assertEquals(snapAfterProbe.chunkCount, snapA3.chunkCount, 'The real database holds the same number of chunk records as before the probe');
 
     // Exit cleanly one last time, so the final screenshot is the menu the player
     // is actually returned to rather than a mid-session frame.

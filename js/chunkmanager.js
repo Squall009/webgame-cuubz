@@ -249,8 +249,166 @@ class ChunkManager {
     }
   }
 
+  // ============================================================
+  // SCHEMA VERSION LADDER (H-2)
+  // ============================================================
+  //
+  // `onupgradeneeded` used to enumerate every existing object store,
+  // `deleteObjectStore` all of them, and recreate them empty, under a comment
+  // reading "handles schema changes cleanly". It did not. It made incrementing
+  // DB_VERSION — a one-character change — destroy every saved world on every
+  // player's device, with no migration and no warning. That is H-2, and it is why
+  // PR 6c had to run the H-1 key migration from `_openDB` at an unchanged version 2
+  // instead of doing the obvious thing, and why DEPLOY.md §2.1 carried a ⛔ warning
+  // saying the version must never be touched.
+  //
+  // It is a ladder now. `SCHEMA_STEPS[v]` is the step that brings a database from
+  // version v-1 to version v, and an upgrade runs every step in
+  // `(oldVersion, newVersion]` in ascending order. Two rules are what make it safe:
+  //
+  //   1. **A step creates. A step never deletes.** `_ensureStore` / `_ensureIndex`
+  //      are create-if-absent, so a step re-run against a database that already has
+  //      the store is a no-op instead of a data loss. Nothing in this file calls
+  //      `deleteObjectStore` any more, and the unit tests assert that by counting
+  //      schema operations rather than by reading the diff.
+  //   2. **A version with no registered step throws.** That aborts the
+  //      versionchange transaction, so the database stays at its old version with
+  //      its data intact and the open fails loudly. Bumping DB_VERSION without
+  //      writing the step is therefore a development-time failure, not a silent
+  //      "this database claims to be v3 but has a v2 schema".
+  //
+  // HOW TO CHANGE THE SCHEMA — this is the procedure DEPLOY.md §2.1 points at:
+  //
+  //   a. Add `ChunkManager.SCHEMA_STEPS[DB_VERSION + 1]`, using only `_ensureStore`
+  //      and `_ensureIndex`. If you need to reshape an existing store, create the
+  //      new one alongside it and leave the old one in place.
+  //   b. Increment `DB_VERSION` (line 21) and the version in DEPLOY.md §2.1.
+  //   c. **Data** that must be rewritten — as opposed to schema that must exist —
+  //      does NOT belong here. A versionchange transaction cannot await anything and
+  //      a half-applied one aborts the entire upgrade. Write it as an `_openDB`
+  //      migration next to `_migrateToWorldScopedKeys`, which every one of the seven
+  //      chunk-store boundary sites awaits, and make it idempotent.
+  //   d. Run `npm run test:e2e`. Its schema-upgrade block seeds a v2 database with
+  //      real chunk and manifest records and drives a real 2 → 3 upgrade through
+  //      this ladder in a real browser. That run is the only thing that makes an
+  //      increment survivable rather than merely intended.
+
+  /** Create an object store only if it is absent. Never deletes. Returns it, or null. */
+  static _ensureStore(db, name, options) {
+    if (db.objectStoreNames.contains(name)) return null;
+    return db.createObjectStore(name, options);
+  }
+
   /**
-   * Open IndexedDB. Returns Promise<IDBDatabase>.
+   * Create an index only if it is absent. `tx` is the versionchange transaction —
+   * the only way to reach an object store that this upgrade did not just create.
+   */
+  static _ensureIndex(db, tx, storeName, indexName, keyPath, options) {
+    if (!db.objectStoreNames.contains(storeName)) return;
+    const store = tx.objectStore(storeName);
+    if (store.indexNames.contains(indexName)) return;
+    store.createIndex(indexName, keyPath, options);
+  }
+
+  /**
+   * The stores and indexes every version of this schema requires.
+   *
+   * Idempotent, which is what lets it double as the repair pass at the end of every
+   * upgrade. H-3 is why that pass exists: `js/main.js` used to open the database
+   * with no version argument, which on a device where it did not exist created
+   * `cuubz-worlds` at **version 1 with no object stores at all**. Such a database
+   * arrives here as a 1 → 2 upgrade whose step must create the stores even though
+   * "version 1" is supposed to have made them.
+   */
+  static _ensureBaseSchema(db, tx) {
+    ChunkManager._ensureStore(db, STORE_CHUNKS, { keyPath: 'chunkKey' });
+    ChunkManager._ensureIndex(db, tx, STORE_CHUNKS, 'worldName', 'worldName', { unique: false });
+    ChunkManager._ensureStore(db, STORE_MANIFESTS, { keyPath: 'worldName' });
+  }
+
+  /**
+   * Run every schema step in `(oldVersion, newVersion]`, in order.
+   *
+   * Called from `onupgradeneeded`, so it is synchronous by necessity: the
+   * versionchange transaction closes at the end of this turn of the event loop.
+   *
+   * @returns {number[]} the versions whose steps ran, for logging.
+   */
+  static _applySchemaUpgrade(db, tx, oldVersion, newVersion) {
+    const from = oldVersion || 0;
+    const applied = [];
+
+    for (let v = from + 1; v <= newVersion; v++) {
+      const step = ChunkManager.SCHEMA_STEPS[v];
+      if (typeof step !== 'function') {
+        // Throwing aborts the versionchange transaction: the database keeps its old
+        // version and every record in it. See rule 2 above.
+        throw new Error(
+          `[ChunkManager] No schema step registered for DB version ${v} ` +
+          `(upgrading ${from} -> ${newVersion}). Add ChunkManager.SCHEMA_STEPS[${v}] ` +
+          'before incrementing DB_VERSION — see the ladder comment in chunkmanager.js.'
+        );
+      }
+      step(db, tx);
+      applied.push(v);
+    }
+
+    // Repair pass. Creating a store that is already there is a no-op, and a store
+    // that is missing holds no data by definition, so this cannot cost anything —
+    // and it is what heals an H-3 database that reached a version without its
+    // stores. Unconditional because the base schema is permanent: rule 1 means no
+    // future step can legitimately remove either store.
+    ChunkManager._ensureBaseSchema(db, tx);
+    return applied;
+  }
+
+  /**
+   * Open `cuubz-worlds` at DB_VERSION with the schema ladder attached.
+   * Returns Promise<IDBDatabase>.
+   *
+   * **One opener, deliberately.** H-3 was a second one: `js/main.js:545` opened the
+   * database with no version argument, so on a device where it did not yet exist it
+   * created `cuubz-worlds` at version 1 with no object stores, and the
+   * `db.transaction(['manifests','chunks'])` on the next line threw `NotFoundError`
+   * into a silent `catch {}`. A caller that does not name the version is a caller
+   * that can create a database this codebase does not recognise, so there is now
+   * nowhere in the codebase to write one: both openers go through here.
+   *
+   * Not memoized — the caller owns the connection and may close it. Instance-level
+   * memoization is `_openDB` below.
+   */
+  static openDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onblocked = (event) => {
+        console.error('[ChunkManager] IndexedDB upgrade blocked — another tab may hold the DB open:', event);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const applied = ChunkManager._applySchemaUpgrade(
+          event.target.result, event.target.transaction, event.oldVersion, event.newVersion
+        );
+        if (applied.length > 0) {
+          console.info(
+            `[ChunkManager] IndexedDB schema ${event.oldVersion} -> ${event.newVersion}; ` +
+            `applied step(s) ${applied.join(', ')}. No object store was deleted (H-2).`
+          );
+        }
+      };
+
+      request.onsuccess = (event) => resolve(event.target.result);
+
+      request.onerror = (event) => {
+        const err = event.target.error;
+        console.error('[ChunkManager] IndexedDB open failed:', err);
+        reject(new Error(`IndexedDB open failed: ${err ? err.name + ' - ' + err.message : 'unknown error'}`));
+      };
+    });
+  }
+
+  /**
+   * Open IndexedDB for this manager. Returns Promise<IDBDatabase>.
    *
    * Every one of the seven chunk-store call sites awaits this first, which is what
    * makes it the correct place to run the H-1 key migration: no read or write can
@@ -259,38 +417,9 @@ class ChunkManager {
   async _openDB() {
     if (this._dbReady) return this._dbReady;
 
-    const opened = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-      request.onblocked = (event) => {
-        console.error('[ChunkManager] IndexedDB upgrade blocked — another tab may hold the DB open:', event);
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        // console.log(`[ChunkManager] IndexedDB upgrade: version ${event.oldVersion} -> ${event.newVersion}`);
-        // Drop old stores and recreate — handles schema changes cleanly
-        const storesToDelete = [];
-        for (let i = 0; i < db.objectStoreNames.length; i++) {
-          storesToDelete.push(db.objectStoreNames[i]);
-        }
-        storesToDelete.forEach(name => db.deleteObjectStore(name));
-
-        const chunkStore = db.createObjectStore(STORE_CHUNKS, { keyPath: 'chunkKey' });
-        chunkStore.createIndex('worldName', 'worldName', { unique: false });
-        db.createObjectStore(STORE_MANIFESTS, { keyPath: 'worldName' });
-      };
-
-      request.onsuccess = (event) => {
-        this._db = event.target.result;
-        resolve(this._db);
-      };
-
-      request.onerror = (event) => {
-        const err = event.target.error;
-        console.error('[ChunkManager] IndexedDB open failed:', err);
-        reject(new Error(`IndexedDB open failed: ${err ? err.name + ' - ' + err.message : 'unknown error'}`));
-      };
+    const opened = ChunkManager.openDatabase().then((db) => {
+      this._db = db;
+      return db;
     });
 
     // Migrate before anyone can read or write. A migration failure must not make the
@@ -1873,6 +2002,29 @@ class ChunkManager {
     }
   }
 }
+
+// ============================================================
+// SCHEMA STEPS (H-2) — read the ladder comment above `_ensureStore` first.
+// ============================================================
+//
+// `SCHEMA_STEPS[v]` brings a database from version v-1 to version v. Steps only
+// ever create; nothing here may delete a store. Assigned outside the class body so
+// it stays a plain, extendable object — the tests register a synthetic step to
+// drive a real 2 → 3 upgrade against a seeded database, which is the whole accept
+// criterion of PR 6d.
+ChunkManager.SCHEMA_STEPS = {
+  // Version 1 — the original schema: the two stores and the `worldName` index.
+  1: (db, tx) => ChunkManager._ensureBaseSchema(db, tx),
+
+  // Version 2 — no schema change of its own. PR 6c world-scoped the `chunks` store's
+  // primary key, but that is a change to the *values* of existing keys, not to the
+  // schema, and it runs as a data migration from `_openDB`
+  // (`_migrateToWorldScopedKeys`) precisely because H-2 made this handler unusable.
+  // The base schema is re-ensured rather than skipped because a database can
+  // legitimately arrive here without its stores: H-3 creates a version-1 database
+  // with none.
+  2: (db, tx) => ChunkManager._ensureBaseSchema(db, tx),
+};
 
 // Export for module environments
 if (typeof module !== 'undefined' && module.exports) {

@@ -540,12 +540,18 @@
       await this.persistence.deleteWorld(id);
 
       // Clean up orphaned chunk data and manifest from IndexedDB.
+      //
+      // H-3: this used to be `indexedDB.open('cuubz-worlds')` with NO version
+      // argument. On a device where the database did not exist yet — a player who
+      // deletes a world before ever entering one — that CREATES `cuubz-worlds` at
+      // version 1 with no object stores, and the `db.transaction([...])` below then
+      // throws NotFoundError into the silent `catch {}` at the bottom of this block.
+      // `ChunkManager.openDatabase()` is the single opener: it names DB_VERSION and
+      // carries the schema ladder, so the database it finds or creates is always one
+      // this codebase recognises. It returns a fresh connection, which is why the
+      // `db.close()` below is still correct.
       try {
-        const db = await new Promise((resolve, reject) => {
-          const request = indexedDB.open('cuubz-worlds');
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error);
-        });
+        const db = await ChunkManager.openDatabase();
         const tx = db.transaction(['manifests', 'chunks'], 'readwrite');
         // Delete manifest for this world
         tx.objectStore('manifests').delete(id);

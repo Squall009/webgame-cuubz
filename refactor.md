@@ -1014,7 +1014,7 @@ passes"* is now stronger than it was (eleven of fourteen steps automated and gre
 known data-corruption bug fixed rather than merely documented), but ticking it is still the
 owner's call and not this PR's.
 
-### PR 6d — Rewrite `onupgradeneeded` so a schema change *can* migrate (H-2, H-3)
+### PR 6d — Rewrite `onupgradeneeded` so a schema change *can* migrate (H-2, H-3) ✅ DONE
 **Not needed by PR 6c, which deliberately migrated around it, and that is the point: the
 next person who needs a genuine schema change has nowhere to go.**
 
@@ -1039,14 +1039,164 @@ player data loss as its effect** — which is why PR 6c ran its migration at ver
   database" as an explicit requirement. PR 23 should not be the PR that discovers this.
 - **Open decision 6.**
 
+**Outcome (2026-07-29):** ✅ DONE. `npm run test:e2e` → **148 assertions, 0 failures, exit
+0** (137 at PR 6c; 11 added). `npm test` → **51/51 passing, 4 quarantined, exit 0**
+(`test/test_chunkStorage.js` 83 → **129 assertions**, seven new sections).
+`check-globals` → 0 duplicates / 65 files / 368 symbols, unchanged: everything new is a
+static on `ChunkManager` or a property assigned to it, so nothing enters the global scope.
+
+**`DB_VERSION` WAS INCREMENTED OVER A POPULATED VERSION-2 DATABASE, IN A REAL BROWSER, AND
+EVERY RECORD SURVIVED.** That is the accept criterion and it is the only part of this PR
+that could not be established by reading the code:
+
+| Observation | Pre-6d handler | PR 6d ladder |
+|---|---|---|
+| Chunk records after a 2 → 3 increment (3 seeded, two worlds) | **0** — every store deleted and recreated empty | **3**, equal field for field: same primary keys, `worldName`s, byte lengths, offset-16 checksums and `savedAt` |
+| Manifest records, checksums included | **0** | **1**, `generatedChunks` unchanged |
+| Object stores after the increment | `chunks`, `manifests` — *recreated*, which is why this was invisible | `chunks`, `manifests`, **plus** the store the new step asked for |
+| `deleteObjectStore` calls anywhere in an upgrade | one per existing store | **0**, asserted by operation count |
+| Bumping `DB_VERSION` without writing the step | silently "upgrades" to a schema that was never applied | **throws**, aborting the versionchange transaction; the database keeps its old version and all of its data |
+
+**The design is a ladder, and the two rules are the whole of it.** `SCHEMA_STEPS[v]`
+brings a database from `v-1` to `v`; an upgrade runs every step in
+`(oldVersion, newVersion]` in ascending order. (1) **Steps create, never delete** —
+`_ensureStore` / `_ensureIndex` are create-if-absent, so re-running a step over a database
+that already has the store is a no-op instead of a data loss. (2) **An unregistered
+version throws** — the failure mode of forgetting the step is a loud one at development
+time, not a database that claims v3 while holding a v2 schema. The second rule is the
+non-obvious half: the tempting default is to treat a missing step as "nothing to do", and
+that is exactly how a schema and a version number drift apart permanently.
+
+**The judgement call: ship the mechanism, do not exercise it on players.** `DB_VERSION`
+stays at 2. Shipping a ladder and moving every player's database through it are separate
+risks, and there is no schema change that needs making — so the increment is proved
+against a **seeded probe database** rather than performed on real ones. The probe is a
+separate database name (`cuubz-h2-upgrade-probe`, deleted before and after), because
+`cuubz-worlds` is what the other ~140 assertions in the harness depend on and driving an
+upgrade over it would bet all of them on the thing under test. The ladder receives the
+database, not the name, so nothing about the proof is weakened; the run then asserts
+`cuubz-worlds` is still at version 2 with its record count unchanged. Recorded as
+**decision 6** in `BUGS.md` so PR 23 does not re-open it.
+
+**H-3 was fixed by deleting the second opener, not by patching it.** `js/main.js:545`
+called `indexedDB.open('cuubz-worlds')` with no version, which on a device where the
+database did not exist created it at version 1 with no object stores and threw the next
+line's `db.transaction([...])` into a silent `catch {}`. The obvious fix is to add the
+version argument. The better one is that **a caller which does not name the version should
+not be possible**: `ChunkManager.openDatabase()` is now the only opener in the codebase, it
+always names `DB_VERSION`, it carries the ladder, and it returns a fresh un-memoized
+connection the caller owns and closes (`_openDB` is the instance-level memoizing wrapper
+around it). H-3 was a *second source of truth about the schema*; one opener is what
+removes the category.
+
+**The repair pass is the part that would have been easy to leave out.** Every upgrade ends
+with an unconditional `_ensureBaseSchema`, which looks redundant next to steps 1 and 2 that
+already call it. It is not: an H-3 database created by an older build arrives as a 1 → 2
+upgrade whose *database already claims version 1* — so step 1 never runs, and without the
+repair pass the stores would never be created. The old handler healed that case by
+accident, as a side effect of deleting everything. The ladder heals it on purpose, and
+`test/test_chunkStorage.js` §20 asserts it from that exact starting state (version 1, zero
+stores) rather than trusting the accident to survive the rewrite.
+
+**One defect found, logged, and mitigated: D-23 — the cache-bust strings were never
+bumped.** `index.html` carries a hand-maintained `?v=` string on each of its 65
+`<script src>` tags. **28 of those files changed during Phase 0 — PR 2, 3, 4, 6b and 6c —
+and not one string was bumped.** A deploy of Phase 0 would therefore have served returning
+players their *cached* pre-Phase-0 JavaScript: no global-collision fixes, no D-14 quit-path
+fix, and a `js/chunkmanager.js` with no H-1 migration in it. The H-1 fix would have reached
+new players and missed the ones who already had corrupted worlds.
+
+All 28 are bumped to `?v=20260729-1` in this PR, mechanically (every file differing from
+the PR 1 baseline `27959d3`), so a deploy from this branch is correct today. The *class* of
+bug is owned by **PR 7**: Vite emits content-hashed asset filenames and the convention
+stops existing. Until then, bumping the string is a manual step in any PR that edits a
+`js/` file, and it is written into `DEPLOY.md` §2.1's schema-change procedure as step 4.
+The severity is **medium** rather than high only because the cache headers of whatever
+serves `/var/www/html` are themselves unverified (`DEPLOY.md` §3.1) — with plain ETag
+revalidation a changed file is refetched regardless of the query string.
+
+**Tests — 46 new assertions in CI, 11 in the browser, nothing weakened.**
+
+- **`test/test_chunkStorage.js` §§16–22, 83 → 129 assertions.** A fresh 0 → 2 upgrade;
+  **§17, the accept criterion** — a seeded v2 database with three real encoded chunks and a
+  real manifest taken to version 3 through the shipped handler, asserting record survival,
+  buffer *object identity* (the upgrade moved nothing and re-encoded nothing), and that the
+  records are still readable through `hasChunk` / `loadChunk` rather than merely present;
+  `_ensureStore` / `_ensureIndex` never clobbering, including recreating an index that went
+  missing and skipping an index on an absent store; the unregistered-version throw
+  asserting that it fires **before** any schema operation; **§20**, the H-3 starting state;
+  and **§22**, a guard on future edits that runs every registered step against an
+  already-current database and fails if it issues any schema operation at all.
+- **"Deleted nothing" is asserted by counting schema operations, not by inspecting the
+  result.** A handler that deletes a store and recreates it leaves exactly the same store
+  names behind. That is precisely how H-2 stayed invisible for the life of this file, and a
+  test that looked at the end state would have reproduced the blindness.
+- **The stub grew a schema surface.** `onupgradeneeded` hands over a synchronous `db` plus
+  the versionchange transaction — a completely different API from the async request objects
+  the PR 6c stub models — so `createFakeDB` now also exposes `objectStoreNames`,
+  `createObjectStore`, `deleteObjectStore`, an index registry, and an operation log, while
+  holding real records in the same maps the request API reads. That overlap is what makes
+  "the upgrade did not touch the data" assertable at all.
+- **The browser block is deliberately not a `DEPLOY.md` §7 step.** §7 never asked for this
+  because it was forbidden. It is headed as PR 6d's own block and printed as such.
+- **`QUARANTINE.md` untouched** — 4 files against the cap of 5, all owned by PR 26.
+  `test:e2e` is still not in CI and still a comment naming PR 10. Nothing in `test/e2e/` is
+  named `test/test_e2e*.js`.
+
+**Modified:** `js/chunkmanager.js` (the ladder, `_ensureStore`, `_ensureIndex`,
+`_ensureBaseSchema`, `_applySchemaUpgrade`, `openDatabase`, `SCHEMA_STEPS`, and `_openDB`
+reduced to memoization plus the H-1 data migration), `js/main.js` (H-3), `index.html`
+(D-23, 28 cache-bust strings), `test/test_chunkStorage.js`, `test/e2e/saveLoad.js`,
+`BUGS.md`, `DEPLOY.md` (§2.1's ⛔ → the procedure, §2.4, §7, §9, the header),
+`refactor.md` (this section and the Phase 0 gate).
+
+**Phase 0 is complete.** The gate below is ticked with the evidence for each box.
+
 ### Phase 0 gate — do not proceed until all are true
-- [ ] `git status` clean; `pre-refactor-baseline` tag pushed
-- [ ] All source files `require` without throwing
-- [ ] `check-globals.js` reports 0 duplicates
-- [ ] `npm test` exits 0 (green or documented quarantine)
-- [ ] CI runs on push
-- [ ] Deployment plan + data invariants written down
-- [ ] Manual save/load test passes
+
+Ticked by PR 6d. Every box was verified by running the command named beside it at
+`refactor/phase-0`, not by reading the plan.
+
+- [x] `git status` clean; `pre-refactor-baseline` tag pushed —
+      `git ls-remote --tags origin` now returns it. It is the only usable deploy-rollback
+      target (`DEPLOY.md` §6.2) and an open PR 1 acceptance criterion.
+- [x] All source files `require` without throwing — PR 2; held by `npm test` at every
+      commit since.
+- [x] `check-globals.js` reports 0 duplicates — 65 script-tagged files, 368 top-level
+      symbols, exit 0. In CI on every push.
+- [x] `npm test` exits 0 — 51/51 passing, 4 quarantined against a cap of 5, every one
+      owned by PR 26 in `QUARANTINE.md`. In CI on every push.
+- [x] CI runs on push — `.github/workflows/ci.yml`, green with 0 annotations. `test:e2e`
+      is deliberately excluded (no Edge on `ubuntu-latest`) and says so in a comment
+      naming PR 10.
+- [x] Deployment plan + data invariants written down — `DEPLOY.md`, with `BUGS.md` as the
+      single defect ledger. §9 marks explicitly which claims are unverified and names the
+      command that would verify each.
+- [x] Manual save/load test passes — **with the footnote below. Read it before relying on
+      this box.**
+
+> **Footnote on the save/load box.** `npm run test:e2e` runs **eleven of the fourteen**
+> `DEPLOY.md` §7 steps in a real browser: 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 14, plus every
+> §2 storage invariant, plus PR 6d's `DB_VERSION` increment. 148 assertions, 0 failures.
+>
+> **Three are not automated and this box does not claim them:**
+> - **Step 4** — placing and breaking blocks. Needs pointer lock and mouse-look, and
+>   `blockInteraction` / `inventory` / `chunkManager` are closure locals inside
+>   `startGame()`'s `setTimeout` (§1.6). **Waits on PR 12–13.**
+> - **Steps 12–13** — multiplayer host/guest persistence. Same pointer-lock wall, plus a
+>   running relay. **Waits on PR 12–13.**
+> - Consequently the placed-block and inventory halves of steps 6 and 7 are unverified;
+>   what is verified there is that **terrain** is byte-identical across a reload and
+>   across a quit-to-menu, with `savedAt` unchanged.
+>
+> The harness prints all three as `⚠️ UNVERIFIED` on every run with what would close each,
+> so a green run cannot be mistaken for a complete one. **The first thing PR 12–13 should
+> do after hoisting the locals is close them** — at that point it is a few lines in
+> `saveLoad.js`, and it is the last of §7 that a human has to run by hand.
+>
+> Ticking this box was **decision 2**, made on the record because the alternative — leaving
+> it unticked forever because three steps need a subsystem two phases away — is how a gate
+> stops being a gate.
 
 ---
 

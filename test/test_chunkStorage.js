@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cuubz — Chunk Storage Integrity Tests (PR 6c)
+ * Cuubz — Chunk Storage Integrity Tests (PR 6c, PR 6d)
  *
  * Covers the three things PR 6c changed about the bytes on a player's disk:
  *
@@ -14,6 +14,12 @@
  *   3. The corrected chunk buffer size (D-15), including the backward-compatibility
  *      property the fix depends on: a 2×-padded chunk written by the old encoder
  *      still decodes identically.
+ *
+ * PR 6d added sections 16-22: the schema version ladder that replaces H-2's
+ * delete-everything upgrade handler. Section 17 is PR 6d's accept criterion —
+ * DB_VERSION incremented against a SEEDED, pre-existing v2 database, with every
+ * chunk and manifest asserted to survive. `npm run test:e2e` runs the same
+ * increment against real IndexedDB in a real browser; this one runs in CI.
  *
  * WHY A HAND-ROLLED IndexedDB STUB
  * --------------------------------
@@ -64,6 +70,12 @@ function createFakeDB(chunkRecords = [], manifestRecords = []) {
     chunks: new Map(chunkRecords.map(r => [r.chunkKey, r])),
     manifests: new Map(manifestRecords.map(r => [r.worldName, r])),
   };
+  // Per-database schema, so the upgrade-ladder tests (PR 6d) can create stores and
+  // indexes on a database that already holds records — which is the only way to
+  // assert that an upgrade does not touch them.
+  const keyPaths = Object.assign({}, KEY_PATHS);
+  const indexes = { chunks: new Set(['worldName']), manifests: new Set() };
+  const schemaOps = [];
   const ops = { get: 0, getAllKeys: 0, put: 0, delete: 0, count: 0, transactions: 0 };
 
   function transaction(names, mode = 'readonly') {
@@ -105,7 +117,7 @@ function createFakeDB(chunkRecords = [], manifestRecords = []) {
     tx.objectStore = (name) => {
       if (!inTx.includes(name)) throw new Error(`objectStore("${name}") outside the transaction's scope`);
       const map = data[name];
-      const kp = KEY_PATHS[name];
+      const kp = keyPaths[name];
       const requireWrite = () => {
         if (mode !== 'readwrite') throw new Error('write attempted on a readonly transaction');
       };
@@ -144,7 +156,64 @@ function createFakeDB(chunkRecords = [], manifestRecords = []) {
     return tx;
   }
 
-  return { name: 'cuubz-worlds', version: 2, transaction, close() {}, _data: data, _ops: ops };
+  // ── Schema surface, for the PR 6d upgrade-ladder tests ──────────
+  //
+  // `onupgradeneeded` gets a synchronous `db` plus the versionchange transaction,
+  // and can only create/delete stores and indexes. That is a completely different
+  // surface from the async request API above, so it is modelled separately — and
+  // every schema operation is recorded, because "the upgrade deleted nothing" is
+  // the assertion H-2 needs and it is invisible in the resulting data.
+  const schemaStore = (name) => ({
+    name,
+    keyPath: keyPaths[name],
+    indexNames: { contains: (i) => indexes[name].has(i) },
+    createIndex(indexName) {
+      schemaOps.push(`createIndex:${name}.${indexName}`);
+      indexes[name].add(indexName);
+    },
+  });
+
+  const db = {
+    name: 'cuubz-worlds',
+    version: 2,
+    transaction,
+    close() {},
+    objectStoreNames: {
+      contains: (n) => Object.prototype.hasOwnProperty.call(data, n),
+      get length() { return Object.keys(data).length; },
+    },
+    createObjectStore(name, options) {
+      if (Object.prototype.hasOwnProperty.call(data, name)) {
+        throw new Error(`ConstraintError: object store "${name}" already exists`);
+      }
+      schemaOps.push(`createObjectStore:${name}`);
+      data[name] = new Map();
+      keyPaths[name] = options && options.keyPath;
+      indexes[name] = new Set();
+      return schemaStore(name);
+    },
+    deleteObjectStore(name) {
+      schemaOps.push(`deleteObjectStore:${name}`);
+      delete data[name];
+      delete keyPaths[name];
+      delete indexes[name];
+    },
+    _data: data,
+    _ops: ops,
+    _schemaOps: schemaOps,
+    _indexes: indexes,
+    /** The versionchange transaction `onupgradeneeded` would receive. */
+    _versionChangeTx: { objectStore: (name) => schemaStore(name) },
+    /** Remove a store WITHOUT logging it — for constructing a damaged starting state. */
+    _dropStoreSilently(name) { delete data[name]; delete keyPaths[name]; delete indexes[name]; },
+  };
+
+  return db;
+}
+
+/** Drive the real upgrade handler against a stub database. */
+function upgrade(db, oldVersion, newVersion) {
+  return ChunkManager._applySchemaUpgrade(db, db._versionChangeTx, oldVersion, newVersion);
 }
 
 /** A ChunkManager wired to a stub DB, with _openDB already satisfied. */
@@ -162,7 +231,7 @@ function chunkRecord(chunkKey, worldName, data) {
 // ── Tests ───────────────────────────────────────────────────────
 
 async function run() {
-  console.log('\n=== Chunk storage integrity (PR 6c) ===\n');
+  console.log('\n=== Chunk storage integrity (PR 6c, PR 6d) ===\n');
 
   // ── 1. The logical key is unchanged ──────────────────────────
   //
@@ -493,6 +562,215 @@ async function run() {
     assert(manifest !== null, 'loadManifest reads the manifest keyed by worldName');
     assertEquals(manifest.worldName, 'world-A', 'The manifest primary key is the world name, unchanged by PR 6c');
     assertEquals(await managerOn(db, 'world-B').loadManifest(), null, 'A second world has no manifest of its own yet');
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // PR 6d — the schema version ladder (H-2, H-3)
+  // ══════════════════════════════════════════════════════════════
+  //
+  // `onupgradeneeded` used to enumerate every object store, `deleteObjectStore` all
+  // of them and recreate them empty. Incrementing DB_VERSION by one destroyed every
+  // saved world on every player's device. These tests assert the two properties that
+  // replace it: an upgrade only ever CREATES, and a version with no registered step
+  // fails loudly instead of silently marking the database migrated.
+  //
+  // "Deleted nothing" is asserted by counting the schema operations the handler
+  // issued, not by inspecting the resulting data — a handler that deleted a store
+  // and recreated it leaves exactly the same store names behind, which is precisely
+  // how H-2 stayed invisible for the life of this file.
+
+  // ── 16. A fresh database: 0 → 2 ──────────────────────────────
+  {
+    const db = createFakeDB();
+    db._dropStoreSilently('chunks');
+    db._dropStoreSilently('manifests');
+
+    const applied = upgrade(db, 0, 2);
+    assertEquals(applied.join(','), '1,2', 'A fresh database runs both steps, in order');
+    assertEquals(db.objectStoreNames.contains('chunks'), true, 'The chunks store exists after a fresh upgrade');
+    assertEquals(db.objectStoreNames.contains('manifests'), true, 'The manifests store exists after a fresh upgrade');
+    assertEquals(db._data.chunks instanceof Map && db._data.chunks.size, 0, 'The new chunks store is empty');
+    assertEquals(db._indexes.chunks.has('worldName'), true, 'The worldName index is created (DEPLOY.md §2.1)');
+    assertEquals(db._schemaOps.filter(o => o.startsWith('deleteObjectStore')).length, 0,
+      'H-2 — a fresh upgrade deletes no object store');
+    assertEquals(db._schemaOps.filter(o => o.startsWith('createObjectStore')).length, 2,
+      'Each store is created exactly ONCE across both steps — _ensureStore is idempotent, so step 2 re-running the base schema costs nothing');
+  }
+
+  // ── 17. THE ACCEPT CRITERION ─────────────────────────────────
+  //
+  // Increment DB_VERSION against a SEEDED, pre-existing v2 database and prove every
+  // chunk and every manifest survives. Reasoning about it is what produced H-2 in
+  // the first place; the comment on the old handler said it "handles schema changes
+  // cleanly".
+  //
+  // The synthetic step 3 is a real schema change — a new object store — because
+  // "the upgrade did nothing" would prove nothing. It is registered here and removed
+  // afterwards, which is also the worked example of the procedure documented in
+  // chunkmanager.js: add SCHEMA_STEPS[n+1], then increment DB_VERSION.
+  {
+    const chunkA = chunkRecord('world-A:0,0', 'world-A');
+    const chunkB = chunkRecord('world-A:1,0', 'world-A');
+    const chunkC = chunkRecord('world-B:-3,7', 'world-B');
+    const manifest = { worldName: 'world-A', seed: '424242', generatedChunks: [{ key: '0,0', checksum: 7 }] };
+    const db = createFakeDB([chunkA, chunkB, chunkC], [manifest]);
+    const bytesBefore = chunkA.data;
+
+    assert(ChunkManager.SCHEMA_STEPS[3] === undefined, 'Version 3 has no step registered in shipped code');
+    ChunkManager.SCHEMA_STEPS[3] = (d) => ChunkManager._ensureStore(d, 'chunkIndex', { keyPath: 'id' });
+    let applied;
+    try {
+      applied = upgrade(db, 2, 3);
+    } finally {
+      delete ChunkManager.SCHEMA_STEPS[3];
+    }
+
+    assertEquals(applied.join(','), '3', 'Only step 3 ran — steps 1 and 2 are not replayed over a v2 database');
+    assertEquals(db.objectStoreNames.contains('chunkIndex'), true, 'The new store the step asked for exists');
+
+    // The whole point.
+    assertEquals(db._schemaOps.filter(o => o.startsWith('deleteObjectStore')).length, 0,
+      'H-2 FIXED — incrementing DB_VERSION over a populated database deletes NO object store');
+    assertEquals(db._data.chunks.size, 3, 'All three chunk records survive the version increment');
+    assertEquals(db._data.manifests.size, 1, 'The manifest survives the version increment');
+    assertEquals([...db._data.chunks.keys()].sort().join(' '), 'world-A:0,0 world-A:1,0 world-B:-3,7',
+      'Every chunk kept its world-scoped primary key');
+    assert(db._data.chunks.get('world-A:0,0').data === bytesBefore,
+      'A surviving chunk holds the SAME buffer object — the upgrade moved nothing and re-encoded nothing');
+    assertEquals(db._data.chunks.get('world-A:0,0').savedAt, 1, 'savedAt is untouched by the upgrade');
+    assertEquals(db._data.manifests.get('world-A').generatedChunks[0].checksum, 7,
+      'The manifest\'s recorded checksums survive, so the load-time integrity check still has its baseline');
+    assertEquals(db._indexes.chunks.has('worldName'), true, 'The worldName index is still there after the increment');
+
+    // And the records are still readable through the normal boundary sites, not just
+    // present in the map.
+    const cm = managerOn(db, 'world-A');
+    assertEquals(await cm.hasChunk('0,0'), true, 'World A can still read its chunk (0,0) after the increment');
+    assert((await cm.loadChunk('0,0')) === bytesBefore, 'loadChunk returns the same bytes it would have before the increment');
+  }
+
+  // ── 18. `_ensureStore` / `_ensureIndex` never clobber ────────
+  {
+    const db = createFakeDB([chunkRecord('world-A:0,0', 'world-A')]);
+    const before = db._schemaOps.length;
+
+    assertEquals(ChunkManager._ensureStore(db, 'chunks', { keyPath: 'chunkKey' }), null,
+      '_ensureStore returns null for a store that already exists');
+    ChunkManager._ensureIndex(db, db._versionChangeTx, 'chunks', 'worldName', 'worldName', { unique: false });
+    assertEquals(db._schemaOps.length - before, 0, 'Neither helper issues an operation when the target is already present');
+    assertEquals(db._data.chunks.size, 1, 'The existing record is untouched');
+
+    // An index missing from a store that exists — a damaged database — is repaired.
+    db._indexes.chunks.delete('worldName');
+    ChunkManager._ensureIndex(db, db._versionChangeTx, 'chunks', 'worldName', 'worldName', { unique: false });
+    assertEquals(db._indexes.chunks.has('worldName'), true, '_ensureIndex recreates an index that went missing');
+    assertEquals(db._data.chunks.size, 1, 'Recreating the index did not disturb the records');
+
+    // An index on a store that does not exist is skipped rather than throwing —
+    // the store-creating step that follows in the same ladder will make it.
+    db._dropStoreSilently('chunks');
+    ChunkManager._ensureIndex(db, db._versionChangeTx, 'chunks', 'worldName', 'worldName', { unique: false });
+    assert(true, '_ensureIndex on an absent store is a no-op, not a throw');
+  }
+
+  // ── 19. An unregistered version throws, and changes nothing ──
+  //
+  // Rule 2: throwing out of `onupgradeneeded` aborts the versionchange transaction,
+  // so the database keeps its old version and all of its data. Bumping DB_VERSION
+  // without writing the step is a development-time failure, not a silent
+  // "this database claims v4 but has a v2 schema".
+  {
+    const db = createFakeDB([chunkRecord('world-A:0,0', 'world-A')], [{ worldName: 'world-A' }]);
+    const opsBefore = db._schemaOps.length;
+    let threw = null;
+    try {
+      upgrade(db, 2, 4);
+    } catch (err) {
+      threw = err;
+    }
+    assert(threw !== null, 'Upgrading to a version with no registered step throws');
+    assert(/SCHEMA_STEPS\[3\]/.test(threw.message),
+      `The error names the missing step so the fix is obvious (${threw && threw.message})`);
+    assertEquals(db._schemaOps.length - opsBefore, 0, 'It throws BEFORE issuing any schema operation');
+    assertEquals(db._data.chunks.size, 1, 'The chunk record is untouched by the failed upgrade');
+    assertEquals(db._data.manifests.size, 1, 'The manifest is untouched by the failed upgrade');
+  }
+
+  // ── 20. H-3 — a version-1 database with no object stores ─────
+  //
+  // Exactly what `indexedDB.open('cuubz-worlds')` with no version used to create on a
+  // device that had never played: version 1, zero stores. The old handler healed it
+  // by accident (it deleted everything and recreated). The ladder heals it on
+  // purpose, through the repair pass.
+  {
+    const db = createFakeDB();
+    db._dropStoreSilently('chunks');
+    db._dropStoreSilently('manifests');
+    assertEquals(db.objectStoreNames.length, 0, 'The H-3 starting state: a version-1 database with no stores at all');
+
+    const applied = upgrade(db, 1, 2);
+    assertEquals(applied.join(','), '2', 'Only step 2 runs — the database already claims version 1');
+    assertEquals(db.objectStoreNames.contains('chunks'), true, 'H-3 — the chunks store is created anyway');
+    assertEquals(db.objectStoreNames.contains('manifests'), true, 'H-3 — the manifests store is created anyway');
+    assertEquals(db._indexes.chunks.has('worldName'), true, 'H-3 — with its index');
+    assertEquals(db._schemaOps.filter(o => o.startsWith('deleteObjectStore')).length, 0,
+      'H-3 is repaired without deleting anything');
+  }
+
+  // ── 21. `openDatabase` is the single opener, and it names the version ──
+  //
+  // H-3's root cause was a SECOND opener that did not name a version. This asserts
+  // the one that remains requests DB_VERSION and wires the ladder into
+  // `onupgradeneeded` — the two properties `js/main.js` now depends on.
+  {
+    const db = createFakeDB();
+    db._dropStoreSilently('chunks');
+    db._dropStoreSilently('manifests');
+
+    const savedIDB = global.indexedDB;
+    let requestedName = null;
+    let requestedVersion = null;
+    global.indexedDB = {
+      open(name, version) {
+        requestedName = name;
+        requestedVersion = version;
+        const req = {};
+        setTimeout(() => {
+          req.result = db;
+          if (req.onupgradeneeded) {
+            req.onupgradeneeded({ target: { result: db, transaction: db._versionChangeTx }, oldVersion: 0, newVersion: version });
+          }
+          if (req.onsuccess) req.onsuccess({ target: req });
+        }, 0);
+        return req;
+      },
+    };
+    try {
+      const opened = await ChunkManager.openDatabase();
+      assertEquals(requestedName, 'cuubz-worlds', 'openDatabase opens the DEPLOY.md §2.1 database name');
+      assertEquals(requestedVersion, 2, 'openDatabase names DB_VERSION explicitly — never the no-version form that caused H-3');
+      assert(opened === db, 'openDatabase resolves with the database');
+      assertEquals(db.objectStoreNames.contains('chunks'), true, 'openDatabase wired the ladder into onupgradeneeded');
+      assertEquals(db._schemaOps.filter(o => o.startsWith('deleteObjectStore')).length, 0,
+        'H-2 — the opener that the game and the world-deletion path both use deletes nothing');
+    } finally {
+      if (savedIDB === undefined) delete global.indexedDB; else global.indexedDB = savedIDB;
+    }
+  }
+
+  // ── 22. Every shipped step is create-only ────────────────────
+  //
+  // A guard on future edits rather than on current behaviour: run every registered
+  // step against a database that already has everything and assert none of them
+  // issues a delete or a create. A step added later that deletes a store fails here.
+  {
+    for (const version of Object.keys(ChunkManager.SCHEMA_STEPS).sort()) {
+      const db = createFakeDB([chunkRecord('world-A:0,0', 'world-A')]);
+      ChunkManager.SCHEMA_STEPS[version](db, db._versionChangeTx);
+      assertEquals(db._schemaOps.length, 0,
+        `SCHEMA_STEPS[${version}] issues no schema operation against a database that is already at that schema`);
+      assertEquals(db._data.chunks.size, 1, `SCHEMA_STEPS[${version}] leaves existing records alone`);
+    }
   }
 }
 

@@ -521,19 +521,19 @@
   <script src="js/util/viewport.js?v=20260729-1"></script>
 
   <!-- World Generation (VoxelGen Overhaul) -->
-  <script src="js/world/blockRegistry.js?v=20260725-2"></script>
+  <script src="js/world/blockRegistry.js?v=20260729-1"></script>
   <script src="js/world/noise.js?v=vgen-1"></script>
-  <script src="js/world/chunkData.js?v=20260728-5"></script>
-  <script src="js/world/biomeSystem.js?v=vgen-1"></script>
+  <script src="js/world/chunkData.js?v=20260729-1"></script>
+  <script src="js/world/biomeSystem.js?v=20260729-1"></script>
   <!-- Worker-side generation code (loaded for fetch-based Blob URL creation) -->
   <script src="js/world/workerGeneration.js?v=vgen-9"></script>
   <!-- REMOVED: featurePlacer, caveGenerator, oreGenerator — in workerGeneration.js -->
   <!-- New monolithic chunk manager (workers + IndexedDB + flush + region tracking) -->
-  <script src="js/world/chunkBinaryCodec.js?v=20260714-1"></script>
-  <script src="js/chunkmanager.js?v=20260728-5"></script>
+  <script src="js/world/chunkBinaryCodec.js?v=20260729-1"></script>
+  <script src="js/chunkmanager.js?v=20260729-1"></script>
   <!-- REMOVED: chunkStore, dirtyFlushManager, worldGenerator, chunkGrid → merged into chunkmanager.js -->
   <script src="js/world/persistence.js?v=20260714-1"></script>
-  <script src="js/world/spawnManager.js?v=20260714-1"></script>
+  <script src="js/world/spawnManager.js?v=20260729-1"></script>
 
   <!-- Renderer (PBR shader before texture atlas) -->
   <script src="js/renderer/pbrShader.js?v=20260725-5"></script>
@@ -544,45 +544,45 @@
   <script src="js/renderer/voxelRenderer.js?v=20260728-1"></script>
   <script src="js/renderer/firstPersonHand.js?v=20260728-10"></script>
   <script src="js/renderer/crosshair.js?v=20260714-1"></script>
-  <script src="js/renderer/skybox.js?v=20260725-2"></script>
+  <script src="js/renderer/skybox.js?v=20260729-1"></script>
   <script src="js/renderer/biomeEffects.js?v=20260725-1"></script>
   <script src="js/renderer/performanceSettings.js?v=20260725-2"></script>
-  <script src="js/renderer/performanceOptimizer.js?v=20260714-1"></script>
+  <script src="js/renderer/performanceOptimizer.js?v=20260729-1"></script>
 
   <!-- Input -->
   <script src="js/input/keyboard.js?v=20260714-1"></script>
   <script src="js/input/mouse.js?v=20260714-1"></script>
   <script src="js/input/touch.js?v=20260712-1"></script>
-  <script src="js/input/interaction.js?v=20260728-4"></script>
+  <script src="js/input/interaction.js?v=20260729-1"></script>
 
   <!-- Entities -->
   <script src="js/entities/player.js?v=20260714-1"></script>
-  <script src="js/entities/characterManager.js?v=20260714-1"></script>
-  <script src="js/entities/worldManager.js?v=20260714-1"></script>
-  <script src="js/entities/boss.js?v=20260714-1"></script>
-  <script src="js/entities/questMarker.js?v=20260714-1"></script>
+  <script src="js/entities/characterManager.js?v=20260729-1"></script>
+  <script src="js/entities/worldManager.js?v=20260729-1"></script>
+  <script src="js/entities/boss.js?v=20260729-1"></script>
+  <script src="js/entities/questMarker.js?v=20260729-1"></script>
 
   <!-- Systems -->
-  <script src="js/systems/inventory.js?v=20260728-1"></script>
-  <script src="js/systems/crafting.js?v=20260727-2"></script>
+  <script src="js/systems/inventory.js?v=20260729-1"></script>
+  <script src="js/systems/crafting.js?v=20260729-1"></script>
   <script src="js/systems/survival.js?v=20260714-1"></script>
-  <script src="js/systems/damageSystem.js?v=20260714-1"></script>
+  <script src="js/systems/damageSystem.js?v=20260729-1"></script>
   <script src="js/systems/questSystem.js?v=20260714-1"></script>
 
   <!-- Audio -->
-  <script src="js/audio/sfx.js?v=20260714-1"></script>
-  <script src="js/audio/ambient.js?v=20260714-1"></script>
+  <script src="js/audio/sfx.js?v=20260729-1"></script>
+  <script src="js/audio/ambient.js?v=20260729-1"></script>
 
   <!-- Multiplayer -->
-  <script src="js/multiplayer/client.js?v=20260720-1"></script>
-  <script src="js/multiplayer/host.js?v=20260714-1"></script>
-  <script src="js/multiplayer/playerSync.js?v=20260714-1"></script>
-  <script src="js/multiplayer/chunkStreamer.js?v=20260728-5"></script>
-  <script src="js/multiplayer/inventorySync.js?v=20260714-1"></script>
-  <script src="js/multiplayer/playerListHUD.js?v=20260714-1"></script>
+  <script src="js/multiplayer/client.js?v=20260729-1"></script>
+  <script src="js/multiplayer/host.js?v=20260729-1"></script>
+  <script src="js/multiplayer/playerSync.js?v=20260729-1"></script>
+  <script src="js/multiplayer/chunkStreamer.js?v=20260729-1"></script>
+  <script src="js/multiplayer/inventorySync.js?v=20260729-1"></script>
+  <script src="js/multiplayer/playerListHUD.js?v=20260729-1"></script>
 
   <!-- Game -->
-  <script src="js/game.js?v=20260714-1"></script>
+  <script src="js/game.js?v=20260729-1"></script>
 
   <!-- ── Mob System ────────────────────────────────────────────── -->
   <script src="js/mobs/mobDefinitions.js?v=20260728-1"></script>
@@ -605,6 +605,6 @@
   <script src="js/mobs/mobIntegration.js?v=20260728-1"></script>
 
   <!-- Main Entry (menu system, screen management) -->
-<script src="js/main.js?v=20260728-5"></script>
+<script src="js/main.js?v=20260729-1"></script>
 </body>
 </html>

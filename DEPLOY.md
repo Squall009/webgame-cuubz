@@ -4,7 +4,7 @@
 deploy, and avoid destroying player save data — without reading `refactor.md`.
 
 **Status of this document:** written at commit `749304b` (PR 6, 2026-07-29), amended at
-`0889448` (PR 6b) and again by PR 6c (same day). Every statement about repo contents was
+`0889448` (PR 6b) and again by PR 6c and PR 6d (same day). Every statement about repo contents was
 verified by reading the file cited. **No statement about the remote server
 `10.0.30.160` was verified** — that needs SSH access no author had. Unverified claims are
 marked `[UNVERIFIED]` with the command that would confirm them.
@@ -22,6 +22,14 @@ chunk buffer is no longer allocated at twice the size it uses. Both were shipped
 migration**, deliberately: they touch the same bytes, so players' data is rewritten once
 rather than twice. Steps 8–9 of [§7](#7-saveload-checklist) now **pass**. See
 [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions).
+
+**What PR 6d changed:** **H-2 and H-3 are fixed.** `onupgradeneeded` no longer deletes
+every object store — [§2.1](#21-indexeddb--worlds-and-terrain)'s ⛔ is now a **procedure**
+for changing the schema, proved by an actual `DB_VERSION` increment over a seeded
+version-2 database in a real browser. `ChunkManager.openDatabase()` is the codebase's only
+database opener. Separately, **28 stale `?v=` cache-bust strings in `index.html` were
+bumped** — every Phase 0 source change had been shipping to returning players' caches as a
+no-op (**D-23**).
 
 > **The defect list moved.** [`BUGS.md`](./BUGS.md) is now the single ledger — every known
 > defect, its severity, its **owner PR** and its status, in one table with a rule that no
@@ -101,10 +109,10 @@ call site in `js/`.
 | Invariant | Location | Value |
 |---|---|---|
 | Database name | `js/chunkmanager.js:20` | `'cuubz-worlds'` |
-| Database version | `js/chunkmanager.js:21` | `2` — **see the warning below** |
-| Object store | `js/chunkmanager.js:23,273` | `'chunks'`, `keyPath: 'chunkKey'` |
-| Index on that store | `js/chunkmanager.js:274` | `'worldName'` → `worldName`, non-unique |
-| Object store | `js/chunkmanager.js:24,275` | `'manifests'`, `keyPath: 'worldName'` |
+| Database version | `js/chunkmanager.js:21` | `2` — changing it is now a **procedure**, not a prohibition. See below |
+| Object store | `js/chunkmanager.js:23`, `_ensureBaseSchema` | `'chunks'`, `keyPath: 'chunkKey'` |
+| Index on that store | `_ensureBaseSchema` | `'worldName'` → `worldName`, non-unique |
+| Object store | `js/chunkmanager.js:24`, `_ensureBaseSchema` | `'manifests'`, `keyPath: 'worldName'` |
 | **Chunk primary key format** | `ChunkManager.prototype._storeKey` | `` `${worldName}:${cx},${cz}` `` — e.g. `"world-1753...:-3,7"`. **Changed by PR 6c**; see below |
 | Logical chunk key format | `ChunkManager.key` | `` `${cx},${cz}` `` — e.g. `"-3,7"`. **Unchanged** |
 | Manifest primary key | `js/main.js:2329` | the world's `id` (`currentWorld.id`) |
@@ -129,27 +137,65 @@ call site in `js/`.
 > goes through `_storeKey` too.
 >
 > **Existing records are migrated at runtime, at `DB_VERSION = 2`.** Not in
-> `onupgradeneeded` — read the warning below to see why that handler cannot be used to
-> migrate anything. `_migrateToWorldScopedKeys` runs from `_openDB`, which all seven sites
+> `onupgradeneeded` — at the time, that handler could not be used to migrate anything
+> (H-2, fixed in PR 6d; the box below is the procedure that replaced it). It stays where
+> it is regardless: rewriting record *data* is not a job for a versionchange transaction,
+> which cannot await. `_migrateToWorldScopedKeys` runs from `_openDB`, which all seven sites
 > await, so no read can observe a half-migrated store. It is idempotent: a key that
 > already contains `:` is skipped, so a migrated database costs one key scan and no
 > writes. A record with no `worldName` field cannot be attributed to a world and is left
 > in place rather than guessed at.
 
-> ### ⛔ `DB_VERSION = 2` must never be incremented
+> ### How to change the schema (H-2, fixed in PR 6d)
 >
-> `onupgradeneeded` (`js/chunkmanager.js:264-276`) **enumerates every existing object
-> store and deletes it**, then recreates them empty:
+> **This box used to be a ⛔ saying `DB_VERSION` must never be incremented.** It said so
+> because `onupgradeneeded` enumerated every existing object store, deleted all of them
+> and recreated them empty —
 >
 > ```js
-> storesToDelete.forEach(name => db.deleteObjectStore(name));
+> storesToDelete.forEach(name => db.deleteObjectStore(name));   // removed in PR 6d
 > ```
 >
-> The comment calls this "handles schema changes cleanly". It does not — it destroys
-> every saved world on every player's device, with no migration and no warning. Bumping
-> that integer is a one-character change with total data loss as its effect. If a schema
-> change is ever genuinely needed, the upgrade handler must be rewritten to migrate
-> before the version is touched.
+> — under a comment reading "handles schema changes cleanly". It did not: bumping that
+> integer was a one-character change with total data loss on every player's device as its
+> effect. That is **H-2**, and it is why PR 6c had to run the H-1 key migration from
+> `_openDB` at an unchanged version 2 rather than doing the obvious thing.
+>
+> **PR 6d replaced the handler with a version ladder.** `ChunkManager.SCHEMA_STEPS[v]` is
+> the step that brings a database from version `v-1` to version `v`; an upgrade runs every
+> step in `(oldVersion, newVersion]` in order. Two rules make an increment survivable:
+>
+> 1. **Steps create; steps never delete.** `_ensureStore` / `_ensureIndex` are
+>    create-if-absent, so a step re-run against a database that already has the store is a
+>    no-op rather than a data loss. `deleteObjectStore` no longer appears anywhere in
+>    `js/`.
+> 2. **A version with no registered step throws**, which aborts the versionchange
+>    transaction and leaves the database at its old version with its data intact. Bumping
+>    `DB_VERSION` without writing the step fails loudly at development time instead of
+>    silently marking an un-migrated database as migrated.
+>
+> **The procedure:**
+>
+> 1. Add `ChunkManager.SCHEMA_STEPS[DB_VERSION + 1]` at the bottom of
+>    `js/chunkmanager.js`, using only `_ensureStore` and `_ensureIndex`. To reshape an
+>    existing store, create the new one alongside it and leave the old one in place.
+> 2. Increment `DB_VERSION` (`js/chunkmanager.js:21`) **and the row in the table above**.
+> 3. **Data** that must be rewritten — as opposed to schema that must exist — does not go
+>    in a step. A versionchange transaction cannot await anything and a half-applied one
+>    aborts the whole upgrade. Write it as an `_openDB` migration beside
+>    `_migrateToWorldScopedKeys`, which all seven chunk-store boundary sites await, and
+>    make it idempotent.
+> 4. Bump the `?v=` cache-bust string on `js/chunkmanager.js` in `index.html`
+>    (**D-23** — nothing enforces this yet).
+> 5. Run `npm run test:e2e` **and** `npm test`. Both drive a real 2 → 3 increment against
+>    a database seeded with real chunk and manifest records — the browser harness against
+>    real IndexedDB, `test/test_chunkStorage.js` §17 against a stub, in CI. That pair is
+>    what makes an increment survivable rather than merely intended.
+>
+> **Opening the database:** `ChunkManager.openDatabase()` is the only opener in the
+> codebase and it always names `DB_VERSION`. Do not add a second one — a caller that does
+> not name the version can create a database this codebase does not recognise, which is
+> exactly what H-3 was.
 
 ### 2.2 Chunk binary format
 
@@ -275,20 +321,30 @@ entry with good bytes means the manifest is the thing out of date. Regenerating 
 signal would deterministically discard whatever a player built immediately before the
 write that outran the manifest.
 
-**H2 — `js/main.js:545` opens the database with no version.**
+**H-3 — `js/main.js:545` opened the database with no version. FIXED in PR 6d.**
+(This entry was labelled `H2` before PR 6c gave the ledger its IDs; `BUGS.md` calls it
+**H-3**, and H-2 is the upgrade handler in §2.1.)
 
 ```js
 const request = indexedDB.open('cuubz-worlds');   // no version argument
 ```
 
-If the database already exists this opens it at its current version and is fine. If it
-does *not* exist — a player who deletes a world before ever loading one — this **creates
+If the database already existed this opened it at its current version and was fine. If it
+did *not* — a player who deletes a world before ever loading one — this **created
 `cuubz-worlds` at version 1 with no object stores**, and the following
-`db.transaction(['manifests','chunks'])` throws `NotFoundError` into a silent
-`catch {}` (`:557-559`). It self-heals: `ChunkManager` later opens with version `2`,
-`onupgradeneeded` fires `1 → 2`, and the stores are created. Low severity, and the
-self-heal path is the same handler described in the warning in §2.1, so it is worth
-knowing about before anyone edits that handler.
+`db.transaction(['manifests','chunks'])` threw `NotFoundError` into a silent
+`catch {}` (`:557-559`). It self-healed through the same handler as H-2, which is why the
+two were one PR.
+
+**Fixed in PR 6d** by deleting the second opener rather than patching it: that call site
+is now `await ChunkManager.openDatabase()`, the single opener, which always names
+`DB_VERSION` and carries the schema ladder. The database it finds or creates is therefore
+always one this codebase recognises. If you need a connection anywhere else, call
+`openDatabase()` — it returns a fresh, un-memoized connection the caller owns and closes.
+
+**H-2 — `onupgradeneeded` deleted every object store. FIXED in PR 6d.** The full write-up
+and the procedure that replaced it are the box in
+[§2.1](#21-indexeddb--worlds-and-terrain).
 
 ---
 
@@ -720,7 +776,7 @@ Two things close the gap, neither of them a documentation task:
 >
 > A real browser (Edge, driven by `playwright-core`, WebGL via SwiftShader) walks the
 > menu flow, generates two worlds from pinned seeds, and reads IndexedDB and
-> localStorage directly. **137 assertions, exit 0, ~6 minutes.** Screenshots land in
+> localStorage directly. **148 assertions, exit 0, ~6 minutes.** Screenshots land in
 > `test/e2e/artifacts/` (gitignored).
 >
 > It covers steps 1, 2, 3, 5, 6, 7, **8, 9**, 10, 11 and 14 outright, plus every invariant in
@@ -890,9 +946,9 @@ verified by execution:
 ### Verified by execution in a real browser — added by PR 6b
 
 `npm run test:e2e` (`test/e2e/saveLoad.js`), Edge 150.0.4078.105 headless, WebGL via
-SwiftShader, **137 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
-rewrote the H-1 and D-15 blocks from asserting the defects to asserting the fixes). This
-moved the following out of "not verified":
+SwiftShader, **148 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
+rewrote the H-1 and D-15 blocks from asserting the defects to asserting the fixes; PR 6d
+added 11). This moved the following out of "not verified":
 
 - **Every value in [§2](#2-do-not-change-player-data-invariants)** — read from the
   running page rather than from source text. Database name, version `2` (read
@@ -965,6 +1021,30 @@ Two limits on that run, both stated because they bound what a green result means
   the harness can click and type but cannot place a block or read the player's
   position. That is why the persistence checks read storage directly, and why steps 4
   and 12–13 stay manual until PR 12–13 hoist those locals onto `Game`.
+
+### Verified by execution in a real browser — added by PR 6d
+
+Same harness, same browser. One thing, and it is the thing this document spent three PRs
+telling people not to do:
+
+- **`DB_VERSION` was incremented over a pre-existing version-2 database and every record
+  survived.** The harness creates a probe database through the shipped upgrade handler at
+  version 2, writes three real encoded chunk records (two worlds) and a real manifest with
+  real checksums, closes it, then reopens at **version 3** with a registered step that
+  creates a new object store. After the increment: the version is 3, the new store exists
+  **alongside** `chunks` and `manifests`, and every chunk and manifest record compares
+  equal field for field — same primary keys, same `worldName`s, same byte lengths, same
+  offset-16 checksums, same `savedAt`. Pre-6d that handler deleted every object store on
+  the way, so the same run would have gone from three chunk records to zero.
+- **It runs against a separate database name** (`cuubz-h2-upgrade-probe`), deleted before
+  and after. `cuubz-worlds` is the live database the other ~140 assertions depend on, and
+  driving an upgrade over it would bet all of them on the thing under test. The ladder
+  receives the database, not the name, so the proof is unaffected. The run asserts
+  afterwards that `cuubz-worlds` is still at version 2 with its record count unchanged.
+- **The same increment runs in CI**, against the stub in `test/test_chunkStorage.js` §17,
+  together with the H-3 repair path, the create-only property of every shipped step, and
+  the abort-on-unregistered-version rule. `npm test` is 51/51 with that file at 129
+  assertions.
 
 ### NOT verified — requires SSH to `dadmin@10.0.30.160`
 
