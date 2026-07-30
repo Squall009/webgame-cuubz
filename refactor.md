@@ -2827,6 +2827,48 @@ Each step is one private method or a system's `init()`. Preserve the existing or
 > literally would have inverted all three.
 - **Accept:** solo and multiplayer both start; saved spawn restore works; loading screen sequence unchanged.
 
+#### PR 17 outcome — landed
+
+`startGame()` — `src/main.js:321–2190`, **1,894 lines, 58% of the file** — is `src/core/Game.js`
+and ten new files. `main.js` is **3,230 → 1,401**. The fifteen steps run in the order the
+banners had, which is the order the code ran in; the three load-bearing couplings (atlases
+before icons, spawn search after `checkRegion`, mob system before the inventory it is handed
+at 13) are restated in the file that owns each. **`joinGame()` is still called in step 8 with
+four of its handlers registered in step 11** — the race `PR16_HANDOFF.md` §4.2 said to
+preserve, preserved, and noted in `initPlayer.js`'s header. **The four duplicate `onGame`
+registrations stay duplicated**: they are two live consumers, not D-44. `decision 33` is why
+there are eleven files rather than one; `decision 34` is why `Game` absorbed the Phase-0 class
+rather than standing beside it. `uiDeps` is unchanged and `gameDeps` extends it with the four
+hooks PR 18 takes.
+
+**`D-49` is the finding.** `renderInventoryCraftingUI()` read `game.chunkManager`, which PR 12
+emptied, so **pressing `E` threw before it could show the crafting screen — the inventory has
+not opened since PR 12**, through four PRs and five green `test:e2e` runs, because no
+assertion had ever pressed `E`. Six assertions were added and **proved non-vacuous by
+reintroducing the defect**: `.hidden` stays `true`, the grid renders 0 slots instead of 36,
+the recipe list stays empty. Four more defects logged with owners: **D-50** (eight
+`document` listeners added per `startGame()`, never removed → PR 18), **D-54** (`game.stop()`
+has no call site, so the 30 s save interval is never cleared → PR 18), **D-51** (the
+dropped-item colour table predates the block renumbering: 3 is cobblestone painted
+dirt-brown, 148 of 162 ids missing → PR 23), **D-52** (the equipment-slot click branch is
+unreachable → PR 26). **D-53** (`Game.update()`, a second rAF loop with no caller) is fixed
+here by deletion.
+
+One deliberate non-mechanical change: `isJoiningClient` is `!!`-coerced, so the `[JOIN]` log
+prints `false` instead of `null` for solo. `ChunkManager` already did `!!options.clientMode`.
+`test/helpers/esmRequire.js` learned to ignore a trailing `//` comment on an `import` line —
+the hook's own header says teach it rather than work around it.
+
+| Gate | Before | After |
+|---|---|---|
+| `npm test` | 53/53 + 4 quarantined | **53/53 + 4 quarantined** |
+| `npm run lint` | 0 errors, 172 warnings | **0 errors, 171 warnings** |
+| `npm run build` | exit 0 | **exit 0** |
+| `npm run test:e2e` (dist) | 183 / 0 | **189 / 0** (+6 = D-49) |
+| `npm run test:e2e:vite` | 183 / 0 | **189 / 0** |
+| `src/main.js` | 3,230 lines | **1,401 lines** |
+| largest extracted file | 374 (`SessionManager.js`) | **399 (`Game.js`)**; 327 is the largest new non-`core` file |
+
 ### 8.5 PR 18 — `RenderLoop` + `SystemRunner`, then delete `main.js`
 
 > **Absorbs PR 19** (§8.7). After the loop is extracted, take the pause menu → `src/ui/overlays/PauseMenu.js`, `updateDebugStats` → `src/ui/hud/DebugStats.js`, and the mobile detection / auto-rejoin / `beforeunload` / init trigger → `src/index.js`. **Then delete `src/main.js`.** Also owns **D-42** (`applyPerfSettings()` is defined and never called — either the inline sites in `startGame` call it or it goes; nothing may still be dead when the file is deleted).
@@ -3189,12 +3231,12 @@ Confirmed non-blockers: workers use no THREE; no removed APIs are referenced.
 | `updateConnectionStatus` ✅ PR 16 | `src/ui/hud/ConnectionHUD.js` |
 | `renderPlayerList` / `hidePlayerList` ✅ PR 16 | `src/ui/hud/PlayerListOverlay.js` (decision 28) |
 | `init()` DOM/event/settings wiring | `src/index.js` + `src/ui/screens/*` |
-| `startGame()` steps 1–15 | `src/core/Game.js` |
-| `new CuubzGame()` + `js/game.js` | Absorbed; `core/Game.js` is a **rewrite** |
-| Hotbar update, inventory toggle, crafting screen | `src/ui/hud/Hotbar.js`, `src/ui/overlays/*` |
+| `startGame()` steps 1–15 ✅ PR 17 | `src/core/Game.js` + `src/core/init/*` (9 modules) |
+| `new CuubzGame()` + `js/game.js` ✅ PR 17 | **Absorbed** into the one `Game` — decision 34. `BlockPalette` → `src/core/BlockPalette.js`, re-exported |
+| Hotbar update, inventory toggle, crafting screen ✅ PR 17 | `src/ui/hud/Hotbar.js`, `src/ui/overlays/{InventoryScreen,InventoryDrag}.js`. Dropped items → `src/game/systems/DroppedItemsSystem.js`; their colour table → `src/game/data/BlockColors.js` (**D-51**) |
 | Damage/quest/creative/sound wiring | respective system files |
 | Keyboard shortcuts, mouse wheel | `src/engine/input/InputManager.js` |
-| Periodic save `setInterval` | `src/engine/world/ChunkStorage.js` |
+| Periodic save `setInterval` ✅ PR 17 | `Game.savePlayerState()` + `src/core/init/initHud.js`, **not** `ChunkStorage.js` — it saves the *character*, not chunks. `Game.stop()` clears it (**D-54**) |
 | `renderLoop` | `src/engine/loop/RenderLoop.js` + `SystemRunner.js` |
 | `updateDebugStats` | `src/ui/hud/DebugStats.js` |
 | `setupPauseMenu`, `onExit` | `src/ui/overlays/PauseMenu.js` |

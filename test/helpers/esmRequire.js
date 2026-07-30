@@ -108,18 +108,18 @@ function transform(source, filename) {
 
   // `import x from './X.js?url';`  →  the resolved path as a string.
   out = out.replace(
-    /^import\s+([A-Za-z_$][\w$]*)\s+from\s+'([^']+)\?url';?[ \t]*$/gm,
+    /^import\s+([A-Za-z_$][\w$]*)\s+from\s+'([^']+)\?url';?[ \t]*(?:\/\/.*)?$/gm,
     (_m, name, spec) => `const ${name} = require.resolve('${spec}');`
   );
 
   // `import * as NS from 'spec';`
   out = out.replace(
-    /^import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+'([^']+)';?[ \t]*$/gm,
+    /^import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+'([^']+)';?[ \t]*(?:\/\/.*)?$/gm,
     (_m, ns, spec) => `const ${ns} = require('${spec}');`
   );
 
   // `import { a, b as c } from 'spec';`  (single line — the codemod never wraps)
-  out = out.replace(/^import\s*\{([^}]*)\}\s*from\s+'([^']+)';?[ \t]*$/gm, (_m, names, spec) => {
+  out = out.replace(/^import\s*\{([^}]*)\}\s*from\s+'([^']+)';?[ \t]*(?:\/\/.*)?$/gm, (_m, names, spec) => {
     const pairs = names
       .split(',')
       .map((n) => n.trim())
@@ -132,10 +132,10 @@ function transform(source, filename) {
   });
 
   // `import 'spec';`  (side effect only)
-  out = out.replace(/^import\s+'([^']+)';?[ \t]*$/gm, (_m, spec) => `require('${spec}');`);
+  out = out.replace(/^import\s+'([^']+)';?[ \t]*(?:\/\/.*)?$/gm, (_m, spec) => `require('${spec}');`);
 
   // `export { a, b };`
-  out = out.replace(/^export\s*\{([^}]*)\}\s*;?[ \t]*$/gm, (_m, names) => {
+  out = out.replace(/^export\s*\{([^}]*)\}\s*;?[ \t]*(?:\/\/.*)?$/gm, (_m, names) => {
     for (const n of names.split(',').map((s) => s.trim()).filter(Boolean)) {
       exported.add(n.split(/\s+as\s+/).pop().trim());
     }

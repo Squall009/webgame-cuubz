@@ -32,8 +32,13 @@
  * here would create two sources of truth for "is the game running" — the exact failure this
  * whole phase is unpicking. Instead `state.game` holds the instance and `isRunning` /
  * `isPaused` / `mode` / `delta` are **getters that read through to it**. That satisfies the
- * §4.2 shape without duplicating state. **PR 17 rewrites `Game.js` and absorbs this
- * object**; at that point the getters become fields and `state.game` goes away.
+ * §4.2 shape without duplicating state.
+ *
+ * **PR 17 update.** `state.game` is now the *same* `Game` that ran `init()` — the
+ * Phase-0-era stub and the orchestrator §8.4 asks for are one class (decision 34), so
+ * `game.state === state` and `state.game === game`. The getters stay exactly as they
+ * were: `running` / `paused` / `mode` / `delta` are still owned by one object and read
+ * from the other, and nothing here duplicates them.
  *
  * ─── THE FIELDS ARE DECLARED, NOT GROWN ─────────────────────────────────────
  *
@@ -91,11 +96,18 @@ export class GameState {
     this.crafting = null;
     this.blockInteraction = null;
     this.droppedItems = null;
+    // PR 17 — was a `main.js` top-level `let` that `startGame()` assigned and the render
+    // loop, the mob attack path and the pause menu's exit handler all read by name.
+    this.mobIntegration = null;
 
     // ── Multiplayer ───────────────────────────────────────────────────────
     this.playerSync = null;
     this.playerListHUD = null;
     this.chunkStreamer = null;
+    // PR 17 — was a `startGame()` local. Nothing outside step 13 reads it today; it is
+    // declared here rather than left on the `Game` instance because it owns a live
+    // `setInterval` (`startPeriodicSync`) that a teardown will have to find. See D-50.
+    this.inventorySync = null;
 
     // ── UI state and the two UI callbacks the render loop drives ──────────
     //
@@ -106,6 +118,20 @@ export class GameState {
     this.inventoryOpen = false;
     this.toggleInventoryScreen = null;
     this.updateHotbarUI = null;
+    // PR 17 — the inventory/crafting DOM moved to `src/ui/hud/Hotbar.js`,
+    // `src/ui/overlays/InventoryScreen.js` and `src/ui/overlays/InventoryDrag.js`. Those
+    // three call each other (a slot change repaints the grid, a craft repaints the
+    // hotbar) and they used to be sibling closures inside `startGame`. They reach each
+    // other through these fields now, which is the same thing the two above already did
+    // for the render loop — and it keeps the wiring countable instead of implicit.
+    this.renderItemIcon = null;
+    this.renderInventoryCraftingUI = null;
+
+    // ── The periodic save (PR 17) ─────────────────────────────────────────
+    // `setInterval` id for the 30 s character save. `Game.stop()` clears it; it is a
+    // field rather than a closure local because the teardown and the setup now live in
+    // different files. DEPLOY.md §7 has the timing table.
+    this.saveIntervalId = null;
 
     // ── Per-frame counters, folded in from `game.*` ───────────────────────
     //

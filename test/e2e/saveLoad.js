@@ -652,6 +652,51 @@ async function main() {
     assert(workerCounts.hardwareConcurrency > 0,
       `navigator.hardwareConcurrency is readable (${workerCounts.hardwareConcurrency}) — worker pool sizes derive from it`);
 
+    // ═══ D-49 — the inventory opens ═══════════════════════════
+    //
+    // `renderInventoryCraftingUI()` called `checkNearCraftingTable(player,
+    // game.chunkManager)`, and `game.chunkManager` has been `undefined` since PR 12
+    // folded the ad-hoc `game.*` props onto `GameState`. The scan's first line threw a
+    // TypeError, and it threw BEFORE `craftingScreen.classList.remove('hidden')` — so
+    // pressing E hid the hotbar, left `inventoryOpen` true and never showed the screen.
+    //
+    // **Five green runs of this file did not see it, because no assertion had ever
+    // pressed E.** That is the fourth time in this refactor that a green harness proved
+    // less than it looked like (D-32, D-34, D-43). PR 17 found it by moving the code.
+    console.log('\n[D-49 — the inventory + crafting screen opens]');
+    await page.keyboard.press('e');
+    const invOpened = await page.evaluate(() => {
+      const el = document.getElementById('crafting-screen');
+      return {
+        exists: !!el,
+        hidden: el ? el.classList.contains('hidden') : null,
+        hotbarHidden: !!document.getElementById('hotbar-container')?.classList.contains('hidden'),
+        recipeListRendered: !!document.getElementById('crafting-recipe-list')?.children.length,
+        gridSlots: document.querySelectorAll('#crafting-inv-grid .inventory-slot').length,
+      };
+    });
+    assert(invOpened.exists, 'D-49 — #crafting-screen is in the document');
+    assertEquals(invOpened.hidden, false,
+      'D-49 — pressing E OPENS the inventory. It threw on `game.chunkManager` (undefined ' +
+      'since PR 12) before it could remove .hidden, so this was false for four PRs');
+    assertEquals(invOpened.hotbarHidden, true,
+      'D-49 — the hotbar hides while the inventory is open');
+    assertEquals(invOpened.gridSlots, 36,
+      'D-49 — the 4×9 inventory grid rendered, which means renderInventoryGrid() ran to ' +
+      'completion rather than dying in the crafting-table proximity scan');
+    assert(invOpened.recipeListRendered,
+      'D-49 — the recipe list rendered (the empty-state message counts; the point is that ' +
+      'renderInventoryCraftingUI() reached it)');
+
+    // Close it again, so the pause-menu assertions below run against the same state
+    // they always have.
+    await page.keyboard.press('e');
+    await page.waitForFunction(
+      () => document.getElementById('crafting-screen')?.classList.contains('hidden'),
+      { timeout: 5000 },
+    );
+    assert(true, 'D-49 — pressing E again closes the inventory and restores the hotbar');
+
     await settleAndPause(page, 'world A first entry');
     await shot(page, '03-pause-menu');
     assert(await page.isVisible('#pause-menu'), '§7 step 5 — Escape opens the pause menu');
