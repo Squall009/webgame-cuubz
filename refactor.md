@@ -1212,7 +1212,7 @@ Ticked by PR 6d. Every box was verified by running the command named beside it a
 
 > **Deliverable:** identical game, ES modules, working build **and working deploy**. Zero visual change.
 
-### PR 7 — Vite skeleton, no source changes
+### PR 7 — Vite skeleton, no source changes ✅ DONE
 ```bash
 npm i -D vite
 ```
@@ -1228,6 +1228,81 @@ export default defineConfig({
 ```
 Add `dev` / `build` / `preview` scripts. **Do not touch `js/` yet.** Confirm `npm run dev` serves the existing script-tag site unchanged.
 - **Accept:** `npm run dev` → game plays identically. `npm run build` succeeds.
+
+**Outcome (2026-07-29):** ✅ DONE. `vite@^8.1.5` as a devDependency; `vite.config.js`;
+`dev` / `build` / `preview` / `test:e2e:vite` scripts; a `build` step in CI. **Not one
+byte of `js/` or `index.html` changed.**
+
+| Gate | Result |
+|---|---|
+| `npm run test:e2e` (staticServer — the parity baseline) | **150 assertions, 0 failures, exit 0** |
+| `npm run test:e2e:vite` (**`npm run dev`**) | **150 assertions, 0 failures, exit 0 — identical** |
+| `npm test` | 51/51 + 4 quarantined, exit 0 |
+| `node scripts/check-globals.js` | 0 duplicates / 65 files / 368 symbols |
+| `npm run build` | exit 0 (see D-24) |
+
+**"Serves the existing site unchanged" is checked, not asserted.** `--server=vite` runs
+the *whole* save/load harness against the dev server instead of `staticServer.js`, so the
+claim being made is not "the menu rendered" but "every storage invariant, both chunk key
+formats, the chunk binary header, `THREE.REVISION === 134`, both terrain round trips, the
+two-world H-1 regression test, the H-1 migration, PR 6d's `DB_VERSION` increment and the
+clean-load error budget all hold, identically, on both hosts". Cost: one ~110-line file
+and about six more minutes per phase gate.
+
+`staticServer.js` stays the default and stays the baseline. PR 6b wrote in its header that
+it exists so the harness does not depend on the dev server PR 7 introduces, "because a
+harness that depends on the thing it is validating is not a gate" — that sentence was
+written for this PR and it still holds.
+
+**One trap, found the hard way, and now impossible.** A dev server left running from an
+earlier attempt answered on the same port while the new `vite` failed to bind, so a probe
+run tested **stale code and passed**. `viteServer.js` therefore uses a fixed port with
+`--strictPort` and turns "vite exited before reporting a URL" into a rejection with vite's
+own output attached. An ephemeral port would have hidden the problem instead of solving
+it: the failure mode is not "the port was busy", it is "something else answered".
+
+**The `missing` assertion had to be re-implemented, not skipped.** `staticServer` counts
+its own 404s and the harness asserts zero. A child-process dev server cannot do that, and
+leaving `server.missing` as an empty array would have turned a real assertion vacuously
+true in one mode — weakening an assertion to make a run pass. The Vite host collects the
+same signal from Playwright's `response` event instead.
+
+**`publicDir: false`, and it is not a detail.** Vite's default is to copy the public
+directory into `dist/` on every build. `textures/` is 118 MB across 3,370 files at the repo
+root (§1.8), so pointing `publicDir` at it would duplicate 118 MB per build, and moving the
+tree into `public/` would duplicate it in git as well. With `publicDir: false` the dev
+server still serves `textures/` — it is inside the project root, and `textureAtlas.js`
+fetches it relatively. **PR 9** owns making those relative fetches survive a base-URL
+change; **PR 10** owns how textures reach a deploy host.
+
+**D-24 — `npm run build` succeeds and produces a `dist/` that cannot run.** Vite does not
+bundle a classic `<script src>`: it emits one *"can't be bundled without `type="module"`"*
+warning per tag — 65 of them — and copies neither the scripts nor the textures. So
+`dist/index.html` (28 kB) plus one bundled CSS asset is the entire output, carrying 65
+references to files that are not there. **This is the expected state at this point in the
+plan, not a regression:** PR 9 is what makes those files modules, which is what makes them
+bundleable. It is logged with an owner anyway, because "the build succeeds" and "the build
+output works" are different claims and only the first one is true today. `sync.sh` excludes
+`dist/` (**D-4**), so nothing can deploy it by accident; the residual risk is a human
+copying the directory by hand, which is why `DEPLOY.md` §4.3 now says so explicitly.
+
+**The `build` step went into CI in this commit**, which is what PR 5's comment block in
+`ci.yml` promised: *"PR 7 and PR 11 each add their step in the same commit that adds the
+script."* Today it only proves `vite build` does not crash. It becomes a real gate during
+PR 9, when every converted file is something the build can fail on — which is the point of
+having it before PR 9 rather than after.
+
+**Not done here, deliberately:** `vite` is not version-pinned (`^8.1.5`). §1.2's pin is
+about `three`, where a minor bump changes every colour in the game; a build tool that
+produces no deployed artifact yet does not need the same treatment, and pinning it would
+just be a lockfile with extra steps.
+
+**New files:** `vite.config.js`, `test/e2e/viteServer.js`. **Modified:** `package.json`
+(four scripts + the devDependency), `package-lock.json`, `test/e2e/saveLoad.js` (the
+`--server=` switch and the browser-side `missing` collector), `.github/workflows/ci.yml`
+(the `build` step, plus three comments that had gone stale), `BUGS.md` (D-24, and D-22's
+note, which claimed PR 11 would be the next PR to touch `ci.yml`), `refactor.md` (this
+section).
 
 ### PR 8 — Pin Three.js at r134
 ```bash

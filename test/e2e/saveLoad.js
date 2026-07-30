@@ -14,6 +14,17 @@
  * coverage and unrecoverable failure modes. A gate that depends on a human
  * clicking around does not get run at every checkpoint.
  *
+ * TWO HOSTS, SAME ASSERTIONS (PR 7)
+ * ---------------------------------
+ *     npm run test:e2e          # test/e2e/staticServer.js — the parity baseline
+ *     npm run test:e2e:vite     # test/e2e/viteServer.js — `npm run dev`
+ *
+ * The second is how PR 7's "Vite serves the existing script-tag site unchanged" is
+ * checked instead of asserted. Both must produce the same numbers; if they ever
+ * diverge, the Vite dev pipeline changed the game and PR 7's premise is false.
+ * `staticServer` stays the default — a gate that only runs on the thing it is
+ * validating is not a gate.
+ *
  * NOT part of `npm test` and NOT part of CI, deliberately. It needs a real browser
  * with a GPU stack; `ubuntu-latest` has no Edge, and downloading a Chromium plus
  * software-rasterising WebGL would add minutes to a 26 s CI run. The workflow
@@ -66,6 +77,10 @@ const { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..', '..');
 const ARTIFACTS = path.join(__dirname, 'artifacts');
 const HEADED = process.argv.includes('--headed');
+
+// Which server hosts the run: `static` (default, the parity baseline) or `vite`
+// (PR 7's `npm run dev`). See where it is used in main().
+const HOST = (process.argv.find(a => a.startsWith('--server=')) || '--server=static').split('=')[1];
 
 // SwiftShader software WebGL. Verified to produce a working WebGL2 context under
 // headless Edge: glRenderer reports "ANGLE (Google, Vulkan 1.3.0 (SwiftShader
@@ -385,9 +400,26 @@ async function main() {
     if (f.endsWith('.png')) fs.unlinkSync(path.join(ARTIFACTS, f));
   }
 
-  const { start } = require('./staticServer');
-  const server = await start(path.resolve(ROOT), 0);
-  console.log(`  ℹ  serving ${ROOT} at ${server.url}`);
+  // ── Which server hosts the run ──────────────────────────────
+  //
+  // `staticServer` is the default and the parity baseline: dependency-free, serves
+  // the working tree with no build step, and behaves identically before and after
+  // PR 7. `--server=vite` runs the SAME assertions against `npm run dev`, which is
+  // how PR 7's "serves the existing script-tag site unchanged" is checked rather
+  // than asserted. Both must produce the same numbers.
+  let server = null;
+  try {
+    if (HOST === 'vite') {
+      server = await require('./viteServer').start(path.resolve(ROOT), 3100);
+    } else {
+      server = await require('./staticServer').start(path.resolve(ROOT), 0);
+    }
+    assert(true, `Host server started (${HOST})`);
+  } catch (err) {
+    assert(false, `Host server started (${HOST}): ${err.message}`);
+    return finish();
+  }
+  console.log(`  ℹ  serving ${ROOT} at ${server.url} via ${HOST}`);
 
   let browser = null;
   try {
@@ -411,6 +443,12 @@ async function main() {
     if (m.type() === 'error') consoleErrors.push({ text: m.text(), url: m.location().url });
   });
   page.on('pageerror', e => pageErrors.push({ text: e.message, url: '' }));
+
+  // The Vite host cannot count its own 404s (it is a child process), so it collects
+  // them from this side instead. Without this the `server.missing` assertion below
+  // would go vacuously true in vite mode, which is weakening an assertion to make a
+  // run pass.
+  if (server.trackResponses) server.trackResponses(page);
 
   const drain = (list) => { const c = list.slice(); list.length = 0; return c; };
 

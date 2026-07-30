@@ -501,15 +501,34 @@ restructuring PR 10 owns.
 
 `sync.sh:30` — `--exclude='dist'`. `.gitignore:3` also ignores `dist/`.
 
-Today this excludes nothing, because nothing builds. **From PR 7 (Vite skeleton)
-onward, `dist/` is the entire application.** A deploy in that window uploads the source
-tree, excludes the only directory containing runnable JavaScript, and produces a live
-site with no JS at all — a black page. `refactor.md` §1.4 calls this the single biggest
-risk in the refactor and PR 10 ("must land with PR 9, not after") owns the fix.
+**From PR 9 onward, `dist/` is the entire application.** A deploy in that window uploads
+the source tree, excludes the only directory containing runnable JavaScript, and produces
+a live site with no JS at all — a black page. `refactor.md` §1.4 calls this the single
+biggest risk in the refactor and PR 10 ("must land with PR 9, not after") owns the fix.
 
-**Operational rule: do not run `./sync.sh` between PR 7 and PR 10.** The current
-`index.html` loads 65 individual `<script src>` tags directly from `js/`; the moment
-that becomes a bundle, this script is wrong until rewritten.
+> ### PR 7 landed the build, and it changed which half of this is dangerous
+>
+> `npm run build` exists now and exits 0, but **`dist/` is not runnable and deploying the
+> source tree is still correct** — which is the opposite of what "from PR 7 onward, `dist/`
+> is the application" led PR 6 to expect.
+>
+> Vite does not bundle a classic `<script src>`. `index.html`'s 65 script tags are classic,
+> so the build emits one warning per tag, copies neither the scripts nor `textures/`, and
+> writes a 28 kB `dist/index.html` carrying 65 references to files that are not there
+> (**D-24**, owned by PR 9 — converting those files to modules is what makes them
+> bundleable; the textures half is PR 10's). So today the danger is not a deploy that
+> *omits* `dist/`. It is a human who runs `npm run build`, sees it succeed, and copies the
+> output over the live site by hand.
+>
+> **Until PR 10: `./sync.sh` ships the source tree and that is the right thing to ship.
+> Do not point a deploy at `dist/`.** The window in the operational rule below opens at
+> **PR 9**, not PR 7 — but PR 9 and PR 10 are required to land together anyway, so in
+> practice the rule is unchanged.
+
+**Operational rule: do not run `./sync.sh` between PR 9 and PR 10, and do not deploy
+`dist/` at all before PR 10.** The current `index.html` loads 65 individual
+`<script src>` tags directly from `js/`; the moment that becomes a bundle, this script is
+wrong until rewritten.
 
 ### 4.4 The `chmod` is the fragile step
 
@@ -776,8 +795,17 @@ Two things close the gap, neither of them a documentation task:
 >
 > A real browser (Edge, driven by `playwright-core`, WebGL via SwiftShader) walks the
 > menu flow, generates two worlds from pinned seeds, and reads IndexedDB and
-> localStorage directly. **149 assertions, exit 0, ~6 minutes.** Screenshots land in
+> localStorage directly. **150 assertions, exit 0, ~6 minutes.** Screenshots land in
 > `test/e2e/artifacts/` (gitignored).
+>
+> ```bash
+> npm run test:e2e:vite   # the same 150 assertions against `npm run dev` (PR 7)
+> ```
+>
+> Added by PR 7 so "Vite serves the existing site unchanged" is checked rather than
+> asserted. The two hosts must produce the same numbers; if they diverge, the dev
+> pipeline changed the game. `test/e2e/staticServer.js` remains the default and the
+> parity baseline.
 >
 > It covers steps 1, 2, 3, 5, 6, 7, **8, 9**, 10, 11 and 14 outright, plus every invariant in
 > [§2](#2-do-not-change-player-data-invariants) — including the chunk binary header
@@ -946,7 +974,7 @@ verified by execution:
 ### Verified by execution in a real browser — added by PR 6b
 
 `npm run test:e2e` (`test/e2e/saveLoad.js`), Edge 150.0.4078.105 headless, WebGL via
-SwiftShader, **149 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
+SwiftShader, **150 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
 rewrote the H-1 and D-15 blocks from asserting the defects to asserting the fixes; PR 6d
 added 12). This moved the following out of "not verified":
 
@@ -1045,6 +1073,19 @@ telling people not to do:
   together with the H-3 repair path, the create-only property of every shipped step, and
   the abort-on-unregistered-version rule. `npm test` is 51/51 with that file at 129
   assertions.
+
+### Verified by execution in a real browser — added by PR 7
+
+- **The Vite dev server serves the identical game.** The full harness — all 150
+  assertions, both terrain round trips, the two-world H-1 regression test, the migration,
+  PR 6d's `DB_VERSION` increment, the clean-load error budget — runs against `npm run dev`
+  via `npm run test:e2e:vite` and produces **the same 150 / 0 / exit 0** as against
+  `staticServer.js`. That is what makes PR 7's "no source changes, identical game" a
+  measurement rather than a claim.
+- **`npm run build` exits 0 and its output does not run.** Both halves verified: the
+  command's exit status, and the contents of `dist/` (one HTML file, one CSS asset, 65
+  dangling script references, no `js/`, no `textures/`). See **D-24** and
+  [§4.3](#43-the-dist-landmine).
 
 ### NOT verified — requires SSH to `dadmin@10.0.30.160`
 

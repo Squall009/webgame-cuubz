@@ -2,9 +2,9 @@ name: CI
 
 # Phase 0 gate — refactor.md §5 PR 5.
 #
-# Two hard gates, both of which must stay green for Phase 1 to be allowed to start:
+# Three hard gates, all of which must stay green:
 #
-#   1. npm test               — test/run_tests.sh: 50 passing, 4 quarantined, exit 0.
+#   1. npm test               — test/run_tests.sh: 51 passing, 4 quarantined, exit 0.
 #                               Quarantined files are listed in test/QUARANTINE.md and
 #                               reported as SKIP. That list is capped at five files and
 #                               every entry names an owner PR; do not grow it to make
@@ -14,16 +14,24 @@ name: CI
 #                               index.html. This is the check that found the eight
 #                               silent global collisions fixed in PR 3. It exists so
 #                               they cannot come back during the PR 9 migration.
+#   3. npm run build           — added by PR 7 with the script itself, as promised
+#                               below. Today it only proves `vite build` does not
+#                               crash: index.html's 65 script tags are classic, not
+#                               modules, so Vite emits a warning per tag and does not
+#                               bundle them, and dist/ is NOT runnable (D-24, owned by
+#                               PR 9). It earns its keep during PR 9, when each
+#                               converted file becomes something the build can
+#                               actually fail on.
 #
-# Deliberately NOT here yet — neither script exists in package.json:
+# Deliberately NOT here yet — the script does not exist:
 #
-#   npm run build   → added by PR 7  (Vite skeleton)
 #   npm run lint    → added by PR 11 (ESLint 9 flat config + Prettier)
 #
-# refactor.md §5 PR 5 lists both in the step chain, but `npm run <missing-script>`
-# exits 1, so adding them now would make CI red on its first run, and adding them
+# refactor.md §5 PR 5 lists it in the step chain, but `npm run <missing-script>`
+# exits 1, so adding it now would make CI red on its first run, and adding it
 # with `|| true` would be a gate that reports success without checking anything.
-# PR 7 and PR 11 each add their step in the same commit that adds the script.
+# PR 11 adds its step in the same commit that adds the script — the idiom PR 7
+# followed for `build`.
 #
 # Deliberately NOT here for a different reason — the script DOES exist:
 #
@@ -32,8 +40,14 @@ name: CI
 #                       playwright-core's channel:msedge. ubuntu-latest has no
 #                       Edge, and installing a Chromium plus software-rasterising
 #                       WebGL through SwiftShader turns a ~26 s job into minutes.
-#                       It also asserts two known defects (H-1, D-14), so it is a
-#                       local pre-Phase-gate gate, not a per-push one.
+#                       It is a local pre-Phase-gate gate, not a per-push one.
+#                       (It used to also assert known defects; none remain — H-1,
+#                       D-15 and D-14 were all fixed and their blocks rewritten
+#                       into the assertions the fixes make true.)
+#
+#   npm run test:e2e:vite → the same 150 assertions against `npm run dev` instead
+#                       of test/e2e/staticServer.js, added by PR 7. Same browser
+#                       requirement, same owner.
 #
 #                       PR 10 is the earliest sensible owner if this ever moves to
 #                       CI: it already rewrites the deploy path and would want a
@@ -57,7 +71,7 @@ concurrency:
 
 jobs:
   test:
-    name: test + check-globals
+    name: test + check-globals + build
     runs-on: ubuntu-latest
 
     # The suite runs in ~20s but stands up real WebSocket servers on fixed ports and
@@ -103,3 +117,13 @@ jobs:
       - name: No duplicate top-level globals
         shell: bash
         run: npm run check-globals
+
+      # Added by PR 7 in the same commit as the script, per the note above.
+      # `vite build` currently emits one "can't be bundled without type=module"
+      # warning per classic <script src> in index.html and exits 0; dist/ is not
+      # runnable and is not deployed (D-24, D-4). What this catches today is a
+      # config or HTML change that breaks the build outright, and from PR 9 onward
+      # it catches a module that does not resolve.
+      - name: Build
+        shell: bash
+        run: npm run build
