@@ -139,11 +139,18 @@ jobs:
 
       # Replaced scripts/check-globals.js, which PR 11 deleted in this same commit.
       # `no-undef` is the strictly stronger check and it caught two real bugs on its first
-      # run (D-31, D-32). Warnings do not fail the build; errors do. Do not disable
-      # no-undef to make this green — an unresolved name in an ES module is a bug.
+      # run (D-31, D-32). Errors fail the build. Do not disable no-undef to make this
+      # green — an unresolved name in an ES module is a bug, not a style opinion.
+      #
+      # `lint:ci` is `eslint . --quiet`, i.e. errors only, and the `--quiet` is not
+      # cosmetic. GitHub renders every ESLint warning as a check annotation, so the plain
+      # `npm run lint` turned one green run into 178 warning annotations — which buries
+      # any annotation that matters and makes "CI green, zero annotations" stop meaning
+      # anything. The warnings are still there: `npm run lint` locally shows all of them,
+      # and D-33 tracks the count with PR 32 as its owner. What CI asserts is the gate.
       - name: Lint
         shell: bash
-        run: npm run lint
+        run: npm run lint:ci
 
       # Added by PR 7 in the same commit as the script, per the note above. Since PR 9
       # this compiles the whole module graph — an unresolvable import, a duplicate

@@ -394,7 +394,7 @@ cuubz/
 ├── scripts/generate-manifest.js   # keep regex-compatible with BLOCK_REGISTRY
 ├── .github/workflows/ci.yml
 ├── vite.config.js
-├── eslint.config.js           # FLAT config — ESLint 9+ (NOT .eslintrc.cjs)
+├── eslint.config.mjs          # FLAT config — ESLint 9+ (NOT .eslintrc.cjs). .mjs: see PR 11
 ├── .prettierrc
 ├── sync.sh                    # REWRITTEN: build, then ship dist/ (+ rollback — DEPLOY.md §6.4)
 ├── cuubz-relay.service        # verify WorkingDirectory after layout change
@@ -1752,7 +1752,7 @@ export default [
 - **Accept:** `npm run lint` exits 0. CI runs test + lint + build.
 
 **Outcome (2026-07-30):** ✅ DONE. `eslint@^10.8.0` and `prettier@^3.9.6` as devDependencies,
-`eslint.config.js` (flat), `.prettierrc`, `.prettierignore`, four scripts, a `Lint` step in
+`eslint.config.mjs` (flat), `.prettierrc`, `.prettierignore`, five scripts, a `Lint` step in
 CI, and **`scripts/check-globals.js` deleted** — script, CI step and its assertion block, in
 this same commit, exactly as [§4.2 of `PR8_HANDOFF.md`](./PR8_HANDOFF.md) and `BUGS.md`
 decision 8 required.
@@ -1845,6 +1845,19 @@ a warning nobody acts on decays into the same "green means nothing" state this P
 deleted a script for. PR 32 restructures the tests and owns the test half; the `src/` half
 falls out of Phase 3 and 4 as each file is split.
 
+**CI runs `npm run lint:ci` (`eslint . --quiet`), not `npm run lint`** — and that is not
+cosmetic. GitHub renders every ESLint warning as a check annotation, so the plain script
+turned one green run into 178 warning annotations, which buries any annotation that
+matters and quietly retires "CI green, zero annotations" as a statement worth making.
+Errors still fail the build. `npm run lint` locally shows everything.
+
+**The config file is `eslint.config.mjs`, not `.js`** — the one deviation from
+[§4.1](#41-target-directory-structure), and it is an extension, not a design change. Flat
+config is an ES module and `package.json` has no `"type": "module"`; adding one would
+reclassify every `.js` under `server/`, `test/` and `scripts/`, which are CommonJS. Without
+it, Node prints a `MODULE_TYPELESS_PACKAGE_JSON` warning on every lint run. `.mjs` is
+ESLint's documented answer.
+
 #### Prettier ships as a script and is not a gate
 
 `npm run format` / `npm run format:check` exist; **nothing has been reformatted and
@@ -1890,7 +1903,7 @@ true when they were written, and rewriting them would be falsifying a log.
   1.3 MB there. Once a deploy has happened, flipping it is one line with both e2e hosts as
   the gate.
 
-**New files:** `eslint.config.js`, `.prettierrc`, `.prettierignore`. **Deleted:**
+**New files:** `eslint.config.mjs`, `.prettierrc`, `.prettierignore`. **Deleted:**
 `scripts/check-globals.js`. **Modified:** `package.json` (+2 devDependencies, `lint` /
 `lint:fix` / `format` / `format:check`, `check-globals` removed), `package-lock.json`,
 `.github/workflows/ci.yml` (Lint step replaces Module boundary; `on: push` narrowed;

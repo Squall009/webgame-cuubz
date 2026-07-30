@@ -4,6 +4,12 @@
  * **Flat config, not `.eslintrc.cjs`.** ESLint 9+ ignores the old file entirely;
  * `refactor.md` §14 names that as an anti-pattern because v1 of the plan got it wrong.
  *
+ * **`.mjs`, not `.js`.** §4.1 names this file `eslint.config.js`; the extension is the one
+ * deviation and it is not a design change. This file is an ES module and package.json has
+ * no `"type": "module"` — adding one would reclassify every `.js` in `server/`, `test/`
+ * and `scripts/`, which are CommonJS. Without it Node prints a MODULE_TYPELESS_PACKAGE_JSON
+ * warning on every single lint run. `.mjs` is ESLint's documented answer and costs nothing.
+ *
  * ─── `no-undef` IS THE POINT ────────────────────────────────────────────────
  *
  * `refactor.md` §6 PR 11 calls it "the payoff", and the payoff only became collectable at
@@ -196,7 +202,7 @@ export default [
 
   // ── 4. Config files at the repo root ──────────────────────────────────────
   {
-    files: ['*.config.js'],
+    files: ['*.config.js', '*.config.mjs'],
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: NODE_GLOBALS },
     rules: BASE_RULES,
   },
