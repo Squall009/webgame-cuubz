@@ -36,8 +36,8 @@ import { PersistenceManager } from './engine/world/Persistence.js';
 // the only test coverage either class has. Option A: the tested classes win, the browser
 // copies are deleted, and the browser-only behaviour they carried (world chunk cleanup)
 // moved to `PersistenceManager.deleteWorld()`. The full ruling is refactor.md §8.1.
-import { CharacterManager, DEFAULT_COLOR, MAX_CHARACTERS } from './game/entities/CharacterManager.js';
-import { MAX_WORLDS, WorldManager } from './game/entities/WorldManager.js';
+import { CharacterManager } from './game/entities/CharacterManager.js';
+import { WorldManager } from './game/entities/WorldManager.js';
 // `js/game.js` published its class as the global `window.CuubzGame`; main.js has always
 // constructed it under that name. The alias keeps the call site (`new CuubzGame()`)
 // byte-identical while the binding becomes an ordinary import. PR 17 rewrites both.
@@ -45,6 +45,16 @@ import { Game as CuubzGame } from './core/Game.js';
 import { GameState } from './core/GameState.js';
 // Test-only: hands the live GameState to the e2e harness. No game code reads it back.
 import { publishGameState } from './testBridge.js';
+// PR 15 — the UI layer (refactor.md §8.2, §13). `screens`, `modals`, `sessionUI`,
+// `showScreen` and the four screen objects moved out of this file. The screens read
+// the managers through the live-getter `uiDeps` object below, because every one of
+// them is a `let` here that is still null when the UI is constructed.
+import { UIManager } from './ui/UIManager.js';
+import { CharacterScreen } from './ui/screens/CharacterScreen.js';
+import { LobbyScreen } from './ui/screens/LobbyScreen.js';
+import { SettingsScreen } from './ui/screens/SettingsScreen.js';
+import { WorldScreen } from './ui/screens/WorldScreen.js';
+import { escapeHtml } from './util/HTMLUtils.js';
 
 (function() {
   'use strict';
@@ -53,48 +63,18 @@ import { publishGameState } from './testBridge.js';
   const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
 
   // ============================================================
-  // Screen Management
+  // Screen Management — PR 15
   // ============================================================
+  //
+  // `screens`, `modals`, `sessionUI` and `showScreen()` are `UIManager`'s now. The four
+  // aliases below keep the ~40 call sites in this file byte-identical while the rest of
+  // Phase 3 moves them out; PR 19 deletes the aliases with the last of their readers.
 
-  const screens = {
-    mainMenu: document.getElementById('main-menu'),
-    characterScreen: document.getElementById('character-screen'),
-    worldScreen: document.getElementById('world-screen'),
-    modeScreen: document.getElementById('mode-screen'),
-    settingsScreen: document.getElementById('settings-screen'),
-    lobbyScreen: document.getElementById('lobby-screen'),
-    loadingScreen: document.getElementById('loading-screen'),
-  };
-
-  // Modal elements (NOT in screens — they must NOT be hidden by showScreen)
-  const modals = {
-    createCharModal: document.getElementById('create-char-modal'),
-    deleteCharModal: document.getElementById('delete-char-modal'),
-    createWorldModal: document.getElementById('create-world-modal'),
-  };
-
-  // Additional screen elements for session UI
-  const sessionUI = {
-    connectionStatus: document.getElementById('connection-status'),
-    connectionHud: document.getElementById('connection-hud'),
-    playerListOverlay: document.getElementById('player-list-overlay'),
-    playerCount: document.getElementById('player-count'),
-    playerListItems: document.getElementById('player-list-items'),
-    browsePanel: document.getElementById('browse-panel'),
-    hostPanel: document.getElementById('host-panel'),
-    sessionList: document.getElementById('session-list'),
-    noSessionsMsg: document.getElementById('no-sessions-msg'),
-  };
-
-  function showScreen(name) {
-    // Hide all screens
-    Object.values(screens).forEach(el => {
-      if (el) el.classList.add('hidden');
-    });
-    // Show target screen
-    const target = screens[name];
-    if (target) target.classList.remove('hidden');
-  }
+  /** @type {UIManager} */
+  let ui = null;
+  let screens = null;
+  let sessionUI = null;
+  function showScreen(name) { ui.show(name); }
 
   // PR 14 — `BrowserCharacterManager` (~130 lines) and its four constants stood here.
   // Deleted; `CharacterManager` from src/game/entities/ is imported above. See the
@@ -115,370 +95,49 @@ import { publishGameState } from './testBridge.js';
   let _cleanupPauseMenu = null; // Cleanup function returned by setupPauseMenu()
   let mobIntegration = null; // Mob system instance
 
-  // ============================================================
-  // Character UI Rendering
-  // ============================================================
-
-  function renderCharacterSlots() {
-    const container = document.getElementById('character-slots');
-    const slotInfo = document.getElementById('char-slot-info');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    // Render existing characters
-    const characters = characterManager ? characterManager.getAllCharacters() : [];
-    characters.forEach(char => {
-      const slot = createCharacterSlotElement(char);
-      container.appendChild(slot);
-    });
-
-    // Render empty slots
-    for (let i = characters.length; i < MAX_CHARACTERS; i++) {
-      const emptySlot = document.createElement('div');
-      emptySlot.className = 'char-slot empty';
-      emptySlot.innerHTML = '<span style="font-size:28px;color:#555;">+</span><span class="char-name">Empty</span>';
-      container.appendChild(emptySlot);
-    }
-
-    // Update slot info text
-    if (slotInfo) {
-      const remaining = MAX_CHARACTERS - characters.length;
-      slotInfo.textContent = `${characters.length}/${MAX_CHARACTERS} characters (${remaining} slots available)`;
-    }
-
-    // Update create button visibility
-    const createBtn = document.getElementById('btn-create-char');
-    if (createBtn) {
-      if (characterManager && !characterManager.canCreateMore()) {
-        createBtn.disabled = true;
-        createBtn.textContent = 'Slots Full';
-        createBtn.style.opacity = '0.5';
-      } else {
-        createBtn.disabled = false;
-        createBtn.textContent = 'Create Character';
-        createBtn.style.opacity = '1';
-      }
-    }
-  }
-
-  function createCharacterSlotElement(char) {
-    const slot = document.createElement('div');
-    slot.className = 'char-slot' + (characterManager && characterManager.selectedId === char.id ? ' selected' : '');
-    slot.style.position = 'relative';
-    slot.dataset.charId = char.id;
-
-    // Avatar circle with character color
-    slot.innerHTML = `
-      <div class="char-avatar" style="background:${char.color};"></div>
-      <span class="char-name">${escapeHtml(char.name)}</span>
-      <div class="char-slot-actions">
-        <button class="char-slot-action-btn edit" title="Edit character" data-action="edit">✎</button>
-        <button class="char-slot-action-btn delete" title="Delete character" data-action="delete">✕</button>
-      </div>
-    `;
-
-    // Click to select character → navigate to world screen
-    slot.addEventListener('click', async (e) => {
-      if (e.target.closest('.char-slot-action-btn')) return; // Don't trigger on action buttons
-      if (characterManager) {
-        await characterManager.selectCharacter(char.id);
-        renderCharacterSlots();
-        // Navigate to world selection after picking character
-        showScreen('worldScreen');
-        renderWorldSlots();
-      }
-    });
-
-    // Edit button
-    const editBtn = slot.querySelector('[data-action="edit"]');
-    editBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openEditModal(char);
-    });
-
-    // Delete button
-    const deleteBtn = slot.querySelector('[data-action="delete"]');
-    deleteBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openDeleteModal(char);
-    });
-
-    return slot;
-  }
-
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
+  /**
+   * PR 15 — what the extracted UI reads this file's state through.
+   *
+   * Every field above is a `let` that is **null when `UIManager` is constructed** and
+   * assigned later, inside `init()` or `startGame()`. A screen that captured
+   * `characterManager` by value at construction would hold a permanent `null`, so this
+   * object exposes them as getters and a screen reads through at the moment it needs
+   * one. It is a deliberate bridge, and the smallest available: the alternative is
+   * rewriting ~110 references in this file onto a context object in the same PR that
+   * moves 700 lines of DOM code. **PR 17 and PR 19 delete these `let`s** when they
+   * become fields on `Game` and `GameState`, and this object goes with them.
+   */
+  const uiDeps = {
+    get characterManager() { return characterManager; },
+    get worldManager() { return worldManager; },
+    get perfSettings() { return perfSettings; },
+    get sessionManager() { return sessionManager; },
+    get gameState() { return gameState; },
+    startGame: (mode) => startGame(mode),
+    rebuildAtlasAndMaterials: (renderer, chunkManager) => rebuildAtlasAndMaterials(renderer, chunkManager),
+    updateRejoinPanel: () => updateRejoinPanel(),
+    log: (msg) => _log(msg),
+  };
 
   // ============================================================
-  // Character Modal Handlers
+  // Character and World UI — PR 15
   // ============================================================
-
-  let editingCharId = null; // Set when editing existing character
-
-  function openCreateModal() {
-    editingCharId = null;
-    document.getElementById('char-modal-title').textContent = 'Create New Character';
-    document.getElementById('btn-save-char').textContent = 'Create';
-    document.getElementById('char-name').value = '';
-    document.getElementById('char-color').value = DEFAULT_COLOR;
-    hideCharError();
-    modals.createCharModal.classList.remove('hidden');
-    setTimeout(() => document.getElementById('char-name').focus(), 100);
-  }
-
-  function openEditModal(char) {
-    editingCharId = char.id;
-    document.getElementById('char-modal-title').textContent = 'Edit Character';
-    document.getElementById('btn-save-char').textContent = 'Save';
-    document.getElementById('char-name').value = char.name;
-    document.getElementById('char-color').value = char.color;
-    hideCharError();
-    modals.createCharModal.classList.remove('hidden');
-    setTimeout(() => {
-      const nameInput = document.getElementById('char-name');
-      nameInput.focus();
-      nameInput.select();
-    }, 100);
-  }
-
-  function closeCharModal() {
-    if (modals.createCharModal) {
-      modals.createCharModal.classList.add('hidden');
-    }
-    editingCharId = null;
-  }
-
-  // ============================================================
-  // World Modal Handlers
-  // ============================================================
-
-  function openCreateWorldModal() {
-    document.getElementById('world-name').value = '';
-    // Generate a random seed and display it (user can edit or leave blank for another random)
-    const randomSeed = Math.floor(Math.random() * 0xFFFFFFFF);
-    document.getElementById('world-seed').value = String(randomSeed);
-    hideWorldError();
-    modals.createWorldModal.classList.remove('hidden');
-    // Force modal-content visible
-    const mc = modals.createWorldModal.querySelector('.modal-content');
-    if (mc) mc.style.display = 'block';
-    setTimeout(() => document.getElementById('world-name').focus(), 100);
-  }
-
-  function closeCreateWorldModal() {
-    if (modals.createWorldModal) {
-      modals.createWorldModal.classList.add('hidden');
-    }
-  }
-
-  function showWorldError(message) {
-    const errorEl = document.getElementById('world-error');
-    errorEl.textContent = message;
-    errorEl.classList.remove('hidden');
-  }
-
-  function hideWorldError() {
-    document.getElementById('world-error').classList.add('hidden');
-  }
-
-  function openDeleteModal(char) {
-    document.getElementById('delete-char-name').textContent = `"${char.name}"`;
-    modals.deleteCharModal.dataset.charId = char.id;
-    modals.deleteCharModal.classList.remove('hidden');
-  }
-
-  function closeDeleteModal() {
-    modals.deleteCharModal.classList.add('hidden');
-    delete modals.deleteCharModal.dataset.charId;
-  }
-
-  // ============================================================
-  // World Delete Modal Handlers
-  // ============================================================
-
-  function openDeleteWorldModal(world) {
-    document.getElementById('delete-char-name').textContent = `"${world.name}"`;
-    modals.deleteCharModal.dataset.worldId = world.id;
-    modals.deleteCharModal.classList.remove('hidden');
-  }
-
-  function closeDeleteWorldModal() {
-    modals.deleteCharModal.classList.add('hidden');
-    delete modals.deleteCharModal.dataset.worldId;
-  }
-
-  function showCharError(message) {
-    const errorEl = document.getElementById('char-error');
-    errorEl.textContent = message;
-    errorEl.classList.remove('hidden');
-  }
-
-  function hideCharError() {
-    document.getElementById('char-error').classList.add('hidden');
-  }
-
-  // PR 14 — `BrowserWorldManager` (~190 lines), `MAX_WORLDS` and an unused
-  // `DEFAULT_WORLD_SEED` stood here. Deleted; `WorldManager` from src/game/entities/ is
-  // imported above. Its `deleteWorld` carried the D-18/H-3 chunk cleanup, which is now
-  // `PersistenceManager.deleteWorld()` — that file, not this one, because Node tests
-  // import WorldManager.js and it has to stay environment-free. refactor.md §8.1.
-
-  // ============================================================
-  // World UI Rendering
-  // ============================================================
-
- function renderWorldSlots() {
-    
-    const container = document.getElementById('world-slots');
-    if (!container) {
-      _log('[Cuubz] #world-slots not found');;
-      return;
-    }
-
-    container.innerHTML = '';
-
-    let worlds = [];
-    try {
-      worlds = worldManager ? worldManager.getAllWorlds() : [];
-    } catch (err) {
-      console.error('[Cuubz] Error loading worlds for display:', err);
-    }
-
-    // Render existing worlds
-    worlds.forEach(world => {
-      try {
-        const slot = createWorldSlotElement(world);
-        container.appendChild(slot);
-      } catch (err) {
-        console.error('[Cuubz] Error rendering world slot:', err, world);
-      }
-    });
-
-    // Render empty slots
-    for (let i = worlds.length; i < MAX_WORLDS; i++) {
-      const emptySlot = document.createElement('div');
-      emptySlot.className = 'world-slot empty';
-      emptySlot.innerHTML = '<span style="font-size:28px;color:#555;">+</span><span class="world-name">Empty</span>';
-      container.appendChild(emptySlot);
-    }
-
-    // Update slot info text
-    const worldSlotInfo = document.getElementById('world-slot-info');
-    if (worldSlotInfo) {
-      const remaining = MAX_WORLDS - worlds.length;
-      worldSlotInfo.textContent = `${worlds.length}/${MAX_WORLDS} worlds (${remaining} slots available)`;
-    }
-
-    // Update create button visibility
-    const createBtn = document.getElementById('btn-create-world');
-    if (createBtn) {
-      if (worldManager && !worldManager.canCreateMore()) {
-        createBtn.disabled = true;
-        createBtn.textContent = 'Slots Full';
-        createBtn.style.opacity = '0.5';
-      } else {
-        createBtn.disabled = false;
-        createBtn.textContent = 'Create New World';
-        createBtn.style.opacity = '1';
-      }
-    }
-  }
-
-  function createWorldSlotElement(world) {
-    const slot = document.createElement('div');
-    slot.className = 'world-slot' + (worldManager && worldManager.selectedId === world.id ? ' selected' : '');
-    slot.style.position = 'relative';
-    slot.dataset.worldId = world.id;
-
-    // `getWorldPreview` is the tested equivalent of `BrowserWorldManager.getBiomePreview`
-    // and a superset — it also returns `chunkCount`, which nothing renders yet.
-    const preview = WorldManager.getWorldPreview(world);
-
-    // Biome colour indicator based on the dominant biome.
-    //
-    // D-39: this table used to key on the eight names `BrowserWorldManager` invented
-    // (`Plains Forest Desert Tundra Mountains Ocean Lava Corrupt`), two of which — Lava
-    // and Corrupt — are not biomes this game has. `WorldManager.BIOME_NAMES` is the real
-    // ten from `BiomeSystem.js`, so the table is keyed on those now and the four new
-    // colours come from that file's own `color:` fields.
-    const biomeColors = {
-      'Deep Ocean': '#051d3b', 'Ocean': '#1565C0', 'Beach': '#d4b483', 'Plains': '#5a8a3c',
-      'Forest': '#2d6e2d', 'Badlands': '#b5623e', 'Tundra': '#c8dde8', 'Desert': '#d1b247',
-      'Mountains': '#607d8b', 'Frozen Peaks': '#e0f7fa'
-    };
-    const primaryBiome = preview.biomes.split(',')[0] || 'Plains';
-    const biomeColor = biomeColors[primaryBiome] || '#4CAF50';
-
-    slot.innerHTML = `
-      <div class="world-icon" style="background:${biomeColor};" title="${preview.biomes}">🌍</div>
-      <div class="world-info">
-        <span class="world-name">${escapeHtml(world.name)}</span>
-        <span class="world-seed">Seed: ${preview.seed}</span>
-        <span class="world-biomes" title="${preview.biomes}">${preview.biomes}</span>
-      </div>
-      <div class="world-slot-actions">
-        <button class="world-slot-action-btn delete" title="Delete world" data-action="delete">✕</button>
-      </div>
-    `;
-
-    // Click to select world → go to mode screen
-    slot.addEventListener('click', async (e) => {
-      if (e.target.closest('.world-slot-action-btn')) return;
-      if (worldManager) {
-        await worldManager.selectWorld(world.id);
-        renderWorldSlots();
-        showScreen('modeScreen');
-      }
-    });
-
-    // Delete button
-    const deleteBtn = slot.querySelector('[data-action="delete"]');
-    deleteBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openDeleteWorldModal(world);
-    });
-
-    return slot;
-  }
+  //
+  // `renderCharacterSlots`, `createCharacterSlotElement`, `escapeHtml`, `editingCharId`,
+  // the character create/edit/delete modals, `renderWorldSlots`,
+  // `createWorldSlotElement` and the world create/delete modals stood here — ~330 lines.
+  // They are `src/ui/screens/CharacterScreen.js` and `WorldScreen.js`; `escapeHtml` is
+  // `src/util/HTMLUtils.js`. `syncPerfSettingsUI` went to `SettingsScreen.js`.
+  //
+  // One delegate survives, and only because a caller outside the UI still names it:
+  // `setupPauseMenu` syncs the performance controls, and that is PR 19's to move.
+  // `renderCharacterSlots` and `renderWorldSlots` have NO remaining caller here — every
+  // one of them was inside `initMenuNavigation` or a slot click handler, and both moved.
+  function syncPerfSettingsUI() { ui.settings.syncUI(); }
 
   // ============================================================
   // Performance Settings Helpers
   // ============================================================
-
-  /**
-   * Sync all performance UI controls to current settings values.
-   * Called on init and whenever settings change.
-   */
-  function syncPerfSettingsUI() {
-    if (!perfSettings) return;
-    const s = perfSettings.get();
-
-    // Main menu settings screen
-    const menuRenderDist = document.getElementById('perf-render-distance');
-    const menuShadows = document.getElementById('perf-shadows');
-    const menuTextureRes = document.getElementById('perf-texture-res');
-    const menuAdvShading = document.getElementById('perf-advanced-shading');
-
-    if (menuRenderDist) menuRenderDist.value = String(s.renderDistance);
-    if (menuShadows) menuShadows.value = s.shadowQuality;
-    if (menuTextureRes) menuTextureRes.value = s.textureResolution;
-    if (menuAdvShading) menuAdvShading.checked = s.advancedShading;
-
-    // Pause menu
-    const pauseRenderDist = document.getElementById('pause-perf-render-distance');
-    const pauseShadows = document.getElementById('pause-perf-shadows');
-    const pauseTextureRes = document.getElementById('pause-perf-texture-res');
-    const pauseAdvShading = document.getElementById('pause-perf-advanced-shading');
-
-    if (pauseRenderDist) pauseRenderDist.value = String(s.renderDistance);
-    if (pauseShadows) pauseShadows.value = s.shadowQuality;
-    if (pauseTextureRes) pauseTextureRes.value = s.textureResolution;
-    if (pauseAdvShading) pauseAdvShading.checked = s.advancedShading;
-  }
 
   /**
    * Apply performance settings to the live game engine.
@@ -538,503 +197,79 @@ import { publishGameState } from './testBridge.js';
   // Menu Navigation
   // ============================================================
 
+  /**
+   * PR 15 — this was ~500 lines wiring every screen in the game. The screen-specific
+   * halves are `UIManager.initNavigation()` and the four screens' own `init()`.
+   *
+   * What is left is what does not belong to a screen: constructing the UI, the rejoin
+   * buttons and `beforeunload`, which are **PR 16's** (§8.3 — `SessionManager` owns
+   * `REJOIN_STORAGE_KEY`, the rejoin panel and the five `cuubz_last_session` sites).
+   */
   function initMenuNavigation() {
     try {
-        _log('[Cuubz] initMenuNavigation');
-      // Main menu buttons
-      document.getElementById('btn-play-solo').addEventListener('click', () => {
-        showScreen('characterScreen');
-        renderCharacterSlots();
+      ui = new UIManager(uiDeps);
+      screens = ui.screens;
+      sessionUI = ui.sessionUI;
+      ui.registerScreens({
+        character: new CharacterScreen(ui),
+        world: new WorldScreen(ui),
+        lobby: new LobbyScreen(ui),
+        settings: new SettingsScreen(ui),
       });
+      ui.initNavigation();
 
-      document.getElementById('btn-host').addEventListener('click', () => {
-      showScreen('lobbyScreen');
-      updateRejoinPanel();
-    });
-
-    document.getElementById('btn-join').addEventListener('click', () => {
-      showScreen('lobbyScreen');
-      updateRejoinPanel();
-    });
-
-    document.getElementById('btn-settings').addEventListener('click', () => {
-      showScreen('settingsScreen');
-    });
-
-    // Character screen — navigate to world screen after selecting character
-    document.getElementById('btn-back-char').addEventListener('click', () => {
-      showScreen('mainMenu');
-    });
-
-    document.getElementById('btn-create-char').addEventListener('click', () => {
-      if (characterManager && !characterManager.canCreateMore()) return;
-      openCreateModal();
-    });
-
-     // Character modal — save (create or edit character)
-    document.getElementById('btn-save-char').addEventListener('click', async () => {
-      const name = document.getElementById('char-name').value.trim();
-      const color = document.getElementById('char-color').value;
-
-      if (!name) { showCharError('Please enter a character name.'); return; }
-
-      let result;
-      if (editingCharId) {
-        result = await characterManager.updateCharacter(editingCharId, { name, color });
-      } else {
-        result = await characterManager.createCharacter(name, color);
+      // ─── Rejoin panel (PR 16 takes these with SessionManager) ───
+      const btnRejoin = document.getElementById('btn-rejoin-session');
+      if (btnRejoin) {
+        btnRejoin.addEventListener('click', async () => { await rejoinSession(); });
       }
 
-      if (result.success) {
-        closeCharModal();
-        renderCharacterSlots();
-        _log(`[Cuubz] Character ${editingCharId ? 'updated' : 'created'}: ${result.character.name}`);
-      } else {
-        showCharError(result.error);
-      }
-    });
-
-    // Character modal — cancel
-    document.getElementById('btn-cancel-char').addEventListener('click', closeCharModal);
-
-    // Enter key in name input triggers save
-    document.getElementById('char-name').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        document.getElementById('btn-save-char').click();
-      }
-      if (e.key === 'Escape') {
-        closeCharModal();
-      }
-    });
-
-    // Delete modal — handles both character and world deletion
-    document.getElementById('btn-confirm-delete-char').addEventListener('click', async () => {
-      const charId = modals.deleteCharModal.dataset.charId;
-      const worldId = modals.deleteCharModal.dataset.worldId;
-
-      if (worldId) {
-        // Deleting a world
-        const result = await worldManager.deleteWorld(worldId);
-        if (result.success) {
-          closeDeleteWorldModal();
-          renderWorldSlots();
-          _log(`[Cuubz] World deleted: ${worldId}`);
-        } else {
-          alert(result.error);
-        }
-      } else if (charId) {
-        // Deleting a character
-        const result = await characterManager.deleteCharacter(charId);
-        if (result.success) {
-          closeDeleteModal();
-          renderCharacterSlots();
-          _log(`[Cuubz] Character deleted: ${charId}`);
-        } else {
-          alert(result.error);
-        }
-      }
-    });
-
-    document.getElementById('btn-cancel-delete-char').addEventListener('click', () => {
-      if (modals.deleteCharModal.dataset.worldId) {
-        closeDeleteWorldModal();
-      } else {
-        closeDeleteModal();
-      }
-    });
-
-    // World screen
-    document.getElementById('btn-back-world').addEventListener('click', () => {
-      showScreen('characterScreen');
-    });
-
-    // Create world button → open dedicated world modal
-    document.getElementById('btn-create-world').addEventListener('click', () => {
-      if (!worldManager || !worldManager.canCreateMore()) return;
-      openCreateWorldModal();
-    });
-
-    // World modal save handler
-    document.getElementById('btn-save-world').addEventListener('click', async () => {
-      const name = document.getElementById('world-name').value.trim();
-      if (!name) { showWorldError('Please enter a world name'); return; }
-
-      // Parse seed from input — blank means random, invalid values fall back to random
-      let seed = undefined;
-      const seedInput = document.getElementById('world-seed').value.trim();
-      if (seedInput !== '') {
-        const parsed = parseInt(seedInput, 10);
-        if (!isNaN(parsed)) {
-          seed = parsed;
-        } else {
-          showWorldError('Seed must be a valid integer (or leave blank for random)');
-          return;
-        }
-      }
-
-      const result = await worldManager.createWorld(name, seed);
-      if (result.success) {
-        closeCreateWorldModal();
-        renderWorldSlots();
-      } else {
-        showWorldError(result.error);
-      }
-    });
-
-    document.getElementById('btn-cancel-world').addEventListener('click', closeCreateWorldModal);
-    document.getElementById('world-name').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') document.getElementById('btn-save-world').click();
-      if (e.key === 'Escape') closeCreateWorldModal();
-    });
-
-    // Mode screen
-    document.getElementById('btn-back-mode').addEventListener('click', () => {
-      showScreen('worldScreen');
-    });
-
-    document.getElementById('btn-survival').addEventListener('click', () => {
-      _log('[Cuubz] Mode: Survival');
-      startGame('survival');
-    });
-
-    document.getElementById('btn-creative').addEventListener('click', () => {
-      _log('[Cuubz] Mode: Creative');
-      startGame('creative');
-    });
-
-    // Settings screen
-    document.getElementById('btn-back-settings').addEventListener('click', () => {
-      showScreen('mainMenu');
-    });
-
-    // ─── Main Menu Performance Settings ──────────────────────
-    const menuPerfRenderDist = document.getElementById('perf-render-distance');
-    const menuPerfShadows = document.getElementById('perf-shadows');
-    const menuPerfTextureRes = document.getElementById('perf-texture-res');
-    const menuPerfAdvShading = document.getElementById('perf-advanced-shading');
-
-    if (menuPerfRenderDist && perfSettings) {
-      menuPerfRenderDist.addEventListener('change', () => {
-        const val = parseInt(menuPerfRenderDist.value, 10);
-        perfSettings.set('renderDistance', val);
-        syncPerfSettingsUI();
-        if (gameState && gameState.chunkManager) {
-          gameState.chunkManager.setRenderDistance(val);
-        }
-      });
-    }
-
-    if (menuPerfShadows && perfSettings) {
-      menuPerfShadows.addEventListener('change', () => {
-        const val = menuPerfShadows.value;
-        perfSettings.set('shadowQuality', val);
-        syncPerfSettingsUI();
-        if (gameState && gameState.renderer) {
-          gameState.renderer.setShadowQuality(val);
-        }
-      });
-    }
-
-    if (menuPerfTextureRes && perfSettings) {
-      menuPerfTextureRes.addEventListener('change', async () => {
-        const val = menuPerfTextureRes.value;
-        perfSettings.set('textureResolution', val);
-        syncPerfSettingsUI();
-        if (gameState && gameState.renderer && gameState.chunkManager) {
-          await rebuildAtlasAndMaterials(gameState.renderer, gameState.chunkManager);
-        }
-      });
-    }
-
-    if (menuPerfAdvShading && perfSettings) {
-      menuPerfAdvShading.addEventListener('change', async () => {
-        const val = menuPerfAdvShading.checked;
-        perfSettings.set('advancedShading', val);
-        syncPerfSettingsUI();
-        if (gameState && gameState.renderer && gameState.chunkManager) {
-          await rebuildAtlasAndMaterials(gameState.renderer, gameState.chunkManager);
-        }
-      });
-    }
-
-    // Volume slider
-    const volumeSlider = document.getElementById('volume-slider');
-    const volumeValue = document.getElementById('volume-value');
-    if (volumeSlider && volumeValue) {
-      volumeSlider.addEventListener('input', () => {
-        volumeValue.textContent = volumeSlider.value + '%';
-      });
-    }
-
-    // Lobby screen — session UI management
-    document.getElementById('btn-back-lobby').addEventListener('click', () => {
-      showScreen('mainMenu');
-    });
-
-    // Tab switching: Browse / Host
-    document.getElementById('tab-browse').addEventListener('click', () => {
-      switchLobbyTab('browse');
-    });
-
-    document.getElementById('tab-host').addEventListener('click', () => {
-      switchLobbyTab('host');
-    });
-
-    // Refresh sessions button
-    document.getElementById('btn-refresh-sessions').addEventListener('click', () => {
-      if (sessionManager) {
-        sessionManager.browseSessions();
-      }
-    });
-
-    // ─── Browse Panel: Character Selection ───
-    // Toggle inline character creation for browse
-    const btnBrowseCreateChar = document.getElementById('btn-browse-create-char');
-    const browseCreateCharForm = document.getElementById('browse-create-char-form');
-    if (btnBrowseCreateChar && browseCreateCharForm) {
-      btnBrowseCreateChar.addEventListener('click', () => {
-        browseCreateCharForm.classList.toggle('hidden');
-        if (!browseCreateCharForm.classList.contains('hidden')) {
-          document.getElementById('browse-char-color').value = '#' + Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6, '0');
-          document.getElementById('browse-char-name').value = '';
-          document.getElementById('browse-char-name').focus();
-        }
-      });
-    }
-
-    // Save inline character for browse
-    const btnBrowseSaveChar = document.getElementById('btn-browse-save-char');
-    const browseCharError = document.getElementById('browse-char-error');
-    if (btnBrowseSaveChar) {
-      btnBrowseSaveChar.addEventListener('click', async () => {
-        const nameInput = document.getElementById('browse-char-name');
-        const colorInput = document.getElementById('browse-char-color');
-        const name = nameInput ? nameInput.value.trim() : '';
-        const color = colorInput ? colorInput.value : '#4CAF50';
-
-        if (!name) {
-          if (browseCharError) { browseCharError.textContent = 'Please enter a character name.'; browseCharError.classList.remove('hidden'); }
-          return;
-        }
-
-        const result = await characterManager.createCharacter(name, color);
-        if (result.success) {
-          if (browseCharError) browseCharError.classList.add('hidden');
-          browseCreateCharForm.classList.add('hidden');
-          populateBrowseCharacterSelect();
-          const select = document.getElementById('browse-character-select');
-          if (select) select.value = result.character.id;
-          _log(`[Cuubz] Character created in browse panel: ${result.character.name}`);
-        } else {
-          if (browseCharError) { browseCharError.textContent = result.error; browseCharError.classList.remove('hidden'); }
-        }
-      });
-
-      const browseCharNameInput = document.getElementById('browse-char-name');
-      if (browseCharNameInput) {
-        browseCharNameInput.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); btnBrowseSaveChar.click(); }
-          if (e.key === 'Escape') { browseCreateCharForm.classList.add('hidden'); }
+      const btnClearRejoin = document.getElementById('btn-clear-rejoin');
+      if (btnClearRejoin) {
+        btnClearRejoin.addEventListener('click', () => {
+          clearLastSession();
+          updateRejoinPanel();
         });
       }
-    }
 
-    // Populate browse character select on init
-    populateBrowseCharacterSelect();
+      initSessionUI();
 
-    // Host form — max players slider
-    const hostMaxPlayers = document.getElementById('host-max-players');
-    const hostMaxPlayersValue = document.getElementById('host-max-players-value');
-    if (hostMaxPlayers && hostMaxPlayersValue) {
-      hostMaxPlayers.addEventListener('input', () => {
-        hostMaxPlayersValue.textContent = hostMaxPlayers.value;
-      });
-    }
-
-    // ─── Inline Character Creation in Host Panel ───
-    const btnHostCreateChar = document.getElementById('btn-host-create-char');
-    const hostCreateCharForm = document.getElementById('host-create-char-form');
-    if (btnHostCreateChar && hostCreateCharForm) {
-      btnHostCreateChar.addEventListener('click', () => {
-        hostCreateCharForm.classList.toggle('hidden');
-        if (!hostCreateCharForm.classList.contains('hidden')) {
-          // Generate random color and focus name input
-          document.getElementById('host-char-color').value = '#' + Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6, '0');
-          document.getElementById('host-char-name').value = '';
-          document.getElementById('host-char-name').focus();
-        }
-      });
-    }
-
-    // Save inline character
-    const btnHostSaveChar = document.getElementById('btn-host-save-char');
-    const hostCharError = document.getElementById('host-char-error');
-    if (btnHostSaveChar) {
-      btnHostSaveChar.addEventListener('click', async () => {
-        const nameInput = document.getElementById('host-char-name');
-        const colorInput = document.getElementById('host-char-color');
-        const name = nameInput ? nameInput.value.trim() : '';
-        const color = colorInput ? colorInput.value : '#4CAF50';
-
-        if (!name) {
-          if (hostCharError) { hostCharError.textContent = 'Please enter a character name.'; hostCharError.classList.remove('hidden'); }
-          return;
-        }
-
-        const result = await characterManager.createCharacter(name, color);
-        if (result.success) {
-          if (hostCharError) hostCharError.classList.add('hidden');
-          hostCreateCharForm.classList.add('hidden');
-          populateHostCharacterSelect();
-          // Auto-select the newly created character
-          const select = document.getElementById('host-character-select');
-          if (select) select.value = result.character.id;
-          _log(`[Cuubz] Character created in host panel: ${result.character.name}`);
-        } else {
-          if (hostCharError) { hostCharError.textContent = result.error; hostCharError.classList.remove('hidden'); }
-        }
-      });
-
-      // Enter key in name input triggers save
-      const hostCharNameInput = document.getElementById('host-char-name');
-      if (hostCharNameInput) {
-        hostCharNameInput.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); btnHostSaveChar.click(); }
-          if (e.key === 'Escape') { hostCreateCharForm.classList.add('hidden'); }
-        });
-      }
-    }
-
-    // ─── Inline World Creation in Host Panel ───
-    const btnHostCreateWorld = document.getElementById('btn-host-create-world');
-    const hostCreateWorldForm = document.getElementById('host-create-world-form');
-    if (btnHostCreateWorld && hostCreateWorldForm) {
-      btnHostCreateWorld.addEventListener('click', () => {
-        hostCreateWorldForm.classList.toggle('hidden');
-        if (!hostCreateWorldForm.classList.contains('hidden')) {
-          // Generate random seed and focus name input
-          document.getElementById('host-world-seed').value = String(Math.floor(Math.random() * 0xFFFFFFFF));
-          document.getElementById('host-world-name').value = '';
-          document.getElementById('host-world-name').focus();
-        }
-      });
-    }
-
-    // Save inline world
-    const btnHostSaveWorld = document.getElementById('btn-host-save-world');
-    const hostWorldError = document.getElementById('host-world-error');
-    if (btnHostSaveWorld) {
-      btnHostSaveWorld.addEventListener('click', async () => {
-        const nameInput = document.getElementById('host-world-name');
-        const seedInput = document.getElementById('host-world-seed');
-        const name = nameInput ? nameInput.value.trim() : '';
-        const seedRaw = seedInput ? seedInput.value.trim() : '';
-
-        if (!name) {
-          if (hostWorldError) { hostWorldError.textContent = 'Please enter a world name.'; hostWorldError.classList.remove('hidden'); }
-          return;
-        }
-
-        let seed = undefined;
-        if (seedRaw !== '') {
-          const parsed = parseInt(seedRaw, 10);
-          if (!isNaN(parsed)) {
-            seed = parsed;
-          } else {
-            if (hostWorldError) { hostWorldError.textContent = 'Seed must be a valid integer.'; hostWorldError.classList.remove('hidden'); }
-            return;
+      // ─── Save session state before page unload (F5, tab close, etc.) ───
+      // If the user refreshes while in a session we can auto-rejoin rather than
+      // dropping them back to the main menu.
+      window.addEventListener('beforeunload', () => {
+        try {
+          if (sessionManager && sessionManager.hostingSessionId) {
+            const world = worldManager ? worldManager.getSelectedWorld() : null;
+            const char = characterManager ? characterManager.getSelectedCharacter() : null;
+            localStorage.setItem('cuubz_last_session', JSON.stringify({
+              sessionId: sessionManager.hostingSessionId,
+              name: document.getElementById('host-session-name')?.value || 'My Session',
+              mode: document.getElementById('host-mode-select')?.value || 'survival',
+              seed: world ? world.seed : null,
+              isHost: true,
+              characterId: char ? char.id : null,
+              worldId: world ? world.id : null,
+              timestamp: Date.now(),
+            }));
+          } else if (sessionManager && sessionManager.currentSessionId) {
+            localStorage.setItem('cuubz_last_session', JSON.stringify({
+              sessionId: sessionManager.currentSessionId,
+              name: 'Joined Session',
+              mode: 'survival',
+              isHost: false,
+              characterId: characterManager ? characterManager.selectedId : null,
+              timestamp: Date.now(),
+            }));
           }
-        }
-
-        const result = await worldManager.createWorld(name, seed);
-        if (result.success) {
-          if (hostWorldError) hostWorldError.classList.add('hidden');
-          hostCreateWorldForm.classList.add('hidden');
-          populateHostWorldSelect();
-          // Auto-select the newly created world
-          const select = document.getElementById('host-world-select');
-          if (select) select.value = result.world.id;
-          _log(`[Cuubz] World created in host panel: ${result.world.name}`);
-        } else {
-          if (hostWorldError) { hostWorldError.textContent = result.error; hostWorldError.classList.remove('hidden'); }
-        }
+        } catch (e) { /* ignore localStorage errors */ }
       });
 
-      // Enter key in name input triggers save
-      const hostWorldNameInput = document.getElementById('host-world-name');
-      if (hostWorldNameInput) {
-        hostWorldNameInput.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); btnHostSaveWorld.click(); }
-          if (e.key === 'Escape') { hostCreateWorldForm.classList.add('hidden'); }
-        });
-      }
+      _log('[Cuubz] initMenuNavigation complete');
+    } catch (e) {
+      console.error('[Cuubz] initMenuNavigation CRASHED:', e.message, '\n', e.stack);
     }
-
-    // Start hosting button
-    document.getElementById('btn-start-hosting').addEventListener('click', async () => {
-      if (sessionManager) {
-        await sessionManager.startHosting();
-      }
-    });
-
-    // Session rejoin button
-    const btnRejoin = document.getElementById('btn-rejoin-session');
-    if (btnRejoin) {
-      btnRejoin.addEventListener('click', async () => {
-        await rejoinSession();
-      });
-    }
-
-    // Clear rejoin button
-    const btnClearRejoin = document.getElementById('btn-clear-rejoin');
-    if (btnClearRejoin) {
-      btnClearRejoin.addEventListener('click', () => {
-        clearLastSession();
-        updateRejoinPanel();
-      });
-    }
-
-    initSessionUI();
-
-    // ─── Save session state before page unload (F5, tab close, etc.) ───
-    // This ensures that if the user refreshes while in a game session,
-    // we can auto-rejoin instead of going back to the main menu.
-    window.addEventListener('beforeunload', () => {
-      try {
-        if (sessionManager && sessionManager.hostingSessionId) {
-          // Save host session state
-          const world = worldManager ? worldManager.getSelectedWorld() : null;
-          const char = characterManager ? characterManager.getSelectedCharacter() : null;
-          localStorage.setItem('cuubz_last_session', JSON.stringify({
-            sessionId: sessionManager.hostingSessionId,
-            name: document.getElementById('host-session-name')?.value || 'My Session',
-            mode: document.getElementById('host-mode-select')?.value || 'survival',
-            seed: world ? world.seed : null,
-            isHost: true,
-            characterId: char ? char.id : null,
-            worldId: world ? world.id : null,
-            timestamp: Date.now(),
-          }));
-        } else if (sessionManager && sessionManager.currentSessionId) {
-          // Save joiner session state
-          localStorage.setItem('cuubz_last_session', JSON.stringify({
-            sessionId: sessionManager.currentSessionId,
-            name: 'Joined Session',
-            mode: 'survival',
-            isHost: false,
-            characterId: characterManager ? characterManager.selectedId : null,
-            timestamp: Date.now(),
-          }));
-        }
-      } catch (e) { /* ignore localStorage errors */ }
-    });
-
-    _log('[Cuubz] initMenuNavigation complete');
-  } catch (e) {
-    console.error('[Cuubz] initMenuNavigation CRASHED:', e.message, '\n', e.stack);
   }
-}
 
   // ============================================================
   // Session UI Management
@@ -1042,113 +277,11 @@ import { publishGameState } from './testBridge.js';
 
   let sessionManager = null;
 
-  /**
-   * Switch between Browse and Host tabs in lobby screen.
-   * @param {'browse'|'host'} tab
-   */
-  function switchLobbyTab(tab) {
-    const tabBrowse = document.getElementById('tab-browse');
-    const tabHost = document.getElementById('tab-host');
-
-    if (tab === 'browse') {
-      tabBrowse.classList.add('active');
-      tabHost.classList.remove('active');
-      sessionUI.browsePanel.classList.remove('hidden');
-      sessionUI.hostPanel.classList.add('hidden');
-      // Auto-refresh sessions when switching to browse
-      if (sessionManager) {
-        sessionManager.browseSessions();
-      }
-      // Populate browse character select
-      populateBrowseCharacterSelect();
-    } else {
-      tabHost.classList.add('active');
-      tabBrowse.classList.remove('active');
-      sessionUI.hostPanel.classList.remove('hidden');
-      sessionUI.browsePanel.classList.add('hidden');
-      // Populate character and world select dropdowns when switching to host
-      populateHostCharacterSelect();
-      populateHostWorldSelect();
-    }
-  }
-
-  /**
-   * Populate the host form's character dropdown with available characters.
-   */
-  function populateHostCharacterSelect() {
-    const select = document.getElementById('host-character-select');
-    if (!select) return;
-
-    select.innerHTML = '';
-    const characters = characterManager ? characterManager.getAllCharacters() : [];
-
-    if (characters.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'No characters — create one below';
-      select.appendChild(opt);
-      return;
-    }
-
-    characters.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = `${c.name} (${c.color})`;
-      select.appendChild(opt);
-    });
-  }
-
-  /**
-   * Populate the host form's world dropdown with available worlds.
-   */
-  function populateHostWorldSelect() {
-    const select = document.getElementById('host-world-select');
-    if (!select) return;
-
-    select.innerHTML = '';
-    const worlds = worldManager ? worldManager.getAllWorlds() : [];
-
-    if (worlds.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'No worlds — create one below';
-      select.appendChild(opt);
-      return;
-    }
-
-    worlds.forEach(w => {
-      const opt = document.createElement('option');
-      opt.value = w.id;
-      opt.textContent = `${w.name} (seed: ${WorldManager.formatSeed(w.seed)})`;
-      select.appendChild(opt);
-    });
-  }
-
-  /**
-   * Populate the browse panel's character dropdown with available characters.
-   */
-  function populateBrowseCharacterSelect() {
-    const select = document.getElementById('browse-character-select');
-    if (!select) return;
-
-    select.innerHTML = '';
-    const characters = characterManager ? characterManager.getAllCharacters() : [];
-
-    if (characters.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'No characters — create one below';
-      select.appendChild(opt);
-      return;
-    }
-
-    characters.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = c.name;
-      select.appendChild(opt);
-    });
-  }
+  // PR 15 — `switchLobbyTab` and the three `populate*Select` functions are
+  // `src/ui/screens/LobbyScreen.js`, with no delegate: every caller was a lobby control
+  // and moved with them. `SessionManager` below does NOT call them, which was worth
+  // checking rather than assuming — `renderSessionList`, `showHostError` and
+  // `hideHostError` are the only three it reaches back into the UI for.
 
   /**
    * Update connection status indicator in lobby and HUD.
@@ -1181,83 +314,9 @@ import { publishGameState } from './testBridge.js';
    * Render the session list in browse panel.
    * @param {Array} sessions — Array of session objects from server
    */
-  function renderSessionList(sessions) {
-    const container = sessionUI.sessionList;
-    const noMsg = sessionUI.noSessionsMsg;
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    if (!sessions || sessions.length === 0) {
-      if (noMsg) noMsg.classList.remove('hidden');
-      return;
-    }
-
-    if (noMsg) noMsg.classList.add('hidden');
-
-    sessions.forEach(session => {
-      const item = document.createElement('div');
-      item.className = 'session-item';
-      const playerCount = session.players || 0;
-      const maxPlayers = session.maxPlayers || 4;
-      const mode = session.mode || 'survival';
-      const isFull = playerCount >= maxPlayers;
-
-      item.innerHTML = `
-        <div class="session-info">
-          <div class="session-name">${escapeHtml(session.name)}</div>
-          <div class="session-details">${mode.charAt(0).toUpperCase() + mode.slice(1)} · ${session.seed ? 'Seed: ' + session.seed : ''}</div>
-        </div>
-        <div class="session-players">
-          ${isFull ? '<span style="color:#e74c3c;">Full</span>' : `${playerCount}/${maxPlayers}`}
-        </div>
-      `;
-
-      if (!isFull) {
-        item.addEventListener('click', async () => {
-          if (sessionManager) {
-            // Validate character selection for joining
-            const browseCharSelect = document.getElementById('browse-character-select');
-            const characterId = browseCharSelect ? browseCharSelect.value : '';
-            if (!characterId) {
-              alert('Please select or create a character to play as.');
-              return;
-            }
-            await characterManager.selectCharacter(characterId);
-
-            // For joining, create a temporary world with the session's seed
-            // so startGame() has a world to work with for local chunk generation.
-            // The host's world state is authoritative; this is just for local rendering.
-            const sessionSeed = session.seed || Math.floor(Math.random() * 0xFFFFFFFF);
-            if (!worldManager.selectedId || !worldManager.getSelectedWorld()) {
-              // Create a temp world entry if none selected
-              const tempWorld = {
-                id: `temp_${session.sessionId}`,
-                name: session.name || 'Remote World',
-                seed: sessionSeed,
-                biomeMap: { dominantBiomes: ['Plains'], seed: sessionSeed },
-                questProgress: {},
-                chunkReferences: [],
-              };
-              worldManager.worlds.push(tempWorld);
-              worldManager.selectedId = tempWorld.id;
-            }
-
-            await sessionManager.joinSession(session.sessionId);
-            // Start the game loop after joining
-            _log(`[SessionManager] Starting game in ${mode} mode (joining)`);
-            console.log('[JOIN] joinSession called, waiting for game session connect...');
-            startGame(mode);
-          }
-        });
-      } else {
-        item.style.opacity = '0.5';
-        item.style.cursor = 'not-allowed';
-      }
-
-      container.appendChild(item);
-    });
-  }
+  // PR 15 — the body is `LobbyScreen.renderSessionList`. `SessionManager` calls this
+  // name in two places; PR 16 moves that class and the delegate goes with it.
+  function renderSessionList(sessions) { ui.lobby.renderSessionList(sessions); }
 
   /**
    * Render the in-game player list overlay.
@@ -1827,19 +886,9 @@ import { publishGameState } from './testBridge.js';
     }
   }
 
-  /** Show error message in host form */
-  function showHostError(message) {
-    const errorEl = document.getElementById('host-error');
-    if (!errorEl) return;
-    errorEl.textContent = message;
-    errorEl.classList.remove('hidden');
-  }
-
-  /** Hide error message in host form */
-  function hideHostError() {
-    const errorEl = document.getElementById('host-error');
-    if (errorEl) errorEl.classList.add('hidden');
-  }
+  // PR 15 — bodies in `LobbyScreen`. Twelve call sites, all inside `SessionManager`.
+  function showHostError(message) { ui.lobby.showHostError(message); }
+  function hideHostError() { ui.lobby.hideHostError(); }
 
   /**
    * Determine the correct WebSocket relay URL based on page origin.

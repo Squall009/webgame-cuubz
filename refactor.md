@@ -2486,7 +2486,7 @@ decisions 24-26).
 
 ---
 
-### 8.2 PR 15 — Extract the UI layer
+### 8.2 PR 15 — Extract the UI layer ✅ DONE
 
 | From `main.js` (grep the symbol) | Target |
 |---|---|
@@ -2511,6 +2511,101 @@ export class CharacterScreen {
 }
 ```
 - **Accept:** menu → character → world → mode → game navigates correctly; all modals open/close; no screen file over 400 lines.
+
+**Outcome (2026-07-30):** ✅ DONE. Seven new files, ~700 lines out of `main.js`, and the
+assertion count did not move — which is the evidence that it was an extraction.
+
+| Gate | Result |
+|---|---|
+| `npm test` | **52/52 + 4 quarantined, exit 0** |
+| `npm run lint` | **0 errors, 176 warnings, exit 0** — unchanged, see below |
+| `npm run build` | exit 0 |
+| `npm run test:e2e` (built `dist/`) | **183 / 0 — unchanged from PR 14** |
+| `npm run test:e2e:vite` (dev server) | **183 / 0 — identical** |
+
+| New file | Lines | What |
+|---|---|---|
+| `src/ui/UIManager.js` | 185 | `screens`, `modals`, `sessionUI`, `show()`, main-menu / mode / back-button wiring, the shared delete modal |
+| `src/ui/screens/CharacterScreen.js` | 227 | slot rendering, the create/edit modal, delete |
+| `src/ui/screens/WorldScreen.js` | 241 | slot rendering, the create modal, delete — the D-18 chunk cleanup is reached from here |
+| `src/ui/screens/LobbyScreen.js` | 246 | tabs, three dropdowns, the session list, host errors |
+| `src/ui/screens/LobbyForms.js` | 218 | the three inline create forms |
+| `src/ui/screens/SettingsScreen.js` | 127 | the four performance controls, the volume slider, `syncUI()` |
+| `src/util/HTMLUtils.js` | 27 | `escapeHtml` |
+
+`main.js`: **4,843 → 3,892 lines.** No file over 400. Every accept criterion holds and the
+e2e harness drives the first two directly — it navigates menu → character → world → mode →
+in-game on both hosts, and opens and closes all four modals including the two PR 14 added.
+
+#### The `uiDeps` bridge, which is the only interesting decision in this PR
+
+Every screen needs `characterManager`, `worldManager`, `perfSettings`, `sessionManager` or
+`gameState`. All five are `let` bindings in `main.js` and **all five are `null` when the UI
+is constructed** — they are assigned later, inside `init()` and `startGame()`. A screen that
+captured one by value would hold a permanent `null`.
+
+So `main.js` passes an object of **live getters** and a screen reads
+`this.deps.worldManager` at the moment it needs it. This is a deliberate, temporary bridge
+and it is the smallest one available. The alternative — rewriting ~110 references in
+`main.js` onto a context object — is a second large mechanical change in the same diff as a
+700-line move, and **PR 17 and PR 19 delete those `let`s anyway** when they become fields
+on `Game` and `GameState`. When they do, `deps` becomes the `Game` instance and the getters
+go away. **Decision 27.**
+
+#### One modal serves two entities, and that is why `UIManager` owns its handler
+
+`#delete-char-modal` deletes **both** characters and worlds. Its confirm button dispatches
+on which of two `data-` attributes is set — `dataset.worldId` wins, then `dataset.charId` —
+and each screen clears only its own key when it closes. Neither `CharacterScreen` nor
+`WorldScreen` can own that handler without reaching into the other, so `UIManager` owns it
+and calls `ui.world.confirmDelete(id)` or `ui.character.confirmDelete(id)`. The coupling is
+in the HTML — PR 26 is where it stops being — and this is the smallest place to keep it
+honest until then.
+
+#### Six delegates were deleted rather than left behind, and that is why the warning count did not move
+
+The obvious way to do this extraction is to leave a one-line delegate in `main.js` for
+every moved function, so no call site changes. That would have added six dead functions to
+a file whose 178 `no-unused-vars` warnings are already **D-33**. So each was checked
+against `grep` rather than assumed:
+
+- **kept** — `syncPerfSettingsUI` (the pause menu calls it, PR 19's), `renderSessionList`,
+  `showHostError`, `hideHostError` (all three are `SessionManager` calling back into the
+  UI, PR 16's), and the `screens` / `sessionUI` aliases (~30 call sites still in this file);
+- **deleted** — `renderCharacterSlots`, `renderWorldSlots`, `switchLobbyTab`, the three
+  `populate*Select` functions, and the `modals` alias. Every caller of all six was inside
+  `initMenuNavigation` or a slot click handler, and both moved.
+
+The three unused imports the move orphaned (`MAX_CHARACTERS`, `MAX_WORLDS`,
+`DEFAULT_COLOR`) went with them. Net: **176 warnings before, 176 after.**
+
+#### Two defects found, both logged with owners rather than absorbed
+
+- **D-41 — three character-creation paths that disagree.** `CharacterScreen`'s modal and
+  the two inline lobby forms all call `createCharacter`, and the modal disables its button
+  at the three-character limit while the inline forms do not check at all. As three blocks
+  inside one 500-line function nothing distinguished them; putting them in two files is
+  what made it legible. **Not fixed here** — reconciling the limit is a UX decision, not an
+  extraction. **PR 29**, and `LobbyForms.js` exists as its single target.
+- **D-42 — `applyPerfSettings()` is defined and never called.** Not a behaviour bug:
+  `startGame()` applies both settings inline at its own construction sites, so saved
+  settings are honoured. It is a second implementation of the same thing. `no-unused-vars`
+  had always flagged it; it was one of 178 until this PR cleared the rest of the section
+  and left it standing alone. **PR 19**, because nothing may still be dead when `main.js`
+  goes.
+
+#### What is deliberately still in `main.js`
+
+`SessionManager`, `REJOIN_STORAGE_KEY`, the rejoin panel, `updateConnectionStatus`,
+`renderPlayerList` / `hidePlayerList` and the five `cuubz_last_session` write sites are
+**PR 16's** (§8.3), and `beforeunload` goes with them. Moving the session layer in the same
+diff as the screen layer would be two extractions with no gate between them.
+
+**Modified:** `src/main.js` (−951 lines), `src/index.js` unchanged, seven new files under
+`src/ui/` and `src/util/`, `refactor.md` (this section, PR 19's and PR 29's accept lists),
+`BUGS.md` (D-41, D-42, decision 27).
+
+---
 
 ### 8.3 PR 16 — Extract `SessionManager`
 `class SessionManager` (L1723), `REJOIN_STORAGE_KEY` (L1593), the rejoin panel, `updateConnectionStatus`, and the 5 `cuubz_last_session` write sites → `src/multiplayer/SessionManager.js`. Route localStorage through `src/util/StorageHelper.js`; **the key string does not change** ([§1.5](#15-player-data-must-survive-byte-for-byte)).
@@ -2577,6 +2672,7 @@ const SYSTEM_ORDER = ['inputManager','blockInteraction','player','mobSystem','dr
 - `updateDebugStats` (L4394) → `src/ui/hud/DebugStats.js`.
 - Mobile detection, auto-rejoin, `beforeunload`, init trigger → `src/index.js` + `SessionManager`.
 - Delete `js/main.js`.
+- **Also owns `BUGS.md` D-42** — `applyPerfSettings()` in `main.js` is defined and never called; `startGame()` applies both settings inline instead. Either the inline sites call it or it is deleted. Nothing may still be dead when `main.js` goes.
 - **Accept:** `js/main.js` gone. `src/index.js` under 50 lines. Every extracted file under 400 lines. Escape → pause → resume/exit/settings all work.
 
 ### Phase 3 gate
@@ -2734,6 +2830,7 @@ Import CSS from the module that uses it (`import '../css/components/buttons.css'
 
 ### PR 29 — Overlay components
 `InventoryScreen`, `CraftingScreen`, `PauseMenu`, `EquipmentPanel` — each owns show/hide and listener lifecycle.
+- **Also owns `BUGS.md` D-41** — three divergent character-creation paths (`CharacterScreen`'s modal plus the two inline forms in `src/ui/screens/LobbyForms.js`), which differ on whether they check the three-character slot limit. PR 15 split them into two files and logged the divergence rather than reconciling it, because reconciling is a UX decision. `LobbyForms.js` is the single target.
 
 ---
 
