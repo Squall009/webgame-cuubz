@@ -2610,6 +2610,8 @@ diff as the screen layer would be two extractions with no gate between them.
 ### 8.3 PR 16 — Extract `SessionManager`
 `class SessionManager` (L1723), `REJOIN_STORAGE_KEY` (L1593), the rejoin panel, `updateConnectionStatus`, and the 5 `cuubz_last_session` write sites → `src/multiplayer/SessionManager.js`. Route localStorage through `src/util/StorageHelper.js`; **the key string does not change** ([§1.5](#15-player-data-must-survive-byte-for-byte)).
 - **Accept:** host a session, close the tab, reopen → rejoin prompt appears and works.
+- **There are six write sites, not five, and two of them are `beforeunload` handlers on the same key** — one at `main.js`'s IIFE top level and one inside `initMenuNavigation`, so both fire and the second-registered one wins. They disagree about `mode`. **`BUGS.md` D-43**, owned by this PR: the fix is one writer with one shape, which is what routing through `StorageHelper` is for.
+- `PR15_HANDOFF.md` §4 has the full inventory — every symbol, its line, where it goes, and the four things that will bite.
 
 ### 8.4 PR 17 — `startGame()` → `src/core/Game.js`
 `core/Game.js` is a **rewrite**; `js/game.js` (280 lines, stub) is absorbed or deleted, along with its `new CuubzGame()` call site (`main.js:2569`).
