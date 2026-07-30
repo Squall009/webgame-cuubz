@@ -359,6 +359,15 @@ and ~1,000 assertions, none ever executed outside `test/`.
 - **A stale `vite` on port 3100 makes a green run a lie.** Seven occurrences so far.
   `Get-NetTCPConnection -LocalPort 3100 -State Listen` → `Stop-Process -Force`.
   `--strictPort` is what makes it loud; do not switch to an ephemeral port.
+- **Do not push a second commit while the previous CI run is still in flight.** The workflow
+  has a concurrency group on `refs/pull/1/merge`, so the new push **cancels** the running one
+  — `35166ca` (PR 20) has no green run of its own for exactly this reason, and the cancelled
+  run reports `conclusion: cancelled` with **one annotation** reading *"Canceling since a
+  higher priority waiting request … exists"*. That looks like a red CI with an annotation and
+  is neither. Either wait for the run, or verify the *later* SHA and say so.
+- **`gh run list --limit 1` can return the PREVIOUS run** for up to a minute after a push —
+  the new one has not registered yet. Match on `headSha` before trusting it, or you will
+  report the last commit's CI as this one's.
 - **Capture the FULL e2e output, not `| tail -3`.** The `Results: N passed` line is not in
   the last three lines, and a run that failed early looks identical to one that passed.
   This cost a cycle in PR 18.
