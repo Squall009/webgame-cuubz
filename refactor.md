@@ -1304,12 +1304,48 @@ just be a lockfile with extra steps.
 note, which claimed PR 11 would be the next PR to touch `ci.yml`), `refactor.md` (this
 section).
 
-### PR 8 — Pin Three.js at r134
+### PR 8 — Pin Three.js at r134 ✅ DONE
 ```bash
 npm i three@0.134.0 --save-exact
 ```
 Keep `js/three.min.js` on disk until PR 9 flips imports. See [§1.2](#12-pin-three01340-do-not-run-npm-install-three).
 - **Accept:** `package.json` shows `"three": "0.134.0"` (exact, no `^`).
+
+**Outcome (2026-07-29):** ✅ DONE. `"three": "0.134.0"` in `dependencies`, exact, and
+`node_modules/three/package.json` reports `0.134.0`. **Nothing imports it yet and nothing
+was removed** — `js/three.min.js` is still on disk and still what `index.html` loads. PR 9
+flips the imports; this PR only makes the package available and the pin enforceable.
+
+**The pin is now a CI gate rather than a paragraph — `test/test_threePin.js`, 8
+assertions.** §1.2 explains at length why r134 is load-bearing (843 hand-written shader
+lines, seven `ShaderMaterial`s, six with `fog: true`, and zero occurrences of
+`outputEncoding` / `sRGBEncoding` / `outputColorSpace` / `physicallyCorrectLights` /
+`useLegacyLights` anywhere in `js/`, so a modern Three changes every colour in the game).
+Nothing enforced it. `npm i three` — the exact command §1.2 forbids — would have
+installed r18x and left the repo looking fine until PR 9 switched the imports over.
+
+**It checks four things, and the fourth is the reason it exists.** The declared range is
+exactly `0.134.0` with no range operator; the *installed* package matches; the vendored
+`js/three.min.js` is r134; and **the two copies agree**. The dangerous state is not "the
+pin moved" — it is the npm package and the vendored bundle disagreeing, because PR 9's
+switchover would then change renderer behaviour silently while both version strings looked
+correct in isolation. That is the failure §1.2 describes, and it is invisible to any check
+that looks at one copy at a time.
+
+The bundle's revision is read in two steps — find `.REVISION=<ident>`, then find that
+identifier's string literal — rather than by grepping for `"134"`, which would also match
+a shader define or a magic number, and which would silently start matching nothing after a
+rebuild with a different minifier.
+
+**Not run: `npm run test:e2e`.** It cannot observe this PR. The harness asserts
+`THREE.REVISION === 134` from the running browser, and the browser loads
+`js/three.min.js` via a `<script>` tag that this PR did not touch; an npm package nothing
+imports cannot change what the page executes. Six minutes for a guaranteed-identical
+result is not diligence, it is theatre. It runs at the Phase 1 gate, where PR 9 will have
+made it meaningful.
+
+**New files:** `test/test_threePin.js`. **Modified:** `package.json`, `package-lock.json`,
+`refactor.md` (this section).
 
 ### PR 9 — Convert `js/` → `src/` ES modules (mechanical, in dependency order)
 For each file, in `index.html` script order (leaves first):

@@ -21,6 +21,7 @@
   "license": "ISC",
   "dependencies": {
     "pngjs": "^7.0.0",
+    "three": "0.134.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
