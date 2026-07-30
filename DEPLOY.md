@@ -4,17 +4,29 @@
 deploy, and avoid destroying player save data — without reading `refactor.md`.
 
 **Status of this document:** written at commit `749304b` (PR 6, 2026-07-29), amended at
-`0889448` (PR 6b, same day). Every statement about repo contents was verified by reading
-the file cited. **No statement about the remote server `10.0.30.160` was verified** —
-that needs SSH access neither author had. Unverified claims are marked `[UNVERIFIED]`
-with the command that would confirm them. See [§9](#9-verification-status).
+`0889448` (PR 6b) and again by PR 6c (same day). Every statement about repo contents was
+verified by reading the file cited. **No statement about the remote server
+`10.0.30.160` was verified** — that needs SSH access no author had. Unverified claims are
+marked `[UNVERIFIED]` with the command that would confirm them.
+See [§9](#9-verification-status).
 
 **What PR 6b changed:** [§7](#7-saveload-checklist) is now mostly executable
 (`npm run test:e2e`) instead of entirely manual, and nine of its fourteen steps are
-verified by a real browser rather than inferred from code. That run confirmed **H-1**
-([§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted)) and found four defects:
-**D-14**, **D-15**, **D-16** and the `console.error` severity bug, three of which are
-fixed. See [§8](#8-known-defects-and-who-owns-them).
+verified by a real browser rather than inferred from code. That run confirmed **H-1** and
+found four defects: **D-14**, **D-15**, **D-16** and the `console.error` severity bug,
+three of which it fixed.
+
+**What PR 6c changed:** **H-1 and D-15 are fixed** — chunk records are keyed
+`` `${worldName}:${cx},${cz}` `` and existing records are migrated at runtime, and the
+chunk buffer is no longer allocated at twice the size it uses. Both were shipped in **one
+migration**, deliberately: they touch the same bytes, so players' data is rewritten once
+rather than twice. Steps 8–9 of [§7](#7-saveload-checklist) now **pass**. See
+[§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions).
+
+> **The defect list moved.** [`BUGS.md`](./BUGS.md) is now the single ledger — every known
+> defect, its severity, its **owner PR** and its status, in one table with a rule that no
+> row may be unowned. [§8](#8-known-defects-and-who-owns-them) is a pointer to it. Do not
+> start a second list here; that is how H-1 stayed unowned through two PRs.
 
 > ### ⛔ Read this before your first deploy
 >
@@ -39,7 +51,7 @@ fixed. See [§8](#8-known-defects-and-who-owns-them).
 5. [Restarting the relay](#5-restarting-the-relay-the-step-syncsh-does-not-do)
 6. [Rollback](#6-rollback)
 7. [Save/load checklist — automated + manual remainder](#7-saveload-checklist)
-8. [Known defects and who owns them](#8-known-defects-and-who-owns-them)
+8. [Known defects and who owns them](#8-known-defects-and-who-owns-them) → [`BUGS.md`](./BUGS.md)
 9. [Verification status](#9-verification-status)
 
 ---
@@ -93,8 +105,36 @@ call site in `js/`.
 | Object store | `js/chunkmanager.js:23,273` | `'chunks'`, `keyPath: 'chunkKey'` |
 | Index on that store | `js/chunkmanager.js:274` | `'worldName'` → `worldName`, non-unique |
 | Object store | `js/chunkmanager.js:24,275` | `'manifests'`, `keyPath: 'worldName'` |
-| Chunk primary key format | `js/chunkmanager.js:455` | `` `${cx},${cz}` `` — e.g. `"-3,7"` |
+| **Chunk primary key format** | `ChunkManager.prototype._storeKey` | `` `${worldName}:${cx},${cz}` `` — e.g. `"world-1753...:-3,7"`. **Changed by PR 6c**; see below |
+| Logical chunk key format | `ChunkManager.key` | `` `${cx},${cz}` `` — e.g. `"-3,7"`. **Unchanged** |
 | Manifest primary key | `js/main.js:2329` | the world's `id` (`currentWorld.id`) |
+
+> ### The two chunk keys, and why there are two
+>
+> **PR 6c changed the `chunks` store's primary key and nothing else.** It used to be the
+> bare `` `${cx},${cz}` ``, which made chunk (0,0) a **single shared record across all
+> three world slots** — H-1, live data corruption, measured at 1,073 of 1,184 chunks
+> destroyed per cross-world visit. It is now prefixed with the world name.
+>
+> `ChunkManager.key(cx, cz)` — the **logical** key — did *not* change, and must not. It
+> has 17 call sites and is the key of the in-memory `memoryCache`, of
+> `manifest.generatedChunks[].key`, and of the worker protocol. None of those are
+> world-scoped concepts, and changing it would cascade into the manifest format, which is
+> itself a row in this table.
+>
+> So the two live side by side: logical keys everywhere in memory, storage keys at exactly
+> the **seven** sites that touch the `chunks` object store (`saveChunk`, `loadChunk`,
+> `hasChunk`, `deleteChunk`, the `flushDirty` batch write, the `beforeunload` flush, and
+> `_batchLoadChunks`). `_storeKey()` is the only bridge. If you add an eighth site, it
+> goes through `_storeKey` too.
+>
+> **Existing records are migrated at runtime, at `DB_VERSION = 2`.** Not in
+> `onupgradeneeded` — read the warning below to see why that handler cannot be used to
+> migrate anything. `_migrateToWorldScopedKeys` runs from `_openDB`, which all seven sites
+> await, so no read can observe a half-migrated store. It is idempotent: a key that
+> already contains `:` is skipped, so a migrated database costs one key scan and no
+> writes. A record with no `worldName` field cannot be attributed to a world and is left
+> in place rather than guessed at.
 
 > ### ⛔ `DB_VERSION = 2` must never be incremented
 >
@@ -127,6 +167,26 @@ call site in `js/`.
 | Chunk width/depth | `js/chunkmanager.js:18-19` | `16` × `16` |
 | Checksum algorithm | `:37-46` | FNV-1a 32-bit, basis `0x811c9dc5`, prime `0x01000193` |
 | Run encoding | `:19` | each run = `[blockID: Uint16, count: Uint16]` |
+| Encoded length | `encode`, `estimateSize` | exactly `HEADER_SIZE + runCount * 4`. **Changed by PR 6c** (D-15) — see below |
+
+> ### Stored chunks used to be twice this size (D-15, fixed in PR 6c)
+>
+> `encode()` sized the buffer as `HEADER_SIZE + blockRuns.length * 4`, but `blockRuns` is
+> a **flat** `Uint16Array` of `[id, count, id, count, …]` — so the run count is
+> `blockRuns.length / 2` and the payload is `blockRuns.length * 2` bytes. Every stored
+> chunk was allocated at exactly double what was written, with a zero tail the same size
+> as its real payload: **24,156 bytes allocated / 12,088 used**, ≈14 MB of zeroes per
+> world. `estimateSize` carried the same error and over-reported 2×.
+>
+> **The fix is backward compatible, and this is why:** `decode()` never consults the
+> buffer length — it stops after `blockRunCount` runs. So an old padded chunk and a new
+> tight one decode identically, and a player's existing worlds load unchanged.
+>
+> **But the checksum spans the whole data portion**, so re-encoding a chunk produces a
+> *different* checksum than its padded original. That is safe only because every write
+> path records the new checksum in the manifest in the same pass — `flushDirty` phase 3
+> and, as of PR 6c, the `beforeunload` flush too (**D-19**). If you add a write path,
+> it records the checksum or it breaks the check in `_batchEnsureChunks`.
 
 **Block IDs are baked into every saved chunk.** The format stores numeric block IDs,
 not names. Renumbering an entry in `BLOCK_REGISTRY` reinterprets every chunk every
@@ -156,36 +216,64 @@ in six places plus one named constant.
 
 ### 2.4 Storage hazards — pre-existing, do not mistake these for refactor regressions
 
-**H1 — Chunk keys are not scoped to a world. Worlds cross-contaminate. This is live.**
+**H1 — Chunk keys were not scoped to a world, so worlds cross-contaminated. FIXED in
+PR 6c.** Kept here because it is the largest thing that has gone wrong with this
+project's player data, and because a future refactor of the storage layer needs to know
+what it must not undo.
 
-The `chunks` store's primary key is `chunkKey`, which is only
-`` `${cx},${cz}` `` (`js/chunkmanager.js:455`). The record *also* carries a
-`worldName` field and there is an index on it (`:274`), but **no read path uses
-either**: `loadChunk` (`:322-330`), `hasChunk` (`:332-340`) and `_batchLoadChunks`
-(`:857-880`) all do a bare `store.get(key)` / `store.count(key)`. Writes
-(`:313`, `:680`, `:770`) set `worldName` and then key the record globally.
+The `chunks` store's primary key is `chunkKey`, and it used to be only
+`` `${cx},${cz}` ``. The record *also* carried a `worldName` field and there was an index
+on it (`:274`), but **no read path used either**: `loadChunk`, `hasChunk` and
+`_batchLoadChunks` all did a bare `store.get(key)` / `store.count(key)`. The three write
+sites set `worldName` and then keyed the record globally.
 
-Consequence: chunk `(0,0)` is a **single shared record across all three world slots**.
-Play world A, place blocks at spawn, then play world B at spawn — B's chunk overwrites
-A's. Return to A and you are standing in B's terrain. Manifests *are* per-world
-(`keyPath: 'worldName'`), so world A's manifest still claims the chunk is generated,
-which is what makes the stale data load instead of regenerating.
+Consequence: chunk `(0,0)` was a **single shared record across all three world slots**.
+Play world A, place blocks at spawn, then play world B at spawn — B's chunk overwrote A's.
+Return to A and you were standing in B's terrain. Manifests *are* per-world
+(`keyPath: 'worldName'`), so world A's manifest still claimed the chunk was generated,
+which is what made the stale data load instead of regenerating.
 
-`js/main.js:551-552` contains a comment reading *"chunks remain orphaned but harmless -
-they're keyed by chunk coordinates"*. The premise is right and the conclusion is wrong:
-coordinate-only keys are the bug, not a mitigation.
+**Confirmed by observation in PR 6b, and worse than the original prediction.** One visit
+to a second world destroyed **1,073 of the first world's 1,184 saved chunks**, and
+re-entering the first world served the second world's spawn chunk byte for byte. The blast
+radius is the whole overlapping pre-generated region — at `regionRadius: 16`, nearly all
+of both worlds — not just spawn.
 
-**Not fixed here.** The fix changes the primary key format, which is itself an entry in
-the table above — every already-saved chunk would be orphaned unless a migration is
-written. That is a data-migration PR with its own manual test plan, not a line in a
-documentation PR. [§7](#7-saveload-checklist) steps 8–9 detect it deliberately and
-**fail today**, so nobody spends a day blaming their own refactor.
+**Fixed in PR 6c** by scoping the store key (see the box in
+[§2.1](#21-indexeddb--worlds-and-terrain)) and migrating existing records at runtime.
+`npm run test:e2e` steps 8–9 are now the regression test: world A's spawn chunk is
+byte-for-byte unchanged by a full visit to world B, and the store holds the **sum** of
+both worlds rather than the union of their coordinates.
 
-> **Confirmed by observation in PR 6b, and worse than described above.** One visit to a
-> second world destroyed **1,073 of the first world's 1,184 saved chunks**, and
-> re-entering the first world served the second world's spawn chunk byte for byte. Full
-> measurements, plus a cheap detection mechanism the stored data already supports, in
-> [§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted).
+> **The migration cannot recover data H-1 already destroyed, and does not pretend to.** A
+> contaminated record only remembers its **last** writer, so it migrates into that world
+> and the other world regenerates those chunks from its seed. Terrain is deterministic, so
+> the ground comes back identical; what is gone is any player edit inside those chunks,
+> and it was gone before the migration ran.
+
+Two smaller things fixed alongside it, both cited in `BUGS.md`:
+
+- **D-18** — `js/main.js` used to delete a world's manifest and leave every chunk record
+  behind, under a comment reading *"chunks remain orphaned but harmless — they're keyed by
+  chunk coordinates"*. The premise was H-1 itself: those records were not orphaned, they
+  were **shared** with whatever world next generated the same coordinates. World-scoped
+  keys are what make a world's chunks both identifiable and safe to delete, so deletion
+  now removes them as a key range.
+- **D-19** — the `beforeunload` flush wrote chunk records without updating the manifest,
+  leaving the manifest's recorded checksum describing the record's *previous* bytes. It
+  now writes both stores in one transaction.
+
+**There is also a load-time check now, as defence in depth rather than a substitute.**
+`_batchEnsureChunks` compares each loaded record's `worldName` against the world doing the
+loading and discards a record that names a different world, regenerating instead of
+serving foreign terrain. That is the tripwire that would catch H-1 coming back. It also
+compares the manifest's recorded checksum against the header checksum at offset 16 — but
+on a mismatch with intact, correctly-owned bytes it **repairs the manifest entry** rather
+than deleting the chunk. Deleting would be wrong: `decode()` already verifies the bytes
+against the checksum they carry, so real corruption is caught there, and a stale manifest
+entry with good bytes means the manifest is the thing out of date. Regenerating on that
+signal would deterministically discard whatever a player built immediately before the
+write that outran the manifest.
 
 **H2 — `js/main.js:545` opens the database with no version.**
 
@@ -344,7 +432,7 @@ itself is never shipped — so this is information disclosure, not a key leak.
 anticipates one existing locally; `sync.sh` had no matching exclude, so it would have
 been tarred, extracted into the web root, and `chmod 644`'d. No `.env` exists in the
 repo today, which is the only reason this was never a live leak. Fixed in this PR —
-see [§8](#8-known-defects-and-who-owns-them) D-1.
+see [`BUGS.md`](./BUGS.md) D-1.
 
 The `${PROJECT_NAME}.tar.gz` staging location is worse in kind: for the duration of
 every deploy, a complete copy of the source tree sits at a predictable URL
@@ -492,7 +580,7 @@ self-heals in 5 s. Note that `uncaughtException` and `unhandledRejection`
 (`server/index.js:219-225`) both route into the clean-shutdown path with
 `process.exit(0)` — **exit code 0 is not a failure**, so `on-failure` will *not*
 restart the relay after an unhandled error. It stays down. `[UNVERIFIED]` in
-production; flagged as D-8 in [§8](#8-known-defects-and-who-owns-them).
+production; flagged as D-8 in [`BUGS.md`](./BUGS.md).
 
 ### 5.2 The node version is pinned by absolute path
 
@@ -632,10 +720,10 @@ Two things close the gap, neither of them a documentation task:
 >
 > A real browser (Edge, driven by `playwright-core`, WebGL via SwiftShader) walks the
 > menu flow, generates two worlds from pinned seeds, and reads IndexedDB and
-> localStorage directly. **112 assertions, exit 0, ~5 minutes.** Screenshots land in
+> localStorage directly. **137 assertions, exit 0, ~6 minutes.** Screenshots land in
 > `test/e2e/artifacts/` (gitignored).
 >
-> It covers steps 1, 2, 3, 5, 6, 7, 10, 11 and 14 outright, plus every invariant in
+> It covers steps 1, 2, 3, 5, 6, 7, **8, 9**, 10, 11 and 14 outright, plus every invariant in
 > [§2](#2-do-not-change-player-data-invariants) — including the chunk binary header
 > decoded from bytes the browser actually wrote, and the database version read
 > **without** triggering the `onupgradeneeded` handler described in
@@ -647,11 +735,13 @@ Two things close the gap, neither of them a documentation task:
 > never implies more than it checked. It is deliberately **not** in `npm test` and
 > **not** in CI — see the comment block in `.github/workflows/ci.yml`.
 >
-> **Two of its assertions describe defects rather than requirements** (H-1, D-15).
-> They pass because the bug is present. Fixing either turns the script red on
-> purpose; that is the signal to replace the block with the assertion the fix makes
-> true. **D-14 was a third such block until PR 6b fixed it**, and it is now a real
-> step-7 round trip — that is the intended lifecycle.
+> **No assertion in it describes a defect any more.** PR 6b shipped three that did —
+> **D-14**, **D-15** and **H-1** — each headed `ASSERTING A KNOWN DEFECT`, passing
+> because the bug was present, on the rule that a run goes red if a new failure appears
+> **or** if a known failure stops reproducing. All three have been fixed and their
+> blocks rewritten into the assertions the fixes make true: D-14 inside PR 6b, D-15 and
+> H-1 in PR 6c. **Steps 8–9 are now the H-1 regression test.** If a future PR needs the
+> pattern again, keep the header and write the replacement assertion beside it.
 
 Run the manual remainder **at every Phase gate and after every deploy.**
 `refactor.md` §1.5 specifies this as a manual gate until PR 32 can automate it.
@@ -688,44 +778,38 @@ step below has a console-visible failure mode.
 | 5 | Pick up the drops, note the hotbar contents. **Press Escape. Wait 5 s.** | Pause menu opens. Console logs `[Cuubz] Saved player state`. | ✅ (pause menu; hotbar is manual) |
 | 6 | **Reload the page** (F5), re-enter the same world | **Your shape is exactly as you left it. Broken blocks are still broken. Inventory and hotbar match.** ← the load-bearing assertion | ✅ for terrain (byte-identical); ❌ for placed blocks + inventory |
 | 7 | Quit to menu, re-enter the same world without reloading | Same result as step 6. | ✅ for terrain (was blocked by **D-14**, fixed in PR 6b — see [§7.2](#72-step-7-was-unrunnable-until-pr-6b--d-14)) |
-| 8 | **Two-world test.** Create a world in slot 1. Enter it, look at spawn. | ⚠️ **FAILS TODAY — H-1, confirmed by observation.** See below. | ✅ (asserts the defect) |
-| 9 | Return to the slot 0 world | ⚠️ **FAILS TODAY — H-1, confirmed by observation.** See below. | ✅ (asserts the defect) |
+| 8 | **Two-world test.** Create a world in slot 1. Enter it, look at spawn. | The slot 1 world generates its own terrain. The slot 0 world's saved chunks are **untouched** — the store now holds both worlds in full. Failed until PR 6c (**H-1**); see [§7.1](#71-steps-89-were-h-1-fixed-in-pr-6c). | ✅ |
+| 9 | Return to the slot 0 world | **Your own terrain, not the other world's.** Same result as step 6. | ✅ |
 | 10 | Open DevTools → Application → IndexedDB | DB `cuubz-worlds`, **version 2**, stores `chunks` + `manifests`. If the version is not 2, **stop** — see [§2.1](#21-indexeddb--worlds-and-terrain). | ✅ read programmatically, without triggering an upgrade |
 | 11 | Change a graphics setting, reload | Setting persists. `localStorage['cuubz:settings']` reflects it. | ✅ |
 | 12 | Host a multiplayer session, join from a second browser profile, place a block as the guest | Block appears for both. Host's browser persists it (host is authoritative). | ❌ manual |
 | 13 | Quit both. Reload as host, re-enter | The guest's block is still there. | ❌ manual |
 | 14 | Confirm the tree is clean | `git status` clean — the manifest smoke test snapshots and restores `textures/blocks/manifest.json`; a dirty tree means it did not. | ✅ |
 
-### 7.1 Steps 8–9 fail. H-1 is confirmed, not predicted.
+### 7.1 Steps 8–9 were H-1. Fixed in PR 6c.
 
-**PR 6 wrote these two steps from the read paths and asked the first runner to correct
-this document if the prediction did not hold. It held, and the run was worse than the
-prediction.** Observed by `npm run test:e2e`, world A on seed `424242` (slot 0) and
-world B on seed `999111` (slot 1):
+This subsection used to document why these two steps failed, and instructed whoever
+fixed H-1 to invert the harness block and delete it. PR 6c did both. What is left is the
+pointer, because the anchor is cited from
+[§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions)
+and [§9](#9-verification-status), and because the numbers are worth being able to find.
 
-| Observation | Value |
-|---|---|
-| Chunk record `"0,0"`'s own `worldName` field after visiting B | world **B**'s id — B's write replaced A's record at the same key |
-| Re-entering world A and reading `"0,0"` | **byte-for-byte identical to world B's chunk.** The player is standing in the other world's terrain. |
-| World A's manifest after B's visit | still lists `"0,0"` as generated, so A loads the stale record instead of regenerating |
-| World A's manifest checksum for `"0,0"` | `3799605976` — but the bytes stored at that key now checksum to `1653333176`. **Nothing verifies this on load.** |
-| World A chunks destroyed by one visit to world B | **1,073 of 1,184** (world-scoped keys would have left 2,393 records in the store; it holds 1,320) |
+- **What the bug was, and what fixed it:** the H-1 entry in
+  [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions),
+  and the two-key box in [§2.1](#21-indexeddb--worlds-and-terrain).
+- **The full measurements from both runs, before and after:** `refactor.md` §5 PR 6b (the
+  damage) and PR 6c (the fix).
+- **The ledger row, with severity and owner:** [`BUGS.md`](./BUGS.md).
 
-Two things follow that the original note did not say:
+**In one line each.** Before: one visit to a second world destroyed **1,073 of the first
+world's 1,184 saved chunks**, and re-entering the first world served the second world's
+spawn chunk byte for byte. After: world A keeps **1,184 of 1,184**, its spawn chunk is
+byte-identical with `savedAt` unchanged, and the store holds **2,393 records — the sum of
+both worlds** (1,184 + 1,209), not the union of their coordinates.
 
-1. **The blast radius is the whole overlapping region, not just spawn.** ~90% of a
-   world's saved chunks are destroyed by a single visit to another world. There is no
-   "look at spawn and you'll see it" nuance — the worlds are the same world.
-2. **The damage is already detectable with data the game stores today.**
-   `manifest.generatedChunks[].checksum` is the chunk header's own FNV-1a
-   (`chunkmanager.js:649`), so a manifest/record checksum mismatch identifies a
-   contaminated chunk exactly. Nothing compares them. That is a cheap partial
-   mitigation for whoever owns H-1 — verify on load, regenerate on mismatch — short of
-   the primary-key migration, which is still the real fix.
-
-**This is pre-existing, not something a refactor broke.** The harness asserts the
-defect so a fix flips it red; when H-1 is fixed, replace that block with the inverse
-assertions and delete this subsection.
+**Neither of these was ever a refactor regression.** H-1 predated Phase 0 entirely; PR 6
+predicted it from the read paths, PR 6b observed it, PR 6c fixed it. That sequence is the
+argument for the gate existing.
 
 ### 7.2 Step 7 was unrunnable until PR 6b — D-14
 
@@ -755,46 +839,32 @@ point of the checklist. 6 and 7 are now automated for terrain; 13 is still manua
 
 ## 8. Known defects and who owns them
 
-| ID | Defect | Severity | Status |
-|---|---|---|---|
-| **D-1** | `sync.sh` did not exclude `.env`, so a local env file would ship into a world-readable public web root | credential leak (latent — no `.env` exists) | **FIXED in PR 6** (`sync.sh:31`) |
-| D-2 | `sync.sh` never restarts the relay; `server/` changes are silently inert | high — silent stale deploys | Documented [§5](#5-restarting-the-relay-the-step-syncsh-does-not-do). Fix in **PR 10** |
-| D-3 | No rollback of any kind: extract-in-place, no backup, no release dirs | high | Documented [§6](#6-rollback). Fix in **PR 10** |
-| D-4 | `--exclude='dist'` will ship a JS-less site from PR 7 onward | **critical** from PR 7 | `refactor.md` §1.4. Fix in **PR 10**, must land with PR 9 |
-| D-5 | `tar xzf` never deletes; removed files persist on the server forever | high at PR 9 (`js/` → `src/`) | Documented [§4.6](#46-tar-xzf-never-deletes). Fix in **PR 10** |
-| D-6 | `chmod` fans out over all of `/var/www/html` and aborts the deploy *after* extraction if any file is not owned by `dadmin` | medium — confusing partial deploys | Documented [§4.4](#44-the-chmod-is-the-fragile-step). Fix in **PR 10** |
-| D-7 | Source archive is staged **inside** the public web root and only removed on success | medium — source disclosure | Documented [§4.2](#42-what-gets-shipped). Fix in **PR 10** |
-| D-8 | `uncaughtException` / `unhandledRejection` exit with code **0**, so `Restart=on-failure` does not restart the relay after an unhandled error | medium — relay stays down | `server/index.js:219-225`. Unowned — needs a decision |
-| D-9 | `node_modules` excluded and no remote `npm ci`: dependency changes never reach production | medium | Documented [§4.5](#45-node_modules-is-never-shipped). Fix in **PR 10** |
-| D-10 | `ExecStart` hardcodes `node-v22.22.0` by absolute path; CI validates 22.23.x | medium — node upgrade breaks the unit | Documented [§5.2](#52-the-node-version-is-pinned-by-absolute-path). Unowned |
-| D-11 | `textures/` (120 MB, 3,370 files) re-uploaded on every deploy | low — transfer cost | Documented [§4.1](#41-measured-payload). Fix in **PR 10** |
-| D-12 | `StrictHostKeyChecking=no` on both `scp` and `ssh` — any host key is accepted | low (LAN IP), by design | `sync.sh:34,36`. Unowned |
-| D-13 | Whole repo (`test/`, `scripts/`, all planning `.md`, `.claude/`) ships to the public web root | low — information disclosure | Documented [§4.2](#42-what-gets-shipped). Fix in **PR 10** |
-| **D-14** | `js/main.js:4562` called `game.playerSync.reset()`, which does not exist on `PlayerSyncManager`. **Every "Exit to Menu" threw**, skipping six cleanup steps and `showScreen('mainMenu')` — the player was left on a blank page, recoverable only by F5 | **high — the quit path was broken in every session, solo included** | Found *and* **FIXED in PR 6b** (call deleted; `clearAll()` was already the whole teardown). [§7.2](#72-step-7-was-unrunnable-until-pr-6b--d-14). §7 step 7 now automated |
-| **D-15** | `chunkBinaryCodec.js:63` sizes the buffer as `HEADER_SIZE + blockRuns.length * 4`, but a run is *two* `Uint16`s, so the payload written is half that. **Every stored chunk is exactly 2× the size it needs, half zero padding** — measured 24,156 bytes allocated / 12,088 used, ≈14 MB of zeroes per world | medium — 50% of IndexedDB footprint and 50% of every 5 s flush's write volume, wasted | Found by PR 6b. Not a corruption bug (`decode` stops at `blockRunCount`), but the fix changes stored byte length, i.e. a [§2.2](#22-chunk-binary-format) format change. **Unowned** |
-| **D-16** | `#pause-pause-time` was a checkbox labelled "Pause Time of Day", `checked` by default, while `main.js:4693` sets `checked = !skybox.timePaused` — so checked meant time was **running**, and ticking "pause" un-paused it | low — confusing control, no data risk | **FIXED in PR 6b** by relabelling to "Day/Night Cycle" (`index.html:477`). Chosen over inverting the logic, which would have changed every existing player's default |
-| **H-1** | Chunk primary keys are not world-scoped; worlds cross-contaminate | **high — live data corruption** | Documented [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions). Needs a migration PR. **Unowned** |
-| **H-2** | `onupgradeneeded` deletes every object store; bumping `DB_VERSION` destroys all player worlds | **critical if triggered** | Documented [§2.1](#21-indexeddb--worlds-and-terrain). Unowned |
-| H-3 | `js/main.js:545` opens IndexedDB with no version; can create a store-less v1 DB | low — self-heals | Documented [§2.4](#24-storage-hazards--pre-existing-do-not-mistake-these-for-refactor-regressions). Unowned |
+> ### ➜ The defect list is [`BUGS.md`](./BUGS.md). This section is a pointer.
+>
+> **One list, not two.** This table used to be the list, and it shipped with six rows
+> reading **"Unowned"** — one of which was **H-1**, live data corruption that destroyed
+> ~90% of a world's saved chunks per cross-world visit and stayed unowned through two
+> PRs. `BUGS.md` consolidates every defect in this document plus the ones that were only
+> ever mentioned in `refactor.md` prose, under a rule that **no row may be unowned**:
+> every one names the PR that will fix it, and a PR slot gets created in `refactor.md` if
+> none exists. Do not restart a table here.
+>
+> What `BUGS.md` holds that this table did not:
+>
+> - **Owners for the six rows that had none** — D-8 and D-10 → PR 10, D-12 → PR 10,
+>   H-2 and H-3 → **PR 6d** (a new slot), plus the two defects that were loose in
+>   `refactor.md` prose with no ID at all: the `SurvivalSystem` spawn `y` (**D-21** →
+>   PR 22) and the four relay tests binding fixed ports (**D-20** → PR 31).
+> - **The defects PR 6c found and fixed** — D-17, D-18, D-19 — and the two it closed:
+>   **H-1** and **D-15**.
+> - **Which open decisions block which rows**, so a decision is neither made twice nor
+>   lost.
+>
+> The deploy-side rows (**D-1** … **D-13**) are all still real and all still owned by
+> **PR 10**, which rewrites `sync.sh` and must land with PR 9. The sections of this
+> document they cite are unchanged: [§4](#4-what-syncsh-actually-does),
+> [§5](#5-restarting-the-relay-the-step-syncsh-does-not-do), [§6](#6-rollback).
 
-Only **D-1** was fixed in PR 6. Everything else is either owned by PR 10 (which
-rewrites `sync.sh` and must land with PR 9) or needs a decision that a documentation
-PR should not make unilaterally — H-1 in particular requires a data migration, and
-"fixing" it carelessly would violate [§2](#2-do-not-change-player-data-invariants).
-
-**PR 6b found four defects and fixed three.** Fixed: `js/main.js:4865,4878` logged the
-`=== AUTO-REJOIN COMPLETE ===` and `=== INIT COMPLETE ===` success milestones through
-`console.error`, so every successful page load reported two console errors — which
-pollutes error monitoring and made "zero console errors on a clean load" unassertable.
-Now `console.info`; same visibility, correct severity. `js/util/logger.js` is *not* the
-problem and was left alone — `CuubzLogger.log` is `console.log` gated on `DEBUG = false`
-and therefore silent in production, which is exactly why someone reached for
-`console.error` to force visibility. Also fixed: **D-14** (the broken quit path — its
-own one-line deletion, because it made a load-bearing checklist step unrunnable) and
-**D-16** (the inverted day/night label). **D-15 is the one left open**: fixing it
-changes the stored byte length of every future chunk, which is a
-[§2.2](#22-chunk-binary-format) format change and wants its own PR rather than a ride
-along in a test-harness one.
 
 ---
 
@@ -820,13 +890,15 @@ verified by execution:
 ### Verified by execution in a real browser — added by PR 6b
 
 `npm run test:e2e` (`test/e2e/saveLoad.js`), Edge 150.0.4078.105 headless, WebGL via
-SwiftShader, **112 assertions / 0 failures / exit 0**. This moved the following out of
-"not verified":
+SwiftShader, **137 assertions / 0 failures / exit 0** (112 at PR 6b; PR 6c added 25 and
+rewrote the H-1 and D-15 blocks from asserting the defects to asserting the fixes). This
+moved the following out of "not verified":
 
 - **Every value in [§2](#2-do-not-change-player-data-invariants)** — read from the
   running page rather than from source text. Database name, version `2` (read
   **without** firing `onupgradeneeded`), both object stores and their key paths, the
-  non-unique `worldName` index, the `` `${cx},${cz}` `` key format, all four
+  non-unique `worldName` index, **both** chunk key formats (the logical
+  `` `${cx},${cz}` `` and the world-scoped `` `${worldName}:${cx},${cz}` ``), all four
   `persistence.js` localStorage keys, `MAX_WORLD_SLOTS = 3`,
   `BLOCK_REGISTRY.length === 193`, and every chunk-format constant.
 - **The chunk binary format, decoded from bytes the browser actually wrote.** Magic
@@ -841,14 +913,44 @@ SwiftShader, **112 assertions / 0 failures / exit 0**. This moved the following 
   terrain was loaded from storage, not regenerated. Step 7 also asserts that `onExit`
   returns to the menu, raises nothing, and leaves no in-game overlay visible, which is
   the shape D-14 failed in.
-- **§7 steps 8–9 — H-1 reproduces.** See [§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted).
-  The prediction PR 6 asked the first runner to confirm is confirmed, and quantified.
 - **The clean-load claim is now literally true**: 0 uncaught exceptions, 0 console
-  errors, 0 missing assets. It was not before — see the `console.error` fix in
-  [§8](#8-known-defects-and-who-owns-them). The only exclusion on the asset check is
-  `/favicon.ico`, which Chromium requests unprompted and the repo does not have.
+  errors, 0 missing assets. It was not before — see the `console.error` fix recorded in
+  `refactor.md` §5 PR 6b. The only exclusion on the asset check is `/favicon.ico`, which
+  Chromium requests unprompted and the repo does not have.
 - **`THREE.REVISION === 134`** and `window.__THREE_LOAD_FAILED` unset, i.e.
   `refactor.md` §1.2's pin is what the browser really loads. PR 8 must keep it there.
+
+### Verified by execution in a real browser — added by PR 6c
+
+Same harness, same browser. The four things PR 6c changed about a player's stored bytes
+are each asserted end to end, against a database the browser itself wrote:
+
+- **§7 steps 8–9 — H-1 is fixed, and the two-world test is now its regression test.**
+  World A generated **1,184** chunk records; a full visit to world B (its own seed, 1,209
+  records of its own) left **every one of A's 1,184 intact**, with A's spawn chunk
+  byte-identical and `savedAt` unchanged, and A's manifest checksum for `"0,0"` matching
+  the bytes stored under A's key. The store held **2,393 records = 1,184 + 1,209, the
+  sum** — which is the number PR 6b predicted world-scoped keys would leave. The equality
+  asserted is between the two worlds' own counts and the store total, not against that
+  literal: world B's count moves by a chunk or two between runs depending on where its
+  region pre-generation quiesces. Re-entering world A served world A's own bytes, not B's.
+  Pre-6c the same run destroyed 1,073 of those 1,184 and served B's chunk byte for byte.
+  **Zero records anywhere in the store carry an unscoped key.**
+- **The migration, against a database seeded with pre-migration keys.** The harness writes
+  a record the pre-6c way — bare `` `${cx},${cz}` `` primary key, `worldName` field beside
+  it — then loads the game. The record is re-keyed under its own `worldName`, the bare row
+  is gone, and the payload is **byte-identical** with `savedAt` preserved: the migration
+  moves records, it does not re-encode them. Idempotency and the no-`worldName` case are
+  covered by `test/test_chunkStorage.js`, which runs in CI.
+- **D-15 — the stored length is exactly `20 + runCount * 4`**, asserted as an equality
+  against the run count in the chunk's own header. The unit test that missed this bug for
+  the life of the codec asserted `< actual * 1.5`, which both the bug and the fix satisfy.
+- **D-17** — `deleteChunk` issues one delete request, asserted by operation count against
+  a stub store in `test/test_chunkStorage.js`.
+
+**Nine of the fourteen §7 steps were automated at PR 6b; it is eleven now** — 1, 2, 3, 5,
+6, 7, **8, 9**, 10, 11, 14. The two that remain are step 4 and steps 12–13, and both wait
+on the same blocker (see below).
 
 Two limits on that run, both stated because they bound what a green result means:
 
@@ -889,9 +991,10 @@ after overwriting the live tree — and the error message says nothing about tha
 ### Still unverified in §7 — two steps, and both wait on the same thing
 
 PR 6 wrote [§7](#7-saveload-checklist) from the code paths and asked the first runner to
-correct it. PR 6b ran it. Nine steps are now automated and H-1 is confirmed
-([§7.1](#71-steps-89-fail-h-1-is-confirmed-not-predicted)); two remain, and the harness
-prints each as `⚠️ UNVERIFIED` on every run so a pass never overclaims:
+correct it. PR 6b ran it and confirmed H-1; PR 6c fixed H-1 and automated the two steps
+that detected it ([§7.1](#71-steps-89-were-h-1-fixed-in-pr-6c)). **Eleven of fourteen
+steps are automated.** Two remain, and the harness prints each as `⚠️ UNVERIFIED` on
+every run so a pass never overclaims:
 
 | Step | Why it is not automated | What would close it |
 |---|---|---|

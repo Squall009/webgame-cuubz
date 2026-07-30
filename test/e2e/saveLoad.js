@@ -37,8 +37,16 @@
  * Phase 2 (PR 12–13), when those locals are hoisted onto an explicit `Game`.
  *
  * The design consequence: every persistence assertion here reads IndexedDB and
- * localStorage directly instead of simulating a player. That is why H-1 is provable
- * with no pointer lock and no mouse-look at all — see [H-1] below.
+ * localStorage directly instead of simulating a player. That is why H-1 was provable
+ * with no pointer lock and no mouse-look at all, and why steps 8-9 are now the
+ * regression test for its fix — see [H-1] below.
+ *
+ * DEFECT-ASSERTING BLOCKS: NONE REMAIN. PR 6b shipped three (D-14, D-15, H-1) whose
+ * assertions described the bug rather than the requirement, on the rule that a run
+ * goes red if a new failure appears OR if a known failure stops reproducing. All
+ * three have been fixed and their blocks rewritten into real assertions — D-14 in
+ * PR 6b, D-15 and H-1 in PR 6c. If a future PR needs the pattern again, head the
+ * block `ASSERTING A KNOWN DEFECT` and write the replacement assertion beside it.
  *
  * WHAT IT CANNOT VERIFY — see the UNVERIFIED summary it prints at the end.
  */
@@ -61,7 +69,10 @@ const CHROME_ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '
 
 // Fixed seeds. #world-seed (index.html:154) pins terrain generation, which is what
 // makes "the bytes are identical after a reload" a legitimate assertion rather
-// than a coin flip. Two different seeds so H-1's overwrite is visible in the bytes.
+// than a coin flip. Two DIFFERENT seeds, so the two worlds' chunk "0,0" cannot be
+// byte-equal by accident — which is what lets steps 8-9 tell "world A kept its own
+// terrain" apart from "both worlds happen to look the same". Pre-6c it was what made
+// H-1's overwrite visible in the bytes; post-6c it is what makes the fix provable.
 const SEED_A = '424242';
 const SEED_B = '999111';
 
@@ -184,7 +195,19 @@ const readStorage = (page, worldId) => page.evaluate(async (wid) => {
   out.chunkCount = out.chunkKeys.length;
   out.manifestKeys = await all(manifests);
 
-  const rec = await get(chunks, '0,0');
+  // PR 6c: the chunks store's primary key is `${worldName}:${cx},${cz}`, so the store
+  // can be partitioned by world — which is the whole point, and the thing the H-1
+  // assertions below measure. `unscopedChunkCount` is the migration's own invariant:
+  // once it has run, no bare `cx,cz` key remains anywhere in the store.
+  out.storeKey00 = `${wid}:0,0`;
+  out.worldChunkCount = out.chunkKeys.filter(k => String(k).indexOf(`${wid}:`) === 0).length;
+  out.unscopedChunkCount = out.chunkKeys.filter(k => String(k).indexOf(':') === -1).length;
+
+  // Read the pre-6c key too. It must always be absent: a bare key means either the
+  // migration did not run or a write site was missed.
+  out.legacyRec00 = (await get(chunks, '0,0')) !== undefined;
+
+  const rec = await get(chunks, out.storeKey00);
   if (rec) {
     out.rec = { chunkKey: rec.chunkKey, worldName: rec.worldName, savedAt: rec.savedAt, byteLength: rec.data.byteLength };
     // Base64 rather than a number array: chunk 0,0 is ~32 KB and this crosses the
@@ -340,7 +363,14 @@ async function main() {
     assert(false, `git status readable (${err.message})`);
   }
 
+  // Clear last run's screenshots. They are a self-comparison baseline, so a stale PNG
+  // from a run of different code is worse than no PNG — and PR 6c renamed one of them
+  // (05-world-alpha-contaminated → -intact), which would otherwise leave seven files
+  // against the count asserted at the end.
   fs.mkdirSync(ARTIFACTS, { recursive: true });
+  for (const f of fs.readdirSync(ARTIFACTS)) {
+    if (f.endsWith('.png')) fs.unlinkSync(path.join(ARTIFACTS, f));
+  }
 
   const { start } = require('./staticServer');
   const server = await start(path.resolve(ROOT), 0);
@@ -428,6 +458,13 @@ async function main() {
       chunkW: typeof CHUNK_W !== 'undefined' ? CHUNK_W : null,
       chunkD: typeof CHUNK_D !== 'undefined' ? CHUNK_D : null,
       chunkKeyFormat: typeof ChunkManager !== 'undefined' ? ChunkManager.key(-3, 7) : null,
+      // PR 6c — the LOGICAL key above is unchanged; the STORE key is world-scoped.
+      // Called on a stub rather than a real instance: only `worldName` is involved.
+      storeKeyFormat: typeof ChunkManager !== 'undefined'
+        ? ChunkManager.prototype._storeKey.call({ worldName: 'world-xyz' }, '-3,7') : null,
+      worldKeyPrefix: typeof ChunkManager !== 'undefined' ? ChunkManager.worldKeyPrefix('world-xyz') : null,
+      scopedRecognised: typeof ChunkManager !== 'undefined' ? ChunkManager.isWorldScopedStoreKey('w:0,0') : null,
+      bareRecognised: typeof ChunkManager !== 'undefined' ? ChunkManager.isWorldScopedStoreKey('0,0') : null,
       magic: typeof CHUNK_MAGIC !== 'undefined' ? CHUNK_MAGIC : null,
       codecVersion: typeof CHUNK_VERSION !== 'undefined' ? CHUNK_VERSION : null,
       legacyMax: typeof LEGACY_LAYOUT_MAX !== 'undefined' ? LEGACY_LAYOUT_MAX : null,
@@ -442,7 +479,12 @@ async function main() {
     assertEquals(inv.storeManifests, 'manifests', 'STORE_MANIFESTS (chunkmanager.js:24)');
     assertEquals(inv.chunkW, 16, 'CHUNK_W (chunkmanager.js:18)');
     assertEquals(inv.chunkD, 16, 'CHUNK_D (chunkmanager.js:19)');
-    assertEquals(inv.chunkKeyFormat, '-3,7', 'Chunk primary key format `${cx},${cz}` (chunkmanager.js:455)');
+    assertEquals(inv.chunkKeyFormat, '-3,7', 'Logical chunk key format `${cx},${cz}` (ChunkManager.key) — unchanged by PR 6c');
+    assertEquals(inv.storeKeyFormat, 'world-xyz:-3,7',
+      'Chunk STORE key format `${worldName}:${cx},${cz}` (PR 6c, H-1) — this is the chunks store primary key');
+    assertEquals(inv.worldKeyPrefix, 'world-xyz:', 'ChunkManager.worldKeyPrefix — the range a world\'s chunks occupy');
+    assertEquals(inv.scopedRecognised, true, 'isWorldScopedStoreKey recognises a migrated key');
+    assertEquals(inv.bareRecognised, false, 'isWorldScopedStoreKey recognises a pre-migration bare key');
 
     console.log('\n[DEPLOY.md §2.2 — chunk binary format constants]');
     assertEquals(inv.magic, 0x43555542, 'CHUNK_MAGIC 0x43555542 "CUUB" (chunkBinaryCodec.js:28)');
@@ -544,35 +586,29 @@ async function main() {
     const runCount = view.getUint32(12, true);
     assert(runCount > 0, `Stored block-run count at offset 12 is non-zero (${runCount} runs)`);
     const usedBytes = 20 + runCount * 4; // each run is [blockID: Uint16, count: Uint16]
-    assert(usedBytes <= bufA1.length,
-      `The header's run count fits inside the stored buffer (${runCount} runs → ${usedBytes} of ${bufA1.length} bytes)`);
 
-    // [D-15] ASSERTING A KNOWN DEFECT, same convention as the H-1 block below.
+    // [D-15] FIXED in PR 6c. This block asserted the defect until PR 6c inverted it —
+    // see the PR 6b write-up in refactor.md §5 for why asserting a defect is a gate
+    // rather than an allowlist, and D-14 for the same lifecycle one PR earlier.
     //
-    // chunkBinaryCodec.js:63 sizes the buffer as
+    // The bug: chunkBinaryCodec.js sized the buffer as
     //     HEADER_SIZE + blockRuns.length * 4
-    // but `blockRuns` is a flat Uint16Array of [id, count, id, count, …], so the
-    // number of RUNS is blockRuns.length / 2 and the payload it goes on to write is
-    // (blockRuns.length / 2) * 4 bytes. The allocation is therefore exactly double
-    // what is used, and every stored chunk carries a zero-filled tail of the same
-    // size as its real payload.
+    // while `blockRuns` is a FLAT Uint16Array of [id, count, id, count, …]. The run
+    // count is blockRuns.length / 2, so the payload is blockRuns.length * 2 bytes.
+    // Every stored chunk was allocated exactly double what was written and carried a
+    // zero tail the same size as its real payload — measured here at 24,156 bytes
+    // allocated / 12,088 used, ≈14 MB of zeroes per world.
     //
-    // Not a corruption bug: decode() stops after blockRunCount runs, and the
-    // checksum is computed over the whole data portion at both ends, so the padding
-    // is self-consistent. It is pure waste — half of the IndexedDB footprint and
-    // half of the bytes written on every 5 s flush.
-    //
-    // Not fixed here: shrinking the allocation changes the byte length and checksum
-    // of every future chunk, which is a DEPLOY.md §2.2 on-disk-format change, and
-    // js/ is off-limits in this PR beyond the log-severity fix. Backward compatible
-    // in principle — decode() never consults the buffer length — but it wants its
-    // own PR. Fixing it turns this assertion red on purpose.
-    assertEquals(bufA1.length, usedBytes * 2 - 20,
-      `D-15 — the stored chunk is exactly twice the size it needs to be: ${bufA1.length} bytes allocated, ` +
-      `${usedBytes} used, ${bufA1.length - usedBytes} bytes of zero padding ` +
-      `(${((1 - usedBytes / bufA1.length) * 100).toFixed(1)}% waste, ~${Math.round((bufA1.length - usedBytes) * snapA1.chunkCount / 1048576)} MB across this world's ${snapA1.chunkCount} chunks)`);
-    const tail = bufA1.subarray(usedBytes);
-    assertEquals(tail.some(b => b !== 0), false, 'D-15 — the wasted tail is entirely zeroes, confirming it is unwritten padding');
+    // The assertion the fix makes true: the stored length is exactly the header plus
+    // the runs the header says are there. There is no slack left to hide a
+    // miscalculation in, which is why this is an equality and not a bound — the unit
+    // test that missed D-15 for the life of the codec used `< actual * 1.5`.
+    assertEquals(bufA1.length, usedBytes,
+      `D-15 FIXED — the stored chunk is exactly its header plus its payload: ${bufA1.length} bytes for ` +
+      `${runCount} runs (20 + ${runCount} × 4), zero padding. Pre-6c this was ${usedBytes * 2 - 20} bytes, ` +
+      `half of it zeroes — ~${Math.round((usedBytes - 20) * snapA1.chunkCount / 1048576)} MB reclaimed across ` +
+      `this world's ${snapA1.chunkCount} chunks`);
+    assertEquals(bufA1.length % 4, 0, 'D-15 FIXED — the stored length is a whole number of 4-byte runs past the header');
 
     const ChunkBinaryCodec = require('../../js/world/chunkBinaryCodec');
     assertEquals(
@@ -717,23 +753,23 @@ async function main() {
 
     // ═══ §7 steps 8-9 — H-1 ══════════════════════════════════
     //
-    // [H-1] This is the section the whole harness was designed around.
+    // [H-1] This is the section the whole harness was designed around, and as of
+    // PR 6c it is the acceptance test for the fix rather than a record of the bug.
     //
-    // DEPLOY.md §7 marks steps 8-9 "EXPECTED TO FAIL TODAY" and §9 admits the
-    // prediction was inference from three read paths, never observed. The naive way
-    // to observe it is to build a shape in world A, visit world B, and look — which
-    // needs block placement, which is exactly what this harness cannot do.
+    // PR 6b asserted the DEFECT here: world B generating chunk "0,0" overwrote world
+    // A's record, because the chunks store's primary key was coordinate-only. One
+    // visit to a second world destroyed 1,073 of world A's 1,184 saved chunks, and
+    // re-entering A served B's spawn chunk byte for byte. All of it provable from
+    // storage alone — no pointer lock, no block placement, which is why this harness
+    // could observe a bug it could never have played its way into.
     //
-    // It needs none of that. World B generating chunk "0,0" overwrites world A's
-    // record because the primary key is coordinate-only, so the proof is entirely in
-    // storage: the record's own `worldName` field flips to B's id while A's manifest
-    // still lists the key as generated, carrying a checksum that no longer matches
-    // the bytes stored there. No pointer lock, no mouse simulation.
-    //
-    // THESE ASSERTIONS DESCRIBE A DEFECT, NOT A REQUIREMENT. They pass because the
-    // bug is present. Fixing H-1 turns this block red — that is the intent, and the
-    // fix's own PR replaces it with the inverse assertions written below each one.
-    console.log('\n[§7 steps 8-9 — H-1 two-world test — ASSERTING A KNOWN DEFECT]');
+    // PR 6c scoped the store key to `${worldName}:${cx},${cz}` and migrated existing
+    // records at DB_VERSION 2. So the block is inverted, per the lifecycle D-14
+    // demonstrated inside PR 6b: asserted defect → fixed → real regression test.
+    // Every assertion below is now the property the fix establishes, and the two
+    // load-bearing ones are that world A's bytes are UNCHANGED by B's visit and that
+    // the store holds the SUM of both worlds rather than their overlap.
+    console.log('\n[§7 steps 8-9 — H-1 two-world test — the fix, asserted]');
     await page.click('#btn-play-solo');
     await page.waitForSelector('#character-screen:not(.hidden)');
     await page.click('.char-slot[data-char-id]');
@@ -755,41 +791,133 @@ async function main() {
     assertEquals(snapB.manifest.seed, SEED_B, 'World B generated from its own distinct seed');
     assertEquals(snapB.manifestKeys.length, 2, 'Manifests ARE per-world — both worlds have one (keyPath: worldName)');
 
-    assertEquals(snapB.rec.worldName, worldB,
-      'H-1 — chunk "0,0" now carries world B\'s worldName: B\'s record overwrote A\'s at the same key');
+    // ── Each world owns its own record at the same coordinates ──
+    assertEquals(snapB.rec.worldName, worldB, 'H-1 FIXED — world B\'s chunk "0,0" record belongs to world B');
+    assertEquals(snapB.rec.chunkKey, `${worldB}:0,0`, 'H-1 FIXED — it is stored under B\'s world-scoped key');
+    assert(snapAafterB.rec !== null, 'H-1 FIXED — world A\'s chunk "0,0" record still EXISTS after visiting world B');
+    assertEquals(snapAafterB.rec.chunkKey, `${worldA}:0,0`, 'H-1 FIXED — under A\'s own world-scoped key');
+    assertEquals(snapAafterB.rec.worldName, worldA, 'H-1 FIXED — and it still belongs to world A');
+
+    // ── The load-bearing inversion: B's visit did not touch A's bytes ──
+    assert(snapAafterB.recBytes === snapA1.recBytes,
+      'H-1 FIXED — world A\'s spawn chunk is byte-for-byte what it was before world B existed. This is the ' +
+      `assertion PR 6b could not make: it used to read as B's bytes. (${digest(snapA1.recBytes)} → ${digest(snapAafterB.recBytes)})`);
+    assertEquals(snapAafterB.rec.savedAt, snapA1.rec.savedAt,
+      'H-1 FIXED — world A\'s record was never rewritten by world B\'s visit (savedAt unchanged)');
     assert(snapB.recBytes !== snapA1.recBytes,
-      'H-1 — the bytes under key "0,0" changed: A\'s terrain at spawn is gone, replaced by B\'s');
-    assertEquals(snapAafterB.manifest.lists00, true,
-      'H-1 — world A\'s manifest still lists "0,0" as generated, so A will load the stale record instead of regenerating');
-    assert(snapAafterB.manifest.checksum00 !== snapAafterB.recStoredChecksum,
-      `H-1 — world A's manifest checksum for "0,0" (${snapAafterB.manifest.checksum00}) no longer matches the ` +
-      `bytes stored there (${snapAafterB.recStoredChecksum}). Nothing verifies this on load.`);
+      'H-1 FIXED — the two worlds hold DIFFERENT terrain at the same coordinates, i.e. two records rather than ' +
+      `one shared one (A ${digest(snapA1.recBytes)} vs B ${digest(snapB.recBytes)}, distinct seeds)`);
 
-    // How much damage one visit does, measured rather than described.
-    const overwritten = snapA1.chunkCount + snapB.manifest.generatedCount - snapB.chunkCount;
-    assert(overwritten > 0,
-      `H-1 — ${overwritten} of world A's ${snapA1.chunkCount} saved chunks were overwritten by one visit to world B ` +
-      `(${snapA1.chunkCount} + ${snapB.manifest.generatedCount} generated = ${snapA1.chunkCount + snapB.manifest.generatedCount} ` +
-      `if keys were world-scoped; the store holds ${snapB.chunkCount})`);
+    // ── The manifest and the bytes agree again ──
+    assertEquals(snapAafterB.manifest.lists00, true, 'H-1 FIXED — world A\'s manifest still lists "0,0" as generated');
+    assertEquals(snapAafterB.manifest.checksum00, snapAafterB.recStoredChecksum,
+      `H-1 FIXED — world A's manifest checksum for "0,0" (${snapAafterB.manifest.checksum00}) matches the bytes ` +
+      'stored under A\'s key. PR 6b measured 3799605976 recorded against 1653333176 stored; the divergence is gone.');
 
-    console.log('\n[§7 step 9 — return to world A — ASSERTING A KNOWN DEFECT]');
+    // ── The store holds the SUM, not the overlap ──
+    //
+    // This is the same arithmetic PR 6b used to quantify the damage, run the other
+    // way round. It reported "world-scoped keys would have left 2,393 records; the
+    // store holds 1,320" — 1,073 of world A's 1,184 chunks destroyed. The store must
+    // now hold both worlds in full.
+    assertEquals(snapAafterB.worldChunkCount, snapA1.worldChunkCount,
+      `H-1 FIXED — world A still owns every one of its ${snapA1.worldChunkCount} saved chunks after a full visit ` +
+      'to world B. Pre-6c this dropped by 1,073.');
+    assert(snapB.worldChunkCount > 0, `H-1 FIXED — world B owns its own ${snapB.worldChunkCount} chunk records`);
+    assertEquals(snapB.chunkCount, snapAafterB.worldChunkCount + snapB.worldChunkCount,
+      `H-1 FIXED — the store holds the SUM of both worlds and nothing else: ${snapAafterB.worldChunkCount} (A) + ` +
+      `${snapB.worldChunkCount} (B) = ${snapB.chunkCount} records. Pre-6c the two worlds shared one keyspace and ` +
+      'the total was the union of their coordinates, not the sum of their chunks.');
+    assert(snapB.chunkCount > snapA1.chunkCount,
+      `H-1 FIXED — the store GREW when world B was generated (${snapA1.chunkCount} → ${snapB.chunkCount}) rather ` +
+      'than staying flat while B overwrote A');
+    assertEquals(snapB.unscopedChunkCount, 0, 'H-1 FIXED — no record anywhere in the store has an unscoped key');
+    assertEquals(snapB.legacyRec00, false, 'H-1 FIXED — nothing is stored under the bare pre-6c key "0,0"');
+
+    console.log('\n[§7 step 9 — return to world A — the fix, asserted]');
     await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#main-menu:not(.hidden)', { timeout: 30000 });
     await sleep(1500);
+
+    // ── Seed a PRE-MIGRATION record, then let the game open the database ──
+    //
+    // The migration is the half of H-1 that cannot be tested by playing forward: every
+    // record this run has written is already world-scoped, so nothing here needs
+    // migrating. This writes a record the way pre-6c code did — a bare `${cx},${cz}`
+    // primary key with a `worldName` field beside it — and the world entry below is
+    // what runs `_migrateToWorldScopedKeys` against it, from `_openDB`, at
+    // DB_VERSION 2 with no upgrade handler involved (H-2).
+    //
+    // (99,99) is outside the 33×33 pre-generated region, so the record is never read
+    // or regenerated during the run; only the migration touches it.
+    const seeded = await page.evaluate(async (wid) => {
+      const db = await new Promise((res, rej) => {
+        const req = indexedDB.open('cuubz-worlds');
+        req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error);
+      });
+      const data = ChunkBinaryCodec.encode(new Chunk(99, 99));
+      const tx = db.transaction(['chunks'], 'readwrite');
+      // Exactly the pre-6c write shape: chunkKey is the LOGICAL key.
+      tx.objectStore('chunks').put({ chunkKey: '99,99', worldName: wid, data, savedAt: 12345 });
+      await new Promise((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+      const check = db.transaction(['chunks'], 'readonly').objectStore('chunks');
+      const before = await new Promise(r => { const q = check.get('99,99'); q.onsuccess = () => r(q.result); });
+      db.close();
+      return { written: before !== undefined, byteLength: before ? before.data.byteLength : 0, checksum: before ? new DataView(before.data).getUint32(16, true) : null };
+    }, worldA);
+    assert(seeded.written, `A pre-migration record was seeded under the bare key "99,99" (${seeded.byteLength} bytes)`);
+
     drain(consoleErrors); drain(pageErrors);
     await enterWorld(page, worldA, 'survival');
     await settleAndPause(page, 'world A re-entry after B');
-    await shot(page, '05-world-alpha-contaminated');
+    await shot(page, '05-world-alpha-intact');
     const snapA3 = await readStorage(page, worldA);
 
-    assert(snapA3.recBytes === snapB.recBytes,
-      'H-1 step 9 — re-entering world A loads world B\'s spawn chunk, byte for byte. The player is standing in ' +
-      `the other world's terrain. (world A now serves ${digest(snapA3.recBytes)}, which is world B's ${digest(snapB.recBytes)})`);
-    assert(snapA3.recBytes !== snapA1.recBytes,
-      'H-1 step 9 — world A\'s original spawn chunk is unrecoverable: nothing in the store holds those bytes ' +
-      `any more (world A's own ${digest(snapA1.recBytes)} is gone)`);
-    assertEquals(snapA3.rec.worldName, worldB,
-      'H-1 step 9 — the record loaded while playing world A still identifies itself as belonging to world B');
+    assert(snapA3.recBytes === snapA1.recBytes,
+      'H-1 step 9 FIXED — re-entering world A serves world A\'s OWN spawn chunk, byte for byte. This is the ' +
+      `assertion the whole PR exists for. (${digest(snapA1.recBytes)} → ${digest(snapA3.recBytes)})`);
+    assert(snapA3.recBytes !== snapB.recBytes,
+      'H-1 step 9 FIXED — and it is not world B\'s chunk: the player is standing in their own world ' +
+      `(A ${digest(snapA3.recBytes)} ≠ B ${digest(snapB.recBytes)})`);
+    assertEquals(snapA3.rec.worldName, worldA,
+      'H-1 step 9 FIXED — the record loaded while playing world A identifies itself as world A\'s');
+    assertEquals(snapA3.rec.savedAt, snapA1.rec.savedAt,
+      'H-1 step 9 FIXED — three round trips and two worlds later, world A\'s spawn chunk has never been rewritten');
+
+    // ── The migration ran, against the record seeded above ──
+    console.log('\n[PR 6c — the H-1 migration, against a DB seeded with pre-migration keys]');
+    const migrated = await page.evaluate(async (wid) => {
+      const db = await new Promise((res, rej) => {
+        const req = indexedDB.open('cuubz-worlds');
+        req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error);
+      });
+      const store = db.transaction(['chunks'], 'readonly').objectStore('chunks');
+      const get = k => new Promise(r => { const q = store.get(k); q.onsuccess = () => r(q.result); });
+      const oldRow = await get('99,99');
+      const newRow = await get(`${wid}:99,99`);
+      db.close();
+      return {
+        oldRowGone: oldRow === undefined,
+        newRow: newRow ? {
+          chunkKey: newRow.chunkKey, worldName: newRow.worldName, savedAt: newRow.savedAt,
+          byteLength: newRow.data.byteLength, checksum: new DataView(newRow.data).getUint32(16, true),
+        } : null,
+      };
+    }, worldA);
+
+    assert(migrated.newRow !== null, `The seeded record was re-keyed to "${worldA}:99,99" by the migration`);
+    assertEquals(migrated.oldRowGone, true, 'The bare "99,99" row is gone — re-keyed, not copied');
+    if (migrated.newRow) {
+      assertEquals(migrated.newRow.chunkKey, `${worldA}:99,99`, 'The record\'s own chunkKey field was rewritten to match its new primary key');
+      assertEquals(migrated.newRow.worldName, worldA, 'The record migrated under ITS OWN worldName');
+      assertEquals(migrated.newRow.byteLength, seeded.byteLength, 'The migrated payload is the same length');
+      assertEquals(migrated.newRow.checksum, seeded.checksum, 'The migrated payload is byte-identical — the migration moves records, it does not re-encode them');
+      assertEquals(migrated.newRow.savedAt, 12345, 'savedAt is preserved, so a migrated chunk does not look freshly written');
+    }
+    assertEquals(snapA3.unscopedChunkCount, 0,
+      'After the migration no record anywhere in the store has an unscoped key — including the one seeded as bare');
+    assertEquals(snapA3.worldChunkCount, snapA1.worldChunkCount + 1,
+      `World A owns its ${snapA1.worldChunkCount} chunks plus the migrated record, and lost none of them`);
 
     // Exit cleanly one last time, so the final screenshot is the menu the player
     // is actually returned to rather than a mid-session frame.
@@ -856,11 +984,12 @@ function finish() {
     process.exit(1);
   }
   console.log('\n🎉 DEPLOY.md §7 save/load harness passing!');
-  console.log('   Note: two blocks above assert KNOWN DEFECTS (H-1, D-15) rather than');
-  console.log('   requirements — they pass because the bug is present. Fixing either turns');
-  console.log('   this harness red on purpose, which is the signal to replace that block');
-  console.log('   with the assertion the fix makes true. D-14 was such a block and is now');
-  console.log('   a real §7 step-7 round trip, which is the pattern.');
+  console.log('   No block in here asserts a known defect any more. PR 6b introduced three');
+  console.log('   (D-14, D-15, H-1) under the rule that a run goes red when a known failure');
+  console.log('   STOPS reproducing, so fixing one forces its block to be rewritten into the');
+  console.log('   assertion the fix makes true. D-14 went that way inside PR 6b; D-15 and H-1');
+  console.log('   went that way in PR 6c, and steps 8-9 are now the H-1 regression test.');
+  console.log('   If a future PR needs the pattern again, see refactor.md §5 PR 6b.');
   process.exit(0);
 }
 

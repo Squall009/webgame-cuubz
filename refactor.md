@@ -6,6 +6,19 @@
 >
 > **Handoff format:** numbered PRs, each independently verifiable with its own acceptance criteria and rollback point. Not weeks. Do not batch PRs.
 
+> ### Every bug goes in [`BUGS.md`](./BUGS.md), with a severity and an owner PR
+>
+> Added by PR 6c. **"Documented and unowned" is not an acceptable end state** — it is how
+> this codebase reached the state Phase 0 is unpicking. `DEPLOY.md` §8 shipped with six
+> unowned rows, one of which (**H-1**) was live data corruption that destroyed ~90% of a
+> world's saved chunks per cross-world visit and sat unowned through two PRs.
+>
+> So: every bug found gets a row in `BUGS.md` **when it is found**, and **either a fix in
+> the current PR or an explicit PR slot** — created here if none exists. A bug found
+> mid-task that is out of scope is logged with an owner and left, not silently absorbed and
+> not merely mentioned in a paragraph. **Prose is not a ledger**; the defects that were
+> loose in PR 4's and PR 5's prose with no ID (D-20, D-21, D-22) are the proof.
+
 ---
 
 ## Table of Contents
@@ -14,7 +27,7 @@
 2. [Why Modules: The Global Scope Is Actively Broken](#2-why-modules-the-global-scope-is-actively-broken)
 3. [Measured Current State](#3-measured-current-state)
 4. [Architecture Target](#4-architecture-target)
-5. [Phase 0 — Stop The Bleeding (PR 1–6, plus 6b)](#5-phase-0--stop-the-bleeding-pr-16-plus-6b)
+5. [Phase 0 — Stop The Bleeding (PR 1–6, plus 6b and 6c)](#5-phase-0--stop-the-bleeding-pr-16-plus-6b-and-6c)
 6. [Phase 1 — Vite + ES Modules (PR 7–11)](#6-phase-1--vite--es-modules-pr-711)
 7. [Phase 2 — Hoist Closure State onto `Game` (PR 12–13)](#7-phase-2--hoist-closure-state-onto-game-pr-1213)
 8. [Phase 3 — Decompose main.js (PR 14–19)](#8-phase-3--decompose-mainjs-pr-1419)
@@ -107,7 +120,7 @@ Hard invariants — never change these strings or the schema behind them:
 
 → **Save/load test at every single checkpoint:** create a world, place blocks, quit to menu, reload the page, re-enter, confirm blocks persist. **PR 6b automated most of it early — run `npm run test:e2e`** (104 assertions, real browser, reads IndexedDB and localStorage directly). Three steps stay manual until PR 12–13 hoists the closure locals: placing/breaking blocks, quit-to-menu (blocked by `DEPLOY.md` D-14), and multiplayer. See the [PR 6b outcome](#pr-6b--automate-the-saveload-gate--done).
 
-> **PR 6 found this table incomplete and superseded it — the authoritative list is now [`DEPLOY.md` §2](./DEPLOY.md#2-do-not-change-player-data-invariants).** The four rows above are real, but they miss: the three `js/world/persistence.js` localStorage keys (**`cuubz:characters`** — every character the player has ever made — plus `cuubz:slotMap` and `cuubz:worldSlot:{N}:conf`), both IndexedDB object stores and their key paths, and the entire chunk binary format (magic `"CUUB"`, version `3`, 20-byte header, FNV-1a checksum constants). It also misses the two hazards that make the table load-bearing: **bumping `DB_VERSION` destroys every player's worlds** (`onupgradeneeded` deletes all object stores before recreating them), and **chunk primary keys are not world-scoped, so the three world slots overwrite each other's terrain** — a live bug. The executable 14-step checklist is [`DEPLOY.md` §7](./DEPLOY.md#7-saveload-checklist); it includes the save-timing rules (chunks flush on a 5 s timer, player state every 30 s / on Escape) without which the naive version of this test produces false failures.
+> **PR 6 found this table incomplete and superseded it — the authoritative list is now [`DEPLOY.md` §2](./DEPLOY.md#2-do-not-change-player-data-invariants).** The four rows above are real, but they miss: the three `js/world/persistence.js` localStorage keys (**`cuubz:characters`** — every character the player has ever made — plus `cuubz:slotMap` and `cuubz:worldSlot:{N}:conf`), both IndexedDB object stores and their key paths, and the entire chunk binary format (magic `"CUUB"`, version `3`, 20-byte header, FNV-1a checksum constants). It also misses the two hazards that make the table load-bearing: **bumping `DB_VERSION` destroys every player's worlds** (`onupgradeneeded` deletes all object stores before recreating them — **H-2, still open, owned by [PR 6d](#pr-6d--rewrite-onupgradeneeded-so-a-schema-change-can-migrate-h-2-h-3)**), and **chunk primary keys were not world-scoped, so the three world slots overwrote each other's terrain** — a live bug, confirmed by measurement in PR 6b and **fixed in [PR 6c](#pr-6c--storage-integrity-h-1--d-15-in-one-migration--done)**, which world-scoped the storage key and migrated existing records at runtime. The chunk store's primary key is therefore now `` `${worldName}:${cx},${cz}` ``; the *logical* key `` `${cx},${cz}` `` is unchanged and must stay that way. The executable 14-step checklist is [`DEPLOY.md` §7](./DEPLOY.md#7-saveload-checklist); it includes the save-timing rules (chunks flush on a 5 s timer, player state every 30 s / on Escape) without which the naive version of this test produces false failures.
 
 ### 1.6 `renderLoop` cannot be extracted as written.
 
@@ -429,7 +442,7 @@ export class GameState {
 
 ---
 
-## 5. Phase 0 — Stop The Bleeding (PR 1–6, plus 6b)
+## 5. Phase 0 — Stop The Bleeding (PR 1–6, plus 6b and 6c)
 
 > **Nothing else in this document is safe until Phase 0 lands.** v1 had no equivalent phase.
 
@@ -704,7 +717,7 @@ Not in the original plan. Added because PR 6 closed with `DEPLOY.md` §7 written
 
 **The key design decision: build the harness around storage inspection, not input simulation.** That is what made this PR possible at all, and it follows from a hard limit worth stating precisely, because it is [§1.6](#16-renderloop-cannot-be-extracted-as-written) showing up somewhere new.
 
-`page.evaluate` **can** reach all 368 top-level lexical symbols — `BLOCK_TYPES`, `ChunkManager`, `CHUNK_MAGIC`, `BLOCK_REGISTRY`, `PersistenceManager` — even though none of them are `window` properties. Same mechanism as [§2.4](#24-the-mechanism-is-implicit-globals-not-windows) and PR 4 bug 1: a top-level `const` in a classic `<script>` is a global lexical binding. Verified live: `typeof BLOCK_TYPES === 'object'`, `BLOCK_REGISTRY.length === 193`. So every registry, constant and codec is directly testable from the browser.
+`page.evaluate` **can** reach all 368 top-level lexical symbols — `BLOCK_TYPES`, `ChunkManager`, `CHUNK_MAGIC`, `BLOCK_REGISTRY`, `PersistenceManager` — even though none of them are `window` properties. Same mechanism as [§2.4](#24-the-mechanism-is-implicit-globals-not-window) and PR 4 bug 1: a top-level `const` in a classic `<script>` is a global lexical binding. Verified live: `typeof BLOCK_TYPES === 'object'`, `BLOCK_REGISTRY.length === 193`. So every registry, constant and codec is directly testable from the browser.
 
 It **cannot** reach live game state. Exactly four things are on `window` — `CuubzGame` / `CuubzBlockPalette` (`game.js:282-283`), `MobIntegration` (`mobIntegration.js:125`), `CuubzLogger` (`logger.js:39`) — and all four are **classes, not instances**. The running `renderer` / `chunkManager` / `player` / `inventory` are among §1.6's ~184 closure locals inside `startGame()`'s `setTimeout`. So the harness can click and type but cannot say "place block 2 at (14,68,-3)" or read the player's position. **This is not fought, it is designed around, and it unblocks at PR 12–13** — which is now a second, independent argument for Phase 2 existing: it is the PR that makes the save/load gate fully automatable.
 
@@ -726,7 +739,11 @@ Two findings the original write-up did not have:
 1. **The blast radius is the entire overlapping region, ~90% of the world, not just spawn.** "Play world A, then world B at spawn, and B's chunk overwrites A's" understates it — the two worlds *are* one world everywhere their pre-generated regions overlap, which at `regionRadius: 16` is nearly all of both.
 2. **The corruption is already detectable with data the game stores today.** `manifest.generatedChunks[].checksum` is the chunk header's own FNV-1a, read straight out of the encoded buffer at offset 16 (`chunkmanager.js:649`), so a manifest-vs-record checksum mismatch identifies a contaminated chunk exactly. Nothing compares them on load. **That is a cheap partial mitigation for whoever owns H-1** — verify on load, regenerate on mismatch — degrading corruption into regeneration without touching the key format. The primary-key migration is still the real fix; this is the thing that could ship first.
 
-**So H-1 needs its own migration PR, and it now has an evidence base for one.** Still unowned.
+**So H-1 needs its own migration PR, and it now has an evidence base for one.** → **That
+PR is [PR 6c](#pr-6c--storage-integrity-h-1--d-15-in-one-migration--done), and it landed
+the same day. H-1 and D-15 are both fixed.** The mitigation sketched above shipped as part
+of it, in a modified form — see the deviation note there, because implementing it as
+written would have destroyed player data.
 
 **Four genuine bugs found. Three fixed, one left for its own PR.**
 
@@ -746,7 +763,7 @@ Two findings the original write-up did not have:
 
 Both gaps are the **same** blocker, which is the second independent argument for Phase 2: **PR 12–13 is what finishes this gate.**
 
-**Toolchain, and why these choices.** `playwright-core`, **not** `playwright` — the latter's postinstall downloads ~300 MB of browsers; `playwright-core` is 14 MB and downloads nothing, driving the already-installed Edge (150.0.4078.105) via `chromium.launch({ channel: 'msedge' })`. **Headless WebGL works** with `['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']`: `glRenderer` reports `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)`, THREE loads, and `THREE.REVISION === 134` is asserted — so [§1.2](#12-pin-three0134-do-not-run-npm-install-three)'s pin is now checked against what the browser really loads, which PR 8 must preserve. `test/e2e/staticServer.js` is a ~90-line dependency-free static server rather than a dev server, so the harness stays independent of the thing PR 7 changes: a gate that depends on what it validates is not a gate.
+**Toolchain, and why these choices.** `playwright-core`, **not** `playwright` — the latter's postinstall downloads ~300 MB of browsers; `playwright-core` is 14 MB and downloads nothing, driving the already-installed Edge (150.0.4078.105) via `chromium.launch({ channel: 'msedge' })`. **Headless WebGL works** with `['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']`: `glRenderer` reports `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)`, THREE loads, and `THREE.REVISION === 134` is asserted — so [§1.2](#12-pin-three01340-do-not-run-npm-install-three)'s pin is now checked against what the browser really loads, which PR 8 must preserve. `test/e2e/staticServer.js` is a ~90-line dependency-free static server rather than a dev server, so the harness stays independent of the thing PR 7 changes: a gate that depends on what it validates is not a gate.
 
 **Two engineering details that were failures first.**
 - **`waitForQuiesce`.** `#hud` loses `.hidden` (`main.js:3901`) long before `checkRegion(0,0)` finishes pre-generating its 33×33 region, so a snapshot taken a fixed few seconds after the HUD appears catches a partly-generated world. Comparing two such snapshots produced a false *"33 chunks appeared after a reload"* failure with nothing to do with persistence. Polling the chunk count until three consecutive reads agree is what lets the round-trip assertions compare **exact** counts instead of being weakened to inequalities. Weakening the assertion would have hidden the real property.
@@ -762,7 +779,265 @@ Both gaps are the **same** blocker, which is the second independent argument for
 
 **New files:** `test/e2e/saveLoad.js`, `test/e2e/staticServer.js`. **Modified:** `package.json` + `package-lock.json` (`playwright-core` devDependency, `test:e2e` script), `.gitignore` (`test/e2e/artifacts/`), `.github/workflows/ci.yml` (comment only), `js/main.js` (two `console.error` → `console.info`; one deleted line for D-14), `index.html` (the D-16 relabel), `DEPLOY.md` §2.4 / §7 / §8 / §9, `refactor.md` (this section).
 
-**Three things left open, all needing a decision rather than work:** **H-1** (the migration PR — now with an evidence base and a cheap partial mitigation), **D-15** (the 2× chunk allocation — a §2.2 format change, so its own PR), and the §7 items that wait on PR 12–13. The Phase 0 gate checkboxes are still untouched; "Manual save/load test passes" is now *substantially* true — nine of fourteen steps automated and green, two blocked on Phase 2, H-1 confirmed as a pre-existing failure — but it is a judgement call whether a gate with a known live data-corruption bug counts as passed, and that call is not this PR's to make.
+**Three things left open, all needing a decision rather than work:** **H-1** (the migration PR — now with an evidence base and a cheap partial mitigation), **D-15** (the 2× chunk allocation — a §2.2 format change, so its own PR), and the §7 items that wait on PR 12–13. **The first two were closed by [PR 6c](#pr-6c--storage-integrity-h-1--d-15-in-one-migration--done) in one migration**; the third still waits on Phase 2. The Phase 0 gate checkboxes are still untouched; "Manual save/load test passes" is now *substantially* true — nine of fourteen steps automated and green, two blocked on Phase 2, H-1 confirmed as a pre-existing failure — but it is a judgement call whether a gate with a known live data-corruption bug counts as passed, and that call is not this PR's to make.
+
+### PR 6c — Storage integrity: H-1 + D-15 in one migration ✅ DONE
+Not in the original plan. Added because PR 6b confirmed **H-1 by observation** — one visit
+to a second world destroyed **1,073 of the first world's 1,184 saved chunks**, and
+re-entering the first world served the second world's spawn chunk byte for byte. Phase 1
+must not be built on a base that eats player data. **D-15 rides along because it touches
+the same storage bytes**, and doing both in one migration means a player's data is
+rewritten once rather than twice.
+
+- **Accept:** the two-world test passes rather than asserting a defect; existing saved
+  chunks are migrated, not orphaned; the migration is idempotent and safe on an
+  already-migrated database; every known defect has an owner.
+- **Rollback:** revert the commit. **Note the asymmetry:** a revert leaves already-migrated
+  databases holding `worldName:cx,cz` keys that reverted code cannot read, so every world
+  would appear empty and regenerate from its seed. Player *edits* would be lost even though
+  terrain would not. That is an argument for getting this right rather than for not
+  shipping it, but it is the reason the migration is idempotent and the reason
+  `test/test_chunkStorage.js` exists.
+
+**Outcome (2026-07-29):** ✅ DONE. `npm run test:e2e` → **137 assertions, 0 failures, exit
+0** (112 at PR 6b; 25 added, and the H-1 and D-15 blocks rewritten from asserting the
+defects to asserting the fixes). `npm test` → **51/51 passing, 4 quarantined, exit 0** (one
+new file, 83 assertions). `check-globals` → 0 duplicates / 65 files / 368 symbols,
+unchanged.
+
+**H-1 IS FIXED, AND THE TWO-WORLD TEST IS NOW ITS REGRESSION TEST.** Same seeds as PR 6b —
+world A `424242` slot 0, world B `999111` slot 1 — read from the same real browser:
+
+| Observation | PR 6b (broken) | PR 6c (fixed) |
+|---|---|---|
+| World A's chunks after one full visit to world B | **1,073 of 1,184 destroyed** | **1,184 of 1,184 intact** |
+| Records in the store with both worlds present | 1,320 — the *union of their coordinates* | **2,393 — the *sum*, 1,184 (A) + 1,209 (B)** |
+| Chunk `"0,0"`'s `worldName` while playing world A | world **B**'s id | world **A**'s id |
+| Re-entering world A and reading its spawn chunk | byte-identical to **world B's** chunk | byte-identical to **world A's own**, `savedAt` unchanged across three round trips and two worlds |
+| World A's manifest checksum for `"0,0"` vs the bytes stored there | `3799605976` vs `1653333176` — divergent, unchecked | equal |
+| Records anywhere in the store with an unscoped key | all of them | **0** |
+
+**2,393 is the number PR 6b said world-scoped keys *would* have left, arrived at
+independently a PR later.** The equality asserted is between the two worlds' own counts and
+the store total, not against that literal — world B's exact count moves by a chunk or two
+between runs depending on where its region pre-generation quiesces (1,209 here, 1,211 on
+another run), and a hard-coded total would be a flaky assertion dressed up as a precise
+one. Asserting *any* exact equality at all is only legitimate because of PR 6b's
+`waitForQuiesce`; without it the counts have to be weakened to inequalities and the whole
+property disappears.
+
+**The design decision: two keys, not one.** The fix is not "world-scope the chunk key" —
+that phrasing is what makes this look like a one-line change and it is the trap.
+`ChunkManager.key(cx, cz)` has **17 call sites** and is the key of the in-memory
+`memoryCache`, of `manifest.generatedChunks[].key`, and of the worker protocol. None of
+those are world-scoped concepts, and changing it cascades into the manifest format, which
+is itself a `DEPLOY.md` §2.1 invariant. So the **logical** key is untouched and a
+**separate storage key** — `_storeKey(key)` → `` `${worldName}:${key}` `` — is applied at
+exactly the **seven** sites that touch the `chunks` object store: three writes
+(`saveChunk`, the `flushDirty` batch, the `beforeunload` flush), three reads (`loadChunk`,
+`hasChunk`, `_batchLoadChunks`) and one delete (`deleteChunk`). That is the whole boundary,
+and confining the change to it is what keeps the blast radius at seven lines instead of
+seventeen call sites and a format change. The `manifests` store was already world-keyed
+(`keyPath: 'worldName'`) and was left alone.
+
+The separator is `:` — the separator `js/world/persistence.js` already uses for
+`cuubz:worldSlot:0:conf`. A logical key contains only digits, `-` and `,`, so **the
+presence of a `:` is an exact discriminator** between a migrated key and a pre-migration
+one, whatever a world id turns out to contain. That is what makes the migration idempotent
+rather than heuristic.
+
+**The migration runs at `DB_VERSION = 2`, and the reason is H-2.** The obvious move —
+bump the version and migrate in `onupgradeneeded` — is the one thing that must not happen
+here: that handler enumerates every object store, `deleteObjectStore`s all of them and
+recreates them empty (`chunkmanager.js:263-276`). Bumping the integer to fix players' keys
+would destroy players' worlds on the way. So nothing about the schema changes, nothing
+needs a version bump, and `_migrateToWorldScopedKeys` runs from `_openDB` instead —
+which all seven boundary sites `await`, so **no read can observe a half-migrated store**.
+That sequencing is the load-bearing property and it is asserted directly: the unit test
+drives a real `_openDB` against a stub `indexedDB` and checks that the first read after
+opening finds a pre-migration record.
+
+**The migration needed no new data.** Every write site already set a `worldName` field on
+the record (and there is a non-unique index on it that no read path has ever used), so
+each row already knew which world it belonged to. Re-put under
+`` `${record.worldName}:${record.chunkKey}` ``, delete the old row, batched 500 at a time
+the way `flushDirty` batches and for the same reason. Payload bytes and `savedAt` are
+carried across untouched — a migrated chunk must not look freshly written.
+
+**What the migration cannot do, stated because the alternative is implying otherwise: it
+cannot recover data H-1 already destroyed.** A contaminated record only remembers its
+**last** writer, so it migrates into that world and the other world regenerates those
+chunks from its seed. Terrain is deterministic, so the ground comes back identical; what is
+gone is any player edit inside those chunks, and it was gone before the migration ran. A
+record with **no** `worldName` cannot be attributed at all, and is left in place rather
+than guessed at — guessing would put one world's terrain into another, which is precisely
+the failure being fixed. It is counted and logged, and it is unreachable rather than
+destroyed: no read path serves a bare key any more.
+
+**D-15 shipped in the same migration, and the checksum is the reason it needed care.**
+Both sites now read `blockRuns.length * 2` (`encode`'s `bufferSize` — the live bug — and
+`estimateSize`, which had no callers outside the codec and over-reported 2×). The fix is
+backward compatible because `decode()` never consults the buffer length; it stops after
+`blockRunCount` runs, so an old padded chunk and a new tight one decode identically. **But
+the checksum spans the whole data portion**, so a re-encoded chunk carries a *different*
+checksum than its padded original — which is safe only because every write path records
+the new checksum in the manifest in the same pass. That is now true; it was not (see D-19).
+Both properties are asserted: the unit test reconstructs a byte-exact pre-6c padded buffer,
+confirms its checksum differs, and confirms both buffers decode to identical blocks.
+
+**Three defects found while doing it. All three fixed, all three logged.**
+
+- **D-17 — `deleteChunk` issued two delete operations per call.** `store.delete(key)`
+  called **twice**, as two separate `IDBRequest`s, purely so `onsuccess` and `onerror`
+  could be attached separately. Idempotent, hence harmless, hence nobody noticed. One
+  request, both handlers. Asserted by counting issued operations against the stub store,
+  not by reading the diff.
+- **D-18 — deleting a world left every one of its chunk records behind.** `js/main.js`
+  deleted the manifest and stopped, under a comment reading *"chunks remain orphaned but
+  harmless — they're keyed by chunk coordinates"*. `DEPLOY.md` §2.4 already called that
+  premise out as H-1 itself: the records were not orphaned, they were **shared** with
+  whatever world next generated the same coordinates. World-scoped keys are what make a
+  world's chunks both identifiable and safe to remove, so deletion now removes them as a
+  key range — the leak is only *fixable* because of this PR. This is the one change outside
+  `chunkmanager.js` and `chunkBinaryCodec.js`, and the reason is that the comment is cited
+  in `DEPLOY.md` as evidence and became false the moment the keys changed. Records already
+  orphaned by a pre-6c deletion stay orphaned; they have no prefix to match.
+- **D-19 — the `beforeunload` flush wrote chunks without updating the manifest.** So a
+  chunk saved on tab close kept the checksum the manifest had recorded for its *previous*
+  bytes. Nothing read those checksums, so nothing noticed — and it would have stayed
+  invisible were it not for the load-time check below, which is the first reader. Both
+  stores are now written in **one** transaction, from the in-memory manifest copy:
+  `beforeunload` has no budget for an async read-modify-write, and two transactions could
+  disagree. The three sites that record checksums (`addVerifiedChunk`, `flushDirty` phase 3
+  and this one) now share `_mergeManifestEntries` so they cannot drift.
+
+**A deviation on the load-time mitigation, and it is the most important judgement call in
+this PR.** The plan (and `DEPLOY.md` §7.1's own suggestion, carried from PR 6b) was:
+verify the manifest's recorded checksum against the stored record's offset-16 checksum on
+load, and **on mismatch drop the manifest entry so the chunk regenerates**. Implemented
+literally, that introduces a data-loss bug worse than the one it defends against. D-19 is
+why: the `beforeunload` flush wrote chunk bytes without updating the manifest, so a
+checksum mismatch is the *expected, benign* state for exactly the chunks a player edited
+immediately before closing the tab. Regenerating on that signal would turn `DEPLOY.md`
+§7's "a block that vanishes after an instant reload is not necessarily a regression" into
+"is deterministically destroyed."
+
+So it was split into the two checks the stored data actually supports:
+
+1. **Ownership — regenerate.** A record whose `worldName` names a *different* world than
+   the one loading it has to be foreign terrain, and serving it is the corruption itself.
+   It is discarded and the chunk regenerates. This is free (the field is already in the
+   record) and it is the **tripwire that would catch H-1 coming back** — which is what
+   "defence in depth" has to mean, given that the keys are what actually fix it.
+2. **Checksum — repair, do not regenerate.** A mismatch on intact, correctly-owned bytes
+   means the *manifest* is out of date, not the chunk. `decode()` already verifies the
+   bytes against the checksum they carry, so real corruption is caught there and always
+   was. The manifest entry is rewritten to what is actually stored, and the chunk loads.
+
+Reporting a fixed defect count would have been easy here; the honest version is that the
+scope item was implemented in the form the data supports, and D-19 exists because
+implementing it literally required finding out why it could not be.
+
+**`BUGS.md` — the standing ledger, and the process it encodes.** Every known defect, its
+severity, its **owner PR** and its status, in one table, under a rule that **no row may say
+"Unowned"**. `DEPLOY.md` §8 is now a pointer to it, so there is one list rather than two.
+The rule is not bookkeeping: §8 shipped with **six unowned rows**, one of which was H-1 —
+live data corruption that sat documented and unowned through two PRs while the thing that
+would fix it had no home. What the consolidation added:
+
+| Was | Now |
+|---|---|
+| D-8, D-10, D-12 — "Unowned" | **PR 10**, which already owns `sync.sh` and the systemd unit |
+| H-2, H-3 — "Unowned" | **PR 6d**, a new slot (below) |
+| `SurvivalSystem` spawn `y=20` — loose in PR 4's prose, no ID | **D-21**, owner **PR 22** — the PR that wires death/respawn out of the render loop, i.e. where it stops being latent |
+| Four relay tests on fixed ports — loose in PR 5's prose, no ID | **D-20**, owner **PR 31** |
+| `on: push` double-running same-repo PR branches — loose in PR 5's prose | **D-22**, owner **PR 11**, the next PR to touch `ci.yml` |
+
+It also records **which open decision blocks which row**, so a decision is neither made
+twice nor lost, and it does *not* retroactively invent IDs for the thirteen bugs PR 3 and
+PR 4 fixed before the scheme existed — those are pointed at, not renumbered.
+
+**Tests — nothing weakened, and one existing assertion strengthened.**
+
+- **New: `test/test_chunkStorage.js`, 83 assertions, in `npm test` and therefore in CI.**
+  Covers the store-key helpers, all four single-record boundary sites (including that a
+  second world neither sees nor overwrites the first's chunk (0,0)), `_batchLoadChunks`
+  keying results by the *logical* key, `_mergeManifestEntries`, the migration on a fresh
+  database, **twice more for idempotency** (asserting *zero* writes on the second pass, not
+  merely a harmless outcome), a record with no `worldName`, a record with an empty one, a
+  half-migrated database, an empty store, D-17 by operation count, and D-15's exact size
+  plus the padded-buffer compatibility property.
+  It uses a ~70-line hand-rolled IndexedDB stub rather than `fake-indexeddb`, which is not
+  a dependency and belongs to PR 32 with the rest of the persistence suite. The stub models
+  the one behaviour that matters: **a transaction does not complete until work queued from
+  inside a request handler has also drained.** The migration issues its `put`/`delete` from
+  inside a `get`'s `onsuccess`, so a stub that resolved synchronously would pass while the
+  real thing failed.
+- **Strengthened, not added: `test_chunkBinaryCodec.js` test 7.** It asserted
+  `estimated < actual * 1.5`. **Both the bug and the fix satisfy that**, which is exactly
+  why a unit test sat next to D-15 for the life of the codec without seeing it. It is now
+  an equality, plus `length === 20 + runCount * 4` read from the chunk's own header.
+- **The two defect-asserting blocks in `test/e2e/saveLoad.js` are inverted, and none
+  remain.** PR 6b shipped three (D-14, D-15, H-1) on the rule that a run goes red if a new
+  failure appears **or** if a known failure stops reproducing. D-14 completed that
+  lifecycle inside PR 6b; D-15 and H-1 complete it here. Steps 8–9 no longer describe the
+  bug — they assert that world A's bytes survive world B, that the store holds the sum, and
+  that re-entering A serves A's own terrain.
+- **The migration is asserted in the browser too, not only against the stub.** The harness
+  writes a record the pre-6c way — bare primary key, `worldName` beside it — then loads the
+  game and checks the record was re-keyed under its own `worldName`, the bare row is gone,
+  and the payload is byte-identical with `savedAt` preserved. That is the one property the
+  suite cannot reach by playing forward, because every record the harness writes is already
+  world-scoped.
+- **`QUARANTINE.md` untouched** — 4 files against the cap of 5, all owned by PR 26.
+  `test:e2e` is still not in CI and still a comment naming PR 10, per PR 5's idiom.
+  Nothing in `test/e2e/` is named `test/test_e2e*.js`, so `run_tests.sh:46`'s flat glob
+  still cannot see it.
+
+One incidental harness fix: it now clears `test/e2e/artifacts/*.png` before a run. PR 6c
+renamed `05-world-alpha-contaminated.png` to `05-world-alpha-intact.png`, which would
+otherwise have left seven files against the six the run asserts — and a screenshot from a
+run of *different code* is worse than no screenshot in a baseline whose only value is
+self-comparison.
+
+**New files:** `BUGS.md`, `test/test_chunkStorage.js`. **Modified:** `js/chunkmanager.js`
+(the seven boundary sites, `_storeKey` + the two static key helpers, the migration,
+`_mergeManifestEntries`, the load-time integrity check, D-17, D-19),
+`js/world/chunkBinaryCodec.js` (D-15, both sites), `js/main.js` (D-18 — stated reason
+above), `test/e2e/saveLoad.js`, `test/test_chunkBinaryCodec.js`, `DEPLOY.md` §2.1 / §2.2 /
+§2.4 / §7 / §7.1 / §8 / §9, `refactor.md` (this section and the PR 6d slot).
+
+**Left open, and each now with an owner:** **H-2** and **H-3** → PR 6d (below). The
+`DEPLOY.md` §7 items that wait on PR 12–13 are unchanged. The Phase 0 gate checkboxes are
+still untouched — six of the seven are substantively true, and *"Manual save/load test
+passes"* is now stronger than it was (eleven of fourteen steps automated and green, the
+known data-corruption bug fixed rather than merely documented), but ticking it is still the
+owner's call and not this PR's.
+
+### PR 6d — Rewrite `onupgradeneeded` so a schema change *can* migrate (H-2, H-3)
+**Not needed by PR 6c, which deliberately migrated around it, and that is the point: the
+next person who needs a genuine schema change has nowhere to go.**
+
+`onupgradeneeded` (`js/chunkmanager.js:263-276`) enumerates every existing object store,
+`deleteObjectStore`s all of them, and recreates them empty. The comment says it "handles
+schema changes cleanly". It destroys every saved world on every player's device, with no
+migration and no warning. **Bumping `DB_VERSION` is a one-character change with total
+player data loss as its effect** — which is why PR 6c ran its migration at version 2 from
+`_openDB` instead, and why `DEPLOY.md` §2.1 carries a ⛔ warning rather than a note.
+
+- **Scope:** rewrite the handler to migrate `oldVersion → newVersion` step by step, creating
+  stores only when absent and never deleting one that holds data. **H-3** rides along:
+  `js/main.js:545` opens the database with no version argument, which on a device where it
+  does not yet exist creates `cuubz-worlds` at version 1 with no object stores and throws
+  the following `db.transaction([...])` into a silent `catch {}`. It self-heals through this
+  same handler, so the two want one PR.
+- **Accept:** `DB_VERSION` can be incremented with a pre-existing v2 database present and
+  every chunk and manifest survives, asserted against a seeded database rather than
+  reasoned about. `DEPLOY.md` §2.1's ⛔ warning is replaced by the procedure.
+- **This gates PR 23.** `refactor.md` §9 PR 23 splits `chunkmanager.js` and is already
+  flagged as the highest data-loss risk in the plan, with "test with a **pre-existing** v2
+  database" as an explicit requirement. PR 23 should not be the PR that discovers this.
+- **Open decision 6.**
 
 ### Phase 0 gate — do not proceed until all are true
 - [ ] `git status` clean; `pre-refactor-baseline` tag pushed
@@ -800,7 +1075,7 @@ Add `dev` / `build` / `preview` scripts. **Do not touch `js/` yet.** Confirm `np
 ```bash
 npm i three@0.134.0 --save-exact
 ```
-Keep `js/three.min.js` on disk until PR 9 flips imports. See [§1.2](#12-pin-threejs01340-do-not-run-npm-install-three).
+Keep `js/three.min.js` on disk until PR 9 flips imports. See [§1.2](#12-pin-three01340-do-not-run-npm-install-three).
 - **Accept:** `package.json` shows `"three": "0.134.0"` (exact, no `^`).
 
 ### PR 9 — Convert `js/` → `src/` ES modules (mechanical, in dependency order)
@@ -874,7 +1149,7 @@ export default [
 ### PR 13 — Un-nest `startGame`
 - Remove the `setTimeout(async () => { try { ... } })` wrapper; convert to a plain `async function` with real `await` and a top-level error handler.
 - Dedent — ~1,845 lines currently sit at ≥10 spaces.
-- Split the body into numbered private steps (still in `main.js`) matching the `Game.init()` order in [§8.4](#84-startgame--coregamejs-pr-17).
+- Split the body into numbered private steps (still in `main.js`) matching the `Game.init()` order in [§8.4](#84-pr-17--startgame--srccoregamejs).
 - **Accept:** max indentation in `main.js` under 8 spaces. Load-order-sensitive init still works (texture atlas before mesh build, chunk manager before player spawn).
 
 ---
@@ -1188,7 +1463,7 @@ Confirmed non-blockers: workers use no THREE; no removed APIs are referenced.
 ## 14. Anti-Patterns
 
 - ❌ **Don't skip Phase 0.** A red suite means you cannot prove parity. This is the whole reason v1 was rejected.
-- ❌ **Don't run bare `npm install three`.** Pin `0.134.0`. See [§1.2](#12-pin-threejs01340-do-not-run-npm-install-three).
+- ❌ **Don't run bare `npm install three`.** Pin `0.134.0`. See [§1.2](#12-pin-three01340-do-not-run-npm-install-three).
 - ❌ **Don't change `DB_NAME`, `DB_VERSION`, `'cuubz:settings'`, or `'cuubz_last_session'`.** Players lose worlds.
 - ❌ **Don't merge the module switch without the deploy fix.** `sync.sh` excludes `dist/`; you'd ship a site with no JS.
 - ❌ **Don't extract `renderLoop` before hoisting its 184 closure locals.**

@@ -549,7 +549,18 @@
         const tx = db.transaction(['manifests', 'chunks'], 'readwrite');
         // Delete manifest for this world
         tx.objectStore('manifests').delete(id);
-        // Note: chunks remain orphaned but harmless - they're keyed by chunk coordinates
+        // D-18: chunk records used to be left behind here, under a comment reading
+        // "orphaned but harmless - they're keyed by chunk coordinates". Coordinate-only
+        // keys were H-1, not a mitigation: the records were not orphaned, they were
+        // SHARED with whatever world next generated the same coordinates. PR 6c scoped
+        // the primary key to `${worldName}:${cx},${cz}`, which is what makes this
+        // world's chunks both identifiable and safe to remove — a contiguous key range.
+        // U+FFFF is the upper bound because it sorts after every character IndexedDB
+        // will see in a chunk key, which is only digits, '-' and ','. Written as an
+        // escape rather than a literal so the file stays pure ASCII.
+        tx.objectStore('chunks').delete(
+          IDBKeyRange.bound(`${id}:`, `${id}:` + String.fromCharCode(0xFFFF))
+        );
         await new Promise((resolve, reject) => {
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);

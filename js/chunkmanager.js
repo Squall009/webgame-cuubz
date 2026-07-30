@@ -249,11 +249,17 @@ class ChunkManager {
     }
   }
 
-  /** Open IndexedDB. Returns Promise<IDBDatabase>. */
+  /**
+   * Open IndexedDB. Returns Promise<IDBDatabase>.
+   *
+   * Every one of the seven chunk-store call sites awaits this first, which is what
+   * makes it the correct place to run the H-1 key migration: no read or write can
+   * observe a half-migrated store.
+   */
   async _openDB() {
     if (this._dbReady) return this._dbReady;
 
-    this._dbReady = new Promise((resolve, reject) => {
+    const opened = new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onblocked = (event) => {
@@ -287,7 +293,95 @@ class ChunkManager {
       };
     });
 
+    // Migrate before anyone can read or write. A migration failure must not make the
+    // world unopenable — it leaves the store as it was, which is the pre-6c behaviour.
+    this._dbReady = opened.then(async (db) => {
+      try {
+        await this._migrateToWorldScopedKeys(db);
+      } catch (err) {
+        console.error('[ChunkManager] Chunk key migration failed — continuing with the store as found:', err);
+      }
+      return db;
+    });
+
     return this._dbReady;
+  }
+
+  /**
+   * H-1 MIGRATION — re-key every pre-6c chunk record under `${worldName}:${chunkKey}`.
+   *
+   * Runs at DB_VERSION 2 rather than in `onupgradeneeded`, deliberately. H-2: that
+   * handler enumerates every object store, `deleteObjectStore`s all of them and
+   * recreates them empty (see the warning in DEPLOY.md §2.1), so bumping the version
+   * to trigger an upgrade would destroy every player's worlds on the way to fixing
+   * their keys. Nothing here touches the schema, so nothing needs a version bump.
+   *
+   * The data needed is already present: every write site sets a `worldName` field on
+   * the record, so each row knows which world it belongs to. (There is also a
+   * non-unique index on that field, `:274`, which no read path has ever used.)
+   *
+   * Idempotent — a record whose key already contains `:` is skipped, so a second run
+   * on a migrated database does no writes at all.
+   *
+   * WHAT THIS CANNOT DO: recover data H-1 already destroyed. A contaminated record
+   * only remembers its LAST writer, so it migrates into that world and the other
+   * world regenerates those chunks from its seed. Terrain is deterministic, so the
+   * regenerated ground is identical; what is gone is any player edit inside those
+   * chunks, and it was already gone before this ran.
+   *
+   * @returns {Promise<{migrated: number, unclaimed: number}>}
+   */
+  async _migrateToWorldScopedKeys(db) {
+    // Keys only — no payloads. Cheap even at several thousand records, which matters
+    // because this runs on every world entry, not just once.
+    const legacyKeys = await new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE_CHUNKS], 'readonly');
+      const request = tx.objectStore(STORE_CHUNKS).getAllKeys();
+      request.onsuccess = () => resolve((request.result || []).filter(k => !ChunkManager.isWorldScopedStoreKey(k)));
+      request.onerror = () => reject(request.error || new Error('Chunk key scan failed'));
+    });
+
+    if (legacyKeys.length === 0) return { migrated: 0, unclaimed: 0 };
+
+    let migrated = 0;
+    let unclaimed = 0;
+
+    // Batched the same way flushDirty batches, and for the same reason: a single
+    // transaction over thousands of read+write+delete triples is the case mobile
+    // IndexedDB implementations handle worst.
+    const BATCH_SIZE = 500;
+    for (let start = 0; start < legacyKeys.length; start += BATCH_SIZE) {
+      const batch = legacyKeys.slice(start, start + BATCH_SIZE);
+      const tx = db.transaction([STORE_CHUNKS], 'readwrite');
+      const store = tx.objectStore(STORE_CHUNKS);
+
+      for (const oldKey of batch) {
+        const request = store.get(oldKey);
+        request.onsuccess = () => {
+          const record = request.result;
+          // A record with no `worldName` cannot be attributed to a world, and
+          // guessing would put one world's terrain into another — the exact failure
+          // this migration exists to end. Left in place, counted, and reported: it
+          // is unreachable rather than destroyed, and no read path can serve it.
+          if (!record || !record.worldName) { unclaimed++; return; }
+          store.put(Object.assign({}, record, { chunkKey: `${record.worldName}:${record.chunkKey}` }));
+          store.delete(oldKey);
+          migrated++;
+        };
+      }
+
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('Chunk key migration transaction failed'));
+        tx.onabort = () => reject(new Error('Chunk key migration transaction aborted'));
+      });
+    }
+
+    console.info(
+      `[ChunkManager] H-1 migration: re-keyed ${migrated} chunk record(s) to \`worldName:cx,cz\`` +
+      (unclaimed > 0 ? `; left ${unclaimed} record(s) with no worldName field in place (unattributable)` : '')
+    );
+    return { migrated, unclaimed };
   }
 
   /** Get chunk store in given mode. */
@@ -306,11 +400,17 @@ class ChunkManager {
   // INDEXEDDB OPERATIONS
   // ============================================================
 
-  /** Save a chunk to IndexedDB. Returns Promise<void>. */
+  /**
+   * Save a chunk to IndexedDB. Returns Promise<void>.
+   *
+   * Takes a LOGICAL key and world-scopes it on the way in (H-1). Same for the
+   * three methods below and the four batch sites further down — those seven are
+   * the entire chunk-store boundary.
+   */
   async saveChunk(key, binaryData) {
     await this._openDB();
     const store = this._getStore('readwrite');
-    store.put({ chunkKey: key, worldName: this.worldName, data: binaryData, savedAt: Date.now() });
+    store.put({ chunkKey: this._storeKey(key), worldName: this.worldName, data: binaryData, savedAt: Date.now() });
     return new Promise((resolve, reject) => {
       const tx = store.transaction;
       tx.oncomplete = () => resolve();
@@ -323,7 +423,7 @@ class ChunkManager {
     await this._openDB();
     const store = this._getStore('readonly');
     return new Promise((resolve, reject) => {
-      const request = store.get(key);
+      const request = store.get(this._storeKey(key));
       request.onsuccess = () => resolve(request.result ? request.result.data : null);
       request.onerror = () => reject(request.error);
     });
@@ -334,19 +434,26 @@ class ChunkManager {
     await this._openDB();
     const store = this._getStore('readonly');
     return new Promise((resolve, reject) => {
-      const request = store.count(key);
+      const request = store.count(this._storeKey(key));
       request.onsuccess = () => resolve(request.result > 0);
       request.onerror = () => reject(request.error);
     });
   }
 
-  /** Delete a chunk from storage. */
+  /**
+   * Delete a chunk from storage.
+   *
+   * D-17: this used to call `store.delete(key)` TWICE — two separate IDBRequests,
+   * one per handler — so every call issued two delete operations. Idempotent, hence
+   * harmless, hence unnoticed. One request, both handlers.
+   */
   async deleteChunk(key) {
     await this._openDB();
     const store = this._getStore('readwrite');
     return new Promise((resolve, reject) => {
-      store.delete(key).onsuccess = () => resolve();
-      store.delete(key).onerror = () => reject(store.transaction.error);
+      const request = store.delete(this._storeKey(key));
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
     });
   }
 
@@ -380,6 +487,35 @@ class ChunkManager {
     });
   }
 
+  /**
+   * Merge `{key, checksum}` entries into a manifest's `generatedChunks` list.
+   *
+   * Normalizes legacy plain-string entries to objects on the way through. Shared by
+   * the three sites that record chunk checksums (`addVerifiedChunk`, `flushDirty`
+   * phase 3, the `beforeunload` flush) so they cannot drift apart — the recorded
+   * checksum is verified against the stored bytes on load (`_batchEnsureChunks`),
+   * which only works if every writer records it the same way.
+   *
+   * @param {Array} generatedChunks existing list, possibly undefined or legacy-shaped
+   * @param {Array<{key: string, checksum: number|null}>} entries
+   */
+  static _mergeManifestEntries(generatedChunks, entries) {
+    const normalized = (generatedChunks || []).map(entry =>
+      typeof entry === 'string' ? { key: entry, checksum: null } : entry
+    );
+
+    for (const { key, checksum } of entries) {
+      const existingIdx = normalized.findIndex(e => e.key === key);
+      if (existingIdx >= 0) {
+        normalized[existingIdx] = { key, checksum };
+      } else {
+        normalized.push({ key, checksum });
+      }
+    }
+
+    return normalized;
+  }
+
   /** Add verified chunk to manifest with checksum. */
   async addVerifiedChunk(key, checksum) {
     let manifest = await this.loadManifest();
@@ -395,22 +531,7 @@ class ChunkManager {
       };
     }
 
-    if (!manifest.generatedChunks) manifest.generatedChunks = [];
-
-    // Normalize legacy entries (plain strings → objects with checksum)
-    const normalized = manifest.generatedChunks.map(entry => {
-      if (typeof entry === 'string') return { key: entry, checksum: null };
-      return entry;
-    });
-
-    const existingIdx = normalized.findIndex(e => e.key === key);
-    if (existingIdx >= 0) {
-      normalized[existingIdx] = { key, checksum };
-    } else {
-      normalized.push({ key, checksum });
-    }
-
-    manifest.generatedChunks = normalized;
+    manifest.generatedChunks = ChunkManager._mergeManifestEntries(manifest.generatedChunks, [{ key, checksum }]);
     manifest.lastPlayed = Date.now();
 
     await this.saveManifest(manifest);
@@ -458,6 +579,39 @@ class ChunkManager {
     const [cx, cz] = key.split(',').map(Number);
     return { cx, cz };
   }
+
+  // ============================================================
+  // STORAGE KEY HELPERS (H-1)
+  // ============================================================
+  //
+  // `ChunkManager.key(cx, cz)` above is the LOGICAL chunk key: `"-3,7"`. It is the
+  // key of `memoryCache`, of `manifest.generatedChunks[].key`, and of the worker
+  // protocol — none of which are world-scoped concepts, and all of which would
+  // cascade into the manifest format (a DEPLOY.md §2.1 invariant) if it changed.
+  // So it does not change.
+  //
+  // What changed for H-1 is the STORAGE key: the primary key of the `chunks`
+  // object store. It used to be the logical key, which made chunk (0,0) a single
+  // shared record across every world slot — one visit to a second world destroyed
+  // 1,073 of the first world's 1,184 saved chunks (DEPLOY.md §7.1). It is now
+  // `${worldName}:${logicalKey}`, applied at exactly the seven sites that touch
+  // that store and nowhere else.
+  //
+  // The separator is `:` — the same one the localStorage key space already uses
+  // (`cuubz:worldSlot:0:conf`). A logical key is only digits, `-` and `,`, so the
+  // presence of a `:` is an exact discriminator between a world-scoped key and a
+  // pre-migration bare one, whatever a world id contains.
+
+  /** Prefix owning every stored chunk of a world. */
+  static worldKeyPrefix(worldName) { return `${worldName}:`; }
+
+  /** True if `k` is already world-scoped, i.e. does not need migrating. */
+  static isWorldScopedStoreKey(k) {
+    return typeof k === 'string' && k.indexOf(':') !== -1;
+  }
+
+  /** Logical chunk key → the `chunks` store's primary key for THIS world. */
+  _storeKey(key) { return `${this.worldName}:${key}`; }
 
   // ============================================================
   // VOXEL GENERATION
@@ -677,7 +831,7 @@ class ChunkManager {
         const store = tx.objectStore(STORE_CHUNKS);
 
         for (const { key, binaryData } of batch) {
-          store.put({ chunkKey: key, worldName: this.worldName, data: binaryData, savedAt: Date.now() });
+          store.put({ chunkKey: this._storeKey(key), worldName: this.worldName, data: binaryData, savedAt: Date.now() });
         }
 
         await new Promise((resolve, reject) => {
@@ -711,23 +865,7 @@ class ChunkManager {
           generatedChunks: []
         };
       }
-      if (!manifest.generatedChunks) manifest.generatedChunks = [];
-
-      // Normalize legacy entries (plain strings → objects with checksum)
-      const normalized = manifest.generatedChunks.map(entry =>
-        typeof entry === 'string' ? { key: entry, checksum: null } : entry
-      );
-
-      for (const { key, checksum } of entries) {
-        const existingIdx = normalized.findIndex(e => e.key === key);
-        if (existingIdx >= 0) {
-          normalized[existingIdx] = { key, checksum };
-        } else {
-          normalized.push({ key, checksum });
-        }
-      }
-
-      manifest.generatedChunks = normalized;
+      manifest.generatedChunks = ChunkManager._mergeManifestEntries(manifest.generatedChunks, entries);
       manifest.lastPlayed = Date.now();
       await this.saveManifest(manifest);
       this._manifest = manifest;
@@ -760,16 +898,34 @@ class ChunkManager {
         if (!db) return;
         const keys = [...self._flushQueue];
         self._flushQueue.clear();
-        const tx = db.transaction([STORE_CHUNKS], 'readwrite');
+
+        // D-19: this used to write chunks WITHOUT updating the manifest, so a chunk
+        // saved on tab close kept the checksum the manifest recorded for its previous
+        // bytes. Nothing read those checksums, so nothing noticed — until
+        // _batchEnsureChunks started verifying them, at which point a stale entry
+        // would look exactly like corruption. Both stores are written in ONE
+        // transaction so they cannot disagree, and the manifest comes from the
+        // in-memory copy: `beforeunload` has no budget for an async read-modify-write.
+        const stores = self._manifest ? [STORE_CHUNKS, STORE_MANIFESTS] : [STORE_CHUNKS];
+        const tx = db.transaction(stores, 'readwrite');
         const store = tx.objectStore(STORE_CHUNKS);
+
+        const written = [];
         for (const key of keys) {
           const chunk = self.memoryCache.get(key);
           if (!chunk || !chunk.dirty) continue;
           try {
             const data = ChunkBinaryCodec.encode(chunk);
-            store.put({ chunkKey: key, worldName: self.worldName, data, savedAt: Date.now() });
+            store.put({ chunkKey: self._storeKey(key), worldName: self.worldName, data, savedAt: Date.now() });
+            written.push({ key, checksum: new DataView(data).getUint32(16, true) });
             chunk.dirty = false;
           } catch (_) {}
+        }
+
+        if (self._manifest && written.length > 0) {
+          self._manifest.generatedChunks = ChunkManager._mergeManifestEntries(self._manifest.generatedChunks, written);
+          self._manifest.lastPlayed = Date.now();
+          tx.objectStore(STORE_MANIFESTS).put(self._manifest);
         }
       } catch (_) {}
     });
@@ -852,7 +1008,12 @@ class ChunkManager {
 
   /**
    * Load multiple chunks from IndexedDB in a single transaction.
-   * Returns Map<chunkKey, ArrayBuffer|null>.
+   *
+   * Takes LOGICAL keys, reads world-scoped store keys (H-1), and returns
+   * `Map<logicalKey, {data, worldName, checksum}|null>` keyed by the logical key the
+   * caller passed in. The whole record rather than just `data`, because
+   * `_batchEnsureChunks` verifies `worldName` and the header checksum before trusting
+   * the bytes — see the integrity check there.
    */
   async _batchLoadChunks(keys) {
     if (keys.length === 0) return new Map();
@@ -866,9 +1027,17 @@ class ChunkManager {
     // Each callback sets its slot in the results map.
     await new Promise((resolve, reject) => {
       for (const key of keys) {
-        const request = store.get(key);
+        const request = store.get(this._storeKey(key));
         request.onsuccess = () => {
-          results.set(key, request.result ? request.result.data : null);
+          const record = request.result;
+          // A record shorter than the 20-byte header has no checksum field to read;
+          // decode() rejects it a moment later, which is the right place to fail.
+          const readable = record && record.data && record.data.byteLength >= 20;
+          results.set(key, record ? {
+            data: record.data,
+            worldName: record.worldName,
+            checksum: readable ? new DataView(record.data).getUint32(16, true) : null,
+          } : null);
         };
         request.onerror = () => {
           results.set(key, null);
@@ -904,11 +1073,13 @@ class ChunkManager {
     const manifest = this._manifest || await this.loadManifest();
     this._manifest = manifest;
 
-    // Build a Set of known chunk keys from manifest
-    const manifestKeys = new Set();
+    // Map of known chunk key → recorded checksum (null for legacy string entries,
+    // which predate checksums and therefore cannot be verified).
+    const manifestChecksums = new Map();
     if (manifest && manifest.generatedChunks) {
       for (const entry of manifest.generatedChunks) {
-        manifestKeys.add(typeof entry === 'string' ? entry : entry.key);
+        if (typeof entry === 'string') manifestChecksums.set(entry, null);
+        else manifestChecksums.set(entry.key, entry.checksum ?? null);
       }
     }
 
@@ -917,7 +1088,7 @@ class ChunkManager {
     const toGenerate = [];
 
     for (const { key, cx, cz } of missing) {
-      if (manifestKeys.has(key)) {
+      if (manifestChecksums.has(key)) {
         toLoad.push({ key, cx, cz });
       } else {
         toGenerate.push({ cx, cz });
@@ -927,11 +1098,42 @@ class ChunkManager {
     // Batch-load existing chunks from IndexedDB (single transaction)
     if (toLoad.length > 0) {
       const loadedData = await this._batchLoadChunks(toLoad.map(e => e.key));
+      const healed = [];
+
       for (const { key, cx, cz } of toLoad) {
-        const binaryData = loadedData.get(key);
-        if (binaryData) {
+        const record = loadedData.get(key);
+        if (record && record.data) {
+          // ── Integrity check: defence in depth behind the world-scoped keys ──
+          //
+          // The keys are what FIX H-1; this is what would CATCH it coming back. A
+          // record that names a different world has to be foreign terrain, and
+          // serving it is precisely the corruption of DEPLOY.md §7.1 — one visit to
+          // a second world used to leave the player standing in it. Regenerating is
+          // always safe: terrain is deterministic from the seed.
+          if (record.worldName && record.worldName !== this.worldName) {
+            console.warn(
+              `[ChunkManager] Chunk ${key} is stored under this world but claims world ` +
+              `"${record.worldName}" — discarding it and regenerating rather than serving foreign terrain`
+            );
+            try { await this.removeChunk(key); } catch (_) {}
+            toGenerate.push({ cx, cz });
+            continue;
+          }
+
+          // A checksum disagreement is NOT treated as corruption, and must not be:
+          // decode() below verifies the bytes against the checksum they carry, so
+          // real damage is caught there. A manifest that disagrees with intact,
+          // correctly-owned bytes means the manifest entry is stale, and the honest
+          // repair is to record what is actually stored. Deleting the chunk here
+          // would discard whatever the player built immediately before the write
+          // that outran the manifest.
+          const recorded = manifestChecksums.get(key);
+          if (recorded !== null && recorded !== undefined && recorded !== record.checksum) {
+            healed.push({ key, checksum: record.checksum });
+          }
+
           try {
-            const chunk = ChunkBinaryCodec.decode(binaryData);
+            const chunk = ChunkBinaryCodec.decode(record.data);
             chunk.dirty = false;
             chunk.humidityMap = computeHumidityMap(this.worldSeed, cx, cz, this.genParams);
             this.memoryCache.set(key, chunk);
@@ -942,10 +1144,24 @@ class ChunkManager {
             toGenerate.push({ cx, cz });
           }
         } else {
-          // Manifest says it exists but data is missing — clean up
+          // Manifest says it exists but data is missing — clean up.
+          // This is also the path a world takes for chunks H-1 already lost to
+          // another world: the record migrated to whichever world wrote it last,
+          // so this one finds nothing and regenerates from its seed.
           try { await this.removeChunk(key); } catch (_) {}
           toGenerate.push({ cx, cz });
         }
+      }
+
+      if (healed.length > 0) {
+        console.warn(
+          `[ChunkManager] Repaired ${healed.length} stale manifest checksum(s) — the stored bytes are ` +
+          `intact and belong to this world, so the manifest was the thing out of date (D-19)`
+        );
+        try {
+          this._manifest.generatedChunks = ChunkManager._mergeManifestEntries(this._manifest.generatedChunks, healed);
+          await this.saveManifest(this._manifest);
+        } catch (_) {}
       }
     }
 

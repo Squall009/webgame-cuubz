@@ -60,8 +60,17 @@ class ChunkBinaryCodec {
     // NOTE: dirty flag is NOT persisted — chunks saved to disk are always clean.
     // Dirty is purely an in-memory state that only matters until flush completes.
 
-    // Calculate total buffer size: header + block runs only
-    const bufferSize = HEADER_SIZE + blockRuns.length * 4;
+    // Calculate total buffer size: header + block runs only.
+    //
+    // D-15: `blockRuns` is a FLAT Uint16Array of [id, count, id, count, …], so the
+    // number of runs is blockRuns.length / 2 and each run occupies 4 bytes — i.e.
+    // blockRuns.length * 2 bytes in total. This used to read `* 4`, which allocated
+    // exactly twice what the write loop below fills, leaving every stored chunk with
+    // a zero-filled tail the same size as its real payload (~14 MB per world).
+    // Shrinking it is backward compatible: decode() never consults the buffer length,
+    // it stops after `blockRunCount` runs, so already-stored padded chunks and new
+    // tight ones decode identically. See DEPLOY.md §2.2.
+    const bufferSize = HEADER_SIZE + blockRuns.length * 2;
     const buffer = new ArrayBuffer(bufferSize);
     const view = new DataView(buffer);
 
@@ -188,10 +197,14 @@ class ChunkBinaryCodec {
 
   /**
    * Get estimated compressed size for a chunk without actually encoding.
+   *
+   * Same D-15 arithmetic as encode() — this copy over-reported by 2× and had no
+   * callers outside this file, which is why nothing noticed. It is exact, not an
+   * estimate: it RLE-encodes for real and only skips writing the buffer.
    */
   static estimateSize(chunk) {
     const blockRuns = this._rleEncode16(chunk.blocks);
-    return HEADER_SIZE + blockRuns.length * 4;
+    return HEADER_SIZE + blockRuns.length * 2;
   }
 }
 

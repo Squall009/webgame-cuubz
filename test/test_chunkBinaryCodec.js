@@ -129,7 +129,14 @@ console.log('\n=== ChunkBinaryCodec (simplified) ===\n');
   assert(ChunkBinaryCodec.computeChecksum(data1) !== ChunkBinaryCodec.computeChecksum(data3), 'Different data should produce different checksum');
 }
 
-// Test 7: estimateSize gives reasonable estimate
+// Test 7: estimateSize is exact, and the encoded buffer carries no padding.
+//
+// D-15 (fixed in PR 6c): both sites used to size the payload as
+// `blockRuns.length * 4`, but blockRuns is a FLAT Uint16Array of [id, count, …], so
+// runs = length / 2 and payload = runs * 4 = length * 2. encode() allocated exactly
+// double what it filled, and estimateSize over-reported by the same factor. The old
+// bound here was `< actual * 1.5`, which both the bug and the fix satisfy — that is
+// why a unit test never caught it. These assertions are exact.
 {
   const chunk = new Chunk(0, 0);
   for (let x = 0; x < 16; x++) {
@@ -140,7 +147,11 @@ console.log('\n=== ChunkBinaryCodec (simplified) ===\n');
 
   const estimated = ChunkBinaryCodec.estimateSize(chunk);
   const encoded = ChunkBinaryCodec.encode(chunk);
-  assert(estimated > 0 && estimated < encoded.byteLength * 1.5, `Estimate ${estimated} should be within 1.5x of actual ${encoded.byteLength}`);
+  assert(estimated === encoded.byteLength, `estimateSize ${estimated} should equal the encoded length ${encoded.byteLength} exactly`);
+
+  const runCount = new DataView(encoded).getUint32(12, true);
+  assert(encoded.byteLength === 20 + runCount * 4,
+    `encoded length ${encoded.byteLength} should be exactly 20 + ${runCount} runs × 4 bytes (no zero padding)`);
 }
 
 // Test 8: Worker output format validation
