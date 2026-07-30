@@ -1440,12 +1440,18 @@ async function main() {
     await page.waitForSelector('#main-menu:not(.hidden)');
 
     note(
-      '§7 steps 12-13 — multiplayer host/guest persistence',
-      'Needs a running relay (server/index.js on 8765) and two browser contexts. The relay ' +
-      'half is reachable today (spawn it as a child process and point src/main.js\'s relay ' +
-      'URL at localhost); the guest-places-a-block half stopped being blocked at PR 12, ' +
-      'which made chunkManager reachable from page.evaluate. What is left is the two-context ' +
-      'orchestration, which is a harness change, not a source one.'
+      '§7 steps 12-13 — multiplayer host/guest persistence, and the browser half of the ' +
+      'session layer generally (BUGS.md D-48, owned by PR 31)',
+      'Needs a running relay (server/index.js on 8765 as a child process) and two browser ' +
+      'contexts. Nothing in this file clicks #btn-host or #btn-join, so the relay handshake, ' +
+      'JOIN_ACCEPTED arriving over a real socket and startGame() on a joining client are all ' +
+      'unexercised — which is what let D-43 sit under five green runs. The way in is the ' +
+      '?relayUrl= query parameter getRelayUrl already honours; PR 16 added assertions for it ' +
+      'in test/test_relayUrl.js precisely so a harness can rely on it. PR 16 covered the ' +
+      "session layer's LOGIC instead — test/test_sessionRecord.js drives the real " +
+      'SessionManager and StorageHelper with 51 assertions inside npm test, so a D-43 ' +
+      'regression goes red on every push rather than at a phase gate. What is left here is ' +
+      'two-context orchestration, which is a harness change, not a source one.'
     );
 
     // ═══ §7 step 14 — the run left the tree alone ═════════════

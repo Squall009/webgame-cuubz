@@ -33,6 +33,9 @@
  * coupling is in the HTML; this is the smallest place to keep it honest.
  */
 
+import { ConnectionHUD } from './hud/ConnectionHUD.js';
+import { PlayerListOverlay } from './hud/PlayerListOverlay.js';
+
 export class UIManager {
   /**
    * @param {Object} deps — live getters: characterManager, worldManager, perfSettings,
@@ -71,6 +74,14 @@ export class UIManager {
       sessionList: document.getElementById('session-list'),
       noSessionsMsg: document.getElementById('no-sessions-msg'),
     };
+
+    // PR 16 — the two in-game session widgets, which `SessionManager` drives. They were
+    // `renderPlayerList` / `hidePlayerList` / `updateConnectionStatus` in `main.js`; both
+    // read `sessionUI`, so `UIManager` is what owns them. See `PlayerListOverlay.js` for
+    // why the roster is NOT `src/multiplayer/PlayerListHUD.js`, which already exists and
+    // is a different thing (decision 28).
+    this.playerList = new PlayerListOverlay(this.sessionUI);
+    this.connectionHUD = new ConnectionHUD(this.sessionUI);
 
     // Screen objects, set by `registerScreens`.
     this.character = null;

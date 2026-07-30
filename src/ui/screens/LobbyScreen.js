@@ -223,7 +223,11 @@ export class LobbyScreen {
       wm.selectedId = tempWorld.id;
     }
 
-    await sm.joinSession(session.sessionId);
+    // PR 16 — the session's real identity goes in with the join. `JOIN_ACCEPTED` carries
+    // neither `mode` nor `name` (server/matchmaking.js), so this is the **only** point at
+    // which a joiner's client can know what it is joining. Before PR 16 nothing carried it
+    // and the rejoin record hard-coded `'survival'` — `BUGS.md` D-43.
+    await sm.joinSession(session.sessionId, { mode, name: session.name, seed: sessionSeed });
     this.deps.log(`[SessionManager] Starting game in ${mode} mode (joining)`);
     console.log('[JOIN] joinSession called, waiting for game session connect...');
     this.deps.startGame(mode);

@@ -12,8 +12,6 @@ import { MouseInput } from './engine/input/Mouse.js';
 import { TouchInput } from './engine/input/Touch.js';
 import { MobIntegration } from './game/mobs/mobIntegration.js';
 import { ChunkCompressor, ChunkStreamer } from './multiplayer/ChunkStreamer.js';
-import { MultiplayerClient } from './multiplayer/Client.js';
-import { HostManager } from './multiplayer/Host.js';
 import { InventorySync } from './multiplayer/InventorySync.js';
 import { PlayerListHUD } from './multiplayer/PlayerListHUD.js';
 import { PlayerSyncManager } from './multiplayer/PlayerSync.js';
@@ -54,7 +52,15 @@ import { CharacterScreen } from './ui/screens/CharacterScreen.js';
 import { LobbyScreen } from './ui/screens/LobbyScreen.js';
 import { SettingsScreen } from './ui/screens/SettingsScreen.js';
 import { WorldScreen } from './ui/screens/WorldScreen.js';
-import { escapeHtml } from './util/HTMLUtils.js';
+// PR 16 — the session layer (refactor.md §8.3, §13). `class SessionManager`, the rejoin
+// panel, `updateConnectionStatus`, the player-list overlay, `getRelayUrl` and all six
+// `cuubz_last_session` write sites moved out of this file. `let sessionManager` below
+// stays, because ~45 reads inside `startGame()` name it directly and PR 17 is what turns
+// those into fields on `Game`.
+import { createSessionManager } from './multiplayer/SessionManager.js';
+import { rejoinSession, updateRejoinPanel } from './multiplayer/SessionRejoin.js';
+import { getRelayUrl } from './multiplayer/RelayUrl.js';
+import { clearLastSession, readLastSession } from './util/StorageHelper.js';
 
 (function() {
   'use strict';
@@ -66,14 +72,14 @@ import { escapeHtml } from './util/HTMLUtils.js';
   // Screen Management — PR 15
   // ============================================================
   //
-  // `screens`, `modals`, `sessionUI` and `showScreen()` are `UIManager`'s now. The four
-  // aliases below keep the ~40 call sites in this file byte-identical while the rest of
-  // Phase 3 moves them out; PR 19 deletes the aliases with the last of their readers.
+  // `screens`, `modals`, `sessionUI` and `showScreen()` are `UIManager`'s now. Two
+  // aliases survive and keep their call sites in this file byte-identical while the rest
+  // of Phase 3 moves them out; PR 19 deletes them with the last of their readers. The
+  // `sessionUI` alias went in PR 16 with the last thing that read it.
 
   /** @type {UIManager} */
   let ui = null;
   let screens = null;
-  let sessionUI = null;
   function showScreen(name) { ui.show(name); }
 
   // PR 14 — `BrowserCharacterManager` (~130 lines) and its four constants stood here.
@@ -108,6 +114,7 @@ import { escapeHtml } from './util/HTMLUtils.js';
    * become fields on `Game` and `GameState`, and this object goes with them.
    */
   const uiDeps = {
+    get ui() { return ui; },
     get characterManager() { return characterManager; },
     get worldManager() { return worldManager; },
     get perfSettings() { return perfSettings; },
@@ -201,15 +208,14 @@ import { escapeHtml } from './util/HTMLUtils.js';
    * PR 15 — this was ~500 lines wiring every screen in the game. The screen-specific
    * halves are `UIManager.initNavigation()` and the four screens' own `init()`.
    *
-   * What is left is what does not belong to a screen: constructing the UI, the rejoin
-   * buttons and `beforeunload`, which are **PR 16's** (§8.3 — `SessionManager` owns
-   * `REJOIN_STORAGE_KEY`, the rejoin panel and the five `cuubz_last_session` sites).
+   * What is left is what does not belong to a screen: constructing the UI and the
+   * session manager, and wiring the two rejoin-panel buttons to `SessionRejoin.js`.
+   * PR 19 takes the rest of it into `src/index.js`.
    */
   function initMenuNavigation() {
     try {
       ui = new UIManager(uiDeps);
       screens = ui.screens;
-      sessionUI = ui.sessionUI;
       ui.registerScreens({
         character: new CharacterScreen(ui),
         world: new WorldScreen(ui),
@@ -218,10 +224,12 @@ import { escapeHtml } from './util/HTMLUtils.js';
       });
       ui.initNavigation();
 
-      // ─── Rejoin panel (PR 16 takes these with SessionManager) ───
+      // ─── Rejoin panel ───
       const btnRejoin = document.getElementById('btn-rejoin-session');
       if (btnRejoin) {
-        btnRejoin.addEventListener('click', async () => { await rejoinSession(); });
+        btnRejoin.addEventListener('click', async () => {
+          await rejoinSession(uiDeps, (sm) => { sessionManager = sm; });
+        });
       }
 
       const btnClearRejoin = document.getElementById('btn-clear-rejoin');
@@ -232,38 +240,13 @@ import { escapeHtml } from './util/HTMLUtils.js';
         });
       }
 
-      initSessionUI();
+      sessionManager = createSessionManager(uiDeps);
 
-      // ─── Save session state before page unload (F5, tab close, etc.) ───
-      // If the user refreshes while in a session we can auto-rejoin rather than
-      // dropping them back to the main menu.
-      window.addEventListener('beforeunload', () => {
-        try {
-          if (sessionManager && sessionManager.hostingSessionId) {
-            const world = worldManager ? worldManager.getSelectedWorld() : null;
-            const char = characterManager ? characterManager.getSelectedCharacter() : null;
-            localStorage.setItem('cuubz_last_session', JSON.stringify({
-              sessionId: sessionManager.hostingSessionId,
-              name: document.getElementById('host-session-name')?.value || 'My Session',
-              mode: document.getElementById('host-mode-select')?.value || 'survival',
-              seed: world ? world.seed : null,
-              isHost: true,
-              characterId: char ? char.id : null,
-              worldId: world ? world.id : null,
-              timestamp: Date.now(),
-            }));
-          } else if (sessionManager && sessionManager.currentSessionId) {
-            localStorage.setItem('cuubz_last_session', JSON.stringify({
-              sessionId: sessionManager.currentSessionId,
-              name: 'Joined Session',
-              mode: 'survival',
-              isHost: false,
-              characterId: characterManager ? characterManager.selectedId : null,
-              timestamp: Date.now(),
-            }));
-          }
-        } catch (e) { /* ignore localStorage errors */ }
-      });
+      // PR 16 — a SECOND `beforeunload` handler on `cuubz_last_session` stood here, and
+      // the one at the bottom of this file was already registered. Both fired; this one
+      // ran second and its `setItem` won, and it hard-coded `mode: 'survival'` for a
+      // joiner. `BUGS.md` **D-43**. There is one handler now, at the bottom of this file,
+      // and `SessionManager.saveSessionRecord()` is the only thing that writes the key.
 
       _log('[Cuubz] initMenuNavigation complete');
     } catch (e) {
@@ -277,664 +260,23 @@ import { escapeHtml } from './util/HTMLUtils.js';
 
   let sessionManager = null;
 
-  // PR 15 — `switchLobbyTab` and the three `populate*Select` functions are
-  // `src/ui/screens/LobbyScreen.js`, with no delegate: every caller was a lobby control
-  // and moved with them. `SessionManager` below does NOT call them, which was worth
-  // checking rather than assuming — `renderSessionList`, `showHostError` and
-  // `hideHostError` are the only three it reaches back into the UI for.
 
-  /**
-   * Update connection status indicator in lobby and HUD.
-   * @param {'disconnected'|'connecting'|'connected'|'reconnecting'} status
-   */
-  function updateConnectionStatus(status) {
-    const statusTexts = {
-      disconnected: 'Disconnected',
-      connecting: 'Connecting...',
-      connected: 'Connected',
-      reconnecting: 'Reconnecting...',
-    };
-
-    // Lobby connection status
-    if (sessionUI.connectionStatus) {
-      sessionUI.connectionStatus.className = `connection-status ${status}`;
-      const textEl = sessionUI.connectionStatus.querySelector('.status-text');
-      if (textEl) textEl.textContent = statusTexts[status] || status;
-    }
-
-    // In-game connection HUD
-    if (sessionUI.connectionHud) {
-      sessionUI.connectionHud.className = `connection-hud ${status}`;
-      const hudText = sessionUI.connectionHud.querySelector('.status-text');
-      if (hudText) hudText.textContent = statusTexts[status] || status;
-    }
-  }
-
-  /**
-   * Render the session list in browse panel.
-   * @param {Array} sessions — Array of session objects from server
-   */
-  // PR 15 — the body is `LobbyScreen.renderSessionList`. `SessionManager` calls this
-  // name in two places; PR 16 moves that class and the delegate goes with it.
-  function renderSessionList(sessions) { ui.lobby.renderSessionList(sessions); }
-
-  /**
-   * Render the in-game player list overlay.
-   * @param {Array} players — Array of player objects with name, color, health
-   */
-  function renderPlayerList(players) {
-    const overlay = sessionUI.playerListOverlay;
-    const itemsContainer = sessionUI.playerListItems;
-    const countEl = sessionUI.playerCount;
-
-    if (!overlay || !itemsContainer) return;
-
-    // Show overlay when in multiplayer game
-    overlay.classList.remove('hidden');
-    itemsContainer.innerHTML = '';
-
-    if (countEl) {
-      countEl.textContent = players ? players.length : 0;
-    }
-
-    if (!players || players.length === 0) return;
-
-    players.forEach(player => {
-      const item = document.createElement('div');
-      item.className = 'player-list-item';
-
-      const healthPercent = player.health !== undefined ? Math.max(0, Math.min(100, player.health)) : 100;
-      const healthColor = healthPercent > 60 ? '#4CAF50' : healthPercent > 30 ? '#f1c40f' : '#e74c3c';
-
-      // Position info
-      let posHtml = '';
-      if (player.position) {
-        const px = Math.round(player.position.x);
-        const py = Math.round(player.position.y);
-        const pz = Math.round(player.position.z);
-        posHtml = `<span class="player-list-item-pos">(${px}, ${py}, ${pz})</span>`;
-      }
-
-      item.innerHTML = `
-        <div class="player-list-item-header">
-          <span class="player-color-dot" style="background:${escapeHtml(player.color || '#ffffff')}"></span>
-          <span class="player-name-text">${escapeHtml(player.name || 'Player')}</span>
-          <div class="player-health-bar">
-            <div class="player-health-fill" style="width:${healthPercent}%;background:${healthColor};"></div>
-          </div>
-        </div>
-        ${posHtml}
-      `;
-
-      itemsContainer.appendChild(item);
-    });
-  }
-
-  /**
-   * Hide the in-game player list overlay.
-   */
-  function hidePlayerList() {
-    if (sessionUI.playerListOverlay) {
-      sessionUI.playerListOverlay.classList.add('hidden');
-    }
-    if (sessionUI.connectionHud) {
-      sessionUI.connectionHud.classList.add('hidden');
-    }
-  }
-
-  // ============================================================
-  // Session Rejoin
-  // ============================================================
-
-  const REJOIN_STORAGE_KEY = 'cuubz_last_session';
-  const REJOIN_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
-
-  /**
-   * Get the last saved session from localStorage.
-   * Returns null if no session or session is too old.
-   */
-  function getLastSession() {
-    try {
-      const raw = localStorage.getItem(REJOIN_STORAGE_KEY);
-      if (!raw) return null;
-      const data = JSON.parse(raw);
-      if (!data || !data.sessionId) return null;
-      // Expire sessions older than 24 hours
-      if (Date.now() - data.timestamp > REJOIN_MAX_AGE) {
-        localStorage.removeItem(REJOIN_STORAGE_KEY);
-        return null;
-      }
-      return data;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /**
-   * Clear the saved session from localStorage.
-   */
-  function clearLastSession() {
-    try { localStorage.removeItem(REJOIN_STORAGE_KEY); } catch (e) {}
-  }
-
-  /**
-   * Update the rejoin panel visibility and content.
-   */
-  function updateRejoinPanel() {
-    const panel = document.getElementById('rejoin-panel');
-    const nameEl = document.getElementById('rejoin-session-name');
-    if (!panel) return;
-
-    const session = getLastSession();
-    if (session) {
-      panel.classList.remove('hidden');
-      if (nameEl) {
-        nameEl.textContent = `${session.name} (${session.isHost ? 'hosting' : 'joined'}, ${session.mode})`;
-      }
-    } else {
-      panel.classList.add('hidden');
-    }
-  }
-
-  /**
-   * Rejoin the last session.
-   */
-  async function rejoinSession() {
-    const session = getLastSession();
-    if (!session) return;
-
-    // Ensure character is selected (use first available if none)
-    const characters = characterManager ? characterManager.getAllCharacters() : [];
-    if (characters.length > 0) {
-      await characterManager.selectCharacter(characters[0].id);
-    }
-
-    // Ensure world is selected
-    if (session.isHost && session.seed) {
-      // For re-hosting, find or create a world with the session's seed
-      const worlds = worldManager ? worldManager.getAllWorlds() : [];
-      const existingWorld = worlds.find(w => w.seed === session.seed);
-      if (existingWorld) {
-        await worldManager.selectWorld(existingWorld.id);
-      } else if (worlds.length > 0) {
-        await worldManager.selectWorld(worlds[0].id);
-      }
-    } else if (!session.isHost && session.seed) {
-      // For re-joining, create temp world with session seed
-      const tempWorld = {
-        id: `temp_${session.sessionId}`,
-        name: session.name || 'Remote World',
-        seed: session.seed,
-        biomeMap: { dominantBiomes: ['Plains'], seed: session.seed },
-        questProgress: {},
-        chunkReferences: [],
-      };
-      worldManager.worlds.push(tempWorld);
-      worldManager.selectedId = tempWorld.id;
-    } else if (worldManager && worldManager.getAllWorlds().length > 0) {
-      await worldManager.selectWorld(worldManager.getAllWorlds()[0].id);
-    }
-
-    if (!sessionManager) {
-      // Initialize session manager if needed
-      sessionManager = new SessionManager();
-      const relayUrl = getRelayUrl();
-      sessionManager.init(relayUrl);
-    }
-
-    updateConnectionStatus('connecting');
-
-    if (session.isHost && sessionManager.client) {
-      // Re-host the session
-      try {
-        await sessionManager.client.hostSession({
-          name: session.name,
-          seed: session.seed || Math.floor(Math.random() * 0xFFFFFFFF),
-          mode: session.mode,
-        });
-        _log(`[Cuubz] Re-hosting session: ${session.name}`);
-      } catch (err) {
-        updateConnectionStatus('disconnected');
-        showHostError(`Failed to re-host: ${err.message}`);
-      }
-    } else if (sessionManager.client) {
-      // Re-join the session
-      try {
-        await sessionManager.joinSession(session.sessionId);
-        _log(`[Cuubz] Re-joining session: ${session.sessionId}`);
-      } catch (err) {
-        updateConnectionStatus('disconnected');
-        showHostError(`Failed to rejoin: ${err.message}`);
-      }
-    }
-
-    // Start the game
-    startGame(session.mode || 'survival');
-  }
-
-  /**
-   * SessionManager — Handles multiplayer session lifecycle in the browser.
-   * Wraps MultiplayerClient for UI integration.
-   */
-  class SessionManager {
-    constructor() {
-      this.client = null; // MultiplayerClient instance (created when connecting)
-      this.sessions = [];
-      this.currentSessionId = null;
-      this.hostingSessionId = null;
-      this.players = [];
-      this._browseCallback = null;
-      this._hostCreatedCallback = null;
-      this._joinAcceptedCallback = null;
-      this._joinRejectedCallback = null;
-      this._playerJoinedCallback = null;
-      this._playerLeftCallback = null;
-    }
-
-    /**
-     * Initialize the WebSocket client for matchmaking.
-     * @param {string} serverUrl — WebSocket URL for matchmaking (e.g., ws://localhost:8765)
-     */
-    init(serverUrl) {
-      this._serverUrl = serverUrl || 'ws://localhost:8765';
-
-      if (typeof MultiplayerClient !== 'undefined') {
-        this.client = new MultiplayerClient({ url: this._serverUrl });
-        this._wireClientEvents();
-      } else {
-        console.warn('[SessionManager] MultiplayerClient not loaded — offline mode');
-      }
-    }
-
-    /** Wire up client events to UI updates */
-    _wireClientEvents() {
-      if (!this.client) return;
-
-      this.client.on('SESSION_LIST', (data) => {
-        this.sessions = data.sessions || [];
-        renderSessionList(this.sessions);
-        if (this._browseCallback) this._browseCallback(this.sessions);
-      });
-
-      this.client.on('HOST_CREATED', (data) => {
-        this.hostingSessionId = data.sessionId;
-        updateConnectionStatus('connected');
-        // Persist session for rejoin
-        try {
-          localStorage.setItem('cuubz_last_session', JSON.stringify({
-            sessionId: data.sessionId,
-            name: data.name || 'My Session',
-            mode: data.mode || 'survival',
-            isHost: true,
-            timestamp: Date.now(),
-          }));
-        } catch (e) { /* ignore localStorage errors */ }
-        updateRejoinPanel();
-        if (this._hostCreatedCallback) this._hostCreatedCallback(data);
-      });
-
-      this.client.on('JOIN_ACCEPTED', (data) => {
-        this.currentSessionId = data.sessionId;
-        updateConnectionStatus('connected');
-        // Persist session for rejoin
-        try {
-          localStorage.setItem('cuubz_last_session', JSON.stringify({
-            sessionId: data.sessionId,
-            name: data.name || 'Joined Session',
-            mode: data.mode || 'survival',
-            isHost: false,
-            timestamp: Date.now(),
-          }));
-        } catch (e) { /* ignore localStorage errors */ }
-        updateRejoinPanel();
-        if (this._joinAcceptedCallback) this._joinAcceptedCallback(data);
-      });
-
-      this.client.on('JOIN_REJECTED', (data) => {
-        const reason = data.reason || 'Unknown error';
-        showHostError(`Join failed: ${reason}`);
-        if (this._joinRejectedCallback) this._joinRejectedCallback(data);
-      });
-
-      this.client.on('PLAYER_JOINED', (data) => {
-        this.players.push({
-          id: data.playerId,
-          name: data.character?.name || 'Player',
-          color: data.character?.color || '#888888',
-          health: data.health !== undefined ? data.health : 100,
-          position: data.position,
-        });
-        renderPlayerList(this.players);
-        if (this._playerJoinedCallback) this._playerJoinedCallback(data);
-      });
-
-      this.client.on('PLAYER_LEFT', (data) => {
-        this.players = this.players.filter(p => p.id !== data.playerId);
-        renderPlayerList(this.players);
-        if (this._playerLeftCallback) this._playerLeftCallback(data);
-      });
-
-      this.client.on('disconnect', () => {
-        updateConnectionStatus('disconnected');
-      });
-
-      this.client.on('stateChange', (data) => {
-        const statusMap = {
-          disconnected: 'disconnected',
-          connecting: 'connecting',
-          connected: 'connected',
-          reconnecting: 'reconnecting',
-        };
-        updateConnectionStatus(statusMap[data.to] || 'disconnected');
-      });
-
-      // Connect to matchmaking server
-      this.client.connectMatchmaking();
-    }
-
-    /** Browse available sessions */
-    browseSessions() {
-      if (this.client) {
-        this.client.browseSessions();
-      } else {
-        // Offline mode — show empty list
-        renderSessionList([]);
-      }
-    }
-
-    /**
-     * Start hosting a multiplayer session.
-     * Validates form inputs, sets character/world selection, creates the session on the server.
-     * @param {Object} [options] — Optional configuration
-     * @param {Function} [options.onBlockBreakValidated] — Called when remote player breaks block (host marks chunk dirty)
-     * @param {Function} [options.onBlockPlaceValidated] — Called when remote player places block (host marks chunk dirty)
-     */
-    async startHosting(options = {}) {
-      const nameInput = document.getElementById('host-session-name');
-      const worldSelect = document.getElementById('host-world-select');
-      const characterSelect = document.getElementById('host-character-select');
-      const modeSelect = document.getElementById('host-mode-select');
-      const maxPlayersSlider = document.getElementById('host-max-players');
-
-      hideHostError();
-
-      // Validate session name
-      const name = nameInput ? nameInput.value.trim() : '';
-      if (!name) {
-        showHostError('Please enter a session name.');
-        return;
-      }
-      if (name.length > 32) {
-        showHostError('Session name must be 32 characters or less.');
-        return;
-      }
-
-      // Validate character selection (required for hosting)
-      const characterId = characterSelect ? characterSelect.value : '';
-      if (!characterId) {
-        showHostError('Please select or create a character to play as.');
-        return;
-      }
-      const selectedCharacter = characterManager ? characterManager.getCharacter(characterId) : null;
-      if (!selectedCharacter) {
-        showHostError('Selected character not found.');
-        return;
-      }
-
-      // Validate world selection
-      const worldId = worldSelect ? worldSelect.value : '';
-      if (!worldId) {
-        showHostError('Please select or create a world to host.');
-        return;
-      }
-      const selectedWorld = worldManager ? worldManager.getWorld(worldId) : null;
-      if (!selectedWorld) {
-        showHostError('Selected world not found.');
-        return;
-      }
-
-      // Wire up character and world selection so startGame() finds them.
-      // This is critical: startGame() checks characterManager.getSelectedCharacter()
-      // and worldManager.getSelectedWorld(), which rely on selectedId.
-      await characterManager.selectCharacter(characterId);
-      await worldManager.selectWorld(worldId);
-      _log(`[SessionManager] Selected character: ${selectedCharacter.name}, world: ${selectedWorld.name}`);
-
-      const mode = modeSelect ? modeSelect.value : 'survival';
-      const maxPlayers = parseInt(maxPlayersSlider ? maxPlayersSlider.value : '4', 10);
-
-      updateConnectionStatus('connecting');
-
-      if (this.client) {
-        try {
-          await this.client.hostSession({
-            name,
-            seed: selectedWorld.seed,
-            mode,
-            maxPlayers,
-          });
-          _log(`[SessionManager] Hosting session: ${name}`);
-        } catch (err) {
-          updateConnectionStatus('disconnected');
-          showHostError(`Failed to host: ${err.message}`);
-          return;
-        }
-      } else {
-        // Offline simulation
-        this.hostingSessionId = `session_${Date.now()}`;
-        updateConnectionStatus('connected');
-        _log(`[SessionManager] Simulated hosting: ${name} (offline)`);
-      }
-
-      // Start the game loop after session is created
-      _log(`[SessionManager] Starting game in ${mode} mode (hosting)`);
-      this._gameMode = mode; // Store for auto-rejoin
-      startGame(mode);
-
-      // ─── Initialize HostManager for server-authoritative validation ───
-      // HostManager validates all remote player actions (movement, blocks, inventory).
-      // It is wired in startGame() after the chunk manager is ready.
-      if (typeof HostManager !== 'undefined' && this.client) {
-        this._hostManager = new HostManager({ client: this.client });
-        this._hostManager.onPlayerJoined = (data) => {
-          _log(`[HostManager] Player joined: ${data.playerId} (${data.character?.name})`);
-        };
-        this._hostManager.onPlayerLeft = (data) => {
-          _log(`[HostManager] Player left: ${data.playerId}`);
-        };
-        _log('[SessionManager] HostManager initialized for server-authoritative validation');
-      }
-
-      // Wire up block validation callbacks for host persistence to IndexedDB.
-      // These fire when remote players break/place blocks — the host validates via relay,
-      // then marks chunks dirty so they get flushed to ChunkStore on next interval.
-      if (this.client) {
-        const { onBlockBreakValidated, onBlockPlaceValidated } = options;
-
-        if (onBlockBreakValidated) {
-          this.client.onGame('BLOCK_BREAK', (data) => {
-            try {
-              onBlockBreakValidated(data);
-            } catch (err) {
-              console.error('[SessionManager] Error in BLOCK_BREAK handler:', err.message);
-            }
-          });
-        }
-
-        if (onBlockPlaceValidated) {
-          this.client.onGame('BLOCK_PLACE', (data) => {
-            try {
-              onBlockPlaceValidated(data);
-            } catch (err) {
-              console.error('[SessionManager] Error in BLOCK_PLACE handler:', err.message);
-            }
-          });
-        }
-
-        _log('[SessionManager] Host block validation callbacks wired');
-      }
-    }
-
-    /**
-     * Join an existing session by its ID.
-     * @param {string} sessionId
-     */
-    async joinSession(sessionId) {
-      if (!sessionId) return;
-
-      updateConnectionStatus('connecting');
-
-      if (this.client) {
-        try {
-          await this.client.joinSession(sessionId);
-          _log(`[SessionManager] Joined session: ${sessionId}`);
-        } catch (err) {
-          updateConnectionStatus('disconnected');
-          showHostError(`Failed to join: ${err.message}`);
-        }
-      } else {
-        // Offline simulation
-        this.currentSessionId = sessionId;
-        updateConnectionStatus('connected');
-        _log(`[SessionManager] Simulated joining: ${sessionId} (offline)`);
-      }
-    }
-
-    /** Leave the current session */
-    leaveSession() {
-      if (this.client) {
-        this.client.leaveSession();
-      }
-      this.currentSessionId = null;
-      this.hostingSessionId = null;
-      this.players = [];
-      updateConnectionStatus('disconnected');
-      hidePlayerList();
-    }
-
-    /**
-     * Register host-side block validation callbacks after game session starts.
-     * Called from startGame() when chunkManager and dirtyFlush are available.
-     * @param {Function} onBlockBreakValidated — (data: {x, y, z, chunkX, chunkZ}) => void
-     * @param {Function} onBlockPlaceValidated — (data: {x, y, z, blockType, chunkX, chunkZ}) => void
-     */
-    registerHostCallbacks(onBlockBreakValidated, onBlockPlaceValidated) {
-      if (!this.client || !this.hostingSessionId) return;
-
-      if (onBlockBreakValidated) {
-        this.client.onGame('BLOCK_BREAK', (data) => {
-          try {
-            onBlockBreakValidated(data);
-          } catch (err) {
-            console.error('[SessionManager] Error in BLOCK_BREAK handler:', err.message);
-          }
-        });
-      }
-
-      if (onBlockPlaceValidated) {
-        this.client.onGame('BLOCK_PLACE', (data) => {
-          try {
-            onBlockPlaceValidated(data);
-          } catch (err) {
-            console.error('[SessionManager] Error in BLOCK_PLACE handler:', err.message);
-          }
-        });
-      }
-
-      _log('[SessionManager] Host callbacks registered for IndexedDB persistence');
-    }
-
-    /**
-     * Register client-side block delta callbacks after game session starts.
-     * Called from startGame() when joining a session (not hosting).
-     * Applies remote deltas visually without persisting to IndexedDB — only the host persists.
-     * @param {Function} onBlockBreak — (data: {x, y, z, chunkX, chunkZ}) => void
-     * @param {Function} onBlockPlace — (data: {x, y, z, blockType, chunkX, chunkZ}) => void
-     */
-    registerClientCallbacks(onBlockBreak, onBlockPlace) {
-      if (!this.client || !this.currentSessionId || this.hostingSessionId) return;
-
-      if (onBlockBreak) {
-        this.client.onGame('BLOCK_BREAK', (data) => {
-          try {
-            onBlockBreak(data);
-          } catch (err) {
-            console.error('[SessionManager] Error in client BLOCK_BREAK handler:', err.message);
-          }
-        });
-      }
-
-      if (onBlockPlace) {
-        this.client.onGame('BLOCK_PLACE', (data) => {
-          try {
-            onBlockPlace(data);
-          } catch (err) {
-            console.error('[SessionManager] Error in client BLOCK_PLACE handler:', err.message);
-          }
-        });
-      }
-
-      _log('[SessionManager] Client delta callbacks registered (visual only, no persistence)');
-    }
-
-    /** Dispose and clean up */
-    dispose() {
-      if (this.client) {
-        this.client.dispose();
-        this.client = null;
-      }
-    }
-  }
-
-  // PR 15 — bodies in `LobbyScreen`. Twelve call sites, all inside `SessionManager`.
-  function showHostError(message) { ui.lobby.showHostError(message); }
-  function hideHostError() { ui.lobby.hideHostError(); }
-
-  /**
-   * Determine the correct WebSocket relay URL based on page origin.
-   * The relay server runs on cuubz-relay.thehomelabguy.com with path-based routing:
-   *   /matchmaking  → session discovery
-   *   /session/:id  → game session
-   * Nginx handles TLS termination — the game never specifies a port.
-   *
-   * @param {string} [pageOrigin] — Override for testing (e.g., 'https://webgame-cuubz.thehomelabguy.com')
-   * @returns {string} WebSocket URL for the matchmaking relay server
-   */
-  function getRelayUrl(pageOrigin) {
-    // Allow override via URL query parameter: ?relayUrl=wss://custom-host
-    if (typeof location !== 'undefined' && location.search) {
-      const params = new URLSearchParams(location.search);
-      const relayOverride = params.get('relayUrl');
-      if (relayOverride) return relayOverride;
-    }
-
-    // Fixed relay subdomain — works regardless of how the game is accessed.
-    // Nginx handles TLS (wss://) and forwards to the relay on port 8765.
-    const protocol = (typeof location !== 'undefined' && location.protocol === 'https:') ? 'wss' : 'ws';
-    return `${protocol}://cuubz-relay.thehomelabguy.com`;
-  }
-
-  /** Initialize session UI — create SessionManager and set defaults */
-  function initSessionUI() {
-    // Create session manager instance
-    sessionManager = new SessionManager();
-
-    // Determine relay URL based on deployment context
-    const relayUrl = getRelayUrl();
-    _log(`[SessionManager] Relay URL: ${relayUrl}`);
-
-    // Initialize WebSocket client with auto-detected relay URL
-    sessionManager.init(relayUrl);
-
-    // Default to disconnected state (will update when connection established)
-    updateConnectionStatus('disconnected');
-
-    // Hide in-game overlays by default
-    hidePlayerList();
-
-    _log('[SessionManager] Initialized with WebSocket client');
-  }
-
+  // PR 16 — the session layer stood here, ~650 lines (refactor.md §8.3):
+  // `updateConnectionStatus`, the `renderSessionList` / `showHostError` / `hideHostError`
+  // delegates, `renderPlayerList` / `hidePlayerList`, `REJOIN_STORAGE_KEY`,
+  // `getLastSession`, `clearLastSession`, `updateRejoinPanel`, `rejoinSession`,
+  // `class SessionManager`, `getRelayUrl` and `initSessionUI`.
+  //
+  //   src/multiplayer/SessionManager.js   the class, and `createSessionManager(deps)`
+  //   src/multiplayer/SessionRejoin.js    the rejoin panel and the manual rejoin
+  //   src/multiplayer/RelayUrl.js         `getRelayUrl()`
+  //   src/util/StorageHelper.js           the ONE writer of `cuubz_last_session` — D-43
+  //   src/ui/hud/ConnectionHUD.js         `updateConnectionStatus`
+  //   src/ui/hud/PlayerListOverlay.js     `renderPlayerList` / `hidePlayerList`
+  //
+  // No delegate survives. Every caller of the six that could have needed one was inside
+  // the class itself, and the class went with them — the same check PR 15 made rather
+  // than leaving six dead functions behind for D-33 to count.
   // ============================================================
   // Game Start
   // ============================================================
@@ -3750,7 +3092,7 @@ import { escapeHtml } from './util/HTMLUtils.js';
       }
 
       // ─── Auto-Rejoin: Check if we were in a session before page refresh ───
-      const lastSession = getLastSession();
+      const lastSession = readLastSession();
       if (lastSession && lastSession.sessionId) {
         _log(`[Cuubz] Found saved session: ${lastSession.sessionId} (${lastSession.isHost ? 'host' : 'joiner'})`);
 
@@ -3795,11 +3137,20 @@ import { escapeHtml } from './util/HTMLUtils.js';
                 await worldManager.selectWorld(worldManager.getAllWorlds()[0].id);
               }
 
-              // Initialize session manager and rejoin
-              sessionManager = new SessionManager();
-              sessionManager.init(relayUrl);
+              // Initialize session manager and rejoin. `createSessionManager` also
+              // resolves the relay URL, which is the same value `relayUrl` above holds —
+              // that one is kept because the `/sessions` probe wanted an HTTP form of it.
+              sessionManager = createSessionManager(uiDeps);
 
-              updateConnectionStatus('connecting');
+              // PR 16 — carry the stored session's identity onto the manager before
+              // anything can write a new record. Without this a page closed during the
+              // re-host handshake would rewrite `mode` as the `'survival'` default and
+              // reproduce D-43 by a different route.
+              sessionManager._gameMode = lastSession.mode || 'survival';
+              sessionManager._sessionName = lastSession.name || null;
+              sessionManager._sessionSeed = lastSession.seed !== undefined ? lastSession.seed : null;
+
+              sessionManager.updateConnectionStatus('connecting');
               showScreen('loadingScreen');
               document.getElementById('loading-status').textContent =
                 lastSession.isHost ? 'Re-hosting session...' : 'Re-joining session...';
@@ -3854,32 +3205,19 @@ import { escapeHtml } from './util/HTMLUtils.js';
   }
 
   // ─── Save session state before page unload ───
-  // This ensures that if the user refreshes or closes the tab,
-  // we can auto-rejoin on the next load.
+  //
+  // **THE ONLY `beforeunload` HANDLER FOR THE REJOIN RECORD, AS OF PR 16.** There were
+  // two — this one and a second inside `initMenuNavigation` — registered on the same
+  // event, writing the same key with different payloads. Both fired; the second-registered
+  // one ran second and its `setItem` won, and it hard-coded `mode: 'survival'` for a
+  // joiner, so refreshing while joined to a creative session rejoined into survival.
+  // `BUGS.md` **D-43**. `SessionManager.getSessionRecord()` decides the shape now and
+  // `StorageHelper.writeLastSession()` is the only thing that writes it — which is
+  // §8.3's `StorageHelper` requirement doing the job it was specified for.
+  //
+  // PR 19 moves this to `src/index.js` with the rest of the bootstrap (§8.6).
   window.addEventListener('beforeunload', () => {
-    try {
-      if (sessionManager && sessionManager.hostingSessionId) {
-        const selected = characterManager ? characterManager.getSelectedCharacter() : null;
-        const world = worldManager ? worldManager.getSelectedWorld() : null;
-        localStorage.setItem(REJOIN_STORAGE_KEY, JSON.stringify({
-          sessionId: sessionManager.hostingSessionId,
-          name: selected ? selected.name : 'My Session',
-          mode: sessionManager._gameMode || 'survival',
-          isHost: true,
-          seed: world ? world.seed : null,
-          timestamp: Date.now(),
-        }));
-      } else if (sessionManager && sessionManager.currentSessionId) {
-        const selected = characterManager ? characterManager.getSelectedCharacter() : null;
-        localStorage.setItem(REJOIN_STORAGE_KEY, JSON.stringify({
-          sessionId: sessionManager.currentSessionId,
-          name: selected ? selected.name : 'Joined Session',
-          mode: sessionManager._gameMode || 'survival',
-          isHost: false,
-          timestamp: Date.now(),
-        }));
-      }
-    } catch (e) { /* ignore localStorage errors */ }
+    if (sessionManager) sessionManager.saveSessionRecord();
   });
 
   // Start when DOM is ready

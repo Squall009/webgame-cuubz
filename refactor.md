@@ -394,7 +394,10 @@ cuubz/
 │   │   │   └── TimeOfDaySystem.js   ← day/night cycle extracted from skybox.js
 │   │   └── mobs/                    ← js/mobs/* (18 files, structure unchanged)
 │   ├── multiplayer/
-│   │   ├── SessionManager.js  ← main.js:1723 (inline class) + rejoin panel + conn status
+│   │   ├── SessionManager.js  ← main.js (inline class) + the rejoin RECORD   (PR 16)
+│   │   ├── SessionHosting.js  ← startHosting(): the only DOM-reading half     (PR 16)
+│   │   ├── SessionRejoin.js   ← rejoin panel + manual rejoin                  (PR 16)
+│   │   ├── RelayUrl.js        ← getRelayUrl()  — D-45/D-46                    (PR 16)
 │   │   ├── Client.js          ← js/multiplayer/client.js
 │   │   ├── Host.js            ← js/multiplayer/host.js (import MESSAGE_TYPES explicitly!)
 │   │   ├── PlayerSync.js      ← js/multiplayer/playerSync.js
@@ -404,7 +407,10 @@ cuubz/
 │   ├── ui/
 │   │   ├── UIManager.js       # screen routing + modal management
 │   │   ├── screens/{MainMenu,Character,World,Mode,Lobby,Settings,Loading}Screen.js
-│   │   ├── hud/{HUD,Hotbar,SurvivalMeters,Crosshair,QuestTracker,FlyModeIndicator,ConnectionHUD,DebugStats}.js
+│   │   ├── hud/{HUD,Hotbar,SurvivalMeters,Crosshair,QuestTracker,FlyModeIndicator,DebugStats}.js
+│   │   │   ├── ConnectionHUD.js      ← main.js updateConnectionStatus         (PR 16)
+│   │   │   └── PlayerListOverlay.js  ← #player-list-overlay — NOT PlayerListHUD.js,
+│   │   │                               which exists and is different (decision 28, PR 16)
 │   │   ├── overlays/{InventoryScreen,CraftingScreen,PauseMenu,EquipmentPanel}.js
 │   │   ├── components/{Button,Modal,Slider}.js
 │   │   └── css/               # split from css/style.css (see §10.2)
@@ -2607,11 +2613,186 @@ diff as the screen layer would be two extractions with no gate between them.
 
 ---
 
-### 8.3 PR 16 — Extract `SessionManager`
+### 8.3 PR 16 — Extract `SessionManager` ✅ DONE
 `class SessionManager` (L1723), `REJOIN_STORAGE_KEY` (L1593), the rejoin panel, `updateConnectionStatus`, and the 5 `cuubz_last_session` write sites → `src/multiplayer/SessionManager.js`. Route localStorage through `src/util/StorageHelper.js`; **the key string does not change** ([§1.5](#15-player-data-must-survive-byte-for-byte)).
 - **Accept:** host a session, close the tab, reopen → rejoin prompt appears and works.
 - **There are six write sites, not five, and two of them are `beforeunload` handlers on the same key** — one at `main.js`'s IIFE top level and one inside `initMenuNavigation`, so both fire and the second-registered one wins. They disagree about `mode`. **`BUGS.md` D-43**, owned by this PR: the fix is one writer with one shape, which is what routing through `StorageHelper` is for.
 - `PR15_HANDOFF.md` §4 has the full inventory — every symbol, its line, where it goes, and the four things that will bite.
+
+**Outcome (2026-07-30):** ✅ DONE. **Six new files, ~660 lines out of `main.js`, D-43 fixed
+and given a regression test that runs in CI**, and four further defects found — three of
+them fixed here, one logged with an owner. The assertion count did not move on either
+e2e host, which is the parity evidence; the *unit* suite grew by one file and 64
+assertions, which is the coverage the session layer has never had.
+
+| Gate | Result |
+|---|---|
+| `npm test` | **53/53 + 4 quarantined, exit 0** (52 → 53: `test_sessionRecord.js`) |
+| `npm run lint` | **0 errors, 172 warnings, exit 0** (was 176 — see below) |
+| `npm run build` | exit 0 |
+| `npm run test:e2e` (built `dist/`) | **183 / 0 — unchanged** |
+| `npm run test:e2e:vite` (dev server) | **183 / 0 — identical** |
+
+| New file | Lines | What |
+|---|---|---|
+| `src/multiplayer/SessionManager.js` | 374 | the class: connection, browse, join, leave, block-delta callbacks, the connection status, **and `getSessionRecord()`** |
+| `src/multiplayer/SessionHosting.js` | 119 | `startHosting()` — the only part of the layer that reads form controls |
+| `src/multiplayer/SessionRejoin.js` | 135 | the rejoin panel and the manual rejoin |
+| `src/multiplayer/RelayUrl.js` | 38 | `getRelayUrl()` |
+| `src/util/StorageHelper.js` | 125 | `REJOIN_STORAGE_KEY`, the 24 h expiry, and **the one writer** |
+| `src/ui/hud/PlayerListOverlay.js` | 93 | `renderPlayerList` / `hidePlayerList` |
+| `src/ui/hud/ConnectionHUD.js` | 54 | `updateConnectionStatus` |
+
+`main.js`: **3,892 → 3,230 lines.** No file over 400 — `SessionManager.js` is the largest at
+374, and getting it there is why the layer is four files rather than one (**decision 30**).
+
+#### D-43 — one writer, one shape, and the two handlers that disagreed
+
+`src/main.js` had **six** `setItem` calls on `cuubz_last_session`, writing four different
+subsets of fields. Two of them were `beforeunload` handlers — one registered at IIFE top
+level when the module evaluated, one inside `initMenuNavigation()` when `init()` ran. Both
+fired. The second-registered ran second and its write won, and it took `mode` from
+`#host-mode-select` for a host and **hard-coded `'survival'` for a joiner**. So refreshing
+while joined to a creative session rejoined into survival.
+
+The fix is not deleting a handler, and §8.3's `StorageHelper` requirement is why:
+
+- `StorageHelper.writeLastSession()` is now the **only** function in `src/` that writes the
+  key, and `normaliseSessionRecord()` gives every record all eight fields with explicit
+  nulls — so a reader tests a field rather than testing which write site produced it;
+- `SessionManager.getSessionRecord()` is the **only** function that decides what goes in
+  one, and it reads `this._gameMode` — set from the form at *host* time and from the
+  browsed session at *join* time, so it is the mode the session is actually running in;
+- the `initMenuNavigation` handler is gone. One handler survives, at the bottom of
+  `main.js`, and its whole body is `if (sessionManager) sessionManager.saveSessionRecord();`.
+
+**`JOIN_ACCEPTED` was the other half, and it is why deleting a handler would not have been
+enough.** That message carries `sessionId`, `sessionPort` and a human-readable `message`
+and nothing else (`server/matchmaking.js:174`), so the surviving handler's
+`mode: data.mode || 'survival'` could only ever produce `'survival'` too. The mode now
+arrives through `joinSession(sessionId, {mode, name, seed})`, which `LobbyScreen` calls with
+the values it already had in hand to render the browse list.
+
+**Two behaviour changes ride on the fix and are stated rather than left to be found:**
+
+1. A joiner's record now carries the **session's real name** instead of the literal
+   `'Joined Session'`, so the rejoin panel reads *"Build Server (joined, creative)"*.
+2. A joiner's record now carries the **host's seed**, which no write site produced before.
+   `SessionRejoin`'s `!session.isHost && session.seed` branch — which builds the temporary
+   world a joiner renders against — was therefore **unreachable for a joiner**, and a
+   rejoin fell through to selecting the player's own first world, with a different seed and
+   different terrain. It works now. This is a fix, not a regression, but it is a change to
+   what a rejoin does and it is not covered by any assertion in the browser.
+
+#### The regression test, and the three ways it was proved non-vacuous
+
+`test/test_sessionRecord.js` — 51 assertions, in `npm test`, so it runs on **every push**
+rather than only when someone runs the seven-minute browser harness. It requires the real
+`SessionManager` and the real `StorageHelper` (both `require`-able now, which is one of the
+things the extraction bought) and installs a fake `localStorage` on `globalThis`.
+
+Its last group is structural, in the idiom `test_globalCollisions.js` uses for the `window`
+allowlist, because **no lint rule can see this class of defect** — a `localStorage.setItem`
+is valid everywhere:
+
+- exactly one file in `src/` spells the literal `'cuubz_last_session'`;
+- exactly one file in `src/` calls `setItem` on the rejoin key — D-43 was six;
+- exactly two files register a `beforeunload` handler and they do different jobs
+  (`ChunkManager`'s D-19 chunk flush, and this one), counted by occurrence as well as by
+  file, because D-43's two were in the same file.
+
+Proved by breaking each thing it checks, not by reading it:
+
+| What was broken | What the run says |
+|---|---|
+| `joinSession` ignores the session info it is handed (the pre-PR-16 call) | 4 failures, incl. *expected "creative", got "survival"* |
+| a second `setItem` on the key added to `SessionRejoin.js` | 2 failures naming both files |
+| a second `beforeunload` handler added to `main.js` | *expected 2, got 3* |
+
+#### D-44 — `startHosting()` wired the block-validation callbacks twice
+
+It took an `options` argument and registered `BLOCK_BREAK` / `BLOCK_PLACE` from it, and
+`registerHostCallbacks()` registers the **same two events** from `startGame()`.
+`startHosting` is called from exactly one place — `LobbyScreen`'s button — **with no
+arguments**, so the `options` half had never executed. It is deleted rather than carried
+across, and that is a decision rather than tidying: had anything ever passed `options`,
+both registrations would have fired and every remote block break would have been handled
+twice, once persisting and once not. A dead double-registration is worse than no code.
+The two surviving registrars now share one `_wireBlockCallbacks` helper, so there is one
+implementation of "wrap a handler in a try/catch and attach it" instead of three.
+
+#### D-45 — `test_relayUrl.js` had been testing a copy of the code, and the copy had drifted
+
+Found while looking for anything that already covered the session layer. The file opened
+with *"Pure implementation of getRelayUrl logic (extracted from main.js)"*, defined its own
+`getRelayUrl(pageOrigin, queryParam)`, and asserted 24 times that
+`https://webgame-cuubz.thehomelabguy.com` resolves to
+`wss://relay.webgame-cuubz.thehomelabguy.com` and that everything else falls back to
+`ws://localhost:8765`. **`main.js` does neither.** The shipped function returns a fixed
+host chosen by page protocol, and its only override is a `?relayUrl=` query parameter that
+the copy modelled as a second argument the real function never had. Twenty-four green
+assertions, every CI run, against logic no browser has executed.
+
+It is rewritten against `src/multiplayer/RelayUrl.js` — 13 assertions, all of them what the
+real code makes true — and proved non-vacuous the same way: removing the `?relayUrl=`
+override turns 3 red, inverting the protocol rule turns 8 red. **That override is not a
+convenience; it is the way a harness points the game at a relay it controls**, which is
+what `PR15_HANDOFF.md` §4.3 identified as the cheapest route into multiplayer coverage, so
+it now has assertions holding it in place.
+
+**D-46** went with it: `getRelayUrl`'s `pageOrigin` parameter was in the signature,
+documented as a test override, and read by no line of the function. Every call site passed
+nothing. Deleted.
+
+#### The session layer's coverage — what was chosen, and what is still not covered
+
+`PR15_HANDOFF.md` §4.3 offered two options: **(a)** stand the relay up in the browser
+harness with two contexts, or **(b)** say plainly that the layer is unverified. **Neither
+was taken as written — decision 31.** What landed is that the layer's *logic* is covered in
+CI by 51 assertions against the real classes, and its *browser wiring* is still unverified
+and now has an owner.
+
+The argument for splitting it that way is what the two options actually cost. Option (b)
+leaves a live player-visible defect with a fix that nothing checks. Option (a) is a
+child-process relay, a second browser context and a second full `startGame()` — several
+minutes added to a run that already takes seven, in a harness that **is not part of CI**
+(no Edge on `ubuntu-latest`), to cover a code path whose defect was in a pure function of
+three fields. A unit test that runs on every push catches a D-43 regression sooner and more
+reliably than a browser harness someone remembers to run at a phase gate.
+
+**Still not covered, stated rather than implied:** nothing in the suite clicks `#btn-host`
+or `#btn-join`; the relay handshake, `HOST_CREATED`/`JOIN_ACCEPTED` arriving over a real
+socket, `startGame()` on a joining client, and the two-context host↔guest persistence of
+`DEPLOY.md` §7 steps 12–13 are all unverified. That has been true since PR 6b and it is
+what let D-43 sit under five green runs and four PRs — so it is logged as **D-48** with
+**PR 31** as its owner rather than left as a `note()` nobody owns. PR 31 already owns relay
+test infrastructure (D-20's fixed ports) and moves the suite to Vitest, which is where a
+spawned relay belongs. `saveLoad.js`'s `note()` is rewritten to say what changed.
+
+#### Two things deliberately left alone
+
+**The ~45 `sessionManager.*` reads inside `startGame()` are syntactically untouched**, and
+`let sessionManager` is still a `main.js` binding for exactly that reason. A dozen of them
+are `client.onGame(...)` registrations whose order is load-sensitive; disturbing them here
+would have turned PR 17 from a cut into a rewrite. `PR15_HANDOFF.md` §4.4 groups them.
+
+**`uiDeps` gained one getter (`ui`) and lost nothing.** Decision 27 stands: PR 17 and PR 19
+delete the bridge when those `let`s become fields on `Game`.
+
+#### Warnings went 176 → 172, and no assertion was weakened to get there
+
+Three came from `main.js`: the `MultiplayerClient` and `HostManager` imports and the
+`sessionUI` alias were orphaned by the move and **deleted rather than left**, which is the
+rule PR 15 set. The fourth is the rewritten `test_relayUrl.js`. `StorageHelper.js` adds
+three `catch (e)` warnings of its own, so the net is −4. **D-33's count is updated.**
+
+**Modified:** `src/main.js` (−662 lines, one `beforeunload`, three imports removed, five
+call sites repointed), `src/ui/UIManager.js` (constructs the two HUD objects),
+`src/ui/screens/LobbyScreen.js` (`joinSession` is told what it is joining — D-43), six new
+files, `test/test_sessionRecord.js` (new), `test/test_relayUrl.js` (rewritten — D-45),
+`test/e2e/saveLoad.js` (the `note()` for §7 steps 12–13), `refactor.md` (this section, §4.1,
+§13, PR 31's scope), `BUGS.md` (D-43 closed; D-44, D-45, D-46 added and closed; D-47, D-48
+added and owned; decisions 28–31).
 
 ### 8.4 PR 17 — `startGame()` → `src/core/Game.js`
 `core/Game.js` is a **rewrite**; `js/game.js` (280 lines, stub) is absorbed or deleted, along with its `new CuubzGame()` call site (`main.js:2569`).
@@ -2859,6 +3040,11 @@ export default defineConfig({ test: { environment: 'jsdom', include: ['test/**/*
 Migrate incrementally: run the legacy `bash test/run_tests.sh` **and** `vitest` side by side in CI until the last file is converted. Do not big-bang this.
 - **Accept:** both runners green; `npm test` runs Vitest; `test/QUARANTINE.md` is empty or has a documented owner per entry.
 
+**PR 31 also owns the relay test infrastructure, which is three rows now:**
+- **D-20** — four relay tests `http.listen()` on fixed ports with no `'error'` handler. Ephemeral ports belong in the Vitest harness.
+- **D-28** — `test/helpers/esmRequire.js`, which this PR deletes.
+- **D-48** — **no automated test has ever driven a multiplayer path in a browser.** `test/e2e/saveLoad.js` is single-context and never clicks `#btn-host` or `#btn-join`, so `DEPLOY.md` §7 steps 12–13 have been `⚠️ UNVERIFIED` since PR 6b — and that gap is what let **D-43**, a player-visible rejoin defect, survive five green e2e runs and four PRs. **The source blockers are gone:** PR 12 put the live `GameState` on `window.__cuubz`, and `getRelayUrl` honours a `?relayUrl=` query parameter that `test_relayUrl.js` has asserted since PR 16, so the game can be pointed at `server/index.js` spawned on 8765 as a child process. What is left is two-context orchestration. PR 16 covered the session layer's *logic* in `npm test` instead (`test/test_sessionRecord.js`, `BUGS.md` decision 31); this is the browser half.
+
 ### PR 32 — Restructure tests + automate the data test
 ```
 test/
@@ -2868,6 +3054,8 @@ test/
 └── e2e/                     # future: Playwright
 ```
 Automate the [§1.5](#15-player-data-must-survive-byte-for-byte) save/load check as `integration/worldPersistence.test.js` using `fake-indexeddb`, seeded with a **pre-refactor v2** database dump.
+
+**PR 32 also owns `BUGS.md` D-47** — `test/test_sessionUI.js` is 730 lines that `require` nothing from `src/` and reimplement `SessionManager`, `updateConnectionStatus`, `renderSessionList`, `renderPlayerList`, host-form validation and tab switching inline beside a `MockElement` DOM. It is the same shape as **D-45**, and D-45 proved the failure mode is real for this file's sibling: that copy had drifted into asserting a relay URL scheme the game does not implement, and stayed green for it. PR 16 moved all six of these things into importable files, so the copies can only drift further. Rewriting it needs `document`, a `MultiplayerClient` and a `UIManager` stubbed, which is test infrastructure rather than an extraction — hence here and not in PR 16.
 
 ### PR 33 — Remove CommonJS shims and final cleanup
 Delete the remaining `typeof module !== 'undefined'` blocks (62 at the start) now that tests import ESM. Final gate: `npm run dev`, `npm run build`, `npm test`, `npm run lint`, `./sync.sh` all pass.
@@ -2923,7 +3111,13 @@ Confirmed non-blockers: workers use no THREE; no removed APIs are referenced.
 | `escapeHtml` | `src/util/HTMLUtils.js` |
 | `renderWorldSlots`, `createWorldSlotElement`, world modals | `src/ui/screens/WorldScreen.js` |
 | `initMenuNavigation` | `src/ui/UIManager.js` + per-screen |
-| `REJOIN_STORAGE_KEY`, `SessionManager`, rejoin panel, `updateConnectionStatus` | `src/multiplayer/SessionManager.js` |
+| `SessionManager`, the rejoin record ✅ PR 16 | `src/multiplayer/SessionManager.js` |
+| `startHosting` (the host form) ✅ PR 16 | `src/multiplayer/SessionHosting.js` |
+| rejoin panel, `rejoinSession` ✅ PR 16 | `src/multiplayer/SessionRejoin.js` |
+| `getRelayUrl` ✅ PR 16 | `src/multiplayer/RelayUrl.js` |
+| `REJOIN_STORAGE_KEY` + the six `cuubz_last_session` writes ✅ PR 16 | `src/util/StorageHelper.js` — **one writer** (D-43) |
+| `updateConnectionStatus` ✅ PR 16 | `src/ui/hud/ConnectionHUD.js` |
+| `renderPlayerList` / `hidePlayerList` ✅ PR 16 | `src/ui/hud/PlayerListOverlay.js` (decision 28) |
 | `init()` DOM/event/settings wiring | `src/index.js` + `src/ui/screens/*` |
 | `startGame()` steps 1–15 | `src/core/Game.js` |
 | `new CuubzGame()` + `js/game.js` | Absorbed; `core/Game.js` is a **rewrite** |
