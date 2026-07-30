@@ -547,7 +547,7 @@ async function main() {
     assert(usedBytes <= bufA1.length,
       `The header's run count fits inside the stored buffer (${runCount} runs → ${usedBytes} of ${bufA1.length} bytes)`);
 
-    // [D-15] ASSERTING A KNOWN DEFECT, same convention as H-1 and D-14 below.
+    // [D-15] ASSERTING A KNOWN DEFECT, same convention as the H-1 block below.
     //
     // chunkBinaryCodec.js:63 sizes the buffer as
     //     HEADER_SIZE + blockRuns.length * 4
@@ -633,6 +633,61 @@ async function main() {
       "(refactor.md §1.6), so page.evaluate cannot reach them. PR 12-13 hoist them onto " +
       'Game; after that, place → flush → reload → assert the voxel is a one-line addition here.'
     );
+
+    // ═══ §7 step 7 — quit to menu, re-enter, no reload ════════
+    //
+    // A stricter test than step 6, and the reason the checklist lists both: a
+    // reload throws the whole JS context away, so step 6 can pass while teardown
+    // leaks. This path keeps the context and exercises onExit — which is where
+    // D-14 lived: `game.playerSync.reset()` does not exist on PlayerSyncManager,
+    // so this used to throw partway through, skip showScreen('mainMenu'), and
+    // leave every screen hidden. Fixed in this PR, so the step is now runnable
+    // and asserted for real rather than reported UNVERIFIED.
+    console.log('\n[§7 step 7 — quit to menu, re-enter without reloading]');
+    drain(consoleErrors); drain(pageErrors);
+    await page.click('#btn-exit-menu');
+    await page.waitForSelector('#main-menu:not(.hidden)', { timeout: 30000 });
+    assert(true, 'Exit to Menu returns to the main menu (D-14 regression guard)');
+
+    const exitPageErrors = drain(pageErrors);
+    assertEquals(exitPageErrors.length, 0,
+      `Exit to Menu raises no uncaught exceptions${exitPageErrors.length ? ' — ' + exitPageErrors.map(e => e.text).join(' | ') : ''}`);
+    // onExit hides every in-game overlay before returning to the menu (main.js:4515-4535).
+    // A leftover visible overlay means teardown stopped early, which is exactly how D-14
+    // presented.
+    const strayOverlays = await page.evaluate(() => ['hud', 'pause-menu', 'debug-stats', 'crosshair']
+      .filter(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); }));
+    assertEquals(strayOverlays.length, 0,
+      `Exit to Menu hides every in-game overlay${strayOverlays.length ? ' — still visible: ' + strayOverlays.join(', ') : ''}`);
+
+    await enterWorld(page, worldA, 'survival');
+    await settleAndPause(page, 'world A after quit-to-menu');
+    const snapA2b = await readStorage(page, worldA);
+
+    assert(snapA2b.recBytes === snapA1.recBytes,
+      'Chunk "0,0" is byte-for-byte identical after quit-to-menu and re-entry — no reload involved ' +
+      `(${digest(snapA1.recBytes)} → ${digest(snapA2b.recBytes)})`);
+    assertEquals(snapA2b.rec.savedAt, snapA1.rec.savedAt,
+      'Chunk "0,0" savedAt is unchanged across the quit-to-menu round trip');
+    assertEquals(snapA2b.chunkCount, snapA1.chunkCount, 'The stored chunk count is unchanged across quit-to-menu');
+    assertEquals(snapA2b.manifest.generatedCount, snapA1.manifest.generatedCount,
+      'The manifest chunk list is unchanged across quit-to-menu');
+
+    // ── The pause menu's day/night checkbox ──
+    // main.js:4693 sets `checked = !game.skybox.timePaused`, so CHECKED means the
+    // cycle is RUNNING. The control used to be labelled "Pause Time of Day", which
+    // made ticking it un-pause time; PR 6b relabelled it rather than inverting the
+    // logic, so no existing player's default changed. This guards the label against
+    // drifting back out of step with the semantics. Asserting the actual
+    // skybox.timePaused value needs PR 12-13 — `game` is a closure local.
+    const dayNight = await page.evaluate(() => {
+      const box = document.getElementById('pause-pause-time');
+      return box ? { checked: box.checked, label: box.closest('label').textContent.trim() } : null;
+    });
+    assert(dayNight !== null, '#pause-pause-time exists in the pause menu');
+    assertEquals(dayNight.label, 'Day/Night Cycle',
+      'The day/night checkbox is labelled for what checked MEANS (checked = cycle running, main.js:4693)');
+    assertEquals(dayNight.checked, true, 'It is checked on entry, i.e. the day/night cycle runs by default');
 
     // ═══ §7 step 11 — settings persist ════════════════════════
     console.log('\n[§7 step 11 — a graphics setting persists across a reload]');
@@ -736,46 +791,16 @@ async function main() {
     assertEquals(snapA3.rec.worldName, worldB,
       'H-1 step 9 — the record loaded while playing world A still identifies itself as belonging to world B');
 
-    // ═══ §7 step 7 — quit to menu, re-enter ═══════════════════
-    //
-    // [D-14] BLOCKED. `js/main.js:4562` calls `game.playerSync.reset()`, which does
-    // not exist on PlayerSyncManager — `reset()` belongs to PingTracker
-    // (playerSync.js:103, class boundaries at :51/:125/:366). `game.playerSync` is
-    // set whenever `sessionManager.client` exists, which includes solo play
-    // (main.js:2612), so EVERY "Exit to Menu" throws a TypeError partway through
-    // onExit. Same shape as the two assertions above: this describes the defect.
-    console.log('\n[§7 step 7 — quit to menu — ASSERTING A KNOWN DEFECT (D-14)]');
+    // Exit cleanly one last time, so the final screenshot is the menu the player
+    // is actually returned to rather than a mid-session frame.
+    console.log('\n[Teardown — exit to menu]');
     drain(consoleErrors); drain(pageErrors);
     await page.click('#btn-exit-menu');
-    await sleep(4000);
-    await shot(page, '06-exit-to-menu-blank');
-
-    const exitErrors = drain(pageErrors);
-    assertEquals(exitErrors.length, 1,
-      `D-14 — "Exit to Menu" raises exactly one uncaught exception${exitErrors.length ? ' — ' + exitErrors.map(e => e.text).join(' | ') : ''}`);
-    assert(exitErrors.some(e => /playerSync\.reset is not a function/.test(e.text)),
-      'D-14 — the exception is `game.playerSync.reset is not a function` (main.js:4562)');
-    const screenState = await page.evaluate(() => {
-      const ids = ['main-menu', 'character-screen', 'world-screen', 'mode-screen', 'loading-screen', 'pause-menu', 'hud'];
-      return ids.filter(id => {
-        const el = document.getElementById(id);
-        return el && !el.classList.contains('hidden');
-      });
-    });
-    assertEquals(screenState.length, 0,
-      `D-14 — the throw skips showScreen('mainMenu') (main.js:4603), leaving every screen hidden: a blank page ` +
-      `with no way back except F5. Visible screens: [${screenState.join(', ')}]`);
-
-    note(
-      '§7 step 7 — "quit to menu, re-enter the same world without reloading". One of the ' +
-      'three load-bearing steps ("if steps 6, 7 or 13 fail, stop the refactor and bisect"), ' +
-      'and it cannot be executed at all: D-14 tears the session down and then throws before ' +
-      'returning to the menu, so there is no menu to re-enter from',
-      'Fix D-14 — delete the `game.playerSync.reset()` call at js/main.js:4562. ' +
-      '`clearAll()` on the line above already disposes every remote-player mesh and clears ' +
-      'the map (playerSync.js:523-531), so the call is redundant as well as wrong. Then ' +
-      'replace this block with the step-6 round trip driven through Exit to Menu instead of reload.'
-    );
+    await page.waitForSelector('#main-menu:not(.hidden)', { timeout: 30000 });
+    await shot(page, '06-exit-to-menu');
+    const teardownErrors = drain(pageErrors);
+    assertEquals(teardownErrors.length, 0,
+      `The second Exit to Menu of the run is also clean${teardownErrors.length ? ' — ' + teardownErrors.map(e => e.text).join(' | ') : ''}`);
 
     note(
       '§7 steps 12-13 — multiplayer host/guest persistence',
@@ -831,10 +856,11 @@ function finish() {
     process.exit(1);
   }
   console.log('\n🎉 DEPLOY.md §7 save/load harness passing!');
-  console.log('   Note: three blocks above assert KNOWN DEFECTS (H-1, D-14, D-15) rather');
-  console.log('   than requirements — they pass because the bug is present. Fixing any of');
-  console.log('   them turns this harness red on purpose, which is the signal to replace');
-  console.log('   that block with the assertion the fix makes true.');
+  console.log('   Note: two blocks above assert KNOWN DEFECTS (H-1, D-15) rather than');
+  console.log('   requirements — they pass because the bug is present. Fixing either turns');
+  console.log('   this harness red on purpose, which is the signal to replace that block');
+  console.log('   with the assertion the fix makes true. D-14 was such a block and is now');
+  console.log('   a real §7 step-7 round trip, which is the pattern.');
   process.exit(0);
 }
 

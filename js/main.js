@@ -4557,9 +4557,15 @@
       }
 
       // ── Clean up player sync ──
+      // clearAll() disposes every remote-player mesh and clears the map
+      // (playerSync.js:523-531) — that is the whole teardown. There was a
+      // game.playerSync.reset() call here; PlayerSyncManager has no reset()
+      // (it belongs to PingTracker, playerSync.js:103), so this threw on EVERY
+      // exit — including solo, since playerSync is created whenever
+      // sessionManager.client exists — skipping the six cleanup steps below and
+      // showScreen('mainMenu'), which left the page blank. DEPLOY.md D-14.
       if (game.playerSync) {
         game.playerSync.clearAll();
-        game.playerSync.reset();
         game.playerSync = null;
       }
 

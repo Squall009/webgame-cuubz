@@ -474,8 +474,12 @@
       </label>
 
       <label class="checkbox-label">
+        <!-- Label, not logic: main.js:4693 sets checked = !skybox.timePaused, so
+             CHECKED means the cycle is RUNNING. The old label read "Pause Time of
+             Day", which made ticking it un-pause time. Relabelled rather than
+             inverted so no existing player's default behaviour changes. -->
         <input type="checkbox" id="pause-pause-time" checked>
-        Pause Time of Day
+        Day/Night Cycle
       </label>
     </div>
 
