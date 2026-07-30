@@ -2184,11 +2184,98 @@ out of `startGame`; ~21 locals hoisted; D-31 restored; D-34 fixed),
 `test/test_globalCollisions.js` (D-35), `BUGS.md`, `DEPLOY.md` (§4.3's operational rule —
 decision 20; §7's automation table), `refactor.md` (this section, the Phase 1 gate, PR 33).
 
-### PR 13 — Un-nest `startGame`
+### PR 13 — Un-nest `startGame` ✅ DONE
 - Remove the `setTimeout(async () => { try { ... } })` wrapper; convert to a plain `async function` with real `await` and a top-level error handler.
 - Dedent — ~1,845 lines currently sit at ≥10 spaces.
 - Split the body into numbered private steps (still in `main.js`) matching the `Game.init()` order in [§8.4](#84-pr-17--startgame--srccoregamejs).
 - **Accept:** max indentation in `main.js` under 8 spaces. Load-order-sensitive init still works (texture atlas before mesh build, chunk manager before player spawn).
+
+**Outcome (2026-07-30):** ✅ DONE. Both wrappers gone, the body dedented to a base of 6,
+fifteen numbered step banners, and **§8.4's step list corrected because it did not match
+the order the code runs in** (D-36).
+
+| Gate | Result |
+|---|---|
+| `npm test` | **52/52 + 4 quarantined, exit 0** |
+| `npm run lint` | **0 errors, 178 warnings, exit 0** |
+| `npm run build` | exit 0 |
+| `npm run test:e2e` (built `dist/`) | **166 / 0 — unchanged from PR 12** |
+| `npm run test:e2e:vite` (dev server) | **166 / 0 — identical** |
+
+The assertion count **not** moving is the point of this PR. PR 12 moved it 152 → 166 by
+adding coverage; PR 13 changes the shape of 1,800 lines and adds none, so an unchanged
+166/0 on both hosts is the parity evidence.
+
+#### There were two wrappers, and both delays are behaviour
+
+`setTimeout(async () => { try { … } }, 200)` around the whole body, and a second
+`setTimeout(() => { … }, 500)` around the render-loop start. Both are now
+`await new Promise(resolve => setTimeout(resolve, N))`.
+
+**The delays were kept on purpose and that is not conservatism.** The 200 ms is what gives
+the loading screen a paint before the WebGL context is constructed — remove it and the
+first thing the player sees is a frozen menu. The 500 ms is what lets the last of the init
+settle before the render loop starts taking the frame budget. They are behaviour; only the
+nesting was scaffolding, and an awaited sleep says the same thing in one line that a reader
+can see the reason for.
+
+**The try/catch became load-bearing in the process.** Nothing awaits `startGame()` — the
+menu handlers and the auto-rejoin path both call it and move on, exactly as they did when
+the wrapper made it return immediately, so from the caller's side nothing changed. But a
+throw inside an un-awaited async function is an *unhandled rejection*, where inside a
+`setTimeout` callback it was a plain exception. The `catch` that writes the error to the
+loading screen is what keeps those the same, and the header says so, because deleting it
+during Phase 3 would look harmless.
+
+#### Indentation
+
+| | Before | After |
+|---|---|---|
+| Body base | 8, then **10** for the last two-thirds | **6** |
+| Lines at ≥10 spaces | ~1,765 | 0 at the base level |
+| `startGame` length | 1,803 lines | 1,853 (banners and the header) |
+
+The 8 → 10 jump partway through was an artifact of a block deleted long ago; the whole body
+is one level now. Three comments that had drifted to column 0 and one to a 7-space indent
+were fixed at the same time — they were invisible inside a 10-space block and obvious in a
+6-space one, which is a small argument for the dedent on its own.
+
+#### D-36 — §8.4's step list was not the order the code runs in
+
+Found while placing the banners. [§8.4](#84-pr-17--startgame--srccoregamejs) sketches
+`Game.init()` as fifteen numbered steps **and instructs PR 17 to "preserve the existing
+ordering exactly — it is load-order sensitive"**. Its list had multiplayer at 9, the
+first-person hand at 10 and the mob system at 11, where the code runs mobs → hand →
+multiplayer; and inventory at 12 before block interaction at 13, where the code does the
+reverse. So the one document telling PR 17 not to reorder load-sensitive init was itself
+proposing to reorder it, in four of fifteen steps.
+
+Numbering the banners from the code and correcting §8.4 to match is the fix. Three
+couplings make it more than tidiness: the texture atlases must exist before anything draws
+an item icon; the spawn search reads `chunkManager.memoryCache`, so it cannot move above
+the chunk manager; and **the mob system is constructed before the inventory exists and
+handed it two steps later** — the `inventory: null` in its deps is that, not an oversight,
+and a PR that "fixed" the order would have broken auto-loot silently.
+
+#### The steps are banners, not functions yet — and why
+
+The plan says "split the body into numbered private steps (still in `main.js`)". They are
+fifteen banner comments, not fifteen functions, and the reason is a measurement rather than
+caution: **the steps share ~160 init-only locals that PR 12 deliberately did not hoist.**
+PR 12 hoisted the 21 the render loop read, because those were what made `renderLoop`
+un-extractable; `loadingStatus`, `loadingProgress`, `selected`, `isJoiningClient`,
+`worldName`, `bestSpawnX/Y/Z`, `container`, `tileSize`, `renderDist` and the ~700-line knot
+of inventory/crafting/hotbar DOM closures are not among them. Extracting a step into a
+function today means threading those through parameters and back out through return values
+— which is the work PR 17 does properly, by putting them on `GameState` as it lifts each
+step onto `Game`. Doing it twice, badly first, is not cheaper. **`BUGS.md` decision 23.**
+
+What the banners buy in the meantime is real: `grep -n '══ Step' src/main.js` prints the
+init sequence in fifteen lines, and PR 17's cut lines are now marked in the file rather
+than rediscovered.
+
+**Modified:** `src/main.js` (both wrappers removed, body dedented, header + 15 banners),
+`refactor.md` (this section, §8.4's step list — D-36), `BUGS.md` (D-36, decision 23).
 
 ---
 
@@ -2240,18 +2327,31 @@ export class CharacterScreen {
 ```js
 class Game {
   async init(config) {
-    // 1 hide screens / show loading      9 multiplayer (host or client)
+    // 1 hide screens / show loading      9 mob system
     // 2 renderer                        10 first-person hand
-    // 3 input                            11 mob system
-    // 4 texture atlas                    12 inventory + systems
-    // 5 PBR + shadows                    13 block interaction
-    // 6 skybox                           14 HUD
+    // 3 input                            11 multiplayer (host or client)
+    // 4 texture atlas                    12 block interaction
+    // 5 PBR + shadows                    13 inventory + systems
+    // 6 skybox                           14 HUD, shortcuts, periodic save
     // 7 chunk manager                    15 start render loop
     // 8 player at spawn
   }
 }
 ```
 Each step is one private method or a system's `init()`. Preserve the existing ordering exactly — it is load-order sensitive.
+
+> **This list was corrected in PR 13 (`BUGS.md` D-36).** It previously had multiplayer at 9,
+> the hand at 10 and mobs at 11, and inventory before block interaction — **none of which is
+> the order `startGame()` runs in**, in a block whose own instruction is "preserve the existing
+> ordering exactly". PR 13 numbered `main.js`'s fifteen step banners **from the code** and
+> brought this list into line with them. The banners are the authority; if they ever disagree
+> with this box again, the banners are right.
+>
+> Three couplings are the reason it matters: the texture atlases (4) must exist before anything
+> draws an item icon; the spawn search (8) reads `chunkManager.memoryCache`, so it cannot move
+> above 7; and the mob system (9) is constructed **before** the inventory and handed it at 13 —
+> the `inventory: null` in its deps is that, not an oversight. Following the old numbering
+> literally would have inverted all three.
 - **Accept:** solo and multiplayer both start; saved spawn restore works; loading screen sequence unchanged.
 
 ### 8.5 PR 18 — `RenderLoop` + `SystemRunner`

@@ -2212,6 +2212,43 @@ import { publishGameState } from './testBridge.js';
   // Game Start
   // ============================================================
 
+  /**
+   * Start a session. Fifteen numbered steps, banner-marked below (PR 13).
+   *
+   * ─── WHAT PR 13 CHANGED ─────────────────────────────────────────────────────
+   *
+   * The body used to be `setTimeout(async () => { try { … } }, 200)` wrapping ~1,765
+   * lines, of which `refactor.md` §1.6 counted 1,845 at ten or more spaces of
+   * indentation. There were two such wrappers — the 200 ms one here and a 500 ms one
+   * around the render-loop start — and both are now awaited sleeps. **The delays are
+   * kept, deliberately:** the first is what gives the loading screen a paint before the
+   * WebGL context is created, the second is what lets the last of the init settle before
+   * the render loop starts taking the frame budget. They were behaviour, not scaffolding;
+   * only the nesting was scaffolding.
+   *
+   * The step order is **load-bearing** and every banner below sits where the code already
+   * put it. Three couplings in particular:
+   *
+   *   • the texture atlases (4) must be built before anything draws an item icon;
+   *   • the chunk manager (7) must have run `checkRegion(0,0)` before the spawn search
+   *     (8), which reads `memoryCache`;
+   *   • the mob system (9) is constructed before the inventory exists and is handed it in
+   *     step 13 — the `inventory: null` in its deps is that, not an oversight.
+   *
+   * ─── THE NUMBERING vs refactor.md §8.4 ──────────────────────────────────────
+   *
+   * §8.4 sketches `Game.init()` as fifteen steps and tells PR 17 to "preserve the existing
+   * ordering exactly — it is load-order sensitive". **Its list did not match the existing
+   * ordering** (BUGS.md D-36): it had multiplayer at 9, the hand at 10 and mobs at 11,
+   * where the code runs mobs, then the hand, then multiplayer; and it had inventory before
+   * block interaction, where the code does the reverse. PR 13 numbered these banners from
+   * the code and corrected §8.4 to match. **If the two ever disagree again, the code is
+   * right** — that is the whole reason §8.4 says what it says.
+   *
+   * PR 17 turns each banner into a private method on `Game`. It is not a mechanical cut
+   * yet: the steps share ~160 init-only locals that PR 12 deliberately did not hoist
+   * (only the 21 the render loop read). Those move to `GameState` as each step is lifted.
+   */
   async function startGame(mode) {
     _log(`[Cuubz] Starting game in ${mode} mode...`);
 
@@ -2240,1781 +2277,1837 @@ import { publishGameState } from './testBridge.js';
     loadingStatus.textContent = 'Initializing renderer...';
     if (loadingProgress) loadingProgress.style.width = '10%';
 
-    setTimeout(async () => {
-      try {
-        // ─── PR 12: one state object per session ──────────────────────────
-        //
-        // Everything below that `renderLoop` needs is assigned onto this object as it is
-        // created. The locals stay as locals — they are read ~700 times across the 1,800
-        // lines of init below and rewriting all of those is PR 13/PR 17's job — but each
-        // one is a `const` that is never reassigned, so the local and `gameState.x` can
-        // never disagree. The two exceptions are handled where they occur:
-        //   • the six `let x = null; if (…) x = new X()` systems get their
-        //     `gameState.x = x` **after** the block that may assign them, never inside it;
-        //   • `inventoryOpen` genuinely mutates at runtime, so it has no local at all and
-        //     lives only on `gameState` (BUGS.md D-31).
-        gameState = new GameState();
-        gameState.currentWorld = currentWorld;
-        gameState.currentCharacter = selected;
+    // PR 13 — the wrapper is gone.
+    //
+    // Everything below used to sit inside `setTimeout(async () => { try { … } }, 200)`,
+    // which is what refactor.md §1.6 means by "1,845 lines at ≥10 spaces". The 200 ms is
+    // real behaviour — it is what gives the loading screen a paint before the renderer is
+    // constructed — so it stays, as one awaited line rather than a level of nesting.
+    //
+    // Nothing awaits `startGame()`. The menu handlers and the auto-rejoin path both call
+    // it and move on, exactly as they did when the wrapper made it return immediately.
+    // The try/catch is therefore load-bearing rather than decorative: without it a throw
+    // in here is an unhandled rejection instead of the loading-screen error message.
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
-        // Hide all UI screens
-        Object.values(screens).forEach(el => { if (el) el.classList.add('hidden'); });
+    try {
+      // ─── PR 12: one state object per session ──────────────────────────
+      //
+      // Everything below that `renderLoop` needs is assigned onto this object as it is
+      // created. The locals stay as locals — they are read ~700 times across the 1,800
+      // lines of init below and rewriting all of those is PR 13/PR 17's job — but each
+      // one is a `const` that is never reassigned, so the local and `gameState.x` can
+      // never disagree. The two exceptions are handled where they occur:
+      //   • the six `let x = null; if (…) x = new X()` systems get their
+      //     `gameState.x = x` **after** the block that may assign them, never inside it;
+      //   • `inventoryOpen` genuinely mutates at runtime, so it has no local at all and
+      //     lives only on `gameState` (BUGS.md D-31).
+      gameState = new GameState();
+      gameState.currentWorld = currentWorld;
+      gameState.currentCharacter = selected;
 
-        const container = document.getElementById('game-container');
-        container.innerHTML = '';
+      // ══ Step 1 — hide screens / show loading ══════════════════════════════════════════════
+      // The GameState above belongs to no step; it is the object every step below writes to.
 
-        // Initialize VoxelRenderer
-        loadingStatus.textContent = 'Building 3D scene...';
-        if (loadingProgress) loadingProgress.style.width = '30%';
+      // Hide all UI screens
+      Object.values(screens).forEach(el => { if (el) el.classList.add('hidden'); });
 
-        const renderer = gameState.renderer = new VoxelRenderer(container, window.innerWidth, window.innerHeight);
-        _log('[Cuubz] Renderer created');
+      const container = document.getElementById('game-container');
+      container.innerHTML = '';
 
-        // Initialize Input Systems
-        loadingStatus.textContent = 'Setting up controls...';
-        if (loadingProgress) loadingProgress.style.width = '40%';
+      // ══ Step 2 — renderer ═════════════════════════════════════════════════════════════════
 
-        // No local alias: the render loop was `keyboard`'s only reader.
-        gameState.keyboard = new KeyboardInput();
-        const touch = gameState.touch = new TouchInput();
-        const canvas = gameState.canvas = renderer.domElement;
-        const mouse = gameState.mouse = new MouseInput(canvas);
+      // Initialize VoxelRenderer
+      loadingStatus.textContent = 'Building 3D scene...';
+      if (loadingProgress) loadingProgress.style.width = '30%';
 
-        // Request pointer lock on canvas click
-        canvas.addEventListener('click', () => {
-          if (!mouse.locked) {
-            mouse.requestPointerLock();
+      const renderer = gameState.renderer = new VoxelRenderer(container, window.innerWidth, window.innerHeight);
+      _log('[Cuubz] Renderer created');
+
+      // ══ Step 3 — input ════════════════════════════════════════════════════════════════════
+
+      // Initialize Input Systems
+      loadingStatus.textContent = 'Setting up controls...';
+      if (loadingProgress) loadingProgress.style.width = '40%';
+
+      // No local alias: the render loop was `keyboard`'s only reader.
+      gameState.keyboard = new KeyboardInput();
+      const touch = gameState.touch = new TouchInput();
+      const canvas = gameState.canvas = renderer.domElement;
+      const mouse = gameState.mouse = new MouseInput(canvas);
+
+      // Request pointer lock on canvas click
+      canvas.addEventListener('click', () => {
+        if (!mouse.locked) {
+          mouse.requestPointerLock();
+        }
+      });
+
+      // Initialize Terrain Generation (handled internally by ChunkManager)
+      const sensitivity = gameState.sensitivity = 0.002;
+      loadingStatus.textContent = 'Initializing workers...';
+      if (loadingProgress) loadingProgress.style.width = '50%';
+
+      // ══ Step 4 — texture atlas ════════════════════════════════════════════════════════════
+      // Two atlases and both `buildAtlas()` calls are awaited here. Everything downstream
+      // that draws an item icon depends on them, which is what makes this order load-bearing.
+
+      // Initialize Texture Atlas (async)
+      loadingStatus.textContent = 'Loading textures...';
+      if (loadingProgress) loadingProgress.style.width = '60%';
+
+      // Determine tile size from settings
+      const perfTexRes = perfSettings ? perfSettings.get('textureResolution') : 'high';
+      const tileSize = PerformanceSettings.getTileSize(perfTexRes);
+      const textureAtlas = gameState.textureAtlas = new PBRTextureAtlas({ tileSize });
+      await textureAtlas.buildAtlas();
+
+      // Build item texture atlas for hotbar/inventory UI
+      const itemAtlas = gameState.itemAtlas = new ItemTextureAtlas({ tileSize: 64 });
+      await itemAtlas.buildAtlas();
+
+      // ══ Step 5 — PBR + shadows ════════════════════════════════════════════════════════════
+
+      // Initialize PBR material factory with the triple atlas
+      const advancedShading = perfSettings ? perfSettings.get('advancedShading') : true;
+      renderer.initPBR(textureAtlas, advancedShading);
+
+      // Apply shadow quality from settings
+      if (perfSettings) {
+        renderer.setShadowQuality(perfSettings.get('shadowQuality'));
+      }
+
+      // ══ Step 6 — skybox ═══════════════════════════════════════════════════════════════════
+
+      // ─── Initialize Day/Night Cycle (Skybox) ─────────
+      let skybox = null;
+      if (typeof Skybox !== 'undefined') {
+        skybox = new Skybox(renderer, { startTime: 8, cycleDuration: 300 });
+        skybox.init();
+        // Wire up the HUD day-night indicator
+        const dayNightEl = document.getElementById('day-night-indicator');
+        if (dayNightEl) {
+          skybox.setNightIndicatorElement(dayNightEl);
+        }
+        _log('[Cuubz] Day/night cycle initialized (5-min cycle, starting at 8:00)');
+      }
+      // Assigned after the `if`, never inside it, so `null` (no Skybox) is recorded too.
+      gameState.skybox = skybox;
+
+      // Wire up texture atlas to debug overlay (top-right corner)
+      const atlasOverlay = document.getElementById('atlas-overlay');
+      const atlasCanvasEl = document.getElementById('atlas-canvas');
+      if (atlasOverlay && atlasCanvasEl && textureAtlas.diffuseCanvas) {
+        const ctx = atlasCanvasEl.getContext('2d');
+        const srcW = textureAtlas.diffuseCanvas.width;
+        const srcH = textureAtlas.diffuseCanvas.height;
+
+        // Scale canvas to fit nicely in the overlay (max 300px wide)
+        const maxDisplayWidth = Math.min(300, window.innerWidth - 40);
+        const scale = maxDisplayWidth / srcW;
+        atlasCanvasEl.width = Math.round(srcW * scale);
+        atlasCanvasEl.height = Math.round(srcH * scale);
+
+        // Draw the atlas scaled down
+        ctx.imageSmoothingEnabled = false; // Keep pixelated
+        ctx.drawImage(textureAtlas.diffuseCanvas, 0, 0, atlasCanvasEl.width, atlasCanvasEl.height);
+
+        // Draw block ID labels on each tile for visual verification
+        const debugInfo = textureAtlas.debugInfo;
+        if (debugInfo) {
+          ctx.font = `bold ${Math.max(8, Math.round(10 * scale))}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          for (const info of debugInfo) {
+            const x = info.col * srcW / textureAtlas.gridW;
+            const y = info.row * srcH / textureAtlas.gridH;
+            const w = srcW / textureAtlas.gridW;
+            const h = srcH / textureAtlas.gridH;
+
+            // Draw label background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(x * scale, y * scale, w * scale, Math.min(h * scale, 14 * scale));
+
+            // Draw block ID text
+            ctx.fillStyle = '#ffffff';
+            const label = `${info.blockId}_${info.faceName}`;
+            ctx.fillText(label, (x + w / 2) * scale, (y + h / 2 - 1) * scale);
           }
-        });
-
-        // Initialize Terrain Generation (handled internally by ChunkManager)
-        const sensitivity = gameState.sensitivity = 0.002;
-        loadingStatus.textContent = 'Initializing workers...';
-        if (loadingProgress) loadingProgress.style.width = '50%';
-
-        // Initialize Texture Atlas (async)
-        loadingStatus.textContent = 'Loading textures...';
-        if (loadingProgress) loadingProgress.style.width = '60%';
-
-        // Determine tile size from settings
-        const perfTexRes = perfSettings ? perfSettings.get('textureResolution') : 'high';
-        const tileSize = PerformanceSettings.getTileSize(perfTexRes);
-        const textureAtlas = gameState.textureAtlas = new PBRTextureAtlas({ tileSize });
-        await textureAtlas.buildAtlas();
-
-        // Build item texture atlas for hotbar/inventory UI
-        const itemAtlas = gameState.itemAtlas = new ItemTextureAtlas({ tileSize: 64 });
-        await itemAtlas.buildAtlas();
-
-        // Initialize PBR material factory with the triple atlas
-        const advancedShading = perfSettings ? perfSettings.get('advancedShading') : true;
-        renderer.initPBR(textureAtlas, advancedShading);
-
-        // Apply shadow quality from settings
-        if (perfSettings) {
-          renderer.setShadowQuality(perfSettings.get('shadowQuality'));
         }
 
-        // ─── Initialize Day/Night Cycle (Skybox) ─────────
-        let skybox = null;
-        if (typeof Skybox !== 'undefined') {
-          skybox = new Skybox(renderer, { startTime: 8, cycleDuration: 300 });
-          skybox.init();
-          // Wire up the HUD day-night indicator
-          const dayNightEl = document.getElementById('day-night-indicator');
-          if (dayNightEl) {
-            skybox.setNightIndicatorElement(dayNightEl);
-          }
-          _log('[Cuubz] Day/night cycle initialized (5-min cycle, starting at 8:00)');
+        // Draw grid lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        for (let col = 0; col <= textureAtlas.gridW; col++) {
+          const gx = (col * srcW / textureAtlas.gridW) * scale;
+          ctx.beginPath();
+          ctx.moveTo(gx, 0);
+          ctx.lineTo(gx, atlasCanvasEl.height);
+          ctx.stroke();
         }
-        // Assigned after the `if`, never inside it, so `null` (no Skybox) is recorded too.
-        gameState.skybox = skybox;
-
-        // Wire up texture atlas to debug overlay (top-right corner)
-        const atlasOverlay = document.getElementById('atlas-overlay');
-        const atlasCanvasEl = document.getElementById('atlas-canvas');
-        if (atlasOverlay && atlasCanvasEl && textureAtlas.diffuseCanvas) {
-          const ctx = atlasCanvasEl.getContext('2d');
-          const srcW = textureAtlas.diffuseCanvas.width;
-          const srcH = textureAtlas.diffuseCanvas.height;
-
-          // Scale canvas to fit nicely in the overlay (max 300px wide)
-          const maxDisplayWidth = Math.min(300, window.innerWidth - 40);
-          const scale = maxDisplayWidth / srcW;
-          atlasCanvasEl.width = Math.round(srcW * scale);
-          atlasCanvasEl.height = Math.round(srcH * scale);
-
-          // Draw the atlas scaled down
-          ctx.imageSmoothingEnabled = false; // Keep pixelated
-          ctx.drawImage(textureAtlas.diffuseCanvas, 0, 0, atlasCanvasEl.width, atlasCanvasEl.height);
-
-          // Draw block ID labels on each tile for visual verification
-          const debugInfo = textureAtlas.debugInfo;
-          if (debugInfo) {
-            ctx.font = `bold ${Math.max(8, Math.round(10 * scale))}px monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            for (const info of debugInfo) {
-              const x = info.col * srcW / textureAtlas.gridW;
-              const y = info.row * srcH / textureAtlas.gridH;
-              const w = srcW / textureAtlas.gridW;
-              const h = srcH / textureAtlas.gridH;
-
-              // Draw label background
-              ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-              ctx.fillRect(x * scale, y * scale, w * scale, Math.min(h * scale, 14 * scale));
-
-              // Draw block ID text
-              ctx.fillStyle = '#ffffff';
-              const label = `${info.blockId}_${info.faceName}`;
-              ctx.fillText(label, (x + w / 2) * scale, (y + h / 2 - 1) * scale);
-            }
-          }
-
-          // Draw grid lines
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-          ctx.lineWidth = 1;
-          for (let col = 0; col <= textureAtlas.gridW; col++) {
-            const gx = (col * srcW / textureAtlas.gridW) * scale;
-            ctx.beginPath();
-            ctx.moveTo(gx, 0);
-            ctx.lineTo(gx, atlasCanvasEl.height);
-            ctx.stroke();
-          }
-          for (let row = 0; row <= textureAtlas.gridH; row++) {
-            const gy = (row * srcH / textureAtlas.gridH) * scale;
-            ctx.beginPath();
-            ctx.moveTo(0, gy);
-            ctx.lineTo(atlasCanvasEl.width, gy);
-            ctx.stroke();
-          }
-
-          // atlasOverlay stays hidden — remove this line to show debug overlay during gameplay
-// Texture atlas built — no log
+        for (let row = 0; row <= textureAtlas.gridH; row++) {
+          const gy = (row * srcH / textureAtlas.gridH) * scale;
+          ctx.beginPath();
+          ctx.moveTo(0, gy);
+          ctx.lineTo(atlasCanvasEl.width, gy);
+          ctx.stroke();
         }
 
-        // Determine if this is a joining client (not host) — clients don't generate chunks
-        const isJoiningClient = sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId;
-        console.log(`[JOIN] isJoiningClient=${isJoiningClient} currentSessionId=${sessionManager?.currentSessionId} hostingSessionId=${sessionManager?.hostingSessionId}`);
+        // atlasOverlay stays hidden — remove this line to show debug overlay during gameplay
+      // Texture atlas built — no log
+      }
 
-        // Initialize Chunk Manager (monolith — workers + IndexedDB + flush + region tracking)
-        loadingStatus.textContent = 'Loading chunks...';
-        if (loadingProgress) loadingProgress.style.width = '85%';
+      // ══ Step 7 — chunk manager ════════════════════════════════════════════════════════════
+      // Also decides host vs joining client, loads or creates the manifest, starts the 5 s
+      // flush timer, and runs the initial checkRegion(0,0). The single slowest step.
 
-        const worldName = gameState.worldName = currentWorld.id;
-        const renderDist = perfSettings ? perfSettings.get('renderDistance') : 8;
-        const chunkManager = gameState.chunkManager = new ChunkManager({
-          renderer: renderer,
-          worldName: worldName,
-          worldSeed: currentWorld.seed,
-          genParams: {}, // Use defaults from ChunkManager
-          renderDistance: renderDist,
-          regionRadius: 16,   // 32×32 pre-generation range
-          textureAtlas: textureAtlas,
-          clientMode: isJoiningClient, // Clients receive all chunks from host
-        });
+      // Determine if this is a joining client (not host) — clients don't generate chunks
+      const isJoiningClient = sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId;
+      console.log(`[JOIN] isJoiningClient=${isJoiningClient} currentSessionId=${sessionManager?.currentSessionId} hostingSessionId=${sessionManager?.hostingSessionId}`);
 
-        await chunkManager.init();
+      // Initialize Chunk Manager (monolith — workers + IndexedDB + flush + region tracking)
+      loadingStatus.textContent = 'Loading chunks...';
+      if (loadingProgress) loadingProgress.style.width = '85%';
 
-        if (isJoiningClient) {
-          // Client: no local generation, no IndexedDB, no flush — all chunks come from host
-          _log('[Cuubz] Client mode: chunk generation disabled, awaiting chunks from host');
+      const worldName = gameState.worldName = currentWorld.id;
+      const renderDist = perfSettings ? perfSettings.get('renderDistance') : 8;
+      const chunkManager = gameState.chunkManager = new ChunkManager({
+        renderer: renderer,
+        worldName: worldName,
+        worldSeed: currentWorld.seed,
+        genParams: {}, // Use defaults from ChunkManager
+        renderDistance: renderDist,
+        regionRadius: 16,   // 32×32 pre-generation range
+        textureAtlas: textureAtlas,
+        clientMode: isJoiningClient, // Clients receive all chunks from host
+      });
+
+      await chunkManager.init();
+
+      if (isJoiningClient) {
+        // Client: no local generation, no IndexedDB, no flush — all chunks come from host
+        _log('[Cuubz] Client mode: chunk generation disabled, awaiting chunks from host');
+      } else {
+        // Host: load existing world or create new manifest
+        const manifest = await chunkManager.loadManifest();
+        if (!manifest) {
+          await chunkManager.createNewWorld();
+          _log(`[Cuubz] Created new world manifest for "${worldName}"`);
         } else {
-          // Host: load existing world or create new manifest
-          const manifest = await chunkManager.loadManifest();
-          if (!manifest) {
-            await chunkManager.createNewWorld();
-            _log(`[Cuubz] Created new world manifest for "${worldName}"`);
-          } else {
-            _log(`[Cuubz] Loaded existing world manifest (${manifest.generatedChunks.length} chunks saved)`);
-          }
-
-          // Start timers: flush dirty every 5s
-          chunkManager.startFlushTimer(5000);
-
-          // Trigger initial load around spawn position (awaits completion)
-          // console.log('[Cuubz] Starting region check at (0, 0)...');
-          await chunkManager.checkRegion(0, 0);
-          
-          // Safety net: drain any remaining generation queue items
-          let genWait = 0;
-          while ((chunkManager._genQueue.length > 0 || chunkManager._generating.size > 0) && genWait < 30) {
-            await new Promise(r => setTimeout(r, 200));
-            genWait++;
-          }
-          // console.log(`[Cuubz] Initial load complete — memoryCache: ${chunkManager.memoryCache.size}, generating: ${chunkManager._generating.size}`);
+          _log(`[Cuubz] Loaded existing world manifest (${manifest.generatedChunks.length} chunks saved)`);
         }
+
+        // Start timers: flush dirty every 5s
+        chunkManager.startFlushTimer(5000);
+
+        // Trigger initial load around spawn position (awaits completion)
+        // console.log('[Cuubz] Starting region check at (0, 0)...');
+        await chunkManager.checkRegion(0, 0);
         
-        chunkManager.updateRenderChunks(0, 0);
+        // Safety net: drain any remaining generation queue items
+        let genWait = 0;
+        while ((chunkManager._genQueue.length > 0 || chunkManager._generating.size > 0) && genWait < 30) {
+          await new Promise(r => setTimeout(r, 200));
+          genWait++;
+        }
+        // console.log(`[Cuubz] Initial load complete — memoryCache: ${chunkManager.memoryCache.size}, generating: ${chunkManager._generating.size}`);
+      }
+      
+      chunkManager.updateRenderChunks(0, 0);
 
-        // Graceful shutdown handlers
-        chunkManager._setupGracefulShutdown();
+      // Graceful shutdown handlers
+      chunkManager._setupGracefulShutdown();
 
-        // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
-        if (sessionManager && sessionManager.hostingSessionId) {
-          const applyRemoteBlockChange = (data, newBlockType) => {
-            try {
-              chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType);
-            } catch (err) {
-              console.error('[Cuubz] Error applying remote block change:', err.message);
-            }
-          };
+      // Wire up host block validation callbacks for multiplayer persistence to IndexedDB.
+      if (sessionManager && sessionManager.hostingSessionId) {
+        const applyRemoteBlockChange = (data, newBlockType) => {
+          try {
+            chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType);
+          } catch (err) {
+            console.error('[Cuubz] Error applying remote block change:', err.message);
+          }
+        };
 
-          sessionManager.registerHostCallbacks(
-            (data) => applyRemoteBlockChange(data, 0),
-            (data) => applyRemoteBlockChange(data, data.blockType || 1)
-          );
-        } else if (sessionManager && sessionManager.currentSessionId) {
-          const applyRemoteDelta = (data, newBlockType) => {
-            try {
-              // Client applies visually without persisting — mark dirty=false after
-              chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType);
-              // Clear dirty flag since client shouldn't flush to storage
-              const cx = Math.floor(data.x / CHUNK_W);
-              const cz = Math.floor(data.z / CHUNK_D);
-              const key = ChunkManager.key(cx, cz);
-              const chunk = chunkManager.memoryCache.get(key);
-              if (chunk) chunk.dirty = false;
-            } catch (err) {
-              console.error('[Cuubz] Error applying client delta:', err.message);
-            }
-          };
+        sessionManager.registerHostCallbacks(
+          (data) => applyRemoteBlockChange(data, 0),
+          (data) => applyRemoteBlockChange(data, data.blockType || 1)
+        );
+      } else if (sessionManager && sessionManager.currentSessionId) {
+        const applyRemoteDelta = (data, newBlockType) => {
+          try {
+            // Client applies visually without persisting — mark dirty=false after
+            chunkManager.applyBlockChange(data.x, data.y, data.z, newBlockType);
+            // Clear dirty flag since client shouldn't flush to storage
+            const cx = Math.floor(data.x / CHUNK_W);
+            const cz = Math.floor(data.z / CHUNK_D);
+            const key = ChunkManager.key(cx, cz);
+            const chunk = chunkManager.memoryCache.get(key);
+            if (chunk) chunk.dirty = false;
+          } catch (err) {
+            console.error('[Cuubz] Error applying client delta:', err.message);
+          }
+        };
 
-          sessionManager.registerClientCallbacks(
-            (data) => applyRemoteDelta(data, 0),
-            (data) => applyRemoteDelta(data, data.blockType || 1)
-          );
+        sessionManager.registerClientCallbacks(
+          (data) => applyRemoteDelta(data, 0),
+          (data) => applyRemoteDelta(data, data.blockType || 1)
+        );
+      }
+
+      // ══ Step 8 — player at spawn ══════════════════════════════════════════════════════════
+      // Spawn search reads chunkManager.memoryCache, so it cannot move above step 7.
+
+      // Wait briefly for initial chunks to populate memoryCache, then calculate spawn position
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Determine spawn position
+      let bestSpawnX = 0, bestSpawnZ = 0, bestSpawnY = -1, bestScore = -Infinity;
+
+      // ─── Client-side: skip spawn search, use default position ───
+      // Clients have no chunks at spawn time — host's chunks will stream in.
+      // The player will fall to terrain when chunks arrive.
+      if (isJoiningClient) {
+        bestSpawnX = 0;
+        bestSpawnZ = 0;
+        bestSpawnY = SEA_LEVEL + 2; // Spawn above sea level, will fall to terrain
+        console.log(`[Cuubz] Client spawn: X=${bestSpawnX + 0.5} Y=${bestSpawnY} Z=${bestSpawnZ + 0.5} (no chunks yet, will fall to terrain)`);
+      } else {
+        // console.log(`[Cuubz] Spawn search: ${chunkManager.memoryCache.size} chunks in cache`);
+
+        // Calculate spawn — search loaded chunks for solid surface with headroom above.
+        // Strategy: prefer GRASS/DIRT/SAND near sea level, fall back to any solid block if needed.
+
+        function getBlockAt(chunk, lx, ly, lz) {
+          return chunk.getBlock(lx, ly, lz);
         }
 
-        // Wait briefly for initial chunks to populate memoryCache, then calculate spawn position
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Surface blocks — prefer these for spawn (natural terrain topside)
+        const SURFACE_BLOCKS = new Set([BLOCK_TYPES.GRASS, BLOCK_TYPES.DIRT, BLOCK_TYPES.SAND]);
 
-        // Determine spawn position
-        let bestSpawnX = 0, bestSpawnZ = 0, bestSpawnY = -1, bestScore = -Infinity;
+        // Search only the center 8×8 area (around origin) for spawn.
+        // Avoids spawning on edge of the 32×32 pre-generated region where terrain features tend to cluster.
+        const spawnSearchRadius = 4; // 8x8 centered on chunk (0,0)
 
-        // ─── Client-side: skip spawn search, use default position ───
-        // Clients have no chunks at spawn time — host's chunks will stream in.
-        // The player will fall to terrain when chunks arrive.
-        if (isJoiningClient) {
-          bestSpawnX = 0;
-          bestSpawnZ = 0;
-          bestSpawnY = SEA_LEVEL + 2; // Spawn above sea level, will fall to terrain
-          console.log(`[Cuubz] Client spawn: X=${bestSpawnX + 0.5} Y=${bestSpawnY} Z=${bestSpawnZ + 0.5} (no chunks yet, will fall to terrain)`);
-        } else {
-          // console.log(`[Cuubz] Spawn search: ${chunkManager.memoryCache.size} chunks in cache`);
+        for (const [key, chunk] of chunkManager.memoryCache) {
+          if (!chunk || !chunk.blocks) continue;
+          const { cx, cz } = ChunkManager.parseKey(key);
 
-          // Calculate spawn — search loaded chunks for solid surface with headroom above.
-          // Strategy: prefer GRASS/DIRT/SAND near sea level, fall back to any solid block if needed.
+          // Only search within center spawnSearchRadius chunks from origin
+          if (Math.abs(cx) > spawnSearchRadius || Math.abs(cz) > spawnSearchRadius) continue;
 
-          function getBlockAt(chunk, lx, ly, lz) {
-            return chunk.getBlock(lx, ly, lz);
-          }
+          for (let lx = 0; lx < 16; lx++) {
+            for (let lz = 0; lz < 16; lz++) {
+              for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
+                const block = getBlockAt(chunk, lx, y, lz);
+                if (!BLOCK_BY_ID[block] || BLOCK_BY_ID[block].category !== 'solid') continue;
 
-          // Surface blocks — prefer these for spawn (natural terrain topside)
-          const SURFACE_BLOCKS = new Set([BLOCK_TYPES.GRASS, BLOCK_TYPES.DIRT, BLOCK_TYPES.SAND]);
+                // Prefer surface blocks above sea level
+                const isSurface = SURFACE_BLOCKS.has(block);
+                const aboveSea = y > SEA_LEVEL;
 
-          // Search only the center 8×8 area (around origin) for spawn.
-          // Avoids spawning on edge of the 32×32 pre-generated region where terrain features tend to cluster.
-          const spawnSearchRadius = 4; // 8x8 centered on chunk (0,0)
+                // Check column clear (headroom for player — 2 blocks above feet)
+                let colClear = true;
+                for (let cy = y + 1; cy <= y + 3; cy++) {
+                  const cBlock = getBlockAt(chunk, lx, cy, lz);
+                  if (cBlock !== BLOCK_TYPES.AIR && cBlock !== BLOCK_TYPES.WATER) { colClear = false; break; }
+                }
+                if (!colClear) continue;
 
-          for (const [key, chunk] of chunkManager.memoryCache) {
-            if (!chunk || !chunk.blocks) continue;
-            const { cx, cz } = ChunkManager.parseKey(key);
+                // Score: elevation primary + surface bonus + above-sea bonus
+                const worldX = cx * 16 + lx;
+                const worldZ = cz * 16 + lz;
+                let score = y * 100;           // Elevation is the primary factor (×100 to dominate bonuses)
+                if (isSurface) score += 500;    // Surface block bonus
+                if (aboveSea) score += 1000;     // Above-sea bonus
 
-            // Only search within center spawnSearchRadius chunks from origin
-            if (Math.abs(cx) > spawnSearchRadius || Math.abs(cz) > spawnSearchRadius) continue;
-
-            for (let lx = 0; lx < 16; lx++) {
-              for (let lz = 0; lz < 16; lz++) {
-                for (let y = Math.min(MAX_Y - 1, 150); y >= MIN_Y; y--) {
-                  const block = getBlockAt(chunk, lx, y, lz);
-                  if (!BLOCK_BY_ID[block] || BLOCK_BY_ID[block].category !== 'solid') continue;
-
-                  // Prefer surface blocks above sea level
-                  const isSurface = SURFACE_BLOCKS.has(block);
-                  const aboveSea = y > SEA_LEVEL;
-
-                  // Check column clear (headroom for player — 2 blocks above feet)
-                  let colClear = true;
-                  for (let cy = y + 1; cy <= y + 3; cy++) {
-                    const cBlock = getBlockAt(chunk, lx, cy, lz);
-                    if (cBlock !== BLOCK_TYPES.AIR && cBlock !== BLOCK_TYPES.WATER) { colClear = false; break; }
-                  }
-                  if (!colClear) continue;
-
-                  // Score: elevation primary + surface bonus + above-sea bonus
-                  const worldX = cx * 16 + lx;
-                  const worldZ = cz * 16 + lz;
-                  let score = y * 100;           // Elevation is the primary factor (×100 to dominate bonuses)
-                  if (isSurface) score += 500;    // Surface block bonus
-                  if (aboveSea) score += 1000;     // Above-sea bonus
-
-                  if (score > bestScore) {
-                    bestSpawnX = worldX;
-                    bestSpawnZ = worldZ;
-                    bestSpawnY = y;
-                    bestScore = score;
-                  }
+                if (score > bestScore) {
+                  bestSpawnX = worldX;
+                  bestSpawnZ = worldZ;
+                  bestSpawnY = y;
+                  bestScore = score;
                 }
               }
             }
           }
         }
+      }
 
-        const spawnHeight = gameState.spawnHeight = bestSpawnY >= 0 ? bestSpawnY + 1.625 + 2 : SEA_LEVEL + 2;
-        // console.log(`[Cuubz] Spawn at X=${bestSpawnX} Z=${bestSpawnZ} Y=${spawnHeight} (surface=${bestSpawnY}, chunks=${chunkManager.memoryCache.size})`);
+      const spawnHeight = gameState.spawnHeight = bestSpawnY >= 0 ? bestSpawnY + 1.625 + 2 : SEA_LEVEL + 2;
+      // console.log(`[Cuubz] Spawn at X=${bestSpawnX} Z=${bestSpawnZ} Y=${spawnHeight} (surface=${bestSpawnY}, chunks=${chunkManager.memoryCache.size})`);
 
-        if (bestSpawnY < 0) {
-          //console.warn("No valid spawn found — using default") — falling back to sea level. Check chunk generation.');
+      if (bestSpawnY < 0) {
+        //console.warn("No valid spawn found — using default") — falling back to sea level. Check chunk generation.');
+      }
+
+      // Initialize Player at terrain level
+      loadingStatus.textContent = 'Creating player...';
+      if (loadingProgress) loadingProgress.style.width = '90%';
+
+      const player = gameState.player = new Player();
+
+      // Check if character has a saved position for this world
+      const savedSpawn = (selected.spawnPoints && selected.spawnPoints[currentWorld.id]) || null;
+      if (savedSpawn) {
+        // Restore last saved position
+        player.position.x = savedSpawn.x;
+        player.position.y = savedSpawn.y;
+        player.position.z = savedSpawn.z;
+        _log(`[Cuubz] Restored saved position: ${savedSpawn.x.toFixed(1)}, ${savedSpawn.y.toFixed(1)}, ${savedSpawn.z.toFixed(1)}`);
+      } else {
+        // No saved position — use calculated terrain spawn
+        player.position.x = bestSpawnX + 0.5; // Center in chunk column
+        player.position.y = spawnHeight;
+        player.position.z = bestSpawnZ + 0.5;
+      }
+      player.pitch = -Math.PI / 8; // Sync with initial camera pitch
+
+      // Player placed — position logged only on error
+      
+      player.linkWorld(worldManager);
+
+      // ─── Multiplayer: Send JOIN to game session ───
+      // Must be after spawn search so we send the actual spawn position.
+      if (sessionManager && sessionManager.client) {
+        const charData = characterManager ? characterManager.getSelectedCharacter() : null;
+        const spawnPos = { x: player.position.x, y: player.position.y, z: player.position.z };
+        sessionManager.client.joinGame(
+          charData ? { name: charData.name, color: charData.color } : { name: 'Player', color: '#ffffff' },
+          spawnPos,
+          { yaw: 0, pitch: 0 }
+        );
+        if (sessionManager.client._pendingGameJoin) {
+          console.log('[JOIN] joinGame QUEUED — game session not connected yet, will send when ready');
+        } else {
+          console.log(`[JOIN] joinGame SENT immediately to game session at ${JSON.stringify(spawnPos)}`);
         }
+      }
 
-          // Initialize Player at terrain level
-          loadingStatus.textContent = 'Creating player...';
-          if (loadingProgress) loadingProgress.style.width = '90%';
-
-          const player = gameState.player = new Player();
-
-          // Check if character has a saved position for this world
-          const savedSpawn = (selected.spawnPoints && selected.spawnPoints[currentWorld.id]) || null;
-          if (savedSpawn) {
-            // Restore last saved position
-            player.position.x = savedSpawn.x;
-            player.position.y = savedSpawn.y;
-            player.position.z = savedSpawn.z;
-            _log(`[Cuubz] Restored saved position: ${savedSpawn.x.toFixed(1)}, ${savedSpawn.y.toFixed(1)}, ${savedSpawn.z.toFixed(1)}`);
-          } else {
-            // No saved position — use calculated terrain spawn
-            player.position.x = bestSpawnX + 0.5; // Center in chunk column
-            player.position.y = spawnHeight;
-            player.position.z = bestSpawnZ + 0.5;
-          }
-          player.pitch = -Math.PI / 8; // Sync with initial camera pitch
-
-          // Player placed — position logged only on error
-          
-          player.linkWorld(worldManager);
-
-          // ─── Multiplayer: Send JOIN to game session ───
-          // Must be after spawn search so we send the actual spawn position.
-          if (sessionManager && sessionManager.client) {
-            const charData = characterManager ? characterManager.getSelectedCharacter() : null;
-            const spawnPos = { x: player.position.x, y: player.position.y, z: player.position.z };
-            sessionManager.client.joinGame(
-              charData ? { name: charData.name, color: charData.color } : { name: 'Player', color: '#ffffff' },
-              spawnPos,
-              { yaw: 0, pitch: 0 }
-            );
-            if (sessionManager.client._pendingGameJoin) {
-              console.log('[JOIN] joinGame QUEUED — game session not connected yet, will send when ready');
-            } else {
-              console.log(`[JOIN] joinGame SENT immediately to game session at ${JSON.stringify(spawnPos)}`);
-            }
-          }
-
-          // Initialize Biome Effects System (wire up visual effects per biome)
-          const biomeEffects = gameState.biomeEffects = new BiomeEffects();
+      // Initialize Biome Effects System (wire up visual effects per biome)
+      const biomeEffects = gameState.biomeEffects = new BiomeEffects();
+      if (renderer.scene && renderer.renderer) {
+        biomeEffects.init(renderer.scene, renderer.renderer);
+      // Biome Effects initialized — no log
+      } else {
+        // If Three.js not ready yet, initialize on next frame when available
+        setTimeout(() => {
           if (renderer.scene && renderer.renderer) {
             biomeEffects.init(renderer.scene, renderer.renderer);
-// Biome Effects initialized — no log
-          } else {
-            // If Three.js not ready yet, initialize on next frame when available
-            setTimeout(() => {
-              if (renderer.scene && renderer.renderer) {
-                biomeEffects.init(renderer.scene, renderer.renderer);
-// Biome Effects initialized — no log
-              }
-            }, 100);
+      // Biome Effects initialized — no log
           }
+        }, 100);
+      }
 
-          // Handle mouse movement for camera rotation (pointer lock) — must be after player exists
-          document.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement === canvas) {
-              player.yaw -= e.movementX * sensitivity;
-              player.pitch -= e.movementY * sensitivity;
-              // Clamp pitch to avoid flipping at gimbal lock limits
-              player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
-            }
-          });
+      // Handle mouse movement for camera rotation (pointer lock) — must be after player exists
+      document.addEventListener('mousemove', (e) => {
+        if (document.pointerLockElement === canvas) {
+          player.yaw -= e.movementX * sensitivity;
+          player.pitch -= e.movementY * sensitivity;
+          // Clamp pitch to avoid flipping at gimbal lock limits
+          player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));
+        }
+      });
 
-          // Initialize Game Engine
-          loadingStatus.textContent = 'Starting game loop...';
-          if (loadingProgress) loadingProgress.style.width = '90%';
+      // Initialize Game Engine
+      loadingStatus.textContent = 'Starting game loop...';
+      if (loadingProgress) loadingProgress.style.width = '90%';
 
-          game = new CuubzGame();
-          game.player = player;
-          game.setMode(mode || 'survival');
-          gameState.game = game;
-          // `renderer`, `chunkManager`, `skybox`, `frameCount` and `attackCooldown` were
-          // assigned onto `game` here. They are declared fields on GameState now and are
-          // set at the point each is constructed — refactor.md §7 PR 12, "fold the ad-hoc
-          // props in". `game.player` stays because CuubzGame.setMode() uses it to push
-          // creative-mode physics onto the player; it is the same object as
-          // `gameState.player` and neither is ever reassigned.
-          gameState.persistence = characterManager ? characterManager.storage : null; // For periodic saving
+      game = new CuubzGame();
+      game.player = player;
+      game.setMode(mode || 'survival');
+      gameState.game = game;
+      // `renderer`, `chunkManager`, `skybox`, `frameCount` and `attackCooldown` were
+      // assigned onto `game` here. They are declared fields on GameState now and are
+      // set at the point each is constructed — refactor.md §7 PR 12, "fold the ad-hoc
+      // props in". `game.player` stays because CuubzGame.setMode() uses it to push
+      // creative-mode physics onto the player; it is the same object as
+      // `gameState.player` and neither is ever reassigned.
+      gameState.persistence = characterManager ? characterManager.storage : null; // For periodic saving
 
-          // ─── Initialize Mob System (stub — inventory + survival set after their init) ──
-          try {
-            mobIntegration = new MobIntegration();
-            const deps = {
-              scene: renderer.scene,
-              camera: renderer.camera,
-              player: player,
-              inventory: null, // Set after Inventory constructor below
-              survivalSystem: null, // Not wired yet
-              worldSeed: currentWorld.seed,
-              onMobDeath: (mob, drops) => {
-                _log(`[Cuubz] Mob died: ${mob.mobType}, drops:`, drops);
-              },
-            };
-            mobIntegration.init(deps);
-            _log('[Cuubz] Mob system initialized');
-          } catch (e) {
-            console.warn('[Cuubz] Failed to init mob system:', e.message);
-          }
+      // ══ Step 9 — mob system ═══════════════════════════════════════════════════════════════
+      // Constructed before the inventory exists and handed it at step 12 — the `inventory: null`
+      // in its deps is that, not an oversight.
 
-           // Set up camera at player eye level — looking slightly downward to see terrain
-          const initCamPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
-          renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
+      // ─── Initialize Mob System (stub — inventory + survival set after their init) ──
+      try {
+        mobIntegration = new MobIntegration();
+        const deps = {
+          scene: renderer.scene,
+          camera: renderer.camera,
+          player: player,
+          inventory: null, // Set after Inventory constructor below
+          survivalSystem: null, // Not wired yet
+          worldSeed: currentWorld.seed,
+          onMobDeath: (mob, drops) => {
+            _log(`[Cuubz] Mob died: ${mob.mobType}, drops:`, drops);
+          },
+        };
+        mobIntegration.init(deps);
+        _log('[Cuubz] Mob system initialized');
+      } catch (e) {
+        console.warn('[Cuubz] Failed to init mob system:', e.message);
+      }
 
-          // ─── Initialize First-Person Hand ──────────────
-          let firstPersonHand = null;
-          if (typeof FirstPersonHand !== 'undefined') {
-            firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas });
-          }
-          gameState.firstPersonHand = firstPersonHand;
+      // Set up camera at player eye level — looking slightly downward to see terrain
+      const initCamPos = new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z);
+      renderer.updateCamera(initCamPos, 0, -Math.PI / 8);
 
-          // ─── Initialize Multiplayer Player Sync ─────────
-          let playerSync = null;
-          if (typeof PlayerSyncManager !== 'undefined' && sessionManager && sessionManager.client) {
-            playerSync = new PlayerSyncManager();
-            playerSync.setGameMode(mode || 'survival');
+      // ══ Step 10 — first-person hand ═══════════════════════════════════════════════════════
 
-            // Wire session events to player sync
-            // Handle WELCOME — it includes existing players already in the session
-            sessionManager.client.onGame('WELCOME', (data) => {
-              console.log('[JOIN] WELCOME received:', JSON.stringify(data).substring(0, 300));
-              if (data.players && Array.isArray(data.players) && data.players.length > 0) {
-                for (const p of data.players) {
-                  // Skip self
-                  if (p.playerId === sessionManager.client.playerId) continue;
-                  const state = playerSync.addPlayer(p.playerId, {
-                    name: p.name || 'Player',
-                    color: p.color || '#888888',
-                    position: p.position,
-                  });
-                  if (state.mesh && renderer.scene) renderer.scene.add(state.mesh);
-                  if (state.nameTag && renderer.scene) renderer.scene.add(state.nameTag);
-                  if (state.healthBar && renderer.scene) renderer.scene.add(state.healthBar);
-                  _log(`[Cuubz] Existing player from WELCOME: ${p.playerId} (${p.name})`);
-                }
-              }
-            });
+      // ─── Initialize First-Person Hand ──────────────
+      let firstPersonHand = null;
+      if (typeof FirstPersonHand !== 'undefined') {
+        firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas });
+      }
+      gameState.firstPersonHand = firstPersonHand;
 
-            sessionManager.client.onGame('PLAYER_JOINED', (data) => {
-              const state = playerSync.addPlayer(data.playerId, {
-                name: data.character?.name || 'Player',
-                color: data.character?.color || '#888888',
-                position: data.position,
+      // ══ Step 11 — multiplayer (host or client) ════════════════════════════════════════════
+      // PlayerSync, PlayerListHUD, ChunkStreamer, and the CHUNK_DATA / TIME_SYNC handlers.
+      // Every one is a no-op without a sessionManager.client, which is why solo skips it all.
+
+      // ─── Initialize Multiplayer Player Sync ─────────
+      let playerSync = null;
+      if (typeof PlayerSyncManager !== 'undefined' && sessionManager && sessionManager.client) {
+        playerSync = new PlayerSyncManager();
+        playerSync.setGameMode(mode || 'survival');
+
+        // Wire session events to player sync
+        // Handle WELCOME — it includes existing players already in the session
+        sessionManager.client.onGame('WELCOME', (data) => {
+          console.log('[JOIN] WELCOME received:', JSON.stringify(data).substring(0, 300));
+          if (data.players && Array.isArray(data.players) && data.players.length > 0) {
+            for (const p of data.players) {
+              // Skip self
+              if (p.playerId === sessionManager.client.playerId) continue;
+              const state = playerSync.addPlayer(p.playerId, {
+                name: p.name || 'Player',
+                color: p.color || '#888888',
+                position: p.position,
               });
               if (state.mesh && renderer.scene) renderer.scene.add(state.mesh);
               if (state.nameTag && renderer.scene) renderer.scene.add(state.nameTag);
               if (state.healthBar && renderer.scene) renderer.scene.add(state.healthBar);
-              _log(`[Cuubz] Remote player joined: ${data.playerId} (${state.name})`);
-            });
-
-            sessionManager.client.onGame('PLAYER_MOVE', (data) => {
-              playerSync.processServerUpdate(data.playerId, {
-                position: data.position,
-                yaw: data.rotation?.yaw,
-                pitch: data.rotation?.pitch,
-              });
-            });
-
-            sessionManager.client.onGame('PLAYER_LEFT', (data) => {
-              const removed = playerSync.removePlayer(data.playerId);
-              _log(`[Cuubz] Remote player left: ${data.playerId}`);
-            });
-
-            _log('[Cuubz] PlayerSyncManager initialized for multiplayer');
+              _log(`[Cuubz] Existing player from WELCOME: ${p.playerId} (${p.name})`);
+            }
           }
-          gameState.playerSync = playerSync;
+        });
 
-          // ─── Initialize PlayerListHUD (connected to live player data) ───
-          let playerListHUD = null;
-          if (typeof PlayerListHUD !== 'undefined' && sessionManager && sessionManager.client) {
-            const overlayEl = document.getElementById('player-list-overlay');
-            const countEl = document.getElementById('player-count');
-            const itemsEl = document.getElementById('player-list-items');
+        sessionManager.client.onGame('PLAYER_JOINED', (data) => {
+          const state = playerSync.addPlayer(data.playerId, {
+            name: data.character?.name || 'Player',
+            color: data.character?.color || '#888888',
+            position: data.position,
+          });
+          if (state.mesh && renderer.scene) renderer.scene.add(state.mesh);
+          if (state.nameTag && renderer.scene) renderer.scene.add(state.nameTag);
+          if (state.healthBar && renderer.scene) renderer.scene.add(state.healthBar);
+          _log(`[Cuubz] Remote player joined: ${data.playerId} (${state.name})`);
+        });
 
-            if (overlayEl && itemsEl) {
-              playerListHUD = new PlayerListHUD({ overlay: overlayEl, count: countEl, items: itemsEl });
+        sessionManager.client.onGame('PLAYER_MOVE', (data) => {
+          playerSync.processServerUpdate(data.playerId, {
+            position: data.position,
+            yaw: data.rotation?.yaw,
+            pitch: data.rotation?.pitch,
+          });
+        });
 
-              // Build initial player list: include local player + any remote players
-              const localChar = characterManager ? characterManager.getSelectedCharacter() : null;
-              const initialPlayers = [];
-              if (localChar) {
-                initialPlayers.push({
-                  id: 'local',
-                  name: localChar.name,
-                  color: localChar.color || '#4CAF50',
+        sessionManager.client.onGame('PLAYER_LEFT', (data) => {
+          const removed = playerSync.removePlayer(data.playerId);
+          _log(`[Cuubz] Remote player left: ${data.playerId}`);
+        });
+
+        _log('[Cuubz] PlayerSyncManager initialized for multiplayer');
+      }
+      gameState.playerSync = playerSync;
+
+      // ─── Initialize PlayerListHUD (connected to live player data) ───
+      let playerListHUD = null;
+      if (typeof PlayerListHUD !== 'undefined' && sessionManager && sessionManager.client) {
+        const overlayEl = document.getElementById('player-list-overlay');
+        const countEl = document.getElementById('player-count');
+        const itemsEl = document.getElementById('player-list-items');
+
+        if (overlayEl && itemsEl) {
+          playerListHUD = new PlayerListHUD({ overlay: overlayEl, count: countEl, items: itemsEl });
+
+          // Build initial player list: include local player + any remote players
+          const localChar = characterManager ? characterManager.getSelectedCharacter() : null;
+          const initialPlayers = [];
+          if (localChar) {
+            initialPlayers.push({
+              id: 'local',
+              name: localChar.name,
+              color: localChar.color || '#4CAF50',
+              health: 100,
+            });
+          }
+          playerListHUD.updatePlayers(initialPlayers);
+
+          // Wire WELCOME — add existing players already in the session
+          sessionManager.client.onGame('WELCOME', (data) => {
+            if (playerListHUD && data.players && Array.isArray(data.players)) {
+              for (const p of data.players) {
+                // Skip self
+                if (p.playerId === sessionManager.client.playerId) continue;
+                playerListHUD.addPlayer({
+                  id: p.playerId,
+                  name: p.name || 'Player',
+                  color: p.color || '#888888',
                   health: 100,
+                  position: p.position,
                 });
               }
-              playerListHUD.updatePlayers(initialPlayers);
-
-              // Wire WELCOME — add existing players already in the session
-              sessionManager.client.onGame('WELCOME', (data) => {
-                if (playerListHUD && data.players && Array.isArray(data.players)) {
-                  for (const p of data.players) {
-                    // Skip self
-                    if (p.playerId === sessionManager.client.playerId) continue;
-                    playerListHUD.addPlayer({
-                      id: p.playerId,
-                      name: p.name || 'Player',
-                      color: p.color || '#888888',
-                      health: 100,
-                      position: p.position,
-                    });
-                  }
-                }
-              });
-
-              // Wire PLAYER_JOINED to add to HUD
-              sessionManager.client.onGame('PLAYER_JOINED', (data) => {
-                if (playerListHUD) {
-                  playerListHUD.addPlayer({
-                    id: data.playerId,
-                    name: data.character?.name || 'Player',
-                    color: data.character?.color || '#888888',
-                    health: data.health !== undefined ? data.health : 100,
-                  });
-                }
-              });
-
-              // Wire PLAYER_LEFT to remove from HUD
-              sessionManager.client.onGame('PLAYER_LEFT', (data) => {
-                if (playerListHUD) {
-                  playerListHUD.removePlayer(data.playerId);
-                }
-              });
-
-              // Wire PLAYER_MOVE to update health + position in HUD
-              sessionManager.client.onGame('PLAYER_MOVE', (data) => {
-                if (playerListHUD && data.playerId) {
-                  const update = { id: data.playerId };
-                  if (data.health !== undefined) update.health = data.health;
-                  if (data.position) update.position = data.position;
-                  playerListHUD.addPlayer(update);
-                }
-              });
-
-              _log('[Cuubz] PlayerListHUD initialized and wired to live player data');
             }
-          }
-          gameState.playerListHUD = playerListHUD;
-
-          // ─── Initialize ChunkStreamer (host-side proactive chunk streaming) ───
-          let chunkStreamer = null;
-          if (typeof ChunkStreamer !== 'undefined' && sessionManager && sessionManager.hostingSessionId) {
-            chunkStreamer = new ChunkStreamer({
-              chunkGrid: chunkManager,
-              options: {
-                loadRadius: 6,
-                unloadRadius: 8,
-                streamInterval: 500,  // Tick every 500ms for faster streaming
-                maxChunksPerTick: 32, // Stream up to 32 chunks per tick
-                compressData: true,
-              },
-            });
-
-            // Register host player position — use actual playerId so server can route messages
-            const hostPlayerId = sessionManager.client.playerId || 'host';
-            chunkStreamer.updatePlayerPosition(hostPlayerId, { x: player.position.x, y: player.position.y, z: player.position.z });
-
-            // Update remote player positions from PlayerSyncManager
-            // This is done in the render loop
-
-            // When chunks are streamed, send them via the game session relay
-            // Don't include targetPlayers — let server broadcast to all non-host players
-            chunkStreamer.onChunkStreamed = (payload) => {
-              if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
-                const cx = payload.chunkX;
-                const cz = payload.chunkZ;
-
-                // Extract 1-deep edge strips from neighbor chunks for correct
-                // water face culling at chunk boundaries on the client side.
-                // Each edge strip is 16 × 256 = 4096 bytes, RLE-compressed.
-                const neighborEdges = {};
-                const edgeConfigs = [
-                  { dir: 'positiveX', dx: 1, dz: 0, edgeX: 0, edgeZ: null, stripIdx: (z, y) => z * 256 + y },
-                  { dir: 'negativeX', dx: -1, dz: 0, edgeX: 15, edgeZ: null, stripIdx: (z, y) => z * 256 + y },
-                  { dir: 'positiveZ', dx: 0, dz: 1, edgeX: null, edgeZ: 0, stripIdx: (x, y) => x * 256 + y },
-                  { dir: 'negativeZ', dx: 0, dz: -1, edgeX: null, edgeZ: 15, stripIdx: (x, y) => x * 256 + y },
-                ];
-
-                for (const ec of edgeConfigs) {
-                  const neighbor = chunkManager.getChunkData(cx + ec.dx, cz + ec.dz);
-                  if (neighbor && neighbor.blocks) {
-                    const strip = new Uint8Array(16 * 256);
-                    if (ec.edgeX !== null) {
-                      for (let z = 0; z < 16; z++) {
-                        for (let y = 0; y < 256; y++) {
-                          strip[ec.stripIdx(z, y)] = neighbor.blocks[ec.edgeX + z * 16 + y * 256];
-                        }
-                      }
-                    } else {
-                      for (let x = 0; x < 16; x++) {
-                        for (let y = 0; y < 256; y++) {
-                          strip[ec.stripIdx(x, y)] = neighbor.blocks[x + ec.edgeZ * 16 + y * 256];
-                        }
-                      }
-                    }
-                    // Convert to regular Array for JSON serialization (WebSocket uses JSON.stringify)
-                    neighborEdges[ec.dir] = Array.from(ChunkCompressor.compress(strip).data);
-                  }
-                }
-
-                // Get humidityMap from the chunk — needed for vertex color tinting on clients
-                const chunkData = chunkManager.getChunkData(cx, cz);
-                let humidityMap;
-                if (chunkData && chunkData.humidityMap) {
-                  humidityMap = Array.from(chunkData.humidityMap);
-                } else if (typeof computeHumidityMap === 'function') {
-                  // Fallback: compute humidityMap for the chunk (e.g., if loaded from cache)
-                  humidityMap = Array.from(computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams));
-                } else {
-                  humidityMap = undefined;
-                }
-
-                const msg = {
-                  type: 'CHUNK_DATA',
-                  chunkX: cx,
-                  chunkZ: cz,
-                  data: payload.data,
-                  compressed: payload.compressed,
-                  dirty: payload.dirty,
-                  neighborEdges: Object.keys(neighborEdges).length > 0 ? neighborEdges : undefined,
-                  humidityMap: humidityMap,
-                  // Only send to players who need this chunk (prevents unnecessary re-streaming
-                  // to players who already have it, which was causing excessive mesh rebuilds)
-                  targetPlayers: payload.players,
-                };
-                sessionManager.client._gameSessionConn?.send(msg);
-              }
-            };
-
-            chunkStreamer.onChunkLoaded = (info) => {
-              _log(`[ChunkStreamer] Chunk loaded: ${info.key}`);
-            };
-
-            chunkStreamer.start();
-            _log('[Cuubz] ChunkStreamer initialized for host-side proactive chunk streaming');
-          }
-          gameState.chunkStreamer = chunkStreamer;
-
-          // ─── Client-side CHUNK_DATA handling (receive streamed chunks from host) ───
-          if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
-            sessionManager.client.onGame('CHUNK_DATA', (data) => {
-              try {
-                if (!data || data.chunkX === undefined || data.chunkZ === undefined) return;
-                if (!data.data) return;
-                // Must be a valid Array (JSON-deserialized from WebSocket)
-                if (!Array.isArray(data.data)) return;
-
-                const cx = data.chunkX;
-                const cz = data.chunkZ;
-                const key = ChunkManager.key(cx, cz);
-
-                // Decompress if needed — data arrives as a regular Array (JSON serialized via WebSocket)
-                const rawArr = data.data;
-                const blockData = data.compressed
-                  ? ChunkCompressor.decompress({ method: 'rle', data: new Uint8Array(rawArr), originalLength: 16 * 16 * 256 })
-                  : new Uint8Array(rawArr);
-
-                if (!blockData || blockData.length === 0) return;
-
-                // If chunk is already loaded, apply as dirty update (only if data changed)
-                const existing = chunkManager.memoryCache.get(key);
-                if (existing) {
-                  // Compare blocks to avoid unnecessary mesh rebuilds — only update if changed
-                  let changed = false;
-                  for (let i = 0; i < Math.min(blockData.length, existing.blocks.length); i++) {
-                    if (existing.blocks[i] !== blockData[i]) {
-                      existing.blocks[i] = blockData[i];
-                      changed = true;
-                    }
-                  }
-                  if (changed) {
-                    existing.dirty = true;
-                    existing.changed = true; // Trigger mesh rebuild only if data changed
-                    _log(`[Cuubz] Applied streamed chunk update: ${key} (${blockData.length} blocks)`);
-                  }
-                  // Update humidityMap if provided (even if block data didn't change)
-                  if (data.humidityMap) {
-                    existing.humidityMap = new Float32Array(data.humidityMap);
-                  } else if (typeof computeHumidityMap === 'function' && !existing.humidityMap) {
-                    existing.humidityMap = computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams);
-                  }
-                } else {
-                  // Chunk not loaded — create it from host data
-                  const newChunk = new Chunk(cx, cz);
-                  for (let i = 0; i < Math.min(blockData.length, newChunk.blocks.length); i++) {
-                    newChunk.blocks[i] = blockData[i];
-                  }
-                  newChunk.dirty = false; // Host data is authoritative
-                  newChunk.changed = true; // Trigger mesh rebuild
-
-                  // Store humidity map for vertex color tinting
-                  if (data.humidityMap) {
-                    newChunk.humidityMap = new Float32Array(data.humidityMap);
-                  } else if (typeof computeHumidityMap === 'function') {
-                    newChunk.humidityMap = computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams);
-                  }
-
-                  // Store virtual neighbor edge strips (if provided by host)
-                  // These prevent false water side faces at chunk boundaries
-                  // Edge data arrives as regular Arrays (JSON serialized)
-                  if (data.neighborEdges) {
-                    const edgeDirs = ['positiveX', 'negativeX', 'positiveZ', 'negativeZ'];
-                    for (const dir of edgeDirs) {
-                      if (data.neighborEdges[dir]) {
-                        const edgeArr = Array.isArray(data.neighborEdges[dir])
-                          ? data.neighborEdges[dir]
-                          : Array.from(data.neighborEdges[dir]);
-                        const decompressed = ChunkCompressor.decompress({
-                          method: 'rle',
-                          data: new Uint8Array(edgeArr),
-                          originalLength: 16 * 256
-                        });
-                        newChunk.neighborEdges[dir] = decompressed;
-                      }
-                    }
-                  }
-
-                  chunkManager.memoryCache.set(key, newChunk);
-                  _log(`[Cuubz] Received streamed chunk: ${key} (${blockData.length} blocks)`);
-                }
-              } catch (err) {
-                console.error('[Cuubz] Error processing CHUNK_DATA:', err.message);
-              }
-            });
-            _log('[Cuubz] CHUNK_DATA handler registered for receiving streamed chunks');
-          }
-
-          // ─── Client-side TIME_SYNC handling (receive time-of-day from host) ───
-          if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
-            sessionManager.client.onGame('TIME_SYNC', (data) => {
-              try {
-                if (!data || data.timeOfDay === undefined) return;
-                if (skybox) {
-                  skybox.timeOfDay = ((data.timeOfDay % 24) + 24) % 24;
-                  skybox.timePaused = !!data.timePaused;
-                }
-              } catch (err) {
-                console.error('[Cuubz] Error processing TIME_SYNC:', err.message);
-              }
-            });
-            _log('[Cuubz] TIME_SYNC handler registered for time-of-day sync from host');
-          }
-
-          // Initialize Block Interaction system
-          const blockInteraction = gameState.blockInteraction = new BlockInteraction({
-            renderer: renderer,
-            chunkManager: chunkManager,
-            mouse: mouse,
-            player: player,
-            touch: touch, // Mobile break/place support
           });
 
-          // ─── Initialize Inventory System ────────────────
-          const inventory = gameState.inventory = new Inventory();
-          player.inventory = inventory;
-
-          // Wire inventory into mob system for auto-loot
-          if (mobIntegration && mobIntegration.getManager()) {
-            mobIntegration.getManager().setPlayerInventory(inventory);
-          }
-
-          // ─── Initialize Crafting System ─────────────────
-          const crafting = gameState.crafting = new CraftingSystem(inventory);
-
-          // ─── Multiplayer: Inventory Sync ────────────────
-          let inventorySync = null;
-          if (typeof InventorySync !== 'undefined' && sessionManager && sessionManager.client) {
-            inventorySync = new InventorySync(inventory, { playerId: sessionManager.client.playerId });
-
-            // On join: send full inventory to host
-            if (sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
-              const joinPayload = inventorySync.createJoinPayload();
-              sessionManager.client.sendInventory(joinPayload);
-              _log('[Cuubz] Sent initial inventory to host on join');
-            }
-
-            // Start periodic diff sync (5s interval)
-            inventorySync.startPeriodicSync((payload) => {
-              if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
-                sessionManager.client.sendInventory(payload);
-              }
-            });
-
-            // Handle incoming inventory sync from host
-            sessionManager.client.onGame('INVENTORY_SYNC', (data) => {
-              if (inventorySync && data.playerId && data.inventory) {
-                // Only apply host's authoritative sync for our own inventory
-                if (data.playerId === sessionManager.client.playerId) {
-                  inventorySync.applyRemoteSync(data.playerId, data.inventory);
-                }
-              }
-            });
-
-            _log('[Cuubz] InventorySync initialized');
-          }
-
-          // Load saved inventory from character data
-          const selectedChar = characterManager ? characterManager.getSelectedCharacter() : null;
-          if (selectedChar) {
-            try {
-              const savedInv = Inventory.deserialize({
-                rows: 4, cols: 9,
-                selectedHotbarSlot: 0,
-                slots: selectedChar.inventory || [],
-                equipment: selectedChar.equipment || {},
+          // Wire PLAYER_JOINED to add to HUD
+          sessionManager.client.onGame('PLAYER_JOINED', (data) => {
+            if (playerListHUD) {
+              playerListHUD.addPlayer({
+                id: data.playerId,
+                name: data.character?.name || 'Player',
+                color: data.character?.color || '#888888',
+                health: data.health !== undefined ? data.health : 100,
               });
-              // Copy saved slots into our inventory
-              for (let i = 0; i < savedInv.totalSlots; i++) {
-                inventory.slots[i] = savedInv.slots[i];
-              }
-              // Copy saved equipment
-              if (typeof EQUIPMENT_SLOT_ORDER !== 'undefined') {
-                for (const slot of EQUIPMENT_SLOT_ORDER) {
-                  if (savedInv.equipment[slot]) {
-                    inventory.equipment[slot] = { ...savedInv.equipment[slot] };
-                  }
-                }
-              }
-              _log('[Cuubz] Loaded saved inventory with ' + savedInv.getItems().length + ' items' +
-                (Object.keys(savedInv.equipment || {}).length > 0 ? ' and equipment' : ''));
-            } catch(e) {
-              _log('[Cuubz] Failed to load saved inventory: ' + e.message);
             }
+          });
 
-            // Initialize HUD armor indicator from loaded equipment
-            const armorStats = inventory.getEquipmentStats();
-            const armorIndicatorHud = document.getElementById('armor-indicator');
-            const hudDefense = document.getElementById('hud-defense');
-            if (armorIndicatorHud && hudDefense) {
-              if (armorStats.totalArmor > 0) {
-                hudDefense.textContent = armorStats.totalArmor;
-                armorIndicatorHud.classList.remove('hidden');
-              }
+          // Wire PLAYER_LEFT to remove from HUD
+          sessionManager.client.onGame('PLAYER_LEFT', (data) => {
+            if (playerListHUD) {
+              playerListHUD.removePlayer(data.playerId);
             }
-          }
+          });
 
-          // Wire inventory to block interaction (for block drops)
-          blockInteraction.inventory = inventory;
+          // Wire PLAYER_MOVE to update health + position in HUD
+          sessionManager.client.onGame('PLAYER_MOVE', (data) => {
+            if (playerListHUD && data.playerId) {
+              const update = { id: data.playerId };
+              if (data.health !== undefined) update.health = data.health;
+              if (data.position) update.position = data.position;
+              playerListHUD.addPlayer(update);
+            }
+          });
 
-          // Wire block broken callback to spawn dropped items
-          blockInteraction.onBlockBroken = (dropType, worldPos) => {
-            droppedItems.addDrop(dropType, worldPos);
-          };
+          _log('[Cuubz] PlayerListHUD initialized and wired to live player data');
+        }
+      }
+      gameState.playerListHUD = playerListHUD;
 
-          // Wire break-started callback to trigger first-person hand swing
-          blockInteraction.onBreakStarted = () => {
-            if (firstPersonHand) firstPersonHand.swing();
-          };
+      // ─── Initialize ChunkStreamer (host-side proactive chunk streaming) ───
+      let chunkStreamer = null;
+      if (typeof ChunkStreamer !== 'undefined' && sessionManager && sessionManager.hostingSessionId) {
+        chunkStreamer = new ChunkStreamer({
+          chunkGrid: chunkManager,
+          options: {
+            loadRadius: 6,
+            unloadRadius: 8,
+            streamInterval: 500,  // Tick every 500ms for faster streaming
+            maxChunksPerTick: 32, // Stream up to 32 chunks per tick
+            compressData: true,
+          },
+        });
 
-          // ─── Dropped Items System ──────────────────────
-          const droppedItems = gameState.droppedItems = {
-            drops: [],
-            scene: renderer.scene,
+        // Register host player position — use actual playerId so server can route messages
+        const hostPlayerId = sessionManager.client.playerId || 'host';
+        chunkStreamer.updatePlayerPosition(hostPlayerId, { x: player.position.x, y: player.position.y, z: player.position.z });
 
-            addDrop(typeId, worldPos) {
-              const color = getBlockColor(typeId);
-              const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-              const mat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.85 });
-              const mesh = new THREE.Mesh(geo, mat);
-              mesh.position.set(worldPos.x + 0.5, worldPos.y + 0.5, worldPos.z + 0.5);
-              this.scene.add(mesh);
+        // Update remote player positions from PlayerSyncManager
+        // This is done in the render loop
 
-              this.drops.push({
-                mesh,
-                typeId,
-                velocity: {
-                  x: (Math.random() - 0.5) * 2,
-                  y: 3 + Math.random() * 2,
-                  z: (Math.random() - 0.5) * 2,
-                },
-                bobPhase: Math.random() * Math.PI * 2,
-                landed: false,
-                landedY: worldPos.y + 0.5,
-                lifetime: 120, // seconds before disappearing
-              });
-            },
+        // When chunks are streamed, send them via the game session relay
+        // Don't include targetPlayers — let server broadcast to all non-host players
+        chunkStreamer.onChunkStreamed = (payload) => {
+          if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
+            const cx = payload.chunkX;
+            const cz = payload.chunkZ;
 
-            update(delta, playerPos, inventory) {
-              for (let i = this.drops.length - 1; i >= 0; i--) {
-                const drop = this.drops[i];
+            // Extract 1-deep edge strips from neighbor chunks for correct
+            // water face culling at chunk boundaries on the client side.
+            // Each edge strip is 16 × 256 = 4096 bytes, RLE-compressed.
+            const neighborEdges = {};
+            const edgeConfigs = [
+              { dir: 'positiveX', dx: 1, dz: 0, edgeX: 0, edgeZ: null, stripIdx: (z, y) => z * 256 + y },
+              { dir: 'negativeX', dx: -1, dz: 0, edgeX: 15, edgeZ: null, stripIdx: (z, y) => z * 256 + y },
+              { dir: 'positiveZ', dx: 0, dz: 1, edgeX: null, edgeZ: 0, stripIdx: (x, y) => x * 256 + y },
+              { dir: 'negativeZ', dx: 0, dz: -1, edgeX: null, edgeZ: 15, stripIdx: (x, y) => x * 256 + y },
+            ];
 
-                // Gravity when not landed
-                if (!drop.landed) {
-                  drop.velocity.y -= 15 * delta;
-                  drop.mesh.position.x += drop.velocity.x * delta;
-                  drop.mesh.position.y += drop.velocity.y * delta;
-                  drop.mesh.position.z += drop.velocity.z * delta;
-                  drop.mesh.rotation.y += delta * 3;
-
-                  // Check if landed
-                  if (drop.mesh.position.y <= drop.landedY) {
-                    drop.mesh.position.y = drop.landedY;
-                    drop.landed = true;
-                    drop.velocity.x = 0;
-                    drop.velocity.y = 0;
-                    drop.velocity.z = 0;
+            for (const ec of edgeConfigs) {
+              const neighbor = chunkManager.getChunkData(cx + ec.dx, cz + ec.dz);
+              if (neighbor && neighbor.blocks) {
+                const strip = new Uint8Array(16 * 256);
+                if (ec.edgeX !== null) {
+                  for (let z = 0; z < 16; z++) {
+                    for (let y = 0; y < 256; y++) {
+                      strip[ec.stripIdx(z, y)] = neighbor.blocks[ec.edgeX + z * 16 + y * 256];
+                    }
                   }
                 } else {
-                  // Bob animation when landed
-                  drop.bobPhase += delta * 3;
-                  drop.mesh.position.y = drop.landedY + Math.sin(drop.bobPhase) * 0.1;
-                  drop.mesh.rotation.y += delta * 1.5;
-                }
-
-                // Pickup check — player within 3 blocks
-                const dx = drop.mesh.position.x - playerPos.x;
-                const dy = drop.mesh.position.y - playerPos.y;
-                const dz = drop.mesh.position.z - playerPos.z;
-                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-                if (dist < 3) {
-                  // Pickup!
-                  const result = inventory.addItem(drop.typeId, 1);
-                  if (result.added > 0) {
-                    this.scene.remove(drop.mesh);
-                    drop.mesh.geometry.dispose();
-                    drop.mesh.material.dispose();
-                    this.drops.splice(i, 1);
-                    _log('[Cuubz] Picked up item: ' + drop.typeId);
+                  for (let x = 0; x < 16; x++) {
+                    for (let y = 0; y < 256; y++) {
+                      strip[ec.stripIdx(x, y)] = neighbor.blocks[x + ec.edgeZ * 16 + y * 256];
+                    }
                   }
-                  continue;
                 }
+                // Convert to regular Array for JSON serialization (WebSocket uses JSON.stringify)
+                neighborEdges[ec.dir] = Array.from(ChunkCompressor.compress(strip).data);
+              }
+            }
 
-                // Lifetime decay
-                drop.lifetime -= delta;
-                if (drop.lifetime <= 0) {
-                  this.scene.remove(drop.mesh);
-                  drop.mesh.geometry.dispose();
-                  drop.mesh.material.dispose();
-                  this.drops.splice(i, 1);
+            // Get humidityMap from the chunk — needed for vertex color tinting on clients
+            const chunkData = chunkManager.getChunkData(cx, cz);
+            let humidityMap;
+            if (chunkData && chunkData.humidityMap) {
+              humidityMap = Array.from(chunkData.humidityMap);
+            } else if (typeof computeHumidityMap === 'function') {
+              // Fallback: compute humidityMap for the chunk (e.g., if loaded from cache)
+              humidityMap = Array.from(computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams));
+            } else {
+              humidityMap = undefined;
+            }
+
+            const msg = {
+              type: 'CHUNK_DATA',
+              chunkX: cx,
+              chunkZ: cz,
+              data: payload.data,
+              compressed: payload.compressed,
+              dirty: payload.dirty,
+              neighborEdges: Object.keys(neighborEdges).length > 0 ? neighborEdges : undefined,
+              humidityMap: humidityMap,
+              // Only send to players who need this chunk (prevents unnecessary re-streaming
+              // to players who already have it, which was causing excessive mesh rebuilds)
+              targetPlayers: payload.players,
+            };
+            sessionManager.client._gameSessionConn?.send(msg);
+          }
+        };
+
+        chunkStreamer.onChunkLoaded = (info) => {
+          _log(`[ChunkStreamer] Chunk loaded: ${info.key}`);
+        };
+
+        chunkStreamer.start();
+        _log('[Cuubz] ChunkStreamer initialized for host-side proactive chunk streaming');
+      }
+      gameState.chunkStreamer = chunkStreamer;
+
+      // ─── Client-side CHUNK_DATA handling (receive streamed chunks from host) ───
+      if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
+        sessionManager.client.onGame('CHUNK_DATA', (data) => {
+          try {
+            if (!data || data.chunkX === undefined || data.chunkZ === undefined) return;
+            if (!data.data) return;
+            // Must be a valid Array (JSON-deserialized from WebSocket)
+            if (!Array.isArray(data.data)) return;
+
+            const cx = data.chunkX;
+            const cz = data.chunkZ;
+            const key = ChunkManager.key(cx, cz);
+
+            // Decompress if needed — data arrives as a regular Array (JSON serialized via WebSocket)
+            const rawArr = data.data;
+            const blockData = data.compressed
+              ? ChunkCompressor.decompress({ method: 'rle', data: new Uint8Array(rawArr), originalLength: 16 * 16 * 256 })
+              : new Uint8Array(rawArr);
+
+            if (!blockData || blockData.length === 0) return;
+
+            // If chunk is already loaded, apply as dirty update (only if data changed)
+            const existing = chunkManager.memoryCache.get(key);
+            if (existing) {
+              // Compare blocks to avoid unnecessary mesh rebuilds — only update if changed
+              let changed = false;
+              for (let i = 0; i < Math.min(blockData.length, existing.blocks.length); i++) {
+                if (existing.blocks[i] !== blockData[i]) {
+                  existing.blocks[i] = blockData[i];
+                  changed = true;
                 }
               }
-            },
+              if (changed) {
+                existing.dirty = true;
+                existing.changed = true; // Trigger mesh rebuild only if data changed
+                _log(`[Cuubz] Applied streamed chunk update: ${key} (${blockData.length} blocks)`);
+              }
+              // Update humidityMap if provided (even if block data didn't change)
+              if (data.humidityMap) {
+                existing.humidityMap = new Float32Array(data.humidityMap);
+              } else if (typeof computeHumidityMap === 'function' && !existing.humidityMap) {
+                existing.humidityMap = computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams);
+              }
+            } else {
+              // Chunk not loaded — create it from host data
+              const newChunk = new Chunk(cx, cz);
+              for (let i = 0; i < Math.min(blockData.length, newChunk.blocks.length); i++) {
+                newChunk.blocks[i] = blockData[i];
+              }
+              newChunk.dirty = false; // Host data is authoritative
+              newChunk.changed = true; // Trigger mesh rebuild
 
-            clear() {
-              for (const drop of this.drops) {
+              // Store humidity map for vertex color tinting
+              if (data.humidityMap) {
+                newChunk.humidityMap = new Float32Array(data.humidityMap);
+              } else if (typeof computeHumidityMap === 'function') {
+                newChunk.humidityMap = computeHumidityMap(chunkManager.worldSeed, cx, cz, chunkManager.genParams);
+              }
+
+              // Store virtual neighbor edge strips (if provided by host)
+              // These prevent false water side faces at chunk boundaries
+              // Edge data arrives as regular Arrays (JSON serialized)
+              if (data.neighborEdges) {
+                const edgeDirs = ['positiveX', 'negativeX', 'positiveZ', 'negativeZ'];
+                for (const dir of edgeDirs) {
+                  if (data.neighborEdges[dir]) {
+                    const edgeArr = Array.isArray(data.neighborEdges[dir])
+                      ? data.neighborEdges[dir]
+                      : Array.from(data.neighborEdges[dir]);
+                    const decompressed = ChunkCompressor.decompress({
+                      method: 'rle',
+                      data: new Uint8Array(edgeArr),
+                      originalLength: 16 * 256
+                    });
+                    newChunk.neighborEdges[dir] = decompressed;
+                  }
+                }
+              }
+
+              chunkManager.memoryCache.set(key, newChunk);
+              _log(`[Cuubz] Received streamed chunk: ${key} (${blockData.length} blocks)`);
+            }
+          } catch (err) {
+            console.error('[Cuubz] Error processing CHUNK_DATA:', err.message);
+          }
+        });
+        _log('[Cuubz] CHUNK_DATA handler registered for receiving streamed chunks');
+      }
+
+      // ─── Client-side TIME_SYNC handling (receive time-of-day from host) ───
+      if (sessionManager && sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
+        sessionManager.client.onGame('TIME_SYNC', (data) => {
+          try {
+            if (!data || data.timeOfDay === undefined) return;
+            if (skybox) {
+              skybox.timeOfDay = ((data.timeOfDay % 24) + 24) % 24;
+              skybox.timePaused = !!data.timePaused;
+            }
+          } catch (err) {
+            console.error('[Cuubz] Error processing TIME_SYNC:', err.message);
+          }
+        });
+        _log('[Cuubz] TIME_SYNC handler registered for time-of-day sync from host');
+      }
+
+      // ══ Step 12 — block interaction ═══════════════════════════════════════════════════════
+
+      // Initialize Block Interaction system
+      const blockInteraction = gameState.blockInteraction = new BlockInteraction({
+        renderer: renderer,
+        chunkManager: chunkManager,
+        mouse: mouse,
+        player: player,
+        touch: touch, // Mobile break/place support
+      });
+
+      // ══ Step 13 — inventory + systems ═════════════════════════════════════════════════════
+      // Inventory, crafting, inventory sync, the saved-inventory load, dropped items, and the
+      // ~700 lines of hotbar / inventory / crafting DOM code that hang off them.
+
+      // ─── Initialize Inventory System ────────────────
+      const inventory = gameState.inventory = new Inventory();
+      player.inventory = inventory;
+
+      // Wire inventory into mob system for auto-loot
+      if (mobIntegration && mobIntegration.getManager()) {
+        mobIntegration.getManager().setPlayerInventory(inventory);
+      }
+
+      // ─── Initialize Crafting System ─────────────────
+      const crafting = gameState.crafting = new CraftingSystem(inventory);
+
+      // ─── Multiplayer: Inventory Sync ────────────────
+      let inventorySync = null;
+      if (typeof InventorySync !== 'undefined' && sessionManager && sessionManager.client) {
+        inventorySync = new InventorySync(inventory, { playerId: sessionManager.client.playerId });
+
+        // On join: send full inventory to host
+        if (sessionManager.currentSessionId && !sessionManager.hostingSessionId) {
+          const joinPayload = inventorySync.createJoinPayload();
+          sessionManager.client.sendInventory(joinPayload);
+          _log('[Cuubz] Sent initial inventory to host on join');
+        }
+
+        // Start periodic diff sync (5s interval)
+        inventorySync.startPeriodicSync((payload) => {
+          if (sessionManager.client && sessionManager.client.isGameSessionConnected) {
+            sessionManager.client.sendInventory(payload);
+          }
+        });
+
+        // Handle incoming inventory sync from host
+        sessionManager.client.onGame('INVENTORY_SYNC', (data) => {
+          if (inventorySync && data.playerId && data.inventory) {
+            // Only apply host's authoritative sync for our own inventory
+            if (data.playerId === sessionManager.client.playerId) {
+              inventorySync.applyRemoteSync(data.playerId, data.inventory);
+            }
+          }
+        });
+
+        _log('[Cuubz] InventorySync initialized');
+      }
+
+      // Load saved inventory from character data
+      const selectedChar = characterManager ? characterManager.getSelectedCharacter() : null;
+      if (selectedChar) {
+        try {
+          const savedInv = Inventory.deserialize({
+            rows: 4, cols: 9,
+            selectedHotbarSlot: 0,
+            slots: selectedChar.inventory || [],
+            equipment: selectedChar.equipment || {},
+          });
+          // Copy saved slots into our inventory
+          for (let i = 0; i < savedInv.totalSlots; i++) {
+            inventory.slots[i] = savedInv.slots[i];
+          }
+          // Copy saved equipment
+          if (typeof EQUIPMENT_SLOT_ORDER !== 'undefined') {
+            for (const slot of EQUIPMENT_SLOT_ORDER) {
+              if (savedInv.equipment[slot]) {
+                inventory.equipment[slot] = { ...savedInv.equipment[slot] };
+              }
+            }
+          }
+          _log('[Cuubz] Loaded saved inventory with ' + savedInv.getItems().length + ' items' +
+            (Object.keys(savedInv.equipment || {}).length > 0 ? ' and equipment' : ''));
+        } catch(e) {
+          _log('[Cuubz] Failed to load saved inventory: ' + e.message);
+        }
+
+        // Initialize HUD armor indicator from loaded equipment
+        const armorStats = inventory.getEquipmentStats();
+        const armorIndicatorHud = document.getElementById('armor-indicator');
+        const hudDefense = document.getElementById('hud-defense');
+        if (armorIndicatorHud && hudDefense) {
+          if (armorStats.totalArmor > 0) {
+            hudDefense.textContent = armorStats.totalArmor;
+            armorIndicatorHud.classList.remove('hidden');
+          }
+        }
+      }
+
+      // Wire inventory to block interaction (for block drops)
+      blockInteraction.inventory = inventory;
+
+      // Wire block broken callback to spawn dropped items
+      blockInteraction.onBlockBroken = (dropType, worldPos) => {
+        droppedItems.addDrop(dropType, worldPos);
+      };
+
+      // Wire break-started callback to trigger first-person hand swing
+      blockInteraction.onBreakStarted = () => {
+        if (firstPersonHand) firstPersonHand.swing();
+      };
+
+      // ─── Dropped Items System ──────────────────────
+      const droppedItems = gameState.droppedItems = {
+        drops: [],
+        scene: renderer.scene,
+
+        addDrop(typeId, worldPos) {
+          const color = getBlockColor(typeId);
+          const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+          const mat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.85 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.position.set(worldPos.x + 0.5, worldPos.y + 0.5, worldPos.z + 0.5);
+          this.scene.add(mesh);
+
+          this.drops.push({
+            mesh,
+            typeId,
+            velocity: {
+              x: (Math.random() - 0.5) * 2,
+              y: 3 + Math.random() * 2,
+              z: (Math.random() - 0.5) * 2,
+            },
+            bobPhase: Math.random() * Math.PI * 2,
+            landed: false,
+            landedY: worldPos.y + 0.5,
+            lifetime: 120, // seconds before disappearing
+          });
+        },
+
+        update(delta, playerPos, inventory) {
+          for (let i = this.drops.length - 1; i >= 0; i--) {
+            const drop = this.drops[i];
+
+            // Gravity when not landed
+            if (!drop.landed) {
+              drop.velocity.y -= 15 * delta;
+              drop.mesh.position.x += drop.velocity.x * delta;
+              drop.mesh.position.y += drop.velocity.y * delta;
+              drop.mesh.position.z += drop.velocity.z * delta;
+              drop.mesh.rotation.y += delta * 3;
+
+              // Check if landed
+              if (drop.mesh.position.y <= drop.landedY) {
+                drop.mesh.position.y = drop.landedY;
+                drop.landed = true;
+                drop.velocity.x = 0;
+                drop.velocity.y = 0;
+                drop.velocity.z = 0;
+              }
+            } else {
+              // Bob animation when landed
+              drop.bobPhase += delta * 3;
+              drop.mesh.position.y = drop.landedY + Math.sin(drop.bobPhase) * 0.1;
+              drop.mesh.rotation.y += delta * 1.5;
+            }
+
+            // Pickup check — player within 3 blocks
+            const dx = drop.mesh.position.x - playerPos.x;
+            const dy = drop.mesh.position.y - playerPos.y;
+            const dz = drop.mesh.position.z - playerPos.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist < 3) {
+              // Pickup!
+              const result = inventory.addItem(drop.typeId, 1);
+              if (result.added > 0) {
                 this.scene.remove(drop.mesh);
                 drop.mesh.geometry.dispose();
                 drop.mesh.material.dispose();
+                this.drops.splice(i, 1);
+                _log('[Cuubz] Picked up item: ' + drop.typeId);
               }
-              this.drops = [];
-            },
+              continue;
+            }
+
+            // Lifetime decay
+            drop.lifetime -= delta;
+            if (drop.lifetime <= 0) {
+              this.scene.remove(drop.mesh);
+              drop.mesh.geometry.dispose();
+              drop.mesh.material.dispose();
+              this.drops.splice(i, 1);
+            }
+          }
+        },
+
+        clear() {
+          for (const drop of this.drops) {
+            this.scene.remove(drop.mesh);
+            drop.mesh.geometry.dispose();
+            drop.mesh.material.dispose();
+          }
+          this.drops = [];
+        },
+      };
+
+      // ─── Block Color Helper (fallback for dropped items) ────────────────
+      function getBlockColor(blockType) {
+        const colors = {
+          0: '#888888', 1: '#333333', 2: '#808080', 3: '#8B4513', 4: '#228B22',
+          5: '#F4A460', 6: '#808080', 7: '#4169E1', 8: '#2c2c2c', 9: '#CD853F',
+          10: '#FFD700', 11: '#00CED1', 12: '#888888', 13: '#FFFFFF', 14: '#DCDCDC',
+          15: '#FF4500', 16: '#B22222', 17: '#FF6347', 18: '#87CEEB', 19: '#B0C4DE',
+          32: '#8B4513', 33: '#228B22', 34: '#DEB887', 35: '#1a0a2e', 36: '#36454F',
+          37: '#32CD32', 38: '#9400D3', 39: '#8B0000', 40: '#FF0000', 41: '#FFD700',
+          42: '#FF69B4', 43: '#FFD700', 44: '#FFA500', 45: '#FFFF00',
+        };
+        if (typeof blockType === 'string') {
+          const namedColors = {
+            coal: '#2c2c2c', iron_ore: '#CD853F', gold_ore: '#FFD700',
+            diamond: '#00CED1', corrupt_crystal: '#9400D3',
+            apple: '#FF0000', cooked_meat: '#8B4513', berry: '#8B008B',
+            bread: '#DEB887', golden_apple: '#FFD700',
           };
+          return namedColors[blockType] || '#888888';
+        }
+        return colors[blockType] || '#888888';
+      }
 
-          // ─── Block Color Helper (fallback for dropped items) ────────────────
-          function getBlockColor(blockType) {
-            const colors = {
-              0: '#888888', 1: '#333333', 2: '#808080', 3: '#8B4513', 4: '#228B22',
-              5: '#F4A460', 6: '#808080', 7: '#4169E1', 8: '#2c2c2c', 9: '#CD853F',
-              10: '#FFD700', 11: '#00CED1', 12: '#888888', 13: '#FFFFFF', 14: '#DCDCDC',
-              15: '#FF4500', 16: '#B22222', 17: '#FF6347', 18: '#87CEEB', 19: '#B0C4DE',
-              32: '#8B4513', 33: '#228B22', 34: '#DEB887', 35: '#1a0a2e', 36: '#36454F',
-              37: '#32CD32', 38: '#9400D3', 39: '#8B0000', 40: '#FF0000', 41: '#FFD700',
-              42: '#FF69B4', 43: '#FFD700', 44: '#FFA500', 45: '#FFFF00',
-            };
-            if (typeof blockType === 'string') {
-              const namedColors = {
-                coal: '#2c2c2c', iron_ore: '#CD853F', gold_ore: '#FFD700',
-                diamond: '#00CED1', corrupt_crystal: '#9400D3',
-                apple: '#FF0000', cooked_meat: '#8B4513', berry: '#8B008B',
-                bread: '#DEB887', golden_apple: '#FFD700',
-              };
-              return namedColors[blockType] || '#888888';
+      // ─── Item Texture Rendering ────────────────────────────────────────
+      // Draw an item icon onto a canvas element using the item texture atlas
+      // or the block texture atlas for block items.
+      function renderItemIcon(canvasEl, typeId) {
+        const ctx = canvasEl.getContext('2d');
+        const w = canvasEl.width;
+        const h = canvasEl.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // Try item atlas first (for named items)
+        if (typeof typeId === 'string' && itemAtlas.slotMap[typeId]) {
+          const src = itemAtlas.canvas;
+          const slot = itemAtlas.slotMap[typeId];
+          const srcCell = itemAtlas.tileSize + itemAtlas._gap;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
+        } else if (typeof typeId === 'number' && itemAtlas.slotMap[typeId]) {
+          // Block item registered in item atlas
+          const src = itemAtlas.canvas;
+          const slot = itemAtlas.slotMap[typeId];
+          const srcCell = itemAtlas.tileSize + itemAtlas._gap;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
+        } else if (typeof typeId === 'number' && textureAtlas.tileMap[typeId]) {
+          // Fall back to block atlas — draw the top face texture
+          const blockEntry = textureAtlas.tileMap[typeId];
+          let tile = blockEntry.tiles.top || blockEntry.tiles.side || blockEntry.tiles.all;
+          if (tile) {
+            const src = textureAtlas.diffuseCanvas;
+            const srcCell = textureAtlas.tileSize + textureAtlas._gap;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(src, textureAtlas._gap + tile.col * srcCell, textureAtlas._gap + tile.row * srcCell, textureAtlas.tileSize, textureAtlas.tileSize, 0, 0, w, h);
+          }
+        }
+      }
+
+      // ─── Hotbar UI Update ──────────────────────────────────────────────
+      function updateHotbarUI() {
+        const hotbarSlots = document.querySelectorAll('.hotbar-slot');
+        for (let i = 0; i < 9; i++) {
+          const globalIndex = inventory.hotbarSlotIndex(i);
+          const slot = inventory.getSlot(globalIndex);
+          const el = hotbarSlots[i];
+          if (!el) continue;
+
+          // Update active state
+          el.classList.toggle('active', i === inventory.selectedHotbarSlot);
+
+          // Remove old canvas if present
+          const oldCanvas = el.querySelector('canvas.item-icon');
+          if (oldCanvas) oldCanvas.remove();
+          const oldCount = el.querySelector('.hotbar-item-count');
+          if (oldCount) oldCount.remove();
+
+          if (slot) {
+            const name = inventory.getDisplayName(slot.typeId);
+
+            // Create canvas for item icon
+            const canvas = document.createElement('canvas');
+            canvas.className = 'item-icon';
+            canvas.width = 48;
+            canvas.height = 48;
+            renderItemIcon(canvas, slot.typeId);
+            el.appendChild(canvas);
+
+            // Show count badge if > 1
+            if (slot.count > 1) {
+              const countEl = document.createElement('span');
+              countEl.className = 'hotbar-item-count';
+              countEl.textContent = slot.count;
+              el.appendChild(countEl);
             }
-            return colors[blockType] || '#888888';
+
+            el.title = name + (slot.count > 1 ? ' (x' + slot.count + ')' : '');
+          } else {
+            el.innerHTML = '';
+            el.title = '';
+          }
+        }
+      }
+
+      // The render loop drives the hotbar every 5 frames and the inventory screen on
+      // mobile tap, and both live at main.js top level now — so they reach these two
+      // through `state` rather than through the closure. PR 15 moves them to
+      // src/ui/hud/Hotbar.js and src/ui/overlays/InventoryScreen.js (§13).
+      gameState.updateHotbarUI = updateHotbarUI;
+
+      // Wire inventory callbacks for hotbar updates
+      inventory.onSlotChange = (index, slot) => {
+        updateHotbarUI();
+        if (gameState.inventoryOpen) renderInventoryCraftingUI();
+      };
+      inventory.onSelectionChange = () => {
+        updateHotbarUI();
+        // Update first-person hand to show the selected item
+        if (firstPersonHand) {
+          const item = inventory.getSelectedItem();
+          firstPersonHand.setItem(item ? item.typeId : null);
+        }
+      };
+
+      // Initial hotbar render
+      updateHotbarUI();
+
+      // Set first-person hand to the initially selected item
+      if (firstPersonHand) {
+        const item = inventory.getSelectedItem();
+        firstPersonHand.setItem(item ? item.typeId : null);
+      }
+
+      // ─── Inventory + Crafting Screen ────────────────
+      //
+      // BUGS.md D-31: `inventoryOpen` was a `let` here. It is the one hoisted value
+      // that genuinely mutates at runtime, so it gets no local alias — `gameState`
+      // is its only home. That is what lets the Escape handler in setupPauseMenu()
+      // read it; see the restored block there.
+      const craftingScreen = document.getElementById('crafting-screen');
+      const btnCloseCrafting = document.getElementById('btn-close-crafting');
+
+      // ─── Inventory Drag State (document-level handlers) ────────────────
+      let _invDrag = null; // { fromSlot, typeId, count, ghostEl }
+      let _invClickStart = null; // { slot, x, y } to distinguish click vs drag
+
+      /**
+       * Check if player is within 4 blocks of a crafting table (block ID 162).
+       */
+      function checkNearCraftingTable(player, chunkManager) {
+        const px = Math.floor(player.position.x);
+        const py = Math.floor(player.position.y);
+        const pz = Math.floor(player.position.z);
+        const range = 4;
+
+        for (let dx = -range; dx <= range; dx++) {
+          for (let dy = -range; dy <= range; dy++) {
+            for (let dz = -range; dz <= range; dz++) {
+              const wx = px + dx, wy = py + dy, wz = pz + dz;
+              const block = chunkManager.getVoxel(wx, wy, wz);
+              if (block === BLOCK_TYPES.CRAFTING_TABLE) return true;
+            }
+          }
+        }
+        return false;
+      }
+
+      /**
+       * Render the interactive inventory grid with drag-and-drop support.
+       */
+      function renderInventoryGrid(container) {
+        if (!container) return;
+        container.innerHTML = '';
+
+        for (let i = 0; i < inventory.totalSlots; i++) {
+          const slot = inventory.getSlot(i);
+          const isHotbar = inventory.isHotbarSlot(i);
+          const div = document.createElement('div');
+          div.className = 'inventory-slot' + (isHotbar ? ' hotbar' : '');
+          div.dataset.slot = i;
+
+          if (slot) {
+            const name = inventory.getDisplayName(slot.typeId);
+
+            // Create canvas for item icon
+            const canvas = document.createElement('canvas');
+            canvas.className = 'item-icon';
+            canvas.width = 48;
+            canvas.height = 48;
+            renderItemIcon(canvas, slot.typeId);
+            div.appendChild(canvas);
+
+            // Show count badge if > 1
+            if (slot.count > 1) {
+              const countEl = document.createElement('span');
+              countEl.className = 'item-count';
+              countEl.textContent = slot.count;
+              div.appendChild(countEl);
+            }
+
+            div.title = name + (slot.count > 1 ? ' (x' + slot.count + ')' : '');
+          } else {
+            div.title = 'Empty slot';
           }
 
-          // ─── Item Texture Rendering ────────────────────────────────────────
-          // Draw an item icon onto a canvas element using the item texture atlas
-          // or the block texture atlas for block items.
-          function renderItemIcon(canvasEl, typeId) {
-            const ctx = canvasEl.getContext('2d');
-            const w = canvasEl.width;
-            const h = canvasEl.height;
-            ctx.clearRect(0, 0, w, h);
+          // ── Right-click: split stack (move 1 to nearest compatible slot) ──
+          div.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const fromIdx = parseInt(div.dataset.slot);
+            const fromSlot = inventory.getSlot(fromIdx);
+            if (!fromSlot || fromSlot.count <= 1) return;
 
-            // Try item atlas first (for named items)
-            if (typeof typeId === 'string' && itemAtlas.slotMap[typeId]) {
-              const src = itemAtlas.canvas;
-              const slot = itemAtlas.slotMap[typeId];
-              const srcCell = itemAtlas.tileSize + itemAtlas._gap;
-              ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
-            } else if (typeof typeId === 'number' && itemAtlas.slotMap[typeId]) {
-              // Block item registered in item atlas
-              const src = itemAtlas.canvas;
-              const slot = itemAtlas.slotMap[typeId];
-              const srcCell = itemAtlas.tileSize + itemAtlas._gap;
-              ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
-            } else if (typeof typeId === 'number' && textureAtlas.tileMap[typeId]) {
-              // Fall back to block atlas — draw the top face texture
-              const blockEntry = textureAtlas.tileMap[typeId];
-              let tile = blockEntry.tiles.top || blockEntry.tiles.side || blockEntry.tiles.all;
-              if (tile) {
-                const src = textureAtlas.diffuseCanvas;
-                const srcCell = textureAtlas.tileSize + textureAtlas._gap;
-                ctx.imageSmoothingEnabled = false;
-                ctx.drawImage(src, textureAtlas._gap + tile.col * srcCell, textureAtlas._gap + tile.row * srcCell, textureAtlas.tileSize, textureAtlas.tileSize, 0, 0, w, h);
+            // Find nearest empty slot or matching slot with space
+            let targetIdx = -1;
+            for (let j = 0; j < inventory.totalSlots; j++) {
+              if (j === fromIdx) continue;
+              const target = inventory.getSlot(j);
+              if (!target) { targetIdx = j; break; }
+              if (inventory.itemsMatch(target.typeId, fromSlot.typeId)) {
+                const maxStack = inventory.getMaxStack(fromSlot.typeId);
+                if (target.count < maxStack) { targetIdx = j; break; }
               }
             }
-          }
-
-          // ─── Hotbar UI Update ──────────────────────────────────────────────
-          function updateHotbarUI() {
-            const hotbarSlots = document.querySelectorAll('.hotbar-slot');
-            for (let i = 0; i < 9; i++) {
-              const globalIndex = inventory.hotbarSlotIndex(i);
-              const slot = inventory.getSlot(globalIndex);
-              const el = hotbarSlots[i];
-              if (!el) continue;
-
-              // Update active state
-              el.classList.toggle('active', i === inventory.selectedHotbarSlot);
-
-              // Remove old canvas if present
-              const oldCanvas = el.querySelector('canvas.item-icon');
-              if (oldCanvas) oldCanvas.remove();
-              const oldCount = el.querySelector('.hotbar-item-count');
-              if (oldCount) oldCount.remove();
-
-              if (slot) {
-                const name = inventory.getDisplayName(slot.typeId);
-
-                // Create canvas for item icon
-                const canvas = document.createElement('canvas');
-                canvas.className = 'item-icon';
-                canvas.width = 48;
-                canvas.height = 48;
-                renderItemIcon(canvas, slot.typeId);
-                el.appendChild(canvas);
-
-                // Show count badge if > 1
-                if (slot.count > 1) {
-                  const countEl = document.createElement('span');
-                  countEl.className = 'hotbar-item-count';
-                  countEl.textContent = slot.count;
-                  el.appendChild(countEl);
-                }
-
-                el.title = name + (slot.count > 1 ? ' (x' + slot.count + ')' : '');
+            if (targetIdx >= 0) {
+              const maxStack = inventory.getMaxStack(fromSlot.typeId);
+              const target = inventory.getSlot(targetIdx);
+              const space = target ? (maxStack - target.count) : maxStack;
+              const moveCount = Math.min(1, fromSlot.count, space);
+              fromSlot.count -= moveCount;
+              if (fromSlot.count <= 0) inventory.clearSlot(fromIdx);
+              if (!target) {
+                inventory.setSlot(targetIdx, { typeId: fromSlot.typeId, count: moveCount });
               } else {
-                el.innerHTML = '';
-                el.title = '';
+                target.count += moveCount;
+                inventory._notifySlotChange(targetIdx);
               }
-            }
-          }
-
-          // The render loop drives the hotbar every 5 frames and the inventory screen on
-          // mobile tap, and both live at main.js top level now — so they reach these two
-          // through `state` rather than through the closure. PR 15 moves them to
-          // src/ui/hud/Hotbar.js and src/ui/overlays/InventoryScreen.js (§13).
-          gameState.updateHotbarUI = updateHotbarUI;
-
-          // Wire inventory callbacks for hotbar updates
-          inventory.onSlotChange = (index, slot) => {
-            updateHotbarUI();
-            if (gameState.inventoryOpen) renderInventoryCraftingUI();
-          };
-          inventory.onSelectionChange = () => {
-            updateHotbarUI();
-            // Update first-person hand to show the selected item
-            if (firstPersonHand) {
-              const item = inventory.getSelectedItem();
-              firstPersonHand.setItem(item ? item.typeId : null);
-            }
-          };
-
-          // Initial hotbar render
-          updateHotbarUI();
-
-          // Set first-person hand to the initially selected item
-          if (firstPersonHand) {
-            const item = inventory.getSelectedItem();
-            firstPersonHand.setItem(item ? item.typeId : null);
-          }
-
-          // ─── Inventory + Crafting Screen ────────────────
-          //
-          // BUGS.md D-31: `inventoryOpen` was a `let` here. It is the one hoisted value
-          // that genuinely mutates at runtime, so it gets no local alias — `gameState`
-          // is its only home. That is what lets the Escape handler in setupPauseMenu()
-          // read it; see the restored block there.
-          const craftingScreen = document.getElementById('crafting-screen');
-          const btnCloseCrafting = document.getElementById('btn-close-crafting');
-
-          // ─── Inventory Drag State (document-level handlers) ────────────────
-          let _invDrag = null; // { fromSlot, typeId, count, ghostEl }
-          let _invClickStart = null; // { slot, x, y } to distinguish click vs drag
-
-          /**
-           * Check if player is within 4 blocks of a crafting table (block ID 162).
-           */
-          function checkNearCraftingTable(player, chunkManager) {
-            const px = Math.floor(player.position.x);
-            const py = Math.floor(player.position.y);
-            const pz = Math.floor(player.position.z);
-            const range = 4;
-
-            for (let dx = -range; dx <= range; dx++) {
-              for (let dy = -range; dy <= range; dy++) {
-                for (let dz = -range; dz <= range; dz++) {
-                  const wx = px + dx, wy = py + dy, wz = pz + dz;
-                  const block = chunkManager.getVoxel(wx, wy, wz);
-                  if (block === BLOCK_TYPES.CRAFTING_TABLE) return true;
-                }
-              }
-            }
-            return false;
-          }
-
-          /**
-           * Render the interactive inventory grid with drag-and-drop support.
-           */
-          function renderInventoryGrid(container) {
-            if (!container) return;
-            container.innerHTML = '';
-
-            for (let i = 0; i < inventory.totalSlots; i++) {
-              const slot = inventory.getSlot(i);
-              const isHotbar = inventory.isHotbarSlot(i);
-              const div = document.createElement('div');
-              div.className = 'inventory-slot' + (isHotbar ? ' hotbar' : '');
-              div.dataset.slot = i;
-
-              if (slot) {
-                const name = inventory.getDisplayName(slot.typeId);
-
-                // Create canvas for item icon
-                const canvas = document.createElement('canvas');
-                canvas.className = 'item-icon';
-                canvas.width = 48;
-                canvas.height = 48;
-                renderItemIcon(canvas, slot.typeId);
-                div.appendChild(canvas);
-
-                // Show count badge if > 1
-                if (slot.count > 1) {
-                  const countEl = document.createElement('span');
-                  countEl.className = 'item-count';
-                  countEl.textContent = slot.count;
-                  div.appendChild(countEl);
-                }
-
-                div.title = name + (slot.count > 1 ? ' (x' + slot.count + ')' : '');
-              } else {
-                div.title = 'Empty slot';
-              }
-
-              // ── Right-click: split stack (move 1 to nearest compatible slot) ──
-              div.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                const fromIdx = parseInt(div.dataset.slot);
-                const fromSlot = inventory.getSlot(fromIdx);
-                if (!fromSlot || fromSlot.count <= 1) return;
-
-                // Find nearest empty slot or matching slot with space
-                let targetIdx = -1;
-                for (let j = 0; j < inventory.totalSlots; j++) {
-                  if (j === fromIdx) continue;
-                  const target = inventory.getSlot(j);
-                  if (!target) { targetIdx = j; break; }
-                  if (inventory.itemsMatch(target.typeId, fromSlot.typeId)) {
-                    const maxStack = inventory.getMaxStack(fromSlot.typeId);
-                    if (target.count < maxStack) { targetIdx = j; break; }
-                  }
-                }
-                if (targetIdx >= 0) {
-                  const maxStack = inventory.getMaxStack(fromSlot.typeId);
-                  const target = inventory.getSlot(targetIdx);
-                  const space = target ? (maxStack - target.count) : maxStack;
-                  const moveCount = Math.min(1, fromSlot.count, space);
-                  fromSlot.count -= moveCount;
-                  if (fromSlot.count <= 0) inventory.clearSlot(fromIdx);
-                  if (!target) {
-                    inventory.setSlot(targetIdx, { typeId: fromSlot.typeId, count: moveCount });
-                  } else {
-                    target.count += moveCount;
-                    inventory._notifySlotChange(targetIdx);
-                  }
-                  inventory._notifySlotChange(fromIdx);
-                  renderInventoryCraftingUI();
-                  updateHotbarUI();
-                }
-              });
-
-              container.appendChild(div);
-            }
-          }
-
-          /**
-           * Render the equipment panel UI (4 armor slots + stats).
-           */
-          function renderEquipmentUI() {
-            const container = document.getElementById('equipment-slots');
-            const defenseEl = document.getElementById('defense-value');
-            const toughnessEl = document.getElementById('toughness-value');
-            if (!container) return;
-
-            // Update stats
-            const stats = inventory.getEquipmentStats();
-            if (defenseEl) defenseEl.textContent = stats.totalArmor;
-            if (toughnessEl) toughnessEl.textContent = stats.totalToughness;
-
-            // Update HUD armor indicator
-            const armorIndicator = document.getElementById('armor-indicator');
-            const hudDefense = document.getElementById('hud-defense');
-            if (armorIndicator && hudDefense) {
-              if (stats.totalArmor > 0) {
-                hudDefense.textContent = stats.totalArmor;
-                armorIndicator.classList.remove('hidden');
-              } else {
-                armorIndicator.classList.add('hidden');
-              }
-            }
-
-            // Render each slot
-            const slots = container.querySelectorAll('.equipment-slot');
-            for (const slotEl of slots) {
-              const slotName = slotEl.dataset.slot;
-              const iconContainer = slotEl.querySelector('.equip-slot-icon');
-              const item = inventory.getEquippedItem(slotName);
-
-              // Clear previous content
-              iconContainer.innerHTML = '';
-
-              if (item) {
-                slotEl.classList.add('occupied');
-
-                // Draw item icon
-                const canvas = document.createElement('canvas');
-                canvas.className = 'item-icon';
-                canvas.width = 48;
-                canvas.height = 48;
-                renderItemIcon(canvas, item.typeId);
-                iconContainer.appendChild(canvas);
-
-                // Show armor value badge
-                const def = NAMED_ITEMS[item.typeId];
-                if (def) {
-                  const badge = document.createElement('span');
-                  badge.className = 'equip-stat-badge';
-                  badge.textContent = '🛡' + (def.armorValue || 0);
-                  slotEl.appendChild(badge);
-                }
-
-                slotEl.title = inventory.getDisplayName(item.typeId);
-              } else {
-                slotEl.classList.remove('occupied');
-                slotEl.title = 'Empty - drag armor here';
-              }
-            }
-          }
-
-          // ── Document-level drag-and-drop handlers (only active when inventory is open) ──
-          // These handle the full drag lifecycle: mousedown → mousemove (start drag) → mouseup (drop or click)
-
-          document.addEventListener('mousedown', function invMouseDown(e) {
-            if (!gameState.inventoryOpen || e.button !== 0) return;
-            const slotEl = e.target.closest('.inventory-slot');
-            const equipEl = e.target.closest('.equipment-slot');
-            if (slotEl) {
-              e.preventDefault();
-              _invClickStart = { slot: parseInt(slotEl.dataset.slot), x: e.clientX, y: e.clientY };
-            } else if (equipEl) {
-              e.preventDefault();
-              _invClickStart = { equipSlot: equipEl.dataset.slot, x: e.clientX, y: e.clientY };
+              inventory._notifySlotChange(fromIdx);
+              renderInventoryCraftingUI();
+              updateHotbarUI();
             }
           });
 
-          document.addEventListener('mousemove', function invMouseMove(e) {
-            if (!_invClickStart) return;
-            const dx = e.clientX - _invClickStart.x;
-            const dy = e.clientY - _invClickStart.y;
-            if (Math.sqrt(dx * dx + dy * dy) <= 5) return;
+          container.appendChild(div);
+        }
+      }
 
-            // Start drag
-            if (!_invDrag) {
-              let typeId = null;
-              let count = 0;
-              let fromSlot = null;
-              let fromEquipSlot = null;
+      /**
+       * Render the equipment panel UI (4 armor slots + stats).
+       */
+      function renderEquipmentUI() {
+        const container = document.getElementById('equipment-slots');
+        const defenseEl = document.getElementById('defense-value');
+        const toughnessEl = document.getElementById('toughness-value');
+        if (!container) return;
 
-              if (_invClickStart.slot !== undefined) {
-                // Dragging from inventory slot
-                const slot = inventory.getSlot(_invClickStart.slot);
-                if (slot) {
-                  fromSlot = _invClickStart.slot;
-                  typeId = slot.typeId;
-                  count = slot.count;
-                  inventory.setSlot(fromSlot, null);
-                }
-              } else if (_invClickStart.equipSlot) {
-                // Dragging from equipment slot
-                const item = inventory.getEquippedItem(_invClickStart.equipSlot);
-                if (item) {
-                  fromEquipSlot = _invClickStart.equipSlot;
-                  typeId = item.typeId;
-                  count = item.count;
-                  inventory.unequipItem(fromEquipSlot);
-                }
-              }
+        // Update stats
+        const stats = inventory.getEquipmentStats();
+        if (defenseEl) defenseEl.textContent = stats.totalArmor;
+        if (toughnessEl) toughnessEl.textContent = stats.totalToughness;
 
-              if (typeId) {
-                _invDrag = { fromSlot, fromEquipSlot, typeId, count };
-                renderInventoryCraftingUI();
-                updateHotbarUI();
+        // Update HUD armor indicator
+        const armorIndicator = document.getElementById('armor-indicator');
+        const hudDefense = document.getElementById('hud-defense');
+        if (armorIndicator && hudDefense) {
+          if (stats.totalArmor > 0) {
+            hudDefense.textContent = stats.totalArmor;
+            armorIndicator.classList.remove('hidden');
+          } else {
+            armorIndicator.classList.add('hidden');
+          }
+        }
 
-                // Create drag ghost
-                const ghost = document.createElement('div');
-                ghost.style.cssText = 'position:fixed;pointer-events:none;z-index:10000;width:48px;height:48px;margin:-24px 0 0 -24px;';
-                const canvas = document.createElement('canvas');
-                canvas.width = 48; canvas.height = 48;
-                canvas.style.cssText = 'width:40px;height:40px;image-rendering:pixelated;';
-                renderItemIcon(canvas, typeId);
-                ghost.appendChild(canvas);
-                document.body.appendChild(ghost);
-                _invDrag.ghostEl = ghost;
-              }
+        // Render each slot
+        const slots = container.querySelectorAll('.equipment-slot');
+        for (const slotEl of slots) {
+          const slotName = slotEl.dataset.slot;
+          const iconContainer = slotEl.querySelector('.equip-slot-icon');
+          const item = inventory.getEquippedItem(slotName);
+
+          // Clear previous content
+          iconContainer.innerHTML = '';
+
+          if (item) {
+            slotEl.classList.add('occupied');
+
+            // Draw item icon
+            const canvas = document.createElement('canvas');
+            canvas.className = 'item-icon';
+            canvas.width = 48;
+            canvas.height = 48;
+            renderItemIcon(canvas, item.typeId);
+            iconContainer.appendChild(canvas);
+
+            // Show armor value badge
+            const def = NAMED_ITEMS[item.typeId];
+            if (def) {
+              const badge = document.createElement('span');
+              badge.className = 'equip-stat-badge';
+              badge.textContent = '🛡' + (def.armorValue || 0);
+              slotEl.appendChild(badge);
             }
-            if (_invDrag && _invDrag.ghostEl) {
-              _invDrag.ghostEl.style.left = e.clientX + 'px';
-              _invDrag.ghostEl.style.top = e.clientY + 'px';
+
+            slotEl.title = inventory.getDisplayName(item.typeId);
+          } else {
+            slotEl.classList.remove('occupied');
+            slotEl.title = 'Empty - drag armor here';
+          }
+        }
+      }
+
+      // ── Document-level drag-and-drop handlers (only active when inventory is open) ──
+      // These handle the full drag lifecycle: mousedown → mousemove (start drag) → mouseup (drop or click)
+
+      document.addEventListener('mousedown', function invMouseDown(e) {
+        if (!gameState.inventoryOpen || e.button !== 0) return;
+        const slotEl = e.target.closest('.inventory-slot');
+        const equipEl = e.target.closest('.equipment-slot');
+        if (slotEl) {
+          e.preventDefault();
+          _invClickStart = { slot: parseInt(slotEl.dataset.slot), x: e.clientX, y: e.clientY };
+        } else if (equipEl) {
+          e.preventDefault();
+          _invClickStart = { equipSlot: equipEl.dataset.slot, x: e.clientX, y: e.clientY };
+        }
+      });
+
+      document.addEventListener('mousemove', function invMouseMove(e) {
+        if (!_invClickStart) return;
+        const dx = e.clientX - _invClickStart.x;
+        const dy = e.clientY - _invClickStart.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= 5) return;
+
+        // Start drag
+        if (!_invDrag) {
+          let typeId = null;
+          let count = 0;
+          let fromSlot = null;
+          let fromEquipSlot = null;
+
+          if (_invClickStart.slot !== undefined) {
+            // Dragging from inventory slot
+            const slot = inventory.getSlot(_invClickStart.slot);
+            if (slot) {
+              fromSlot = _invClickStart.slot;
+              typeId = slot.typeId;
+              count = slot.count;
+              inventory.setSlot(fromSlot, null);
             }
-          });
+          } else if (_invClickStart.equipSlot) {
+            // Dragging from equipment slot
+            const item = inventory.getEquippedItem(_invClickStart.equipSlot);
+            if (item) {
+              fromEquipSlot = _invClickStart.equipSlot;
+              typeId = item.typeId;
+              count = item.count;
+              inventory.unequipItem(fromEquipSlot);
+            }
+          }
 
-          document.addEventListener('mouseup', function invMouseUp(e) {
-            if (!_invClickStart) return;
-            const dx = e.clientX - _invClickStart.x;
-            const dy = e.clientY - _invClickStart.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const fromIdx = _invClickStart.slot;
-            _invClickStart = null;
+          if (typeId) {
+            _invDrag = { fromSlot, fromEquipSlot, typeId, count };
+            renderInventoryCraftingUI();
+            updateHotbarUI();
 
-            // ── Drag drop ──
-            if (_invDrag) {
-              if (_invDrag.ghostEl) _invDrag.ghostEl.remove();
-              const targetEl = document.elementFromPoint(e.clientX, e.clientY);
-              const slotEl = targetEl ? targetEl.closest('.inventory-slot') : null;
-              const equipEl = targetEl ? targetEl.closest('.equipment-slot') : null;
+            // Create drag ghost
+            const ghost = document.createElement('div');
+            ghost.style.cssText = 'position:fixed;pointer-events:none;z-index:10000;width:48px;height:48px;margin:-24px 0 0 -24px;';
+            const canvas = document.createElement('canvas');
+            canvas.width = 48; canvas.height = 48;
+            canvas.style.cssText = 'width:40px;height:40px;image-rendering:pixelated;';
+            renderItemIcon(canvas, typeId);
+            ghost.appendChild(canvas);
+            document.body.appendChild(ghost);
+            _invDrag.ghostEl = ghost;
+          }
+        }
+        if (_invDrag && _invDrag.ghostEl) {
+          _invDrag.ghostEl.style.left = e.clientX + 'px';
+          _invDrag.ghostEl.style.top = e.clientY + 'px';
+        }
+      });
 
-              // ── Dropped on equipment slot ──
-              if (equipEl) {
-                const equipSlotName = equipEl.dataset.slot;
+      document.addEventListener('mouseup', function invMouseUp(e) {
+        if (!_invClickStart) return;
+        const dx = e.clientX - _invClickStart.x;
+        const dy = e.clientY - _invClickStart.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const fromIdx = _invClickStart.slot;
+        _invClickStart = null;
 
-                if (inventory.isEquippable(_invDrag.typeId) && inventory.getEquipmentSlot(_invDrag.typeId) === equipSlotName) {
-                  // Equip the item — if slot was occupied, return old item to inventory
-                  const oldItem = inventory.equipItem(equipSlotName, _invDrag.typeId);
-                  if (oldItem) {
-                    // Try to add old item to inventory; if full, drop it
-                    const result = inventory.addItem(oldItem.typeId, oldItem.count);
-                    if (result.remaining > 0) {
-                      // Inventory full — put old item back in equipment slot
-                      inventory.equipItem(equipSlotName, oldItem.typeId);
-                      // Restore dragged item to its origin
-                      if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
-                        inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
-                      } else if (_invDrag.fromEquipSlot) {
-                        inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
-                      }
-                    }
-                  }
-                } else {
-                  // Can't equip this item — restore to origin
+        // ── Drag drop ──
+        if (_invDrag) {
+          if (_invDrag.ghostEl) _invDrag.ghostEl.remove();
+          const targetEl = document.elementFromPoint(e.clientX, e.clientY);
+          const slotEl = targetEl ? targetEl.closest('.inventory-slot') : null;
+          const equipEl = targetEl ? targetEl.closest('.equipment-slot') : null;
+
+          // ── Dropped on equipment slot ──
+          if (equipEl) {
+            const equipSlotName = equipEl.dataset.slot;
+
+            if (inventory.isEquippable(_invDrag.typeId) && inventory.getEquipmentSlot(_invDrag.typeId) === equipSlotName) {
+              // Equip the item — if slot was occupied, return old item to inventory
+              const oldItem = inventory.equipItem(equipSlotName, _invDrag.typeId);
+              if (oldItem) {
+                // Try to add old item to inventory; if full, drop it
+                const result = inventory.addItem(oldItem.typeId, oldItem.count);
+                if (result.remaining > 0) {
+                  // Inventory full — put old item back in equipment slot
+                  inventory.equipItem(equipSlotName, oldItem.typeId);
+                  // Restore dragged item to its origin
                   if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
                     inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
                   } else if (_invDrag.fromEquipSlot) {
                     inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
                   }
                 }
-              } else if (slotEl) {
-                // ── Dropped on inventory slot ──
-                const toIdx = parseInt(slotEl.dataset.slot);
-                const toSlot = inventory.getSlot(toIdx);
+              }
+            } else {
+              // Can't equip this item — restore to origin
+              if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
+                inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
+              } else if (_invDrag.fromEquipSlot) {
+                inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
+              }
+            }
+          } else if (slotEl) {
+            // ── Dropped on inventory slot ──
+            const toIdx = parseInt(slotEl.dataset.slot);
+            const toSlot = inventory.getSlot(toIdx);
 
-                // If dragging from equipment slot, just place into inventory
-                if (_invDrag.fromEquipSlot) {
-                  if (!toSlot) {
-                    // Empty slot — place the item
-                    inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
-                  } else if (inventory.itemsMatch(toSlot.typeId, _invDrag.typeId)) {
-                    // Same type — try to stack
-                    const maxStack = inventory.getMaxStack(_invDrag.typeId);
-                    const space = maxStack - toSlot.count;
-                    if (space > 0) {
-                      const move = Math.min(space, _invDrag.count);
-                      toSlot.count += move;
-                      if (_invDrag.count - move > 0) {
-                        inventory.addItem(_invDrag.typeId, _invDrag.count - move);
-                      }
-                    } else {
-                      // No space — put the dragged item elsewhere, keep the slotted item
-                      inventory.addItem(_invDrag.typeId, _invDrag.count);
-                    }
-                  } else {
-                    // Different type — swap: place dragged item, move slotted item elsewhere
-                    inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
-                    inventory.addItem(toSlot.typeId, toSlot.count);
-                  }
-                } else if (toIdx === _invDrag.fromSlot) {
-                  inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
-                } else if (!toSlot) {
-                  inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
-                } else if (inventory.itemsMatch(toSlot.typeId, _invDrag.typeId)) {
-                  const maxStack = inventory.getMaxStack(_invDrag.typeId);
-                  const space = maxStack - toSlot.count;
-                  if (space > 0) {
-                    const move = Math.min(space, _invDrag.count);
-                    toSlot.count += move;
-                    if (_invDrag.count - move > 0) {
-                      inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count - move });
-                    }
-                  } else {
-                    inventory.setSlot(_invDrag.fromSlot, { typeId: toSlot.typeId, count: toSlot.count });
-                    inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+            // If dragging from equipment slot, just place into inventory
+            if (_invDrag.fromEquipSlot) {
+              if (!toSlot) {
+                // Empty slot — place the item
+                inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+              } else if (inventory.itemsMatch(toSlot.typeId, _invDrag.typeId)) {
+                // Same type — try to stack
+                const maxStack = inventory.getMaxStack(_invDrag.typeId);
+                const space = maxStack - toSlot.count;
+                if (space > 0) {
+                  const move = Math.min(space, _invDrag.count);
+                  toSlot.count += move;
+                  if (_invDrag.count - move > 0) {
+                    inventory.addItem(_invDrag.typeId, _invDrag.count - move);
                   }
                 } else {
-                  inventory.setSlot(_invDrag.fromSlot, { typeId: toSlot.typeId, count: toSlot.count });
-                  inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+                  // No space — put the dragged item elsewhere, keep the slotted item
+                  inventory.addItem(_invDrag.typeId, _invDrag.count);
                 }
               } else {
-                // Dropped outside — restore to origin
-                if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
-                  inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
-                } else if (_invDrag.fromEquipSlot) {
-                  inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
-                }
+                // Different type — swap: place dragged item, move slotted item elsewhere
+                inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+                inventory.addItem(toSlot.typeId, toSlot.count);
               }
-              _invDrag = null;
-              renderInventoryCraftingUI();
-              updateHotbarUI();
-              return;
-            }
-
-            // ── Simple click (no drag) ──
-            if (dist <= 5 && e.button === 0) {
-              // Click on equipment slot → unequip to hotbar
-              if (_invClickStart && _invClickStart.equipSlot) {
-                const equipSlotName = _invClickStart.equipSlot;
-                const item = inventory.unequipItem(equipSlotName);
-                if (item) {
-                  const result = inventory.addItem(item.typeId, item.count);
-                  if (result.remaining > 0) {
-                    // Inventory full — re-equip
-                    inventory.equipItem(equipSlotName, item.typeId);
-                  }
+            } else if (toIdx === _invDrag.fromSlot) {
+              inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+            } else if (!toSlot) {
+              inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+            } else if (inventory.itemsMatch(toSlot.typeId, _invDrag.typeId)) {
+              const maxStack = inventory.getMaxStack(_invDrag.typeId);
+              const space = maxStack - toSlot.count;
+              if (space > 0) {
+                const move = Math.min(space, _invDrag.count);
+                toSlot.count += move;
+                if (_invDrag.count - move > 0) {
+                  inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count - move });
                 }
+              } else {
+                inventory.setSlot(_invDrag.fromSlot, { typeId: toSlot.typeId, count: toSlot.count });
+                inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+              }
+            } else {
+              inventory.setSlot(_invDrag.fromSlot, { typeId: toSlot.typeId, count: toSlot.count });
+              inventory.setSlot(toIdx, { typeId: _invDrag.typeId, count: _invDrag.count });
+            }
+          } else {
+            // Dropped outside — restore to origin
+            if (_invDrag.fromSlot !== undefined && _invDrag.fromSlot !== null) {
+              inventory.setSlot(_invDrag.fromSlot, { typeId: _invDrag.typeId, count: _invDrag.count });
+            } else if (_invDrag.fromEquipSlot) {
+              inventory.equipItem(_invDrag.fromEquipSlot, _invDrag.typeId);
+            }
+          }
+          _invDrag = null;
+          renderInventoryCraftingUI();
+          updateHotbarUI();
+          return;
+        }
+
+        // ── Simple click (no drag) ──
+        if (dist <= 5 && e.button === 0) {
+          // Click on equipment slot → unequip to hotbar
+          if (_invClickStart && _invClickStart.equipSlot) {
+            const equipSlotName = _invClickStart.equipSlot;
+            const item = inventory.unequipItem(equipSlotName);
+            if (item) {
+              const result = inventory.addItem(item.typeId, item.count);
+              if (result.remaining > 0) {
+                // Inventory full — re-equip
+                inventory.equipItem(equipSlotName, item.typeId);
+              }
+            }
+            renderInventoryCraftingUI();
+            updateHotbarUI();
+            return;
+          }
+
+          // Click on inventory slot
+          const fromSlot = inventory.getSlot(fromIdx);
+          const isHotbar = inventory.isHotbarSlot(fromIdx);
+          if (fromSlot) {
+            // Quick-equip armor: if item is equippable and target equipment slot is empty, equip directly
+            if (inventory.isEquippable(fromSlot.typeId)) {
+              const equipSlot = inventory.getEquipmentSlot(fromSlot.typeId);
+              if (equipSlot && !inventory.getEquippedItem(equipSlot)) {
+                inventory.setSlot(fromIdx, null);
+                inventory.equipItem(equipSlot, fromSlot.typeId);
                 renderInventoryCraftingUI();
                 updateHotbarUI();
                 return;
               }
+            }
 
-              // Click on inventory slot
-              const fromSlot = inventory.getSlot(fromIdx);
-              const isHotbar = inventory.isHotbarSlot(fromIdx);
-              if (fromSlot) {
-                // Quick-equip armor: if item is equippable and target equipment slot is empty, equip directly
-                if (inventory.isEquippable(fromSlot.typeId)) {
-                  const equipSlot = inventory.getEquipmentSlot(fromSlot.typeId);
-                  if (equipSlot && !inventory.getEquippedItem(equipSlot)) {
-                    inventory.setSlot(fromIdx, null);
-                    inventory.equipItem(equipSlot, fromSlot.typeId);
-                    renderInventoryCraftingUI();
-                    updateHotbarUI();
-                    return;
-                  }
+            if (!isHotbar) {
+              const hotbarIdx = inventory.hotbarSlotIndex(inventory.selectedHotbarSlot);
+              const hotbarSlot = inventory.getSlot(hotbarIdx);
+              if (!hotbarSlot) {
+                inventory.setSlot(hotbarIdx, { typeId: fromSlot.typeId, count: fromSlot.count });
+                inventory.clearSlot(fromIdx);
+              } else if (inventory.itemsMatch(hotbarSlot.typeId, fromSlot.typeId)) {
+                const maxStack = inventory.getMaxStack(fromSlot.typeId);
+                const space = maxStack - hotbarSlot.count;
+                if (space > 0) {
+                  const move = Math.min(space, fromSlot.count);
+                  hotbarSlot.count += move;
+                  fromSlot.count -= move;
+                  if (fromSlot.count <= 0) inventory.clearSlot(fromIdx);
+                  inventory._notifySlotChange(hotbarIdx);
                 }
-
-                if (!isHotbar) {
-                  const hotbarIdx = inventory.hotbarSlotIndex(inventory.selectedHotbarSlot);
-                  const hotbarSlot = inventory.getSlot(hotbarIdx);
-                  if (!hotbarSlot) {
-                    inventory.setSlot(hotbarIdx, { typeId: fromSlot.typeId, count: fromSlot.count });
-                    inventory.clearSlot(fromIdx);
-                  } else if (inventory.itemsMatch(hotbarSlot.typeId, fromSlot.typeId)) {
-                    const maxStack = inventory.getMaxStack(fromSlot.typeId);
-                    const space = maxStack - hotbarSlot.count;
-                    if (space > 0) {
-                      const move = Math.min(space, fromSlot.count);
-                      hotbarSlot.count += move;
-                      fromSlot.count -= move;
-                      if (fromSlot.count <= 0) inventory.clearSlot(fromIdx);
-                      inventory._notifySlotChange(hotbarIdx);
-                    }
-                  } else {
-                    inventory.swapSlots(fromIdx, hotbarIdx);
-                  }
-                } else {
-                  inventory.selectHotbarSlot(fromIdx - inventory.hotbarStart);
-                }
-                renderInventoryCraftingUI();
-                updateHotbarUI();
+              } else {
+                inventory.swapSlots(fromIdx, hotbarIdx);
               }
-            }
-          });
-
-          /**
-           * Render the combined inventory + crafting UI — recipe list + interactive inventory grid.
-           */
-          function renderInventoryCraftingUI() {
-            const recipeList = document.getElementById('crafting-recipe-list');
-            const invGrid = document.getElementById('crafting-inv-grid');
-            const stationIndicator = document.getElementById('crafting-station-indicator');
-
-            if (!recipeList || !invGrid) return;
-
-            // Check crafting table proximity
-            const atTable = checkNearCraftingTable(player, game.chunkManager);
-            if (stationIndicator) {
-              stationIndicator.classList.toggle('hidden', !atTable);
-            }
-
-            // Get craftable recipes
-            const recipes = crafting.getCraftableRecipes(inventory, atTable);
-
-            // Render recipe list
-            recipeList.innerHTML = '';
-            if (recipes.length === 0) {
-              recipeList.innerHTML = '<div class="crafting-empty-msg">No recipes available. Gather materials or find a crafting table.</div>';
             } else {
-              for (const recipe of recipes) {
-                const card = document.createElement('div');
-                card.className = 'recipe-card';
-                card.dataset.recipeId = recipe.id;
-
-                // Ingredients
-                let cardHTML = '<div class="recipe-ingredients">';
-                for (let i = 0; i < recipe.ingredients.length; i++) {
-                  if (i > 0) cardHTML += '<span class="recipe-plus">+</span>';
-                  const ing = recipe.ingredients[i];
-                  // Resolve actual typeId to display (handles typeIds array)
-                  const displayTypeId = crafting._getIngredientType(inventory, ing);
-                  cardHTML += `<div class="recipe-ing-slot">
-                    <canvas class="item-icon" width="32" height="32" data-typeid="${displayTypeId}"></canvas>
-                    <span class="ing-count">${ing.count}</span>
-                  </div>`;
-                }
-                cardHTML += '</div>';
-
-                // Output
-                const outCount = recipe.output.count || 1;
-                cardHTML += `<div class="recipe-arrow">→</div>
-                  <div class="recipe-output">
-                    <canvas class="item-icon" width="40" height="40" data-typeid="${recipe.output.typeId}"></canvas>
-                    ${outCount > 1 ? `<span class="output-count">${outCount}</span>` : ''}
-                  </div>`;
-
-                // Name
-                cardHTML += `<div class="recipe-name">${recipe.name}</div>`;
-
-                card.innerHTML = cardHTML;
-
-                // Click → craft
-                card.addEventListener('click', () => {
-                  crafting.craftRecipe(recipe.id, inventory);
-                  renderInventoryCraftingUI();
-                  updateHotbarUI();
-                });
-
-                recipeList.appendChild(card);
-
-                // Draw icons after DOM insertion
-                card.querySelectorAll('canvas[data-typeid]').forEach(canvas => {
-                  const typeId = canvas.dataset.typeid;
-                  // Preserve type: numeric strings that are pure numbers → parseInt, otherwise keep as string
-                  renderItemIcon(canvas, /^\d+$/.test(typeId) ? parseInt(typeId, 10) : typeId);
-                });
-              }
+              inventory.selectHotbarSlot(fromIdx - inventory.hotbarStart);
             }
-
-            // Render interactive inventory grid
-            renderInventoryGrid(invGrid);
-
-            // Render equipment panel
-            renderEquipmentUI();
-          }
-
-          /**
-           * Toggle inventory + crafting screen open/closed.
-           */
-          function toggleInventoryScreen() {
-            gameState.inventoryOpen = !gameState.inventoryOpen;
-            const hotbarContainer = document.getElementById('hotbar-container');
-
-            if (gameState.inventoryOpen) {
-              // Unlock mouse so player can use inventory UI
-              if (document.pointerLockElement) {
-                document.exitPointerLock();
-              }
-              // Hide hotbar when inventory screen is open
-              if (hotbarContainer) hotbarContainer.classList.add('hidden');
-              renderInventoryCraftingUI();
-              craftingScreen.classList.remove('hidden');
-            } else {
-              // Re-lock mouse when closing inventory
-              gameState.renderer.domElement.requestPointerLock();
-              // Show hotbar when inventory screen is closed
-              if (hotbarContainer) hotbarContainer.classList.remove('hidden');
-              craftingScreen.classList.add('hidden');
-            }
-          }
-          gameState.toggleInventoryScreen = toggleInventoryScreen;
-
-          if (btnCloseCrafting) {
-            btnCloseCrafting.addEventListener('click', () => {
-              gameState.inventoryOpen = false;
-              gameState.renderer.domElement.requestPointerLock();
-              const hotbarContainer = document.getElementById('hotbar-container');
-              if (hotbarContainer) hotbarContainer.classList.remove('hidden');
-              craftingScreen.classList.add('hidden');
-            });
-          }
-
-          // Mobile crafting button
-          const mobileCraftBtn = document.getElementById('btn-crafting-mobile');
-          if (mobileCraftBtn) {
-            mobileCraftBtn.addEventListener('touchstart', (e) => {
-              e.preventDefault();
-              if (!gameState.inventoryOpen) toggleInventoryScreen();
-            });
-          }
-
-          // ─── Keyboard Shortcuts ────────────────────────
-          document.addEventListener('keydown', function gameKeyHandler(e) {
-            if (game.paused || !game.running) return;
-
-            // Number keys 1-9 for hotbar selection
-            if (e.key >= '1' && e.key <= '9') {
-              e.preventDefault();
-              inventory.selectByNumber(parseInt(e.key));
-              updateHotbarUI();
-            }
-
-            // E for inventory + crafting screen
-            if (e.key === 'e' || e.key === 'E') {
-              e.preventDefault();
-              toggleInventoryScreen();
-            }
-          });
-
-          // Scroll wheel for hotbar cycling
-          document.addEventListener('wheel', function gameWheelHandler(e) {
-            if (game.paused || !game.running) return;
-            if (gameState.inventoryOpen) return; // Don't cycle when inventory is open
-            inventory.cycleSelection(e.deltaY > 0 ? 1 : -1);
+            renderInventoryCraftingUI();
             updateHotbarUI();
-          });
-
-          // ─── Periodic Save (every 30 seconds) ──────────
-          function savePlayerState() {
-            const selected = characterManager ? characterManager.getSelectedCharacter() : null;
-            if (!selected) return;
-
-            // Save inventory
-            const serialized = inventory.serialize();
-            selected.inventory = serialized.slots;
-            selected.equipment = serialized.equipment;
-
-            // Save spawn point
-            selected.spawnPoints = selected.spawnPoints || {};
-            selected.spawnPoints[currentWorld.id] = {
-              x: player.position.x,
-              y: player.position.y,
-              z: player.position.z,
-            };
-
-            characterManager.persistence.saveCharacter(selected);
-            _log('[Cuubz] Saved player state');
           }
+        }
+      });
 
-          // Save every 30 seconds
-          const saveIntervalId = setInterval(() => {
-            if (!game.paused && game.running) {
-              savePlayerState();
+      /**
+       * Render the combined inventory + crafting UI — recipe list + interactive inventory grid.
+       */
+      function renderInventoryCraftingUI() {
+        const recipeList = document.getElementById('crafting-recipe-list');
+        const invGrid = document.getElementById('crafting-inv-grid');
+        const stationIndicator = document.getElementById('crafting-station-indicator');
+
+        if (!recipeList || !invGrid) return;
+
+        // Check crafting table proximity
+        const atTable = checkNearCraftingTable(player, game.chunkManager);
+        if (stationIndicator) {
+          stationIndicator.classList.toggle('hidden', !atTable);
+        }
+
+        // Get craftable recipes
+        const recipes = crafting.getCraftableRecipes(inventory, atTable);
+
+        // Render recipe list
+        recipeList.innerHTML = '';
+        if (recipes.length === 0) {
+          recipeList.innerHTML = '<div class="crafting-empty-msg">No recipes available. Gather materials or find a crafting table.</div>';
+        } else {
+          for (const recipe of recipes) {
+            const card = document.createElement('div');
+            card.className = 'recipe-card';
+            card.dataset.recipeId = recipe.id;
+
+            // Ingredients
+            let cardHTML = '<div class="recipe-ingredients">';
+            for (let i = 0; i < recipe.ingredients.length; i++) {
+              if (i > 0) cardHTML += '<span class="recipe-plus">+</span>';
+              const ing = recipe.ingredients[i];
+              // Resolve actual typeId to display (handles typeIds array)
+              const displayTypeId = crafting._getIngredientType(inventory, ing);
+              cardHTML += `<div class="recipe-ing-slot">
+                <canvas class="item-icon" width="32" height="32" data-typeid="${displayTypeId}"></canvas>
+                <span class="ing-count">${ing.count}</span>
+              </div>`;
             }
-          }, 30000);
+            cardHTML += '</div>';
 
-          // Save when pausing (Escape key)
-          document.addEventListener('keydown', function saveOnPause(e) {
-            if (e.key === 'Escape' && !game.paused) {
-              savePlayerState();
-            }
-          });
+            // Output
+            const outCount = recipe.output.count || 1;
+            cardHTML += `<div class="recipe-arrow">→</div>
+              <div class="recipe-output">
+                <canvas class="item-icon" width="40" height="40" data-typeid="${recipe.output.typeId}"></canvas>
+                ${outCount > 1 ? `<span class="output-count">${outCount}</span>` : ''}
+              </div>`;
 
-          // Clean up save interval on game stop
-          const origStop = game.stop.bind(game);
-          game.stop = function() {
-            savePlayerState();
-            droppedItems.clear();
-            clearInterval(saveIntervalId);
-            origStop();
-          };
+            // Name
+            cardHTML += `<div class="recipe-name">${recipe.name}</div>`;
 
-          // Start game loop
-          loadingStatus.textContent = 'Almost ready...';
-          if (loadingProgress) loadingProgress.style.width = '100%';
+            card.innerHTML = cardHTML;
 
-          // Create a simple world-like object for collision detection.
-          // No local alias: the render loop was its only reader.
-          gameState.chunkWorld = {
-            getBlockAtWorld: function(bx, by, bz) {
-              return chunkManager.getVoxel(Math.floor(bx), Math.floor(by), Math.floor(bz));
-            }
-          };
+            // Click → craft
+            card.addEventListener('click', () => {
+              crafting.craftRecipe(recipe.id, inventory);
+              renderInventoryCraftingUI();
+              updateHotbarUI();
+            });
 
-          setTimeout(() => {
-            game.start(mode);
-            // Show HUD (contains hotbar) when game starts
-            const hud = document.getElementById('hud');
-            if (hud) hud.classList.remove('hidden');
+            recipeList.appendChild(card);
 
-            // Cancel any old render loop from a previous session before starting fresh.
-            if (_renderRafId) { cancelAnimationFrame(_renderRafId); _renderRafId = null; }
+            // Draw icons after DOM insertion
+            card.querySelectorAll('canvas[data-typeid]').forEach(canvas => {
+              const typeId = canvas.dataset.typeid;
+              // Preserve type: numeric strings that are pure numbers → parseInt, otherwise keep as string
+              renderItemIcon(canvas, /^\d+$/.test(typeId) ? parseInt(typeId, 10) : typeId);
+            });
+          }
+        }
 
-            // ─── Wire up Pause Menu & Settings ────────────
-            // Clean up any previous session's pause menu listeners before setting up fresh
-            if (typeof _cleanupPauseMenu === 'function') {
-              _cleanupPauseMenu();
-              _cleanupPauseMenu = null;
-            }
-            _cleanupPauseMenu = setupPauseMenu(gameState);
+        // Render interactive inventory grid
+        renderInventoryGrid(invGrid);
 
-            game.lastTime = performance.now();
-            // renderLoop lives at main.js top level now (PR 12). `gameState` is the only
-            // thing it needs, and passing it here is what proves the closure is severed.
-            _renderRafId = requestAnimationFrame(() => renderLoop(gameState));
-
-            // The e2e harness drives block placement through this handle — it is the
-            // reason test/e2e/saveLoad.js can assert a *player edit* round-trips, rather
-            // than only generated terrain. See src/testBridge.js.
-            publishGameState(gameState);
-
-            _log('[Cuubz] Game started successfully in ' + mode + ' mode');
-          }, 500);
-      } catch (err) {
-        console.error('[Cuubz] Game init failed:', err);
-        loadingStatus.textContent = 'Error: ' + err.message;
-        _log('[Cuubz] Game init error:', err.stack);
+        // Render equipment panel
+        renderEquipmentUI();
       }
-    }, 200);
+
+      /**
+       * Toggle inventory + crafting screen open/closed.
+       */
+      function toggleInventoryScreen() {
+        gameState.inventoryOpen = !gameState.inventoryOpen;
+        const hotbarContainer = document.getElementById('hotbar-container');
+
+        if (gameState.inventoryOpen) {
+          // Unlock mouse so player can use inventory UI
+          if (document.pointerLockElement) {
+            document.exitPointerLock();
+          }
+          // Hide hotbar when inventory screen is open
+          if (hotbarContainer) hotbarContainer.classList.add('hidden');
+          renderInventoryCraftingUI();
+          craftingScreen.classList.remove('hidden');
+        } else {
+          // Re-lock mouse when closing inventory
+          gameState.renderer.domElement.requestPointerLock();
+          // Show hotbar when inventory screen is closed
+          if (hotbarContainer) hotbarContainer.classList.remove('hidden');
+          craftingScreen.classList.add('hidden');
+        }
+      }
+      gameState.toggleInventoryScreen = toggleInventoryScreen;
+
+      if (btnCloseCrafting) {
+        btnCloseCrafting.addEventListener('click', () => {
+          gameState.inventoryOpen = false;
+          gameState.renderer.domElement.requestPointerLock();
+          const hotbarContainer = document.getElementById('hotbar-container');
+          if (hotbarContainer) hotbarContainer.classList.remove('hidden');
+          craftingScreen.classList.add('hidden');
+        });
+      }
+
+      // Mobile crafting button
+      const mobileCraftBtn = document.getElementById('btn-crafting-mobile');
+      if (mobileCraftBtn) {
+        mobileCraftBtn.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          if (!gameState.inventoryOpen) toggleInventoryScreen();
+        });
+      }
+
+      // ══ Step 14 — HUD, input shortcuts and the periodic save ══════════════════════════════
+
+      // ─── Keyboard Shortcuts ────────────────────────
+      document.addEventListener('keydown', function gameKeyHandler(e) {
+        if (game.paused || !game.running) return;
+
+        // Number keys 1-9 for hotbar selection
+        if (e.key >= '1' && e.key <= '9') {
+          e.preventDefault();
+          inventory.selectByNumber(parseInt(e.key));
+          updateHotbarUI();
+        }
+
+        // E for inventory + crafting screen
+        if (e.key === 'e' || e.key === 'E') {
+          e.preventDefault();
+          toggleInventoryScreen();
+        }
+      });
+
+      // Scroll wheel for hotbar cycling
+      document.addEventListener('wheel', function gameWheelHandler(e) {
+        if (game.paused || !game.running) return;
+        if (gameState.inventoryOpen) return; // Don't cycle when inventory is open
+        inventory.cycleSelection(e.deltaY > 0 ? 1 : -1);
+        updateHotbarUI();
+      });
+
+      // ─── Periodic Save (every 30 seconds) ──────────
+      function savePlayerState() {
+        const selected = characterManager ? characterManager.getSelectedCharacter() : null;
+        if (!selected) return;
+
+        // Save inventory
+        const serialized = inventory.serialize();
+        selected.inventory = serialized.slots;
+        selected.equipment = serialized.equipment;
+
+        // Save spawn point
+        selected.spawnPoints = selected.spawnPoints || {};
+        selected.spawnPoints[currentWorld.id] = {
+          x: player.position.x,
+          y: player.position.y,
+          z: player.position.z,
+        };
+
+        characterManager.persistence.saveCharacter(selected);
+        _log('[Cuubz] Saved player state');
+      }
+
+      // Save every 30 seconds
+      const saveIntervalId = setInterval(() => {
+        if (!game.paused && game.running) {
+          savePlayerState();
+        }
+      }, 30000);
+
+      // Save when pausing (Escape key)
+      document.addEventListener('keydown', function saveOnPause(e) {
+        if (e.key === 'Escape' && !game.paused) {
+          savePlayerState();
+        }
+      });
+
+      // Clean up save interval on game stop
+      const origStop = game.stop.bind(game);
+      game.stop = function() {
+        savePlayerState();
+        droppedItems.clear();
+        clearInterval(saveIntervalId);
+        origStop();
+      };
+
+      // Start game loop
+      loadingStatus.textContent = 'Almost ready...';
+      if (loadingProgress) loadingProgress.style.width = '100%';
+
+      // ══ Step 15 — start the render loop ═══════════════════════════════════════════════════
+
+      // Create a simple world-like object for collision detection.
+      // No local alias: the render loop was its only reader.
+      gameState.chunkWorld = {
+        getBlockAtWorld: function(bx, by, bz) {
+          return chunkManager.getVoxel(Math.floor(bx), Math.floor(by), Math.floor(bz));
+        }
+      };
+
+      // The same again for the 500 ms that let the last of the init settle before the
+      // render loop starts taking the frame budget. Awaiting it preserves the delay and
+      // removes the last level of nesting from this function.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      game.start(mode);
+      // Show HUD (contains hotbar) when game starts
+      const hud = document.getElementById('hud');
+      if (hud) hud.classList.remove('hidden');
+
+      // Cancel any old render loop from a previous session before starting fresh.
+      if (_renderRafId) { cancelAnimationFrame(_renderRafId); _renderRafId = null; }
+
+      // ─── Wire up Pause Menu & Settings ────────────
+      // Clean up any previous session's pause menu listeners before setting up fresh
+      if (typeof _cleanupPauseMenu === 'function') {
+        _cleanupPauseMenu();
+        _cleanupPauseMenu = null;
+      }
+      _cleanupPauseMenu = setupPauseMenu(gameState);
+
+      game.lastTime = performance.now();
+      // renderLoop lives at main.js top level now (PR 12). `gameState` is the only
+      // thing it needs, and passing it here is what proves the closure is severed.
+      _renderRafId = requestAnimationFrame(() => renderLoop(gameState));
+
+      // The e2e harness drives block placement through this handle — it is the
+      // reason test/e2e/saveLoad.js can assert a *player edit* round-trips, rather
+      // than only generated terrain. See src/testBridge.js.
+      publishGameState(gameState);
+
+      _log('[Cuubz] Game started successfully in ' + mode + ' mode');
+    } catch (err) {
+      console.error('[Cuubz] Game init failed:', err);
+      loadingStatus.textContent = 'Error: ' + err.message;
+      _log('[Cuubz] Game init error:', err.stack);
+    }
   }
 
   // ============================================================
