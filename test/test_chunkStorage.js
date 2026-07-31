@@ -772,6 +772,78 @@ async function run() {
       assertEquals(db._data.chunks.size, 1, `SCHEMA_STEPS[${version}] leaves existing records alone`);
     }
   }
+
+  // ── 23. setRenderDistance recomputes the voxel region radius (D-66) ──
+  //
+  // `_voxelRegionRadius` is DERIVED from `renderDistance`: the constructor computes it
+  // as `max(renderDistance + 2, min(32, regionRadius))`, and `_updateVoxelRegion` reads
+  // it every few frames to decide which chunks are resident and which get generated.
+  // `setRenderDistance` used to assign `renderDistance` and stop there, so every live
+  // caller of the render-distance control (`PerformanceSettings.apply`, the pause menu,
+  // the settings screen) moved the mesh range without moving the voxel range underneath
+  // it — for the rest of the session the voxel region stayed at whatever the render
+  // distance was at STARTUP. Raising the slider then built the outermost meshes against
+  // chunks that were never loaded.
+  //
+  // Asserted through `_updateVoxelRegion` and not just on the field, because the field
+  // is only a bug if something reads it.
+  {
+    const cm = new ChunkManager({ worldName: 'world-rd', renderDistance: 4, regionRadius: 16 });
+
+    assertEquals(cm._voxelRegionRadius, 16,
+      'Constructor derives _voxelRegionRadius from renderDistance and regionRadius');
+
+    // Raising the render distance past `regionRadius - 2` must push the voxel region out
+    // with it: the voxel region has to extend at least one chunk beyond the meshes.
+    cm.setRenderDistance(16);
+    assertEquals(cm.renderDistance, 16, 'setRenderDistance sets the render distance');
+    assertEquals(cm._voxelRegionRadius, 18,
+      'setRenderDistance recomputes _voxelRegionRadius — max(renderDistance + 2, min(32, regionRadius)) (D-66)');
+
+    // Lowering it again returns the voxel region to the configured region radius rather
+    // than leaving it stretched.
+    cm.setRenderDistance(2);
+    assertEquals(cm._voxelRegionRadius, 16,
+      'Lowering the render distance returns _voxelRegionRadius to the configured region radius');
+
+    // The clamp is unchanged: [2, 16].
+    cm.setRenderDistance(99);
+    assertEquals(cm.renderDistance, 16, 'setRenderDistance still clamps to a maximum of 16');
+    cm.setRenderDistance(-5);
+    assertEquals(cm.renderDistance, 2, 'setRenderDistance still clamps to a minimum of 2');
+
+    // ── The consequence: _updateVoxelRegion actually asks for the wider area ──
+    const scanned = [];
+    const probe = new ChunkManager({ worldName: 'world-rd2', renderDistance: 4, regionRadius: 16 });
+    probe._batchEnsureChunks = (entries) => { scanned.push(entries.length); return Promise.resolve(); };
+
+    probe._updateVoxelRegion(0, 0);
+    assertEquals(scanned[0], 33 * 33,
+      '_updateVoxelRegion scans (2 * 16 + 1)^2 chunks at the startup radius');
+
+    probe.setRenderDistance(16);
+    probe._updateVoxelRegion(0, 0);
+    assertEquals(scanned[1], 37 * 37,
+      '_updateVoxelRegion scans (2 * 18 + 1)^2 chunks after the render distance is raised — ' +
+      'the stale-derived-field bug made this identical to the previous scan (D-66)');
+
+    // ── The dead callback is gone, not merely unused ──
+    //
+    // `setRenderDistance` used to invoke `this.onRenderDistanceChange` — a field the
+    // constructor never initialised and that nothing in src/ ever assigned (the one
+    // module that did, PerformanceOptimizer.js, assigned it to itself and PR 20 deleted
+    // it). A callback nothing can set reads as a wiring point and is not one — D-42's
+    // shape — so it was removed rather than wired. If a future PR needs a notification
+    // here, it has to add it deliberately and change this assertion.
+    let fired = 0;
+    const cb = new ChunkManager({ worldName: 'world-rd3', renderDistance: 4 });
+    cb.onRenderDistanceChange = () => { fired++; };
+    cb.setRenderDistance(9);
+    assertEquals(fired, 0,
+      'setRenderDistance fires no onRenderDistanceChange callback — the field was dead and is gone (D-66)');
+    assertEquals(cb._voxelRegionRadius, 16,
+      'The recompute still happens on the instance that carries a stray callback field');
+  }
 }
 
 // ─── Results ────────────────────────────────────────────────────

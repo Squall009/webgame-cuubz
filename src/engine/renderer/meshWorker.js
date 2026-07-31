@@ -1,47 +1,49 @@
 /**
  * Cuubz — Mesh Builder Worker Script (with detailed error reporting)
  * No Three.js dependency — returns raw Float32Array/Uint16Array buffers via postMessage.
+ *
+ * ─── THIS FILE HOLDS NO BLOCK-ID TABLE, DELIBERATELY (BUGS.md D-63) ─────────
+ *
+ * It used to carry five: CUTOUT_IDS, TRANSPARENT_IDS, TINTABLE_IDS,
+ * SPECIAL_MESH_TYPES and BLOCK_COLORS, all hand-written, all a copy of something
+ * `ChunkMeshBuilder.js` derives from BLOCK_REGISTRY. Three had rotted:
+ *
+ *   - TINTABLE_IDS listed 115 commented YELLOW_POPLAR_LEAVES. 115 is `white_concrete`
+ *     — the worker tinted white concrete green with the humidity gradient.
+ *   - CUTOUT_IDS omitted 192, the real `yellow_poplar_leaves`, so the worker binned it
+ *     as solid: faces behind it culled, wrong material bucket.
+ *   - The block loop skipped `blockType === 12` as "CAVE_AIR". CAVE_AIR is 0 (an alias
+ *     of AIR); 12 is `polished_granite`. The worker drew no geometry for it at all.
+ *
+ * Every one of those was invisible on the main-thread fallback path, so the bug's
+ * presence depended on whether the browser spawned a worker.
+ *
+ * This file is a CLASSIC SCRIPT (decision 14) and cannot `import` — eslint.config.mjs
+ * lints it with `sourceType: 'script'`, so an `import` here is a parse error. So the
+ * tables arrive in the build message instead, derived from BLOCK_REGISTRY by
+ * `src/game/data/BlockCategories.js` and assembled by
+ * `ChunkMeshCoordinator._ensureMeshTablesCache`. `msg.tables` is REQUIRED: there is no
+ * built-in default to fall back to, because a default is exactly the thing that goes
+ * stale. Do not add one. Do not add an id literal to this file.
  */
 
-// Block categories (IDs match blockRegistry.js)
-var CUTOUT_IDS = {
-  104: true, 105: true, 106: true, 107: true, 108: true, 109: true, 110: true,
-  111: true, 112: true, 113: true, 114: true, // leaves + leaf_litter
-  168: true, // ladder
-  170: true, // glowstone
-  172: true, 173: true, 174: true, 175: true, // torch, lantern, soul_lantern, campfire
-  177: true, 178: true, // short_grass, tall_grass
-  179: true, 180: true, // red_flower, yellow_flower
-  181: true, 182: true, // brown_mushroom, red_mushroom
-  183: true, 184: true, // weeping_vines, twisting_vines
-  186: true, 187: true, // glow_lichen, vine
-  189: true, 190: true, 191: true, // corrupt_crystal, apple, quest_key
-}; // cutout: alpha-tested (discard transparent pixels)
-var TRANSPARENT_IDS = {
-  46: true, 47: true,  // water, lava
-  61: true, 62: true, 63: true, 64: true, // ice, packed_ice, blue_ice, frosted_ice
-  188: true, // toxic_slime
-}; // transparent: alpha-blended
-
-var AIR_ID = 0;
 var CHUNK_W = 16;
 var CHUNK_D = 16;
 var CHUNK_H = 256;
 
-function isNonSolid(b) {
-  return b === AIR_ID || CUTOUT_IDS[b] || TRANSPARENT_IDS[b];
+/** Turn an array of ids into an O(1) lookup object. */
+function idSet(ids) {
+  var out = {};
+  if (ids) { for (var i = 0; i < ids.length; i++) out[ids[i]] = true; }
+  return out;
 }
 
-// Face definitions — use var + simple arrays to avoid const issues with structured-clone
-var FACES = [
-  // dir, verts[4][3], uvCoords[4][2], name
-  {d:[0,1,0], v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]], u:[[0,0],[1,0],[1,1],[0,1]], n:'top'},
-  {d:[0,-1,0], v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]], u:[[0,1],[1,1],[1,0],[0,0]], n:'bottom'},
-  {d:[0,0,1], v:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]], u:[[0,0],[1,0],[1,1],[0,1]], n:'front'},
-  {d:[0,0,-1],v:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]], u:[[0,0],[1,0],[1,1],[0,1]], n:'back'},
-  {d:[1,0,0], v:[[1,0,1],[1,0,0],[1,1,0],[1,1,1]], u:[[0,0],[1,0],[1,1],[0,1]], n:'right'},
-  {d:[-1,0,0],v:[[0,0,0],[0,0,1],[0,1,1],[0,1,0]], u:[[0,0],[1,0],[1,1],[0,1]], n:'left'}
-];
+/** Turn an array of [id, value] pairs into a lookup object. */
+function idMap(pairs) {
+  var out = {};
+  if (pairs) { for (var i = 0; i < pairs.length; i++) out[pairs[i][0]] = pairs[i][1]; }
+  return out;
+}
 
 // uvLookup: Array[256] where each entry is [topU,topV,botU,botV,sideU,sideV,size] or null
 function getUV(blockType, faceName, uvLookup) {
@@ -65,47 +67,23 @@ function getUV(blockType, faceName, uvLookup) {
   return result;
 }
 
-// Block types that receive humidity-based vertex color tinting
-var TINTABLE_IDS = {
-  // Grass blocks
-  49: true,  // GRASS (grass_block)
-  55: true,  // PODZOL
-  // Grass (ground cover)
-  177: true, // SHORT_GRASS
-  178: true, // TALL_GRASS
-  // Leaves
-  104: true, // OAK_LEAVES
-  105: true, // SPRUCE_LEAVES
-  106: true, // BIRCH_LEAVES
-  107: true, // JUNGLE_LEAVES
-  108: true, // ACACIA_LEAVES
-  109: true, // DARK_OAK_LEAVES
-  110: true, // CHERRY_LEAVES
-  111: true, // MANGROVE_LEAVES
-  112: true, // PALE_OAK_LEAVES
-  113: true, // ORANGE_POPLAR_LEAVES
-  114: true, // RED_POPLAR_LEAVES
-  115: true, // YELLOW_POPLAR_LEAVES
-};
+/**
+ * @param tables — the derived tables from the build message. See the file header:
+ *   { faces, airIds, cutoutIds, transparentIds, tintableIds, specialMeshTypes, blockColors }
+ */
+function buildMeshData(blocks, neighbors, uvLookup, humidityMap, tables) {
+  var FACES = tables.faces;
+  var AIR_IDS = idSet(tables.airIds);
+  var CUTOUT_IDS = idSet(tables.cutoutIds);
+  var TRANSPARENT_IDS = idSet(tables.transparentIds);
+  var TINTABLE_IDS = idSet(tables.tintableIds);
+  var SPECIAL_MESH_TYPES = idMap(tables.specialMeshTypes);
+  var BLOCK_COLORS = idMap(tables.blockColors);
 
-// Special mesh types: block ID → { type, height }
-// 'crossbillboard' = two vertical 1×1 planes forming an X (grass)
-// 'crossbillboard_stacked' = two crossbillboards stacked (tall grass)
-// 'topface' = single 1×1 top face near the ground (flowers)
-var SPECIAL_MESH_TYPES = {
-  177: { type: 'crossbillboard' },              // short_grass
-  178: { type: 'crossbillboard_stacked' },      // tall_grass
-  179: { type: 'topface' },                     // red_flower
-  180: { type: 'topface' },                     // yellow_flower
-};
+  function isNonSolid(b) {
+    return AIR_IDS[b] || CUTOUT_IDS[b] || TRANSPARENT_IDS[b] ? true : false;
+  }
 
-// Block color multipliers: block ID → [r, g, b]
-var BLOCK_COLORS = {
-  179: [1, 0.25, 0.25],  // red_flower
-  180: [1, 1, 0.25],     // yellow_flower
-};
-
-function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
   var solidPos = [], solidNorm = [], solidUV = [], solidIdx = [], solidColor = [];
   var cutoutPos = [], cutoutNorm = [], cutoutUV = [], cutoutIdx = [], cutoutColor = [];
   var transPos = [], transNorm = [], transUV = [], transIdx = [], transColor = [];
@@ -226,7 +204,9 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
         var idx = x + (z * CHUNK_W) + (y * CHUNK_W * CHUNK_D);
         var blockType = blocks[idx];
 
-        if (blockType === 0 || blockType === 12) continue; // AIR or CAVE_AIR
+        // AIR only. This line used to read `blockType === 0 || blockType === 12`, calling
+        // 12 "CAVE_AIR"; CAVE_AIR is an alias of AIR (0) and 12 is polished_granite.
+        if (AIR_IDS[blockType]) continue;
 
         var isCutout = CUTOUT_IDS[blockType] ? true : false;
         var isTransparent = TRANSPARENT_IDS[blockType] ? true : false;
@@ -259,9 +239,9 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
 
         for (var f = 0; f < 6; f++) {
           var face = FACES[f];
-          var nx = x + face.d[0];
-          var ny = y + face.d[1];
-          var nz = z + face.d[2];
+          var nx = x + face.dir[0];
+          var ny = y + face.dir[1];
+          var nz = z + face.dir[2];
           
           // Get neighbor block — check all three axes for in-chunk bounds
           var nb;
@@ -271,10 +251,10 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
             // Out of chunk bounds — Y-direction defaults to AIR, X/Z use neighbor arrays
             if ((nx < 0 || nx >= CHUNK_W || nz < 0 || nz >= CHUNK_D)) {
               var na = null;
-              if (face.d[0] === 1 && face.d[2] === 0) na = neighbors.positiveX;
-              else if (face.d[0] === -1 && face.d[2] === 0) na = neighbors.negativeX;
-              else if (face.d[0] === 0 && face.d[2] === 1) na = neighbors.positiveZ;
-              else if (face.d[0] === 0 && face.d[2] === -1) na = neighbors.negativeZ;
+              if (face.dir[0] === 1 && face.dir[2] === 0) na = neighbors.positiveX;
+              else if (face.dir[0] === -1 && face.dir[2] === 0) na = neighbors.negativeX;
+              else if (face.dir[0] === 0 && face.dir[2] === 1) na = neighbors.positiveZ;
+              else if (face.dir[0] === 0 && face.dir[2] === -1) na = neighbors.negativeZ;
               
               nb = 0; // AIR
               if (na && ny >= 0 && ny < CHUNK_H) {
@@ -306,9 +286,9 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap) {
 
           // Face is visible — proceed to build geometry
 
-          var faceUVs = getUV(blockType, face.n, uvLookup);
+          var faceUVs = getUV(blockType, face.name, uvLookup);
           var vColor = getVertexColor(x, y, z, blockType);
-          addFace(posArr, normArr, uvArr, (isCutout ? cutoutColor : (isTransparent ? transColor : solidColor)), idxArr, face.v, face.d, faceUVs, vColor, x, y, z);
+          addFace(posArr, normArr, uvArr, (isCutout ? cutoutColor : (isTransparent ? transColor : solidColor)), idxArr, face.vertices, face.dir, faceUVs, vColor, x, y, z);
         }
       }
     }
@@ -330,7 +310,12 @@ self.onmessage = function (e) {
       if (!msg.blocks || !msg.neighbors) {
         throw new Error('Missing blocks or neighbors in message');
       }
-      
+      // Required, and deliberately not defaulted — see the file header. A missing
+      // table must be a loud error, not a silently-wrong mesh.
+      if (!msg.tables || !msg.tables.faces) {
+        throw new Error('Missing derived block tables in message (see BlockCategories.buildMeshTables)');
+      }
+
       var blocks = new Uint8Array(msg.blocks);
       var neighbors = {};
       for (var dir in msg.neighbors) {
@@ -342,7 +327,7 @@ self.onmessage = function (e) {
       if (!humidityMap && !msg.humidityMap) {
         console.warn('[MeshWorker] No humidityMap for chunk', msg.cx, msg.cz);
       }
-      var result = buildMeshData(blocks, neighbors, msg.uvLookup || null, humidityMap);
+      var result = buildMeshData(blocks, neighbors, msg.uvLookup || null, humidityMap, msg.tables);
 
       // Send result with transferable buffers
       self.postMessage({

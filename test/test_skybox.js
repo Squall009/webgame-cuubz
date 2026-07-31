@@ -251,6 +251,91 @@ sbNull.setTime(6); assert(true, 'setTime does not crash with null renderer');
 sbNull.setTime(18); assertEquals(sbNull.getTime(), 18, 'setTime still works correctly');
 
 // ============================================================
+// Group 29: D-67 — dawn/dusk are defined ONCE and all three consumers agree
+// ============================================================
+//
+// This file used to be able to pass while `getSkyPhase`, `getFogDensityForTime`/
+// `getAmbientIntensityForTime` and `getSkyColorForTime` each ran a different schedule:
+// integer hours 5/7/17/19, fractions 0.20/0.30/0.70/0.80 (= 4:48 / 7:12 / 16:48 / 19:12),
+// and a third set of hour-based smoothsteps. Decision 46 ruled that the sky-colour
+// schedule wins — dawn 5 h → 7 h, dusk 17 h → 19 h — and the fraction constants moved to
+// match. These assertions are what stops them drifting apart again.
+console.log('\n--- Group 29: D-67 One Schedule ---');
+const {DAWN_START, DAWN_END, DUSK_START, DUSK_END,
+  DAWN_START_HOUR, DAWN_END_HOUR, DUSK_START_HOUR, DUSK_END_HOUR, DUSK_LABEL_END_HOUR} = SkyRenderer;
+
+// The fraction constants are the boundary hours, exactly — not a rounded copy of them.
+assertEquals(DAWN_START, hoursToFraction(DAWN_START_HOUR), 'DAWN_START is exactly hour 5 as a fraction');
+assertEquals(DAWN_END, hoursToFraction(DAWN_END_HOUR), 'DAWN_END is exactly hour 7 as a fraction');
+assertEquals(DUSK_START, hoursToFraction(DUSK_START_HOUR), 'DUSK_START is exactly hour 17 as a fraction');
+assertEquals(DUSK_END, hoursToFraction(DUSK_END_HOUR), 'DUSK_END is exactly hour 19 as a fraction');
+assertEquals(DAWN_START_HOUR, 5, 'Dawn starts at hour 5');
+assertEquals(DAWN_END_HOUR, 7, 'Dawn ends at hour 7');
+assertEquals(DUSK_START_HOUR, 17, 'Dusk starts at hour 17');
+assertEquals(DUSK_END_HOUR, 19, 'Dusk ends at hour 19');
+assertEquals(DUSK_LABEL_END_HOUR, 20, "The 'dusk' LABEL runs one further hour, into the night");
+
+// The four boundaries: the phase label flips at the same instant the curves do.
+assertEquals(getSkyPhase(DAWN_START_HOUR), 'dawn', 'Hour 5 is dawn');
+assertEquals(getFogDensityForTime(DAWN_START_HOUR), FOG_DENSITY_NIGHT, 'Fog is still full night AT hour 5 (the transition starts here)');
+assertEquals(getAmbientIntensityForTime(DAWN_START_HOUR), AMBIENT_LIGHT.nightIntensity, 'Ambient is still full night AT hour 5');
+assertEquals(getSkyPhase(DAWN_END_HOUR), 'day', 'Hour 7 is day');
+assertEquals(getFogDensityForTime(DAWN_END_HOUR), FOG_DENSITY_DAY, 'Fog has reached its day value AT hour 7');
+assertEquals(getAmbientIntensityForTime(DAWN_END_HOUR), AMBIENT_LIGHT.dayIntensity, 'Ambient has reached its day value AT hour 7');
+assertEquals(getSkyPhase(DUSK_START_HOUR), 'sunset', 'Hour 17 is sunset');
+assertEquals(getFogDensityForTime(DUSK_START_HOUR), FOG_DENSITY_DAY, 'Fog is still full day AT hour 17 (the transition starts here)');
+assertEquals(getAmbientIntensityForTime(DUSK_START_HOUR), AMBIENT_LIGHT.dayIntensity, 'Ambient is still full day AT hour 17');
+assertEquals(getSkyPhase(DUSK_END_HOUR), 'dusk', 'Hour 19 is the dusk label, and the night curves');
+assertEquals(getFogDensityForTime(DUSK_END_HOUR), FOG_DENSITY_NIGHT, 'Fog has reached its night value AT hour 19');
+assertEquals(getAmbientIntensityForTime(DUSK_END_HOUR), AMBIENT_LIGHT.nightIntensity, 'Ambient has reached its night value AT hour 19');
+
+// The four measured symptoms from the D-67 row, at the hours it names.
+assertEquals(getSkyPhase(4.9), 'night', "Hour 4.9 still reads 'night'");
+assertEquals(getFogDensityForTime(4.9), FOG_DENSITY_NIGHT, 'Hour 4.9 fog has NOT started thinning yet (was 0.0029899)');
+assertEquals(getAmbientIntensityForTime(4.9), AMBIENT_LIGHT.nightIntensity, 'Hour 4.9 ambient is still full night');
+assertEquals(getSkyPhase(7.1), 'day', "Hour 7.1 reads 'day'");
+assertEquals(getFogDensityForTime(7.1), FOG_DENSITY_DAY, 'Hour 7.1 fog is fully at its day value (was 0.0010010)');
+assertEquals(getAmbientIntensityForTime(7.1), AMBIENT_LIGHT.dayIntensity, 'Hour 7.1 ambient is fully at its day value (was 0.4489868)');
+assertEquals(getSkyPhase(16.9), 'day', "Hour 16.9 still reads 'day'");
+assertEquals(getFogDensityForTime(16.9), FOG_DENSITY_DAY, 'Hour 16.9 fog has NOT started thickening yet (was 0.0010101)');
+assertEquals(getAmbientIntensityForTime(16.9), AMBIENT_LIGHT.dayIntensity, 'Hour 16.9 ambient is still full day (was 0.4489873)');
+assertEquals(getSkyPhase(19.1), 'dusk', "Hour 19.1 reads the 'dusk' label");
+assertEquals(getFogDensityForTime(19.1), FOG_DENSITY_NIGHT, 'Hour 19.1 fog is fully at its night value (was 0.0029899)');
+assertEquals(getAmbientIntensityForTime(19.1), AMBIENT_LIGHT.nightIntensity, 'Hour 19.1 ambient is fully at its night value (was 0.2510132)');
+
+// The transitions really do run inside their bands — without this the assertions above
+// would also pass if dawn and dusk had simply been deleted.
+assertLessThan(getFogDensityForTime(5.5), FOG_DENSITY_NIGHT, 'Fog is thinning inside the dawn band');
+assertGreaterThan(getFogDensityForTime(5.5), FOG_DENSITY_DAY, 'Fog has not finished thinning at 5.5');
+assertGreaterThan(getFogDensityForTime(18), FOG_DENSITY_DAY, 'Fog is thickening inside the dusk band');
+assertLessThan(getFogDensityForTime(18), FOG_DENSITY_NIGHT, 'Fog has not finished thickening at 18:00');
+
+// Structural sweep: across the whole cycle, every hour the phase calls 'day' has day fog
+// and day ambient, and every hour it calls 'night' or 'dusk' has the night values. This is
+// the assertion that fails for ANY disagreement between the label and the curves, not just
+// the four boundaries.
+{
+  const dayMismatches = [];
+  const nightMismatches = [];
+  for (let i = 0; i < 240; i++) {
+    const hour = i / 10;
+    const phase = getSkyPhase(hour);
+    const fog = getFogDensityForTime(hour);
+    const amb = getAmbientIntensityForTime(hour);
+    if (phase === 'day' && (fog !== FOG_DENSITY_DAY || amb !== AMBIENT_LIGHT.dayIntensity)) {
+      dayMismatches.push(hour);
+    }
+    if ((phase === 'night' || phase === 'dusk') && (fog !== FOG_DENSITY_NIGHT || amb !== AMBIENT_LIGHT.nightIntensity)) {
+      nightMismatches.push(hour);
+    }
+  }
+  assertEquals(dayMismatches.length, 0,
+    `Every 'day' hour has day fog and day ambient (mismatches: ${dayMismatches.join(', ') || 'none'})`);
+  assertEquals(nightMismatches.length, 0,
+    `Every 'night'/'dusk' hour has night fog and night ambient (mismatches: ${nightMismatches.join(', ') || 'none'})`);
+}
+
+// ============================================================
 console.log('\n================================');
 console.log(`Results: ${passCount} passed, ${failCount} failed`);
 if (failCount > 0) {

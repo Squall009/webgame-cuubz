@@ -2,9 +2,24 @@
  * Cuubz — Mob Movement System
  * Handles velocity, gravity, AABB collision against solid blocks, step-up for stairs,
  * and flying movement for air-based mobs.
+ *
+ * ─── D-56: THIS FILE USED TO TEST SOLIDITY AS `block !== 0 && block !== 12` ──
+ *
+ * At four sites, treating ids 0 and 12 as air. Against the live registry **id 12 is
+ * `polished_granite`**, `category: 'solid'` — so `_resolveAxis` returned false for it and
+ * `_moveAndCollide` never zeroed the velocity that should have been blocked: mobs walked
+ * straight through polished granite. The same test was wrong in the other direction for
+ * water (46) and lava (47), which are neither 0 nor 12 and were therefore counted SOLID —
+ * mobs stood on the surface of oceans and lava lakes.
+ *
+ * The four comparisons are now one predicate, `isPassable`, derived from
+ * `BLOCK_PROPERTIES[id].solid` — the registry's own field, and exactly what
+ * `Player._isSolidAt` already tests. Mobs and the player now answer "is this block
+ * solid?" from one place. See `src/game/data/BlockCategories.js`.
  */
 
 import { AI_STATES } from '../mobDefinitions.js';
+import { isPassable } from '../../data/BlockCategories.js';
 
 /**
  * Apply movement toward a target position for a ground-based mob.
@@ -111,7 +126,7 @@ export function applyFlyingMovement(mob, targetX, targetZ, deltaTime, blockAcces
     for (let by = minY; by < maxY && !blocked; by++) {
       for (let bz = minZ; bz <= maxZ && !blocked; bz++) {
         const block = blockAccess.getBlockAtWorld ? blockAccess.getBlockAtWorld(bx, by, bz) : 0;
-        if (block !== 0 && block !== 12) {
+        if (!isPassable(block)) {
           blocked = true;
         }
       }
@@ -202,10 +217,10 @@ export function _checkStepUp(mob, deltaTime, hw, hh, world) {
     for (let bz = minZ; bz <= maxZ; bz++) {
       const by = Math.floor(mob.position.y);
       const block = world.getBlockAtWorld(bx, by, bz);
-      if (block !== 0 && block !== 12) {
-        // Check if the block above is air
+      if (!isPassable(block)) {
+        // Check if the block above can be stepped into
         const above = world.getBlockAtWorld(bx, by + 1, bz);
-        if (above === 0 || above === 12) {
+        if (isPassable(above)) {
           return stepHeight;
         }
       }
@@ -233,7 +248,7 @@ export function _resolveAxis(mob, newX, newY, newZ, hw, hh, axis, world) {
       for (let bz = minZ; bz <= maxZ; bz++) {
         const block = world.getBlockAtWorld(bx, by, bz);
         if (block === null || block === undefined) continue; // Unloaded = pass through
-        if (block === 0 || block === 12) continue; // Air
+        if (isPassable(block)) continue; // Air, water, lava, grass, flowers, torches…
 
         const overlapX = (newX - hw) < (bx + 1) && (newX + hw) > bx;
         const overlapY = newY < (by + 1) && (newY + hh) > by;

@@ -5,6 +5,7 @@
  */
 
 import { AI_STATES, MOB_BEHAVIORS, getMobDefinition } from './mobDefinitions.js';
+import { isAir } from '../data/BlockCategories.js';
 
 export class Mob {
   /**
@@ -263,8 +264,11 @@ export class Mob {
       const block = blockAccess.getBlockAtWorld
         ? blockAccess.getBlockAtWorld(Math.floor(px), Math.floor(py), Math.floor(pz))
         : 0;
-      // Non-air blocks block line of sight
-      if (block !== 0 && block !== 12) {
+      // Non-air blocks block line of sight.
+      // D-56: this used to read `block !== 0 && block !== 12`, calling 12 "cave air".
+      // Id 12 is `polished_granite` — mobs could see through a granite wall. The
+      // predicate now matches the comment above it exactly.
+      if (!isAir(block)) {
         if (i > 0) return false; // Allow starting voxel
       }
     }

@@ -15,82 +15,67 @@
  */
 
 import { validateBlockBreak, validateBlockPlace } from './Host.js';
+import { ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS } from '../game/data/ItemDefinitions.js';
+import { BLOCK_REGISTRY, BLOCK_TYPES } from '../engine/world/BlockRegistry.js';
 
 'use strict';
 
 // ============================================================
-// Constants
+// Constants — ALL DERIVED. See BUGS.md D-64.
 // ============================================================
+//
+// Every table below used to be hand-written here, and every one of them was wrong:
+//
+//   VALID_BLOCK_IDS   — 27 ids commented `1, // Grass`, `3, // Stone`, `7, // Wood Log`.
+//                       The registry says 1 is `bedrock`, 3 is `cobblestone`, 7 is `tuff`.
+//                       The multiplayer block-placement allowlist admitted and rejected
+//                       the wrong blocks: 166 of the registry's 193 ids were refused
+//                       outright, so a client holding, say, `oak_planks` (id 96) had its
+//                       whole inventory sync rejected.
+//   VALID_NAMED_ITEMS — 10 of the canonical 104.
+//   NAMED_ITEM_META   — 10 entries, 5 of them disagreeing with canonical `NAMED_ITEMS`:
+//                       apple/cooked_meat/berry/bread were maxStack 16 here vs **64**
+//                       canonically, and golden_apple was **1** here vs **64**. The other
+//                       94 named items fell through `getMaxStackSize` to
+//                       `MAX_STACK.resource = 64`, silently giving every tool and every
+//                       piece of armour a 64-stack over the wire (canonically 1).
+//   SINGLE_STACK_BLOCKS — `new Set([22, 25, 26])` commented "Corrupt Crystal, Quest Key,
+//                       Boss Spawn". Those ids are `iron_ore`, `copper_ore` and
+//                       `emerald_ore`; the real corrupt_crystal is 189 and quest_key 191.
+//                       So three ordinary ores were capped at 1 over the wire and the two
+//                       quest items were not.
+//
+// `src/game/data/ItemDefinitions.js` and `src/engine/world/BlockRegistry.js` are the
+// canonical tables and this file now reads them. It imports nothing that imports back:
+// both are leaves of the module graph, so `src/` gains no cycle (D-28).
 
-/** Valid block type IDs (from Block Type Registry) */
-export const VALID_BLOCK_IDS = new Set([
-  0,   // Air
-  1,   // Grass
-  2,   // Dirt
-  3,   // Stone
-  4,   // Sand
-  5,   // Gravel
-  6,   // Water
-  7,   // Wood Log
-  8,   // Leaves
-  9,   // Snow
-  10,  // Ice
-  11,  // Bedrock
-  12,  // Planks
-  13,  // Obsidian
-  14,  // Blackstone
-  15,  // Lava
-  16,  // Corrupt Stone
-  17,  // Toxic Slime
-  18,  // Coal Ore
-  19,  // Iron Ore
-  20,  // Gold Ore
-  21,  // Diamond Ore
-  22,  // Corrupt Crystal
-  23,  // Bed
-  24,  // Apple
-  25,  // Quest Key
-  26,  // Boss Spawn
-]);
+/**
+ * Valid block type IDs.
+ *
+ * The allowlist's INTENT is "ids a player may place". The registry has no property that
+ * expresses placeability — its fields are `{id, name, texture, category, hardness, tool}`
+ * plus the occasional `opacity`/`emissive`/`solid`/`meshType`/`color` — so the honest
+ * derived answer is **every id the registry knows**, and inventing a placeability rule
+ * here would just be a sixth hand-written table wearing a filter. Air stays in the set
+ * for the same reason it was in the old one: `validateSlot` rejects it separately and
+ * explicitly ("Air cannot be stored"), which is where that rule belongs.
+ */
+export const VALID_BLOCK_IDS = new Set(BLOCK_REGISTRY.map((b) => b.id));
 
-/** Valid named item keys (from inventory.js NAMED_ITEMS) */
-export const VALID_NAMED_ITEMS = new Set([
-  'coal',
-  'iron_ore',
-  'gold_ore',
-  'diamond',
-  'corrupt_crystal',
-  'apple',
-  'cooked_meat',
-  'berry',
-  'bread',
-  'golden_apple',
-]);
+/** Valid named item keys — the canonical NAMED_ITEMS table, all 104 of them. */
+export const VALID_NAMED_ITEMS = new Set(Object.keys(NAMED_ITEMS));
 
-/** Max stack sizes by category */
-export const MAX_STACK = {
-  block: 64,
-  resource: 64,
-  food: 16,
-  tool: 1,
-};
+/**
+ * Max stack sizes by category. Re-export of the canonical `MAX_STACKS`, which is keyed by
+ * the same four strings ('block' | 'resource' | 'food' | 'tool') this table used.
+ */
+export const MAX_STACK = MAX_STACKS;
 
-/** Named item categories and max stacks (mirrors inventory.js NAMED_ITEMS) */
-export const NAMED_ITEM_META = {
-  coal:            { category: 'resource', maxStack: 64 },
-  iron_ore:        { category: 'resource', maxStack: 64 },
-  gold_ore:        { category: 'resource', maxStack: 64 },
-  diamond:         { category: 'resource', maxStack: 64 },
-  corrupt_crystal: { category: 'resource', maxStack: 1 },
-  apple:           { category: 'food',     maxStack: 16 },
-  cooked_meat:     { category: 'food',     maxStack: 16 },
-  berry:           { category: 'food',     maxStack: 16 },
-  bread:           { category: 'food',     maxStack: 16 },
-  golden_apple:    { category: 'food',     maxStack: 1 },
-};
-
-/** Single-stack block IDs (quest items, special blocks) */
-export const SINGLE_STACK_BLOCKS = new Set([22, 25, 26]); // Corrupt Crystal, Quest Key, Boss Spawn
+/**
+ * Single-stack block IDs. Resolved BY NAME through BLOCK_TYPES, and identical to the pair
+ * `Inventory.getMaxStack` special-cases — quest items, which must not stack.
+ */
+export const SINGLE_STACK_BLOCKS = new Set([BLOCK_TYPES.CORRUPT_CRYSTAL, BLOCK_TYPES.QUEST_KEY]);
 
 /** Default inventory dimensions */
 export const DEFAULT_INVENTORY_ROWS = 4;
@@ -103,30 +88,43 @@ export const DEFAULT_TOTAL_SLOTS = 36;
 
 /**
  * Determine the category of a typeId.
+ *
+ * Body-for-body `Inventory.getItemCategory` (src/game/systems/InventoryItemTypes.js),
+ * reading the same `NAMED_ITEMS`. It used to read a local 10-entry `NAMED_ITEM_META`,
+ * so 94 of the 104 named items were categorised 'resource' over the wire — including
+ * all 70 tools.
+ *
  * @param {*} typeId — number (block ID) or string (named item)
  * @returns {string} 'block', 'resource', 'food', or 'tool'
  */
 export function getItemCategory(typeId) {
   if (typeof typeId === 'string') {
-    const meta = NAMED_ITEM_META[typeId];
-    return meta ? meta.category : 'resource';
+    const named = NAMED_ITEMS[typeId];
+    return named ? named.category : ITEM_CATEGORIES.RESOURCE;
   }
-  return 'block';
+  return ITEM_CATEGORIES.BLOCK;
 }
 
 /**
  * Get the max stack size for a given typeId.
+ *
+ * Body-for-body `Inventory.getMaxStack`. The host validates client inventories against
+ * this number, so a disagreement with the client's own limit is a desync that reads as
+ * "the server rejected your inventory" — which is what the old local table produced for
+ * every stack of apples between 17 and 64.
+ *
  * @param {*} typeId — number or string
  * @returns {number}
  */
 export function getMaxStackSize(typeId) {
   if (typeof typeId === 'string') {
-    const meta = NAMED_ITEM_META[typeId];
-    return meta ? meta.maxStack : MAX_STACK.resource;
+    const named = NAMED_ITEMS[typeId];
+    if (named) return named.maxStack;
+    return MAX_STACKS[ITEM_CATEGORIES.RESOURCE];
   }
   // Block items: special single-stack blocks
   if (SINGLE_STACK_BLOCKS.has(typeId)) return 1;
-  return MAX_STACK.block;
+  return MAX_STACKS[ITEM_CATEGORIES.BLOCK];
 }
 
 /**

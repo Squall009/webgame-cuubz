@@ -3090,14 +3090,30 @@ multiplayer movement sync (`frameCount % 3`) · touch look delta · fly-mode ind
 
 - **Highest data-loss risk in the plan.** `DB_NAME`/`DB_VERSION` must not change; the `onupgradeneeded` path must behave identically. Run the save/load test before and after, and test with a **pre-existing** v2 database.
 
+#### PR 23 outcome — the three monoliths are gone, and the id tables have a source of truth
+
+The splits landed one at a time with `npm test` between each, by **prototype mixin** (decision 44) — `Object.assign(Class.prototype, …)`, so `this` is the same object, every call site is unchanged and each body moved verbatim; an AST differ proved **53/53** of `ChunkManager`'s method bodies byte-identical against `git show HEAD:` apart from static-call renames and the two intended fixes, and a load-time collision guard closes the pattern's one new failure mode. **§4.1's eleven files are twenty-three** (decision 45): `ChunkManager.js` **2,057 → 400** across 12, `InventorySystem.js` **981 → 380** across 7, `SkyRenderer.js` **1,007 → 353** across 4. `ChunkCache.js` was deliberately **not** created — `memoryCache` is read or written by 17 methods across every other target — and §9 PR 24's `Hotbar.js` row was not followed, because that filename is occupied by PR 17's icon renderer and the three methods it names are not a seam. **The semantic half is D-64's census closed at every live site.** `meshWorker.js` now holds **zero block-id literals**: the cutout/transparent/tintable sets arrive in the build message, derived from `BLOCK_REGISTRY` on the main thread, which makes a stale table impossible rather than merely detectable (**D-63**, high — white concrete was tinted green and yellow poplar leaves rendered opaque, but only when a mesh worker spawned; a third instance surfaced in the same file, where the worker skipped id 12 as `CAVE_AIR` and emitted no geometry for polished granite at all). `mobMovement` asks the registry's own `solid` field, the one `Player._isSolidAt` already reads (**D-56**, decision 50; three sibling sites carried the same rot, including `mob.canSee` letting mobs see through granite one line under a comment saying otherwise). `InventorySync`'s `VALID_BLOCK_IDS` went **27 → 193** — it had been rejecting 166 real blocks — and a sixth table nobody had counted, `SINGLE_STACK_BLOCKS`, was capping three ordinary ores at 1 over the wire while the two real quest items were uncapped. `BlockColors.js`'s 34 hand-written entries are gone, replaced by the alpha-weighted mean of the block's atlas tile (**D-51**, decision 47). **D-60's Perlin collapse could have changed terrain silently, so it was proved rather than read:** 202,163 bit-exact comparisons across all four implementations — including `workerGeneration.js`'s, which had never been checked against the main thread's — plus 273,818 more of `BiomeSystem`'s public surface before and after at seed 424242 among others, **zero differences**, and the adversarial pass reproduced 42,793 of them independently. **D-57**'s fallback exists now (the bundle went from one occurrence of `_voxelgenGenerateChunk`, the read, to three including the assignment); **D-66**, **D-65** and **D-67** are fixed with non-vacuity proofs; **D-68**'s unmatchable biome names are repointed while its content half is deferred to PR 34 (decision 48). The adversarial pass could not refute the change on any of nine hunting-list items and logged five rows — **D-70** is the one with player-visible consequences: mobs correctly stop standing on water and, having no buoyancy or swim path anywhere in `src/game/mobs/`, now sink (decision 51). Six new test files, seven new `BUGS.md` rows; **D-51, D-56, D-57, D-60, D-63, D-64, D-65, D-66, D-67 closed, D-68 half-closed, and D-25's `Noise.js` third closed with D-60.**
+
+| Gate | Before | After |
+|---|---|---|
+| `npm test` | 50 files, 0 failed, 4 quarantined | **55 files, 0 failed, 4 quarantined** |
+| assertions | 5,699 | **6,359** (+660) |
+| `npm run lint` | 0 errors, 159 warnings | **0 errors, 157 warnings** |
+| `npm run build` | exit 0 (1,798.84 kB) | **exit 0 (1,898.58 kB)** |
+| `npm run test:e2e` (dist) | 189 / 0 | **189 / 0** |
+| `npm run test:e2e:vite` | 189 / 0 | **189 / 0** |
+| largest file in `src/` | `ChunkManager.js` **2,057** | **`SurvivalSystem.js` 1,159** — PR 34's |
+
+The bundle grew **+99.7 kB** and only ~38 kB of it is code: `workerGeneration.js` entering the main-thread graph *is* the D-57 fix, and the rest is per-file header documentation surviving `minify: false` (**D-30**, deliberate, PR 33's). **No "before" e2e run was taken** — PR 20's "after" pair is this PR's "before", because the only commits between them are documentation.
+
 ### PR 24 — Split `inventory.js` (1,048) + dedupe the face table — **ABSORBED INTO PR 23**
 
 | From | To |
 |---|---|
 | `ITEM_CATEGORIES`, `MAX_STACKS`, `NAMED_ITEMS` | `src/game/data/ItemDefinitions.js` |
 | `Inventory` (slots, add, remove, stack, serialize), `getAttackDamage()` | `src/game/systems/InventorySystem.js` |
-| `EQUIPMENT_SLOTS`, `getEquipmentSlotForItem`, `equipItem`, `unequipItem`, `getEquipmentStats`, `getArmorValue`, `getArmorToughness` | `src/game/systems/EquipmentSystem.js` |
-| `hotbarSlotIndex`, `selectByNumber`, `cycleSelection` | `src/ui/hud/Hotbar.js` |
+| `EQUIPMENT_SLOTS`, `getEquipmentSlotForItem`, `equipItem`, `unequipItem`, `getEquipmentStats`, ~~`getArmorValue`, `getArmorToughness`~~ | `src/game/systems/EquipmentSystem.js` — **the last two do not exist**; armour numbers are fields inside `NAMED_ITEMS`, summed inline in `getEquipmentStats` |
+| ~~`hotbarSlotIndex`, `selectByNumber`, `cycleSelection`~~ | ~~`src/ui/hud/Hotbar.js`~~ — **not done, decision 45.** That filename is occupied by PR 17's canvas icon renderer, and the three methods read five constructor-owned fields six other methods also use, so it is not a seam. Hotbar selection stayed in `InventorySystem.js` |
 
 Also: unify `FACES` (`meshWorker.js:36`) with the `sides` table (`chunkMeshBuilder.js:371`) into `src/game/data/FaceTable.js` ([§3.5](#35-protocol-duplication--v1-was-half-wrong)). Worker imports must stay worker-safe (no THREE, no DOM).
 - **Accept:** inventory serialization round-trips existing saves; meshes render identically (screenshot diff).

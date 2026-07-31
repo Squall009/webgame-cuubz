@@ -44,6 +44,7 @@
 
 import { PerformanceSettings } from '../engine/renderer/PerformanceSettings.js';
 import { PBRTextureAtlas } from '../engine/renderer/TextureAtlas.js';
+import { registerBlockColorAtlas } from '../game/data/BlockColors.js';
 import { CuubzLogger } from '../util/Logger.js';
 import { PersistenceManager } from '../engine/world/Persistence.js';
 import { CharacterManager } from '../game/entities/CharacterManager.js';
@@ -163,6 +164,8 @@ async function rebuildAtlasAndMaterials(renderer, chunkManager) {
   // Build new atlas with new tile size
   const newAtlas = new PBRTextureAtlas({ tileSize });
   await newAtlas.buildAtlas();
+  // New atlas = new pixel layout; re-point the dropped-item colour cache at it (D-51).
+  registerBlockColorAtlas(newAtlas);
 
   // Rebuild PBR factory with new atlas + shading mode
   renderer.rebuildPBRFactory(newAtlas, s.advancedShading);

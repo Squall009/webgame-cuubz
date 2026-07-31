@@ -543,6 +543,57 @@ const splitSingle = new Inventory();
 splitSingle.setSlot(0, { typeId: 3, count: 1 });
 assertFalse(splitSingle.splitStack(0, 1), 'Cannot split single-item stack');
 
+// --- Test: D-65 — splitStack bounds and no-op reporting (PR 23) ---
+console.log('\n[D-65: splitStack bounds]');
+
+// splitStack used to bounds-check NEITHER index while its sibling swapSlots checked both.
+// `splitStack(0, 999)` wrote this.slots[999], growing the fixed-size array past totalSlots;
+// serialize() iterates i < totalSlots, so the split-off items vanished on the next save.
+{
+  const oob = new Inventory();
+  oob.setSlot(0, { typeId: 3, count: 10 });
+  assertFalse(oob.splitStack(0, 999), 'splitStack rejects a destination past totalSlots');
+  assertEquals(oob.slots.length, 36, 'The slot array did not grow past totalSlots');
+  assertEquals(oob.getSlot(0).count, 10, 'Source stack is untouched by a rejected split');
+  assertEquals(oob.countTotalItems(), 10, 'No items were moved out of reach of serialize()');
+  // The symptom D-65 names: the split-off half is outside serialize()'s loop, so a
+  // save/load round-trip is where the items actually disappear.
+  assertEquals(Inventory.deserialize(oob.serialize()).countTotalItems(), 10,
+    'All 10 items survive a serialize/deserialize round-trip');
+}
+
+// A negative `to` defines a NAMED property on the array — same silent loss, different shape.
+{
+  const neg = new Inventory();
+  neg.setSlot(0, { typeId: 3, count: 10 });
+  assertFalse(neg.splitStack(0, -1), 'splitStack rejects a negative destination');
+  assertEquals(neg.slots[-1], undefined, 'No named property was written onto the slot array');
+  assertEquals(neg.countTotalItems(), 10, 'All 10 items are still inside totalSlots');
+}
+
+// A negative/out-of-range SOURCE is rejected the same way swapSlots rejects it.
+{
+  const negFrom = new Inventory();
+  negFrom.setSlot(0, { typeId: 3, count: 10 });
+  assertFalse(negFrom.splitStack(-1, 0), 'splitStack rejects a negative source');
+  assertFalse(negFrom.splitStack(36, 0), 'splitStack rejects a source past totalSlots');
+  assertEquals(negFrom.countTotalItems(), 10, 'A rejected split moved nothing');
+}
+
+// Second half of D-65: a FULL destination means actualMove === 0. That used to return true
+// and fire _notifySlotChange twice — a no-op reported to the caller as a success.
+{
+  const noRoom = new Inventory();
+  noRoom.setSlot(0, { typeId: 3, count: 10 }); // Stone 10
+  noRoom.setSlot(1, { typeId: 3, count: 64 }); // Stone at max stack — no space at all
+  let notifications = 0;
+  noRoom.onSlotChange = () => { notifications++; };
+  assertFalse(noRoom.splitStack(0, 1), 'splitStack returns false when the target stack is full');
+  assertEquals(notifications, 0, 'A split that moves nothing fires no slot-change notification');
+  assertEquals(noRoom.getSlot(0).count, 10, 'Source keeps all 10 when nothing could move');
+  assertEquals(noRoom.getSlot(1).count, 64, 'Full target is unchanged');
+}
+
 // --- Test: isFull edge case ---
 console.log('\n[isFull Edge Cases]');
 

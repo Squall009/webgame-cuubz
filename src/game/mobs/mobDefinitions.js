@@ -208,7 +208,7 @@ export const MOB_DEFINITIONS = {
     speed: 5.5,
     fleeSpeed: 0,
     hitbox: { width: 0.8, height: 0.9 },
-    biomes: ['corrupt'],
+    biomes: ['badlands'], // D-68/decision 48: was ['corrupt'] — not a biome BiomeSystem can produce, so this mob had NEVER spawned
     spawnWeight: 25,
     spawnInDark: true,
     spawnMinY: 0,
@@ -288,7 +288,7 @@ export const MOB_DEFINITIONS = {
     speed: 2.0,
     fleeSpeed: 0,
     hitbox: { width: 1.4, height: 2.8 },
-    biomes: ['mountains', 'deepslate_caves'],
+    biomes: ['mountains'], // D-68: dropped 'deepslate_caves' — BiomeSystem cannot produce it; zero behaviour change
     spawnWeight: 10,
     spawnInDark: true,
     spawnMinY: 0,
@@ -364,7 +364,7 @@ export const MOB_DEFINITIONS = {
     speed: 6.0,
     fleeSpeed: 0,
     hitbox: { width: 0.6, height: 0.6 },
-    biomes: ['corrupt'],
+    biomes: ['badlands'], // D-68/decision 48: was ['corrupt'] — not a biome BiomeSystem can produce, so this mob had NEVER spawned
     spawnWeight: 20,
     spawnInDark: true,
     spawnMinY: 0,

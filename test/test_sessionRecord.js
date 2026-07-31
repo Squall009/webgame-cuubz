@@ -255,14 +255,19 @@ assertEquals(keyWriters.join(', '), ALLOWED_REJOIN_WRITERS.join(', '),
 // The other half of D-43 was TWO handlers on one event, both writing the rejoin record.
 // There are two `beforeunload` handlers in `src/` and they do different jobs:
 //
-//   ChunkManager.js — the D-19 chunk flush: dirty chunks and their manifest, in one
-//                     transaction. Nothing to do with sessions.
+//   ChunkStorage.js — the D-19 chunk flush: dirty chunks and their manifest, in one
+//                     transaction. Nothing to do with sessions. It was in
+//                     `ChunkManager.js` until PR 23 split that file; `_setupGracefulShutdown`
+//                     moved verbatim into the storage mixin, which is where the flush
+//                     queue and both object stores now live. Still one registration,
+//                     still registered from the same `chunkManager._setupGracefulShutdown()`
+//                     call in `src/core/init/initWorld.js`.
 //   Bootstrap.js    — the rejoin record, and the only writer of it. This was `main.js`
 //                     until PR 18 deleted that file; the handler itself is unchanged,
 //                     still registered once, at module evaluation.
 //
 // Counted by file and by occurrence, because D-43's two were in the same file.
-const ALLOWED_BEFOREUNLOAD = ['src/core/Bootstrap.js', 'src/engine/world/ChunkManager.js'];
+const ALLOWED_BEFOREUNLOAD = ['src/core/Bootstrap.js', 'src/engine/world/ChunkStorage.js'];
 const beforeUnloadFiles = [];
 let beforeUnloadCount = 0;
 for (const f of srcFiles) {

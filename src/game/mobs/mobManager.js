@@ -9,6 +9,7 @@ import { addDropsToInventory } from './drops/mobDropTable.js';
 import { Mob } from './mob.js';
 import { AI_STATES, getMobDefinition, selectMobForBiome } from './mobDefinitions.js';
 import { applyMovement } from './movement/mobMovement.js';
+import { isPassable, isSolidBlock } from '../data/BlockCategories.js';
 
 export class MobManager {
   constructor(options = {}) {
@@ -222,7 +223,7 @@ export class MobManager {
       let y = maxY;
       while (y > minY) {
         const block = blockAccess.getBlockAtWorld ? blockAccess.getBlockAtWorld(Math.floor(x), y, Math.floor(z)) : 0;
-        if (block !== 0 && block !== 12 && block !== 7 && block !== 15) {
+        if (isSolidBlock(block)) { // D-56: was `!== 0 && !== 12 && !== 7 && !== 15`; 12/7/15 are polished_granite/tuff/deepslate_tiles, never called ground, while water/lava were
           // Found ground
           y += 1; // Stand on top
           break;
@@ -239,7 +240,7 @@ export class MobManager {
 
       // Verify head space
       const headBlock = blockAccess.getBlockAtWorld ? blockAccess.getBlockAtWorld(Math.floor(x), Math.floor(y + def.hitbox.height), Math.floor(z)) : 0;
-      if (headBlock !== 0 && headBlock !== 12) continue;
+      if (!isPassable(headBlock)) continue;
 
       // Verify no existing mob nearby
       let nearbyMob = false;

@@ -10,11 +10,20 @@
 
 'use strict';
 
+// PR 23 / BUGS.md D-64: the six constants below used to be hand-written inside
+// InventorySync.js and every one of them was stale — the allowlist commented
+// `1, // Grass` where the registry says `bedrock`, and a 10-entry NAMED_ITEM_META whose
+// stack sizes disagreed with canonical NAMED_ITEMS for five of those ten. The
+// assertions in Test Group 1 pinned that wrong data; they are rewritten below into what
+// the derivation makes true, and now compare against the canonical tables directly so
+// they cannot drift apart again. NAMED_ITEM_META is gone — it WAS the drift.
+const { NAMED_ITEMS, MAX_STACKS } = require('../src/game/data/ItemDefinitions.js');
+const { BLOCK_REGISTRY, BLOCK_TYPES } = require('../src/engine/world/BlockRegistry.js');
+
 const {
   VALID_BLOCK_IDS,
   VALID_NAMED_ITEMS,
   MAX_STACK,
-  NAMED_ITEM_META,
   SINGLE_STACK_BLOCKS,
   DEFAULT_INVENTORY_ROWS,
   DEFAULT_INVENTORY_COLS,
@@ -85,34 +94,67 @@ console.log('====================\n');
 
 console.log('[Constants]');
 
-// VALID_BLOCK_IDS: all IDs from 0-26 should be present
-assertEquals(VALID_BLOCK_IDS.size, 27, 'VALID_BLOCK_IDS has 27 entries (0-26)');
+// VALID_BLOCK_IDS — derived from BLOCK_REGISTRY, so it IS the registry.
+// WAS: `size === 27` / `has(26)` / `!has(27)`, pinning a 27-entry table whose comments
+// (`1, // Grass`, `3, // Stone`, `7, // Wood Log`) named blocks that are now bedrock,
+// cobblestone and tuff — and which refused 166 of the registry's 193 ids.
+assertEquals(VALID_BLOCK_IDS.size, BLOCK_REGISTRY.length, 'VALID_BLOCK_IDS has one entry per registry block');
+assertEquals(VALID_BLOCK_IDS.size, 193, 'VALID_BLOCK_IDS has 193 entries — the registry\'s real size');
+assertTrue(BLOCK_REGISTRY.every((b) => VALID_BLOCK_IDS.has(b.id)), 'every registry block id is accepted');
 assertTrue(VALID_BLOCK_IDS.has(0), 'Block ID 0 (Air) is valid');
-assertTrue(VALID_BLOCK_IDS.has(26), 'Block ID 26 (Boss Spawn) is valid');
-assertFalse(VALID_BLOCK_IDS.has(27), 'Block ID 27 is not valid');
+assertTrue(VALID_BLOCK_IDS.has(27), 'Block ID 27 (deepslate_iron_ore) IS valid — it used to be rejected');
+assertTrue(VALID_BLOCK_IDS.has(192), 'Block ID 192 (yellow_poplar_leaves) is valid');
+assertFalse(VALID_BLOCK_IDS.has(193), 'Block ID 193 does not exist and is not valid');
 assertFalse(VALID_BLOCK_IDS.has(-1), 'Block ID -1 is not valid');
 
-// VALID_NAMED_ITEMS: all named items present
-assertEquals(VALID_NAMED_ITEMS.size, 10, 'VALID_NAMED_ITEMS has 10 entries');
+// VALID_NAMED_ITEMS — the canonical NAMED_ITEMS keys, all 104.
+// WAS: `size === 10` and `!has('diamond_sword')`. diamond_sword is a canonical item; the
+// old allowlist rejected it and 93 others.
+assertEquals(VALID_NAMED_ITEMS.size, Object.keys(NAMED_ITEMS).length, 'VALID_NAMED_ITEMS === the canonical NAMED_ITEMS keys');
+assertEquals(VALID_NAMED_ITEMS.size, 104, 'VALID_NAMED_ITEMS has 104 entries');
 assertTrue(VALID_NAMED_ITEMS.has('coal'), 'coal is a valid named item');
 assertTrue(VALID_NAMED_ITEMS.has('golden_apple'), 'golden_apple is a valid named item');
-assertFalse(VALID_NAMED_ITEMS.has('diamond_sword'), 'diamond_sword is not yet defined');
+assertTrue(VALID_NAMED_ITEMS.has('diamond_sword'), 'diamond_sword IS defined — it used to be rejected over the wire');
+assertFalse(VALID_NAMED_ITEMS.has('not_a_real_item'), 'an unknown name is still rejected');
 
-// MAX_STACK: correct values
+// MAX_STACK: is the canonical table, not a copy of its values
+assertTrue(MAX_STACK === MAX_STACKS, 'MAX_STACK IS the canonical MAX_STACKS object');
 assertEquals(MAX_STACK.block, 64, 'Block max stack is 64');
 assertEquals(MAX_STACK.resource, 64, 'Resource max stack is 64');
 assertEquals(MAX_STACK.food, 16, 'Food max stack is 16');
 assertEquals(MAX_STACK.tool, 1, 'Tool max stack is 1');
 
-// NAMED_ITEM_META: structure check
-assertDeepEqual(NAMED_ITEM_META.apple, { category: 'food', maxStack: 16 }, 'Apple meta correct');
-assertDeepEqual(NAMED_ITEM_META.corrupt_crystal, { category: 'resource', maxStack: 1 }, 'Corrupt crystal single stack');
+// The wire agrees with the canonical item table for EVERY named item — this is the
+// assertion NAMED_ITEM_META's two structure checks are replaced by, and it covers all
+// 104 instead of 2.
+assertTrue(
+  Object.keys(NAMED_ITEMS).every((k) => getMaxStackSize(k) === NAMED_ITEMS[k].maxStack),
+  'getMaxStackSize agrees with canonical NAMED_ITEMS for all 104 items'
+);
+assertTrue(
+  Object.keys(NAMED_ITEMS).every((k) => getItemCategory(k) === NAMED_ITEMS[k].category),
+  'getItemCategory agrees with canonical NAMED_ITEMS for all 104 items'
+);
+// The five that actually disagreed, named.
+assertEquals(getMaxStackSize('apple'), 64, 'apple max stack is 64 (was 16 here, 64 canonically)');
+assertEquals(getMaxStackSize('cooked_meat'), 64, 'cooked_meat max stack is 64 (was 16 here)');
+assertEquals(getMaxStackSize('berry'), 64, 'berry max stack is 64 (was 16 here)');
+assertEquals(getMaxStackSize('bread'), 64, 'bread max stack is 64 (was 16 here)');
+assertEquals(getMaxStackSize('golden_apple'), 64, 'golden_apple max stack is 64 (was 1 here)');
+// And the 70 tools that fell through to `resource = 64` because they were not in the
+// local table at all.
+assertEquals(getMaxStackSize('diamond_sword'), 1, 'a tool stacks to 1 over the wire (it used to be 64)');
+assertEquals(getItemCategory('diamond_sword'), 'tool', 'a tool is categorised `tool` (it used to be `resource`)');
 
-// SINGLE_STACK_BLOCKS: quest items and special blocks
-assertTrue(SINGLE_STACK_BLOCKS.has(22), 'Corrupt Crystal (22) is single stack');
-assertTrue(SINGLE_STACK_BLOCKS.has(25), 'Quest Key (25) is single stack');
-assertTrue(SINGLE_STACK_BLOCKS.has(26), 'Boss Spawn (26) is single stack');
-assertFalse(SINGLE_STACK_BLOCKS.has(1), 'Grass (1) is not single stack');
+// SINGLE_STACK_BLOCKS: resolved by NAME through BLOCK_TYPES.
+// WAS: `new Set([22, 25, 26])` commented "Corrupt Crystal, Quest Key, Boss Spawn". Those
+// ids are iron_ore, copper_ore and emerald_ore — three ordinary ores capped at 1 over the
+// wire, while the two real quest items were not capped at all.
+assertTrue(SINGLE_STACK_BLOCKS.has(BLOCK_TYPES.CORRUPT_CRYSTAL), 'corrupt_crystal (189) is single stack');
+assertTrue(SINGLE_STACK_BLOCKS.has(BLOCK_TYPES.QUEST_KEY), 'quest_key (191) is single stack');
+assertEquals(SINGLE_STACK_BLOCKS.size, 2, 'exactly the two quest items are single stack');
+assertFalse(SINGLE_STACK_BLOCKS.has(22), 'id 22 is iron_ore and is NOT single stack');
+assertFalse(SINGLE_STACK_BLOCKS.has(1), 'bedrock (1) is not single stack');
 
 // DEFAULT constants
 assertEquals(DEFAULT_INVENTORY_ROWS, 4, 'Default inventory rows = 4');
@@ -142,12 +184,12 @@ console.log('');
 
 console.log('[getMaxStackSize]');
 
-assertEquals(getMaxStackSize(1), 64, 'Grass max stack = 64');
-assertEquals(getMaxStackSize(22), 1, 'Corrupt Crystal max stack = 1');
-assertEquals(getMaxStackSize(25), 1, 'Quest Key max stack = 1');
-assertEquals(getMaxStackSize('apple'), 16, 'Apple max stack = 16');
+// WAS: `getMaxStackSize(22) === 1` / `(25) === 1`, from SINGLE_STACK_BLOCKS' stale ids.
+assertEquals(getMaxStackSize(1), 64, 'An ordinary block max stack = 64');
+assertEquals(getMaxStackSize(22), 64, 'id 22 (iron_ore) max stack = 64 — it was capped at 1');
+assertEquals(getMaxStackSize(BLOCK_TYPES.CORRUPT_CRYSTAL), 1, 'corrupt_crystal block max stack = 1');
+assertEquals(getMaxStackSize(BLOCK_TYPES.QUEST_KEY), 1, 'quest_key block max stack = 1');
 assertEquals(getMaxStackSize('coal'), 64, 'Coal max stack = 64');
-assertEquals(getMaxStackSize('golden_apple'), 1, 'Golden Apple max stack = 1');
 assertEquals(getMaxStackSize('corrupt_crystal'), 1, 'Corrupt Crystal named item max stack = 1');
 assertEquals(getMaxStackSize('unknown_item'), 64, 'Unknown item defaults to resource max (64)');
 
@@ -161,12 +203,17 @@ console.log('[isValidTypeId]');
 
 assertTrue(isValidTypeId(0), 'Block ID 0 is valid');
 assertTrue(isValidTypeId(26), 'Block ID 26 is valid');
-assertFalse(isValidTypeId(27), 'Block ID 27 is invalid');
+// WAS: `assertFalse(isValidTypeId(27))` — 27 is deepslate_iron_ore, a real block the
+// allowlist rejected because the hand-written table stopped at 26.
+assertTrue(isValidTypeId(27), 'Block ID 27 is valid — it is deepslate_iron_ore');
+assertTrue(isValidTypeId(192), 'Block ID 192 is valid — it is yellow_poplar_leaves');
 assertFalse(isValidTypeId(-1), 'Block ID -1 is invalid');
 assertFalse(isValidTypeId(999), 'Block ID 999 is invalid');
+assertFalse(isValidTypeId(193), 'Block ID 193 is invalid — one past the last real block');
 
 assertTrue(isValidTypeId('coal'), 'coal is valid');
 assertTrue(isValidTypeId('apple'), 'apple is valid');
+assertTrue(isValidTypeId('diamond_sword'), 'diamond_sword is valid — the wire used to reject every tool');
 assertFalse(isValidTypeId('sword'), 'sword is invalid');
 assertFalse(isValidTypeId(''), 'Empty string is invalid');
 
@@ -195,14 +242,19 @@ assertTrue(validateSlot({ typeId: 'coal', count: 64 }).valid, 'Stack of 64 coal 
 assertFalse(validateSlot({}).valid, 'Empty object is invalid (missing typeId)');
 assertFalse(validateSlot({ typeId: null }).valid, 'Null typeId is invalid');
 assertFalse(validateSlot({ typeId: undefined }).valid, 'Undefined typeId is invalid');
-assertFalse(validateSlot({ typeId: 27 }).valid, 'Unknown block ID 27 is invalid');
+assertFalse(validateSlot({ typeId: 999 }).valid, 'Unknown block ID 999 is invalid');
 assertFalse(validateSlot({ typeId: 'sword' }).valid, 'Unknown named item is invalid');
 assertFalse(validateSlot({ typeId: 0, count: 1 }).valid, 'Air (block 0) cannot be stored');
 assertFalse(validateSlot({ typeId: 1, count: 0 }).valid, 'Count 0 is invalid');
 assertFalse(validateSlot({ typeId: 1, count: -1 }).valid, 'Negative count is invalid');
 assertFalse(validateSlot({ typeId: 1, count: 65 }).valid, 'Count 65 exceeds block max stack');
-assertFalse(validateSlot({ typeId: 'apple', count: 17 }).valid, 'Apple count 17 exceeds food max (16)');
-assertFalse(validateSlot({ typeId: 22, count: 2 }).valid, 'Corrupt Crystal count 2 exceeds single stack');
+// WAS: `count: 17` → invalid, from the local NAMED_ITEM_META that said apple stacks to 16.
+// Canonically apple carries an explicit `maxStack: 64` that overrides MAX_STACKS.food.
+assertTrue(validateSlot({ typeId: 'apple', count: 64 }).valid, 'Stack of 64 apples is valid (canonical maxStack)');
+assertFalse(validateSlot({ typeId: 'apple', count: 65 }).valid, 'Apple count 65 exceeds its max stack of 64');
+// WAS: `typeId: 22` — id 22 is iron_ore, not corrupt_crystal (189).
+assertFalse(validateSlot({ typeId: BLOCK_TYPES.CORRUPT_CRYSTAL, count: 2 }).valid, 'Corrupt Crystal count 2 exceeds single stack');
+assertTrue(validateSlot({ typeId: 22, count: 2 }).valid, 'iron_ore (22) stacks past 1 — it was wrongly capped');
 assertFalse(validateSlot('string').valid, 'String slot is invalid');
 assertFalse(validateSlot([1, 2]).valid, 'Array slot is invalid');
 
@@ -226,7 +278,7 @@ assertTrue(validateInventorySlots(fullValid).valid, 'Full inventory of valid ite
 assertFalse(validateInventorySlots('not_array').valid, 'Non-array is invalid');
 assertTrue(validateInventorySlots([null]).valid === true, 'Single null slot is valid');
 
-const invalidSlots = [{ typeId: 27, count: 1 }]; // Unknown block type
+const invalidSlots = [{ typeId: 999, count: 1 }]; // Unknown block type (27 is a real block: deepslate_iron_ore)
 const invResult1 = validateInventorySlots(invalidSlots);
 assertFalse(invResult1.valid, 'Unknown block type fails validation');
 assertEquals(invResult1.errors.length, 1, 'One error reported for unknown block type');

@@ -4,6 +4,9 @@
  */
 
 import { BLOCK_TYPES } from './BlockRegistry.js';
+// D-60: the ONE Perlin implementation. This file used to carry two more copies of it —
+// see the note above the `_`-prefixed aliases below for the bit-exactness proof.
+import { applySpline, createPerlin, createSharedPerlin, fbm2, hashString, mulberry32 } from './Noise.js';
 
 // Continentalness spline control points — maps raw noise to landmass distribution.
 export const CONT_SPLINE = [
@@ -94,6 +97,27 @@ export const BIOME_DEFS = {
     color: '#e0f7fa', name: 'Frozen Peaks'
   }
 };
+
+/**
+ * Biome display name → the stable id every consumer matches on.
+ *
+ * DERIVED from BIOME_DEFS rather than hand-written, and exported rather than hidden
+ * inside the `BiomeSystem` IIFE, because of `BUGS.md` **D-68**: two mob definitions
+ * declared `biomes: ['corrupt']` and one declared `deepslate_caves`, neither of which
+ * this system can produce, so those mobs could never spawn and nothing said so. A
+ * consumer that wants to name a biome now has a list to check against, and
+ * `test/test_mobBiomes.js` fails if any mob names an id that is not in it.
+ *
+ * The rule is exactly the fallback `getBiomeAtWorldPos` already applied to an unmapped
+ * name (`toLowerCase`, spaces → underscores), and it reproduces the previous
+ * hand-written `NAME_TO_ID` table entry-for-entry.
+ */
+export const BIOME_NAME_TO_ID = Object.freeze(Object.fromEntries(
+  Object.values(BIOME_DEFS).map((d) => [d.name, d.name.toLowerCase().replace(/\s+/g, '_')])
+));
+
+/** The ten ids `BiomeSystem.getBiomeAtWorldPos` can actually return. */
+export const BIOME_IDS = Object.freeze(Object.values(BIOME_NAME_TO_ID));
 
 /**
  * Select biome from climate parameters.
@@ -213,88 +237,50 @@ export function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScal
 }
 
 /**
- * Noise infrastructure (mirrors workerGeneration.js for main-thread humidity recomputation).
+ * Noise infrastructure — D-60: THIS FILE USED TO CONTAIN IT TWICE.
+ *
+ * `_mulberry32`, `_hashString`, `_createPerlin`, `_fbm2`, `_applySpline` and
+ * `_createSharedPerlin` were defined here as module-level exports AND defined again,
+ * verbatim, inside the `BiomeSystem` IIFE below — ~66 duplicated lines in a 441-line
+ * file, both copies carrying the same nine XOR salts. `src/engine/world/Noise.js` held a
+ * THIRD copy and, until this change, had no consumer at all; PR 20 kept it rather than
+ * deleting it (decision 42) precisely so this collapse could land here.
+ *
+ * Both in-file copies are gone. The names below are aliases of `Noise.js`'s exports and
+ * exist only so that importers — `src/game/systems/QuestSystem.js` imports `_hashString`
+ * — do not change in the same PR that moves the code.
+ *
+ * ─── THE PROOF THAT THIS DID NOT CHANGE TERRAIN ─────────────────────────────
+ *
+ * The e2e harness pins world seed 424242 and asserts terrain, so a single differing salt,
+ * operator, permutation entry, lerp or fade curve would silently invalidate every
+ * downstream assertion. Before a line was deleted, all FOUR implementations — Noise.js,
+ * the two in this file, and `workerGeneration.js`'s (which MUST stay separate: classic
+ * script, decision 14) — were compared with `Object.is`, no tolerance, over
+ * **202,163 comparisons**: `hashString` on 8 seed strings, 2,000 `mulberry32` draws on
+ * each of 10 seeds, `noise2` and `noise3` on 1,208 coordinates × 10 seeds (including the
+ * -0, 255.999999 and 256 boundaries), `fbm2` across 45 octave/persistence/lacunarity
+ * combinations, `applySpline` at 601 points through the real CONT_SPLINE, and
+ * `createSharedPerlin` across all NINE salts × 8 seed strings. **Zero differences.**
+ * `workerGeneration.js`'s copy agrees too, so the worker and the main thread do generate
+ * identical terrain for a given seed — which had never been checked.
+ *
+ * The one asymmetry, and it is additive: this file's `_createPerlin` returned
+ * `{ noise2 }` only. `Noise.js`'s returns `{ noise2, noise3 }`. Nothing here called
+ * `noise3`, so every existing call site is unaffected.
+ *
+ * NOTE: this file used to alias its private helpers to the BARE names `fbm2` and
+ * `applySpline`, which silently collided with the identical functions in `Noise.js`
+ * (refactor.md §2.1). Those aliases are gone and `test/test_globalCollisions.js` asserts
+ * they stay gone — do not reintroduce them. The `_`-prefixed names below are not the
+ * same thing: they are namespaced and no other file declares them.
  */
-export function _mulberry32(seed) {
-  var s = seed | 0;
-  return function () {
-    s |= 0; s = s + 0x6D2B79F5 | 0;
-    var t = Math.imul(s ^ s >>> 15, 1 | s);
-    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-
-export function _hashString(str) {
-  var h = 0x811c9dc5;
-  for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-  return h >>> 0;
-}
-
-export function _createPerlin(seed) {
-  var rng = _mulberry32(seed);
-  var p = new Uint8Array(256);
-  for (var i = 0; i < 256; i++) p[i] = i;
-  for (var i = 255; i > 0; i--) { var j = Math.floor(rng() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
-  var perm = new Uint8Array(512);
-  for (var i = 0; i < 512; i++) perm[i] = p[i & 255];
-
-  function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-  function lerp(a, b, t) { return a + t * (b - a); }
-  function grad3(h, x, y, z) {
-    h &= 15; var u = h < 8 ? x : y, v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
-    return (h & 1 ? -u : u) + (h & 2 ? -v : v);
-  }
-
-  function noise2(x, y) {
-    var X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-    x -= Math.floor(x); y -= Math.floor(y);
-    var u = fade(x), v = fade(y);
-    var a = perm[X] + Y, aa = perm[a], ab = perm[a + 1];
-    var b = perm[X + 1] + Y, ba = perm[b], bb = perm[b + 1];
-    return lerp(lerp(grad3(perm[aa], x, y, 0), grad3(perm[ba], x - 1, y, 0), u),
-                lerp(grad3(perm[ab], x, y - 1, 0), grad3(perm[bb], x - 1, y - 1, 0), u), v);
-  }
-
-  return { noise2: noise2 };
-}
-
-export function _fbm2(perlin, x, y, octaves, persistence, lacunarity) {
-  var val = 0, amp = 1, freq = 1, maxV = 0;
-  for (var i = 0; i < octaves; i++) {
-    val += perlin.noise2(x * freq, y * freq) * amp;
-    maxV += amp; amp *= persistence; freq *= lacunarity;
-  }
-  return val / maxV;
-}
-
-export function _applySpline(val, points) {
-  if (val <= points[0][0]) return points[0][1];
-  if (val >= points[points.length - 1][0]) return points[points.length - 1][1];
-  for (var i = 0; i < points.length - 1; i++) {
-    if (val < points[i + 1][0]) {
-      var t = (val - points[i][0]) / (points[i + 1][0] - points[i][0]);
-      return points[i][1] + (points[i + 1][1] - points[i][1]) * t;
-    }
-  }
-}
-
-// NOTE: this file used to alias its private helpers to the bare names `fbm2` and
-// `applySpline`, which silently collided with the identical functions declared in
-// js/world/noise.js (refactor.md §2.1). biomeSystem.js loads later, so its aliases won.
-// The aliases are gone; call sites use the private `_fbm2` / `_applySpline` directly.
-// Behaviour is unchanged — the implementations were line-for-line equivalent.
-
-export function _createSharedPerlin(seed) {
-  var sInt = _hashString(String(seed));
-  return {
-    cont:   _createPerlin(sInt ^ 0x1111), eros: _createPerlin(sInt ^ 0x2222),
-    temp:   _createPerlin(sInt ^ 0x3333), hum:  _createPerlin(sInt ^ 0x4444),
-    det:    _createPerlin(sInt ^ 0x5555), c1:   _createPerlin(sInt ^ 0x6666),
-    c2:     _createPerlin(sInt ^ 0x7777), river:_createPerlin(sInt ^ 0x8888),
-    jitter: _createPerlin(sInt ^ 0xBBBB)
-  };
-}
+export const _mulberry32 = mulberry32;
+export const _hashString = hashString;
+export const _createPerlin = createPerlin;
+export const _fbm2 = fbm2;
+export const _applySpline = applySpline;
+export const _createSharedPerlin = createSharedPerlin;
 
 /**
  * Recompute humidityMap for a chunk (used when loading cached chunks from IndexedDB).
@@ -336,73 +322,14 @@ export function computeHumidityMap(seed, chunkX, chunkZ, params) {
  * Creates its own noise infrastructure so it can be called independently.
  */
 export var BiomeSystem = (function () {
-  // Inline noise helpers (mirror of the private ones above)
-  function _mulberry32(seed) {
-    var s = seed | 0;
-    return function () {
-      s |= 0; s = s + 0x6D2B79F5 | 0;
-      var t = Math.imul(s ^ s >>> 15, 1 | s);
-      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    };
-  }
-  function _hashString(str) {
-    var h = 0x811c9dc5;
-    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-    return h >>> 0;
-  }
-  function _createPerlin(seed) {
-    var rng = _mulberry32(seed);
-    var p = new Uint8Array(256);
-    for (var i = 0; i < 256; i++) p[i] = i;
-    for (var i = 255; i > 0; i--) { var j = Math.floor(rng() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
-    var perm = new Uint8Array(512);
-    for (var i = 0; i < 512; i++) perm[i] = p[i & 255];
-    function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-    function lerp(a, b, t) { return a + t * (b - a); }
-    function grad3(h, x, y, z) {
-      h &= 15; var u = h < 8 ? x : y, v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
-      return (h & 1 ? -u : u) + (h & 2 ? -v : v);
-    }
-    function noise2(x, y) {
-      var X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-      x -= Math.floor(x); y -= Math.floor(y);
-      var u = fade(x), v = fade(y);
-      var a = perm[X] + Y, aa = perm[a], ab = perm[a + 1];
-      var b = perm[X + 1] + Y, ba = perm[b], bb = perm[b + 1];
-      return lerp(lerp(grad3(perm[aa], x, y, 0), grad3(perm[ba], x - 1, y, 0), u),
-                  lerp(grad3(perm[ab], x, y - 1, 0), grad3(perm[bb], x - 1, y - 1, 0), u), v);
-    }
-    return { noise2: noise2 };
-  }
-  function _fbm2(perlin, x, y, octaves, persistence, lacunarity) {
-    var val = 0, amp = 1, freq = 1, maxV = 0;
-    for (var i = 0; i < octaves; i++) {
-      val += perlin.noise2(x * freq, y * freq) * amp;
-      maxV += amp; amp *= persistence; freq *= lacunarity;
-    }
-    return val / maxV;
-  }
-  function _applySpline(val, points) {
-    if (val <= points[0][0]) return points[0][1];
-    if (val >= points[points.length - 1][0]) return points[points.length - 1][1];
-    for (var i = 0; i < points.length - 1; i++) {
-      if (val < points[i + 1][0]) {
-        var t = (val - points[i][0]) / (points[i + 1][0] - points[i][0]);
-        return points[i][1] + (points[i + 1][1] - points[i][1]) * t;
-      }
-    }
-  }
-  function _createSharedPerlin(seed) {
-    var sInt = _hashString(String(seed));
-    return {
-      cont:   _createPerlin(sInt ^ 0x1111), eros: _createPerlin(sInt ^ 0x2222),
-      temp:   _createPerlin(sInt ^ 0x3333), hum:  _createPerlin(sInt ^ 0x4444),
-      det:    _createPerlin(sInt ^ 0x5555), c1:   _createPerlin(sInt ^ 0x6666),
-      c2:     _createPerlin(sInt ^ 0x7777), river:_createPerlin(sInt ^ 0x8888),
-      jitter: _createPerlin(sInt ^ 0xBBBB)
-    };
-  }
+  // D-60: this IIFE used to redeclare _mulberry32, _hashString, _createPerlin, _fbm2,
+  // _applySpline and _createSharedPerlin — a verbatim second copy of the module-level
+  // helpers, 66 lines, with the same nine XOR salts. It now closes over the module-level
+  // aliases, which are Noise.js's functions. Proved bit-exact over 202,163 Object.is
+  // comparisons before a line was removed; see the note above those aliases.
+  //
+  // Its `_fbm2` and `_applySpline` were dead even inside the IIFE — the only caller of
+  // either is the module-level `sampleBiomeParams`, which this block calls directly.
 
   // Default generation params (match chunkmanager.js defaults)
   var DEFAULT_PARAMS = {
@@ -410,18 +337,10 @@ export var BiomeSystem = (function () {
   };
 
   // Map biome display name (e.g. "Tundra") → lowercase id (e.g. "tundra")
-  var NAME_TO_ID = {
-    'Deep Ocean': 'deep_ocean',
-    'Ocean': 'ocean',
-    'Beach': 'beach',
-    'Plains': 'plains',
-    'Forest': 'forest',
-    'Badlands': 'badlands',
-    'Tundra': 'tundra',
-    'Desert': 'desert',
-    'Mountains': 'mountains',
-    'Frozen Peaks': 'frozen_peaks'
-  };
+  // Was a second hand-written copy of the name→id table. It is now the module-level
+  // BIOME_NAME_TO_ID, derived from BIOME_DEFS, so mob/quest definitions can be checked
+  // against it (D-68).
+  var NAME_TO_ID = BIOME_NAME_TO_ID;
 
   function getBiomeAtWorldPos(wx, wz, seed) {
     var p = _createSharedPerlin(seed);

@@ -14,6 +14,7 @@
 import { ItemTextureAtlas } from '../../engine/renderer/ItemTextureAtlas.js';
 import { PerformanceSettings } from '../../engine/renderer/PerformanceSettings.js';
 import { PBRTextureAtlas } from '../../engine/renderer/TextureAtlas.js';
+import { registerBlockColorAtlas } from '../../game/data/BlockColors.js';
 import { VoxelRenderer } from '../../engine/renderer/VoxelRenderer.js';
 import { KeyboardInput } from '../../engine/input/Keyboard.js';
 import { MouseInput } from '../../engine/input/Mouse.js';
@@ -102,6 +103,8 @@ export async function initScene(game) {
   const tileSize = PerformanceSettings.getTileSize(perfTexRes);
   const textureAtlas = state.textureAtlas = new PBRTextureAtlas({ tileSize });
   await textureAtlas.buildAtlas();
+  // Dropped-item cubes take their colour from this atlas's tiles (D-51).
+  registerBlockColorAtlas(textureAtlas);
 
   // Build item texture atlas for hotbar/inventory UI
   const itemAtlas = state.itemAtlas = new ItemTextureAtlas({ tileSize: 64 });

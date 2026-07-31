@@ -5,68 +5,44 @@
  */
 
 import * as THREE from 'three';
-import { BLOCK_BY_ID, BLOCK_TYPES } from '../world/BlockRegistry.js';
+import { BLOCK_TYPES } from '../world/BlockRegistry.js';
 import { CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH, MAX_Y, MIN_Y } from '../world/ChunkData.js';
+import { FACE_TABLE, HORIZONTAL_FACES } from '../../game/data/FaceTable.js';
+import {
+  AIR_IDS,
+  BLOCK_COLOR_MULTIPLIERS,
+  CUTOUT_IDS,
+  EMISSIVE_BLOCKS,
+  SPECIAL_MESH_TYPES,
+  TINTABLE_IDS,
+  TRANSPARENT_IDS,
+} from '../../game/data/BlockCategories.js';
 
 export class ChunkMeshBuilder {
   constructor() {
-    this.faceNormals = [
-      { dir: [0, 1, 0],  vertices: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]], uvCoords: [[0,0],[1,0],[1,1],[0,1]], name: 'top' },
-      { dir: [0,-1, 0],  vertices: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], uvCoords: [[0,1],[1,1],[1,0],[0,0]], name: 'bottom' },
-      { dir: [0, 0, 1],  vertices: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], uvCoords: [[0,0],[1,0],[1,1],[0,1]], name: 'front' },
-      { dir: [0, 0,-1],  vertices: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], uvCoords: [[0,0],[1,0],[1,1],[0,1]], name: 'back' },
-      { dir: [1, 0, 0],  vertices: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], uvCoords: [[0,0],[1,0],[1,1],[0,1]], name: 'right' },
-      { dir: [-1,0, 0],  vertices: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], uvCoords: [[0,0],[1,0],[1,1],[0,1]], name: 'left' },
-    ];
+    // The face table and every id set below now come from `src/game/data/` — the SAME
+    // module objects `ChunkMeshCoordinator` puts in the mesh worker's build message
+    // (BUGS.md D-63). Main thread and worker no longer agree by coincidence; they read
+    // one derivation of one registry. See src/game/data/BlockCategories.js.
+    this.faceNormals = FACE_TABLE;
 
-    // Derive cutout/transparent/emissive sets from block registry (no hardcoded IDs)
-    this.cutoutIds = new Set(
-      Object.values(BLOCK_BY_ID)
-        .filter(b => b.category === 'cutout')
-        .map(b => b.id)
-    );
-
-    this.transparentIds = new Set(
-      Object.values(BLOCK_BY_ID)
-        .filter(b => b.category === 'transparent')
-        .map(b => b.id)
-    );
-
-    // Emissive block intensities (for future emissive geometry stream)
-    this.emissiveBlocks = new Map(
-      Object.values(BLOCK_BY_ID)
-        .filter(b => b.emissive && b.emissive > 0)
-        .map(b => [b.id, b.emissive])
-    );
+    this.cutoutIds = new Set(CUTOUT_IDS);
+    this.transparentIds = new Set(TRANSPARENT_IDS);
+    this.emissiveBlocks = new Map(EMISSIVE_BLOCKS);
 
     // Combined set for face culling (any block that isn't fully solid/opaque)
-    this.nonSolidIds = new Set([...this.cutoutIds, ...this.transparentIds, BLOCK_TYPES.AIR, BLOCK_TYPES.CAVE_AIR]);
+    this.nonSolidIds = new Set([...this.cutoutIds, ...this.transparentIds, ...AIR_IDS]);
 
     // Block types that receive humidity-based vertex color tinting
-    this.tintableIds = new Set([
-      BLOCK_TYPES.GRASS, BLOCK_TYPES.PODZOL,  // grass blocks
-      BLOCK_TYPES.SHORT_GRASS, BLOCK_TYPES.TALL_GRASS,  // grass (ground cover)
-      BLOCK_TYPES.SPRUCE_LEAVES, BLOCK_TYPES.BIRCH_LEAVES, BLOCK_TYPES.JUNGLE_LEAVES,
-      BLOCK_TYPES.OAK_LEAVES, BLOCK_TYPES.ACACIA_LEAVES, BLOCK_TYPES.DARK_OAK_LEAVES,
-      BLOCK_TYPES.CHERRY_LEAVES, BLOCK_TYPES.MANGROVE_LEAVES, BLOCK_TYPES.PALE_OAK_LEAVES,
-      BLOCK_TYPES.ORANGE_POPLAR_LEAVES, BLOCK_TYPES.RED_POPLAR_LEAVES, BLOCK_TYPES.YELLOW_POPLAR_LEAVES,
-    ]);
+    this.tintableIds = new Set(TINTABLE_IDS);
 
     // Special mesh types: block ID → { type, height }
     // 'crossbillboard' = two vertical planes forming an X (grass)
     // 'topface' = single top face near the ground (flowers)
-    this.specialMeshTypes = new Map(
-      Object.values(BLOCK_BY_ID)
-        .filter(b => b.meshType)
-        .map(b => [b.id, { type: b.meshType, height: b.meshHeight || 0.5 }])
-    );
+    this.specialMeshTypes = new Map(SPECIAL_MESH_TYPES);
 
     // Block color map: block ID → [r, g, b] for blocks with explicit color multipliers
-    this.colorMap = new Map(
-      Object.values(BLOCK_BY_ID)
-        .filter(b => b.color && Array.isArray(b.color))
-        .map(b => [b.id, b.color])
-    );
+    this.colorMap = new Map(BLOCK_COLOR_MULTIPLIERS);
   }
 
   /**
@@ -372,14 +348,9 @@ export class ChunkMeshBuilder {
      }
 
      // SIDE faces: only if neighbor is NOT the same fluid type (edge of body)
-     const sides = [
-       { dir: [0, 0, 1], faceName: 'front', verts: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], normal: [0, 0, 1] },
-       { dir: [0, 0,-1], faceName: 'back',  verts: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], normal: [0, 0,-1] },
-       { dir: [1, 0, 0], faceName: 'right', verts: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], normal: [1, 0, 0] },
-       { dir: [-1,0, 0], faceName: 'left',  verts: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], normal: [-1,0, 0] },
-     ];
-
-     for (const side of sides) {
+     // HORIZONTAL_FACES is FACE_TABLE minus top/bottom, in the same order this table
+     // used to spell out by hand (refactor.md §9).
+     for (const side of HORIZONTAL_FACES) {
        const nx = x + side.dir[0];
        const nz = z + side.dir[2];
        const neighborBlock = queryBlock(nx, y, nz);
