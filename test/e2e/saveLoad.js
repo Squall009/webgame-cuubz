@@ -29,9 +29,19 @@
  * with a GPU stack; `ubuntu-latest` has no Edge, and downloading a Chromium plus
  * software-rasterising WebGL would add minutes to a 26 s CI run. The workflow
  * records this in a comment naming the PR that could add it, following PR 5's
- * idiom for `npm run build` / `npm run lint`. `test/run_tests.sh:46` globs
- * `test/test_*.js` — flat, non-recursive — so nothing under `test/e2e/` is visible
- * to the suite either. Do not name a file in here `test/test_e2e*.js`.
+ * idiom for `npm run build` / `npm run lint`. It is invisible to `npm test` too, but
+ * the mechanism changed at PR 31: the legacy runner's flat `test/test_*.js` glob used
+ * to exclude `test/e2e/` by accident, and Vitest's recursive `.test.js` suffix glob
+ * would not. `vitest.config.js` names `test/e2e` in its `exclude` for exactly that
+ * reason — see note 3 there. Do not remove it, and do not name a file in here
+ * `*.test.js`.
+ *
+ * STILL CommonJS, DELIBERATELY (PR 31). Every other test file in the repo is an ES
+ * module loaded by Vitest. This one is a standalone `node` program that spawns a
+ * browser, so it stays `require`-based and `eslint.config.mjs` lints `test/e2e/**` as
+ * `sourceType: 'commonjs'` on its own. The single place it needs an ES module — the
+ * production chunk codec, used to decode browser-written bytes under Node — is a
+ * `await import()` at its one call site. There is no require hook any more.
  *
  * HOW IT DRIVES THE GAME — storage inspection, not input simulation
  * ----------------------------------------------------------------
@@ -85,11 +95,6 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-// PR 9: this harness decodes browser-written chunk bytes with the production codec,
-// which is an ES module now. The hook lets this CommonJS file require() it. See its
-// header; PR 31 removes both.
-require('../helpers/esmRequire');
-
 const ROOT = path.join(__dirname, '..', '..');
 const ARTIFACTS = path.join(__dirname, 'artifacts');
 const HEADED = process.argv.includes('--headed');
@@ -124,6 +129,52 @@ let passCount = 0;
 let failCount = 0;
 const failures = [];
 const unverified = [];
+
+// ── Teardown that cannot be skipped (D-83) ────────────────────
+//
+// MEASURED: a `test:e2e:vite` run died mid-way on "Target page, context or browser has
+// been closed" and left a `vite` process **still LISTENING on 3100**. A stale listener
+// on that port has made a green run a lie eight times in this project — the next run's
+// `vite --strictPort` fails to bind, the browser is served by the OLD server, and the
+// whole suite passes against stale code.
+//
+// The old shape had four ways to skip the stop: the two statements between the browser
+// launch and the assertion `try` (`newContext`/`newPage`) were outside every handler; a
+// throw from `browser.close()` in the `finally` skipped the `server.close()` after it;
+// the browser-launch failure path closed the server by hand and could drift; and
+// anything thrown outside `main()`'s own `try` went straight to `main().catch`, which
+// closed nothing at all.
+//
+// So the handles are module-scoped and every exit path funnels here. This function is
+// idempotent, and each stop is individually guarded because **a teardown that throws
+// must not skip the teardown after it** — that is exactly how the vite child was
+// orphaned. `finish()` calls it too, so even the early `return finish()` paths stop the
+// server. See `test/e2e/viteServer.js` for the Windows process-tree kill and the
+// pre-flight port check that catches a listener this failed to clean up.
+let hostServer = null;
+let browserHandle = null;
+let tornDown = false;
+
+async function teardown() {
+  if (tornDown) return;
+  tornDown = true;
+  if (browserHandle) {
+    try {
+      await browserHandle.close();
+    } catch (err) {
+      console.error(`  ⚠️  browser teardown failed (continuing to the server): ${err.message}`);
+    }
+    browserHandle = null;
+  }
+  if (hostServer) {
+    try {
+      await hostServer.close();
+    } catch (err) {
+      console.error(`  ⚠️  host server teardown failed: ${err.message}`);
+    }
+    hostServer = null;
+  }
+}
 
 function assert(condition, message) {
   if (condition) {
@@ -289,12 +340,77 @@ const readStorage = (page, worldId) => page.evaluate(async (wid) => {
 // Every selector below is an id or data attribute that exists in index.html today;
 // PR 26 slims index.html and owns keeping these alive.
 
+/**
+ * `page.fill` that PROVES the value took. (D-62)
+ *
+ * ─── WHY EVERY FILL IN THIS FILE GOES THROUGH HERE ──────────────────────────
+ *
+ * One run failed `#world-seed pinned the manifest seed` with **"expected 424242, got
+ * 3335459929"** against a byte-identical tree, and passed on the runs either side. The
+ * cause is not a flaky assertion — it is that a *silently ineffective* `page.fill` of
+ * `#world-seed` is **byte-indistinguishable from a successful one**:
+ *
+ *   - `src/ui/screens/WorldScreen.js:180` pre-fills `#world-seed` with a random uint32
+ *     every time the create-world modal is opened, before it is unhidden; and
+ *   - a *blank* `#world-seed` also yields a random uint32, via
+ *     `WorldManager.generateSeed()` (`src/game/entities/WorldManager.js:126-129`).
+ *
+ * So whether the fill lands on nothing, races the pre-fill, or is reverted, the world
+ * still gets a plausible numeric seed and the run carries on generating **unpinned
+ * terrain** — which quietly turns every "the bytes are identical after a reload"
+ * assertion into a coin flip. The other four fills target `#char-name`, which has no
+ * such default, so they fail loudly on their own; they go through here anyway, because
+ * "this one is guarded and those four are guarded by luck" is not a property worth
+ * relying on and the guard costs one `waitForFunction` each.
+ *
+ * `waitForFunction`, never a `waitForSelector` with an attribute predicate: a selector
+ * wait requires the element to be VISIBLE, so it would burn its full timeout on a modal
+ * that is still hidden and then fail for the wrong reason. (It is also why no id is
+ * named illustratively anywhere in this file — `test/unit/ui/pageLoad.test.js` scrapes
+ * hash-prefixed ids out of this file's TEXT, **comments included**, and asserts that
+ * every one exists in the assembled DOM. A made-up placeholder id in a comment here
+ * turns that unit test red.)
+ *
+ * This is the HARNESS's guard. The deeper cure — making a blank seed an explicit error
+ * instead of a silent randomisation — is a `src/` change and is not PR 31's.
+ */
+async function fillChecked(page, selector, value) {
+  await page.fill(selector, value);
+  try {
+    await page.waitForFunction(
+      ([sel, want]) => {
+        const el = document.querySelector(sel);
+        return !!el && el.value === want;
+      },
+      [selector, value],
+      { timeout: 5000 }
+    );
+  } catch {
+    let got;
+    try {
+      got = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        return el ? el.value : '<no such element>';
+      }, selector);
+    } catch (readErr) {
+      got = `<unreadable: ${readErr.message}>`;
+    }
+    throw new Error(
+      `D-62 — page.fill('${selector}', '${value}') DID NOT TAKE: the field reads ` +
+      `${JSON.stringify(got)}. Everything after this point would be testing an input ` +
+      'this harness did not choose — for #world-seed specifically that means an ' +
+      'unpinned, randomly seeded world and a whole run of byte-comparison assertions ' +
+      'that no longer compare anything. Stopping here on purpose.'
+    );
+  }
+}
+
 async function createCharacter(page, name) {
   await page.click('#btn-play-solo');
   await page.waitForSelector('#character-screen:not(.hidden)');
   await page.click('#btn-create-char');
   await page.waitForSelector('#create-char-modal:not(.hidden)');
-  await page.fill('#char-name', name);
+  await fillChecked(page, '#char-name', name);
   await page.click('#btn-save-char');
   await page.waitForSelector('.char-slot[data-char-id]');
 }
@@ -303,8 +419,8 @@ async function createWorld(page, name, seed) {
   const before = await page.$$eval('.world-slot[data-world-id]', els => els.map(e => e.dataset.worldId));
   await page.click('#btn-create-world');
   await page.waitForSelector('#create-world-modal:not(.hidden)');
-  await page.fill('#world-name', name);
-  await page.fill('#world-seed', seed);
+  await fillChecked(page, '#world-name', name);
+  await fillChecked(page, '#world-seed', seed);
   await page.click('#btn-save-world');
   await page.waitForFunction(
     n => document.querySelectorAll('.world-slot[data-world-id]').length === n,
@@ -430,6 +546,7 @@ async function main() {
     } else {
       server = await require('./staticServer').start(path.resolve(ROOT), 0);
     }
+    hostServer = server; // D-83 — registered before anything else can throw
     assert(true, `Host server started (${HOST})`);
   } catch (err) {
     assert(false, `Host server started (${HOST}): ${err.message}`);
@@ -440,11 +557,11 @@ async function main() {
   let browser = null;
   try {
     browser = await chromium.launch({ channel: 'msedge', headless: !HEADED, args: CHROME_ARGS });
+    browserHandle = browser; // D-83 — registered before newContext/newPage can throw
     assert(true, 'Launched Edge via channel:msedge (playwright-core ships no browsers)');
   } catch (err) {
     assert(false, `Launched Edge via channel:msedge (${err.message})`);
-    await server.close();
-    return finish();
+    return finish(); // finish() runs teardown(), which stops the host server
   }
 
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -765,7 +882,14 @@ async function main() {
       `this world's ${snapA1.chunkCount} chunks`);
     assertEquals(bufA1.length % 4, 0, 'D-15 FIXED — the stored length is a whole number of 4-byte runs past the header');
 
-    const { ChunkBinaryCodec } = require('../../src/engine/world/ChunkBinaryCodec.js');
+    // PR 31 (D-79): `src/**` is ES modules and this file is CommonJS, so this used to
+    // go through `test/helpers/esmRequire.js` — a require hook that regex-rewrote
+    // `import`/`export` into `require`/`module.exports` and had TWO install sites, the
+    // legacy bash runner and the top of this file. Vitest loads ESM natively, the hook
+    // and the runner are both deleted, and the one place this harness needs a source
+    // module is this dynamic import. It is inside `async main()`, so the `await` is
+    // legal; everything else in this file stays `require`.
+    const { ChunkBinaryCodec } = await import('../../src/engine/world/ChunkBinaryCodec.js');
     assertEquals(
       ChunkBinaryCodec.computeChecksum(new Uint8Array(bufA1.buffer, bufA1.byteOffset + 20, bufA1.length - 20)),
       view.getUint32(16, true),
@@ -1401,7 +1525,7 @@ async function main() {
     const charIdBefore = await page.$eval('.char-slot[data-char-id]', el => el.dataset.charId);
     await page.click('.char-slot[data-char-id] [data-action="edit"]');
     await page.waitForSelector('#create-char-modal:not(.hidden)');
-    await page.fill('#char-name', 'E2E Renamed');
+    await fillChecked(page, '#char-name', 'E2E Renamed');
     await page.click('#btn-save-char');
     // Not waitForSelector('#create-char-modal.hidden') — that waits for VISIBLE, and a
     // .hidden modal never becomes visible, so it burns the full timeout and fails green.
@@ -1418,7 +1542,7 @@ async function main() {
     // ── deleteCharacter: create a second character, then remove it ─────────
     await page.click('#btn-create-char');
     await page.waitForSelector('#create-char-modal:not(.hidden)');
-    await page.fill('#char-name', 'Doomed');
+    await fillChecked(page, '#char-name', 'Doomed');
     await page.click('#btn-save-char');
     await page.waitForFunction(() => document.querySelectorAll('.char-slot[data-char-id]').length === 2);
     const doomedId = await page.evaluate(() =>
@@ -1485,18 +1609,17 @@ async function main() {
     await page.waitForSelector('#main-menu:not(.hidden)');
 
     note(
-      '§7 steps 12-13 — multiplayer host/guest persistence, and the browser half of the ' +
-      'session layer generally (BUGS.md D-48, owned by PR 31)',
-      'Needs a running relay (server/index.js on 8765 as a child process) and two browser ' +
-      'contexts. Nothing in this file clicks #btn-host or #btn-join, so the relay handshake, ' +
-      'JOIN_ACCEPTED arriving over a real socket and startGame() on a joining client are all ' +
-      'unexercised — which is what let D-43 sit under five green runs. The way in is the ' +
-      '?relayUrl= query parameter getRelayUrl already honours; PR 16 added assertions for it ' +
-      'in test/test_relayUrl.js precisely so a harness can rely on it. PR 16 covered the ' +
-      "session layer's LOGIC instead — test/test_sessionRecord.js drives the real " +
-      'SessionManager and StorageHelper with 51 assertions inside npm test, so a D-43 ' +
-      'regression goes red on every push rather than at a phase gate. What is left here is ' +
-      'two-context orchestration, which is a harness change, not a source one.'
+      '§7 steps 12-13 — multiplayer host/guest persistence — NOT covered by THIS file, and ' +
+      'no longer uncovered: see test/e2e/multiplayer.js (BUGS.md D-48, closed in PR 31)',
+      'Nothing in this file clicks #btn-host or #btn-join and nothing should — it is the ' +
+      'single-context parity baseline and its 189 assertions must stay equal across both ' +
+      'hosts. PR 31 added a THIRD entry point instead: `npm run test:e2e:mp` spawns ' +
+      'server/index.js on 8765 as a child process, opens two BrowserContexts against ' +
+      '?relayUrl=ws://127.0.0.1:8765, drives the real host and guest click paths, and ' +
+      "asserts the guest's chunk manager carries the seed the host typed and that its " +
+      "cuubz_last_session record carries the host's MODE (D-43, in a browser, for the " +
+      'first time). It does not run in CI — ubuntu-latest has no Edge — so it is a local ' +
+      'gate like this one. Run it when you touch the session layer.'
     );
 
     // ═══ §7 step 14 — the run left the tree alone ═════════════
@@ -1520,14 +1643,19 @@ async function main() {
     assert(false, `Harness ran to completion (${err.message})`);
     try { await shot(page, '99-failure'); } catch { /* the page may already be gone */ }
   } finally {
-    await browser.close();
-    await server.close();
+    // D-83 — one funnel, individually guarded, idempotent. It used to be two bare
+    // awaits here, and a throw from the first skipped the second.
+    await teardown();
   }
 
-  finish();
+  await finish();
 }
 
-function finish() {
+async function finish() {
+  // D-83 — every early `return finish()` above reaches this, so no exit path can leave
+  // a vite child listening on 3100.
+  await teardown();
+
   console.log('\n==============================================');
   console.log(`Results: ${passCount} passed, ${failCount} failed`);
 
@@ -1554,7 +1682,9 @@ function finish() {
   process.exit(0);
 }
 
-main().catch(err => {
+main().catch(async err => {
   console.error(`\nHarness crashed outside the assertion scope: ${err.stack}`);
+  // D-83 — the last exit path, and the one that used to close nothing at all.
+  await teardown();
   process.exit(1);
 });

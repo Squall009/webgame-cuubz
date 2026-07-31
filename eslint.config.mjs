@@ -189,13 +189,40 @@ export default [
     rules: BASE_RULES,
   },
 
-  // ── 3. Node CommonJS: the relay, the tests, the scripts ───────────────────
+  // ── 3. Node CommonJS: the relay, the scripts, and the e2e harness ─────────
+  //
+  // `test/**` used to be in this list and is not any more — PR 31 moved the unit suite
+  // to Vitest and ES modules, and the first converted file failed `no-undef` on its own
+  // `import` until this block was split (**D-79**). What is left here is genuinely still
+  // CommonJS: `server/` (the relay), `scripts/` (both shell out or are shelled out to),
+  // and `test/e2e/` — the browser harness, which is a standalone Node program rather
+  // than a Vitest file and is excluded from the Vitest glob for that reason.
   {
-    files: ['server/**/*.js', 'test/**/*.js', 'scripts/**/*.js'],
+    files: ['server/**/*.js', 'scripts/**/*.js', 'test/e2e/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',
       globals: { ...NODE_GLOBALS, ...BROWSER_GLOBALS },
+    },
+    rules: BASE_RULES,
+  },
+
+  // ── 3b. The Vitest suite: Node ES modules ─────────────────────────────────
+  //
+  // `sourceType: 'module'` is the half that matters: these files `import` from `src/`,
+  // which is what deleting `test/helpers/esmRequire.js` bought. They keep the Node
+  // globals (`process`, `Buffer`, `URL`) and the browser ones (several build a `document`
+  // stub by hand and `environment: 'node'` means nothing supplies them — see
+  // `vitest.config.js` note 1). `__dirname` is deliberately NOT a global here: it does
+  // not exist in an ES module, and `test/helpers/paths.js` is what replaced it, so a
+  // stray `__dirname` must be a `no-undef` error rather than a silent `undefined`.
+  {
+    files: ['test/**/*.js'],
+    ignores: ['test/e2e/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...NODE_GLOBALS, ...BROWSER_GLOBALS, __dirname: 'off', __filename: 'off' },
     },
     rules: BASE_RULES,
   },

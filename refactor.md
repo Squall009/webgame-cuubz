@@ -3207,7 +3207,7 @@ resolve: { alias: { '@shared': path.resolve(__dirname, 'shared') } }
 `server/` is CommonJS — either publish `shared/protocol.js` as dual CJS/ESM, or keep it CJS and let Vite consume it. **Pick one and write it down.**
 - **Accept:** a test asserts client and server `MESSAGE_TYPES` are deep-equal. Two-browser multiplayer session still works.
 
-### PR 31 — Vitest, and the test restructure with it
+### PR 31 — Vitest, and the test restructure with it ✅ DONE
 
 > **Absorbs PR 32** (§8.7). Moving to Vitest and restructuring the suite are one change — doing them separately means touching all 56 test files twice. Owns **D-20** (four relay tests on fixed ports with no `error` handler), **D-28** (`esmRequire` vs real ESM on cycles — the hook is deleted here), **D-33** (172 `no-unused-vars` warnings), **D-47** (`test_sessionUI.js` — 730 lines testing a *copy* of the code) and **D-48** (no automated test has ever driven a multiplayer path in a browser).
 ```bash
@@ -3225,6 +3225,47 @@ Migrate incrementally: run the legacy `bash test/run_tests.sh` **and** `vitest` 
 - **D-20** — four relay tests `http.listen()` on fixed ports with no `'error'` handler. Ephemeral ports belong in the Vitest harness.
 - **D-28** — `test/helpers/esmRequire.js`, which this PR deletes.
 - **D-48** — **no automated test has ever driven a multiplayer path in a browser.** `test/e2e/saveLoad.js` is single-context and never clicks `#btn-host` or `#btn-join`, so `DEPLOY.md` §7 steps 12–13 have been `⚠️ UNVERIFIED` since PR 6b — and that gap is what let **D-43**, a player-visible rejoin defect, survive five green e2e runs and four PRs. **The source blockers are gone:** PR 12 put the live `GameState` on `window.__cuubz`, and `getRelayUrl` honours a `?relayUrl=` query parameter that `test_relayUrl.js` has asserted since PR 16, so the game can be pointed at `server/index.js` spawned on 8765 as a child process. What is left is two-context orchestration. PR 16 covered the session layer's *logic* in `npm test` instead (`test/test_sessionRecord.js`, `BUGS.md` decision 31); this is the browser half.
+
+#### PR 31 outcome — the bash runner and the `require` hook are gone
+
+`npm test` is `vitest run` and **runs from PowerShell**; the constraint that it only ran from Git
+Bash is deleted, along with `ci.yml`'s `shell: bash` pin and the four warnings about it. All 58
+files moved to `test/unit/{core,engine,game,ui,multiplayer,util,server,meta}/` and
+`test/integration/`, bodies **verbatim and un-reindented** inside one `it()` each (decision 60),
+with `process.exit` shimmed into the verdict and a **no-verdict-is-a-failure** guard that caught
+three un-awaited async tails during the migration (decision 62). The claim is checkable and was
+checked: **every one of the 58 files reports exactly the assertion count its pre-migration
+original reported**, measured file-for-file against the legacy runner before it was deleted.
+`environment` is **`node`, not jsdom** — decision 61, because jsdom flips 28 of `src/`'s
+feature-detection guards — and `pool: 'forks'` / `fileParallelism: false` are mandatory.
+
+Ten rows closed or half-closed: **D-20**, **D-28**, **D-47**, **D-48**, **D-73**, **D-79**,
+**D-80**, **D-83** closed; **D-62**'s detector and **D-33**'s test half landed and the residue
+moved to PR 33. `test/e2e/multiplayer.js` (**D-48**) is a **third** harness entry point — 70
+assertions, a real relay child, two browser contexts — deliberately not folded into `saveLoad.js`,
+whose 189/189 equality is the parity proof (decision 65). It found **D-84** on its first green run.
+The adversarial pass found a real defect for the **sixth consecutive PR**: the new
+`storageUpgrade.test.js` counted *failing* assertions as passing and printed `N/N passed, 0 failed`
+unconditionally — in the file feeding the one number `scripts/count-assertions.js` exists to make
+trustworthy.
+
+| Gate | Result |
+|---|---|
+| `npm test` | **59 files / 81 tests / 0 failed**, exit 0 — and it runs from PowerShell |
+| `npm run test:count` | **6,562** assertions, 59 of 59 files reporting |
+| `npm run lint` | **0 errors, 149 warnings** (was 151) |
+| `npm run build` | exit 0 |
+| `npm run test:e2e` | **189 passed, 0 failed** |
+| `npm run test:e2e:vite` | **189 passed, 0 failed** — equal, unchanged |
+| `npm run test:e2e:mp` | **70 passed, 0 failed**, ~72 s — new |
+| `test/QUARANTINE.md` | still **zero rows** |
+| largest new file | `test/e2e/multiplayer.js`, 660 lines — a harness, not an extracted `src/` file |
+
+**Assertion arithmetic, because the number moved.** 6,532 → 6,562. **−12**: `test_framework.js`
+deleted, which self-tested the assert helpers Vitest replaces. **+26**: the new
+`storageUpgrade.test.js` (**D-80**). **+16**: `sessionUI.test.js` went 155 → 171 because it is a
+**rewrite, not a migration** (**D-47**) — it is the one file the per-file equality proof does not
+cover, and it is excluded from that claim by name. Every other file: unchanged, exactly.
 
 ### PR 32 — Restructure tests + automate the data test — **ABSORBED INTO PR 31**
 ```

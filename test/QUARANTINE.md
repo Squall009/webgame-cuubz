@@ -1,27 +1,34 @@
 # Quarantined Tests
 
-Tests listed here are **skipped by `test/run_tests.sh`** and do not fail the build.
-They are reported as `⏭️  SKIP` so they stay visible rather than silently dropped.
+## THE MECHANISM IS GONE (PR 31)
 
-The runner parses this file for filenames — one `test_*.js` per row of the table
-below. Adding a row quarantines a test; deleting a row un-quarantines it. Nothing
-else needs to change.
+This file no longer does anything. It is kept for the record below.
 
-**Quarantine is not a way to make a red test green.** Every entry needs a real
-reason and a named owner PR that will fix or replace it. Keep this list at **five
-files or fewer**. If it grows past that, the suite is drifting from the code and
-that is the problem to fix.
+Quarantine was a feature of `test/run_tests.sh`: the runner parsed the first column
+of the table in this file, skipped those files and reported them as `⏭️  SKIP`.
+**PR 31 replaced that runner with Vitest and deleted it**, so nothing reads this file
+any more.
+
+**Vitest has no equivalent and none is wanted.** The nearest things it offers —
+`test.skip` / `describe.skip` and a `vitest.config.js` `exclude` entry — both hide the
+skip inside the code or the config rather than in a list with an owner PR beside it,
+which is the property that made the quarantine table safe. Nothing needs one today
+(see below), and if something ever does, the answer is to fix or delete the test, not
+to rebuild the mechanism.
+
+The empty table below is preserved as-is. It parsed under the old runner; it is inert
+now. **Do not add a row to it** — a row would be skipped by nothing and read by no
+one, which is strictly worse than a red test.
 
 ## Currently quarantined (0)
 
 | File | Failure | Why it is deferred | Owner PR |
 |---|---|---|---|
 
-**The quarantine is empty.** All four entries were owned by **PR 26**, which is the
-PR that rewrote the HTML and CSS they asserted against, and `refactor.md` §3.6 says
-the rewrite and the test fix ship together. They did. The table above is left in
-place — with its header row — because the runner parses it (`run_tests.sh:31-34`)
-and an empty table must still parse.
+**The quarantine is empty, and was already empty before the runner was deleted.** All
+four entries were owned by **PR 26**, which is the PR that rewrote the HTML and CSS
+they asserted against, and `refactor.md` §3.6 says the rewrite and the test fix ship
+together. They did.
 
 ## The historical record — what was quarantined, when, and how it ended
 
@@ -32,9 +39,11 @@ That is what made them fail when markup and CSS were reorganised even though the
 page still worked, and it is also what made most of their assertions *already
 false* long before the reorganisation.
 
-A bullet list, deliberately — **not** a table. `run_tests.sh` parses the first
+A bullet list, deliberately — **not** a table. `run_tests.sh` parsed the first
 column of *every* markdown table row in this file, so a historical table here
-would re-quarantine all four. Only the empty table above may be a table.
+would have re-quarantined all four. That runner is gone as of PR 31, so the
+constraint is no longer live; the list is left as a list because rewriting it into
+a table would gain nothing.
 
 - **`test_pageLoad.js`** — went red on `#render-distance` and `#inventory-screen`
   not being found and on expecting `textures/*.png` at the repo root.

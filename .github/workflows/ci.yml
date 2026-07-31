@@ -4,16 +4,23 @@ name: CI
 #
 # Three hard gates, all of which must stay green:
 #
-#   1. npm test               — test/run_tests.sh: 52 passing, 4 quarantined, exit 0.
-#                               Quarantined files are listed in test/QUARANTINE.md and
-#                               reported as SKIP. That list is capped at five files and
-#                               every entry names an owner PR; do not grow it to make
-#                               this job green.
-#                               PR 9 note: the runner invokes node with
-#                               `-r ./test/helpers/esmRequire.js`. Without that hook
-#                               every test that requires a source file dies on "Cannot
-#                               use import statement outside a module". PR 31 removes
-#                               both when Vitest arrives.
+#   1. npm test               — `vitest run`: 59 test files, 0 quarantined, exit 0.
+#                               PR 31 replaced the bash runner with Vitest 4 and deleted
+#                               test/run_tests.sh. There is no quarantine mechanism any
+#                               more — Vitest has no equivalent and none is needed;
+#                               test/QUARANTINE.md is empty and is history now.
+#                               `npm run test:count` reports the assertion total, which
+#                               is the number to watch: a file that stops asserting
+#                               still "passes".
+#                               PR 31 also deleted test/helpers/esmRequire.js, the
+#                               require hook that let CommonJS tests require() the ES
+#                               modules in src/. Vitest loads ESM natively, so nothing
+#                               is preloaded and no `-r` flag is involved.
+#                               Config lives in vitest.config.js — read its header
+#                               before changing it. `pool: 'forks'` +
+#                               `fileParallelism: false` are mandatory (five suites bind
+#                               real TCP sockets), and `exclude: test/e2e` is what keeps
+#                               the seven-minute browser harness out of this job.
 #   2. npm run lint            — ESLint 9 flat config, `no-undef: error`. This REPLACED
 #                               scripts/check-globals.js in PR 11, which deleted the
 #                               script and its step in the same commit. That script had
@@ -59,7 +66,7 @@ name: CI
 #                       Format what you touch. PR 26/27 (HTML/CSS) is the natural point
 #                       to reconsider.
 #
-#   npm run test:e2e:vite → the same 152 assertions against `npm run dev` instead
+#   npm run test:e2e:vite → the same 189 assertions against `npm run dev` instead
 #                       of test/e2e/staticServer.js, added by PR 7. Same browser
 #                       requirement, same owner.
 #
@@ -71,8 +78,9 @@ name: CI
 #                       test/e2e/saveLoad.js, on a separate job so it cannot slow
 #                       the three gates below.
 #
-# test/run_tests.sh globs test/test_*.js — flat, non-recursive — so nothing under
-# test/e2e/ reaches `npm test` either. That is deliberate; keep it that way.
+# Nothing under test/e2e/ reaches `npm test` either. Until PR 31 that was an accident
+# of the bash runner's flat test/test_*.js glob; it is now explicit — vitest.config.js
+# excludes test/e2e and its note 3 says why. That is deliberate; keep it that way.
 
 # D-22, closed by PR 11. `on: push` with no branch filter PLUS `on: pull_request` meant a
 # same-repo PR branch ran CI **twice** on every push — observed, not predicted, once PR #1
@@ -129,12 +137,12 @@ jobs:
 
       - run: npm ci
 
-      # test/run_tests.sh is bash, not sh: it uses `local`, `echo -e`, and GNU
-      # `grep -E` / `sed -E` to parse the first column of the table in
-      # test/QUARANTINE.md. `shell: bash` is already the ubuntu-latest default —
-      # it is stated explicitly so the requirement survives a runner change.
+      # No `shell:` pin. `npm test` used to be `bash test/run_tests.sh` and genuinely
+      # required bash — `local`, `echo -e`, GNU `grep -E`/`sed -E`. PR 31 made it
+      # `vitest run`, a Node binary with no shell dependency at all, and deleted the
+      # script. The pin came off with it. (It also means `npm test` now runs from
+      # PowerShell, which it never could before.)
       - name: Test suite
-        shell: bash
         run: npm test
 
       # Replaced scripts/check-globals.js, which PR 11 deleted in this same commit.
@@ -147,7 +155,9 @@ jobs:
       # `npm run lint` turned one green run into 178 warning annotations — which buries
       # any annotation that matters and makes "CI green, zero annotations" stop meaning
       # anything. The warnings are still there: `npm run lint` locally shows all of them,
-      # and D-33 tracks the count with PR 32 as its owner. What CI asserts is the gate.
+      # and D-33 tracks the count with PR 31 as its owner (PR 32 was absorbed into
+      # PR 31 — the runner swap and the suite restructure are one change). What CI
+      # asserts is the gate.
       - name: Lint
         shell: bash
         run: npm run lint:ci
