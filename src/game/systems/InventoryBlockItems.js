@@ -5,28 +5,23 @@
  * below is the byte-identical body it had as a member of `Inventory`, `this` is still the
  * `Inventory` instance, and no call site changed (decision 44).
  *
- * WHY THESE FIVE AND NOT SOME OTHER FIVE: they are the only methods on `Inventory` whose
- * dependency is `BlockRegistry` rather than `this.slots`. Everything else in the class
- * reaches into the slot array; these reach out of the inventory entirely, at
- * `getBlockDrop` and `BLOCK_PROPERTIES`. That is the seam, and it is what lets
- * `InventorySystem.js` stop importing `BLOCK_PROPERTIES` and `getBlockDrop` at all.
+ * WHY THESE AND NOT SOME OTHERS: they are the methods on `Inventory` whose dependency is
+ * `BlockRegistry` rather than `this.slots`. Everything else in the class reaches into the
+ * slot array; these reach out of the inventory entirely. That is the seam, and it is what
+ * lets `InventorySystem.js` stop importing `getBlockDrop` at all.
  *
  * FIELDS CROSSING THIS BOUNDARY: 0. Not one method here reads or writes an instance field.
  * They call `this.getSelectedItem()` and `this.addItem()` — prototype methods, which the
  * mixin plumbing in `InventorySystem.js` guarantees are present on the same object.
  *
- * TWO OF THESE FIVE ARE UNCALLED in `src/` and `test/`: `canPlaceBlock` (the survival-mode
- * check that actually runs is `Game.canPlaceBlock`, which asks `inventory.hasItem`) and
- * `_getBlockProperties` (nothing reads block properties through the inventory). They are
- * moved rather than deleted — dead-code triage is D-25's sweep, not a mechanical split's.
- *
- * `_getBlockProperties`'s `typeof BLOCK_PROPERTIES === 'undefined'` guard was provably
- * dead — the name is a module import, so it is either bound or the module fails to load
- * — and PR 33 / D-27 removed it.
+ * PR 23 moved FIVE methods here and recorded two of them — `canPlaceBlock` and
+ * `_getBlockProperties` — as uncalled, moving rather than deleting them because dead-code
+ * triage is not a mechanical split's job. PR 34 deleted both as D-75; see the note at the
+ * bottom. Three remain, and with them went this file's `BLOCK_PROPERTIES` import.
  */
 
 import { NAMED_ITEMS } from '../data/ItemDefinitions.js';
-import { BLOCK_PROPERTIES, getBlockDrop } from '../../engine/world/BlockRegistry.js';
+import { getBlockDrop } from '../../engine/world/BlockRegistry.js';
 
 export const BlockItemMethods = {
   /**
@@ -85,26 +80,23 @@ export const BlockItemMethods = {
     return result.added > 0;
   },
 
-  /**
-   * Check if player has a specific block type to place
-   */
-  canPlaceBlock(typeId) {
-    if (typeof typeId !== 'number') return false;
-    const item = this.getSelectedItem();
-    return item && item.typeId === typeId;
-  },
-
-  /**
-   * Get block properties from the live block registry.
-   *
-   * Note: blockRegistry.js declares `BLOCK_PROPERTIES` as a top-level `const`. In a
-   * classic <script> that is a lexical global binding, which is NOT exposed as
-   * `window.BLOCK_PROPERTIES` — the old `window.` lookup here was always undefined
-   * in the browser and silently fell back to a stale table. Reference it directly.
-   */
-  _getBlockProperties(blockType) {
-    // D-27: `if (typeof BLOCK_PROPERTIES === 'undefined') return undefined;` removed —
-    // constant-false; the name is a module import.
-    return BLOCK_PROPERTIES[blockType];
-  },
+  // ─── D-75: `canPlaceBlock` AND `_getBlockProperties` WERE HERE ──────────────
+  //
+  // PR 23's header above recorded them as uncalled and moved them anyway, because
+  // dead-code triage is not a mechanical split's job. PR 34 is where that gets settled, and
+  // both are deleted. Re-verified before deleting: no call site in `src/`, `test/`,
+  // `server/`, `shared/`, `scripts/` or `index.html`.
+  //
+  //   `canPlaceBlock(typeId)` — returned `item && item.typeId === typeId` against the
+  //   SELECTED slot only. The survival-mode placement check that actually runs is
+  //   `Game.canPlaceBlock` (`src/core/Game.js:373`), which asks `inventory.hasItem` and so
+  //   sees the whole inventory. Two different answers under one name; keeping the unused
+  //   one is how the wrong one eventually gets called.
+  //
+  //   `_getBlockProperties(blockType)` — a one-line passthrough to `BLOCK_PROPERTIES`.
+  //   Nothing reads block properties through the inventory; the four files that need them
+  //   import `BLOCK_PROPERTIES` from `BlockRegistry.js` directly.
+  //
+  // The header's "these five" is now three, and this file no longer imports
+  // `BLOCK_PROPERTIES` at all.
 };

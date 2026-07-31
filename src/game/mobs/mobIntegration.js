@@ -6,7 +6,12 @@
 
 import { MobManager } from './mobManager.js';
 import { MobRenderer } from './rendering/mobRenderer.js';
-import { DAMAGE_SOURCES } from '../systems/SurvivalSystem.js';
+// PR 9 moved this table to `game/data/DamageSources.js` to break a real circular
+// dependency (D-26) and left `SurvivalSystem.js` re-exporting it so no import site had to
+// change. That re-export was this file's only edge into SurvivalSystem.js, and it is the
+// reason `src/index.js` used to call that module "reached". PR 34 deleted SurvivalSystem.js,
+// so the import now points at the table's actual home. The table itself is unchanged.
+import { DAMAGE_SOURCES } from '../data/DamageSources.js';
 
 export class MobIntegration {
   constructor() {
@@ -22,7 +27,11 @@ export class MobIntegration {
    * @param {THREE.Scene} deps.scene - Three.js scene
    * @param {object} deps.player - Player instance (for inventory reference)
    * @param {Inventory} deps.inventory - Player inventory
-   * @param {SurvivalSystem} deps.survivalSystem - Player survival system
+   * @param {?object} deps.survivalSystem - Player survival system. There is no such class
+   *   in `src/` — PR 34 deleted `SurvivalSystem.js` as never-constructed — and
+   *   `core/init/initMobs.js:35` passes `null`. The `if (survivalSystem)` branch below is
+   *   the wiring point a future survival PR fills in; it is not dead code pretending to be
+   *   wired, because the callback it installs is only registered when one is supplied.
    * @param {number} deps.worldSeed - World seed
    * @param {function} deps.onMobDeath - Callback when mob dies
    * @returns {MobManager}

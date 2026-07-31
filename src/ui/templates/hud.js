@@ -5,10 +5,27 @@
  * the five survival meters, the hotbar, the quest tracker, the fly-mode and armor
  * indicators and the damage flash.
  *
- * **The `*-meter` family and `quest-*` are referenced from nowhere in `src/`.** They
- * are PR 34's (D-25 / D-69), not dead markup, and deleting them is that PR's call.
- * The five `.meter-fill` divs carried `style="width:100%"`; that lives in
- * `src/ui/css/hud/meters.css` now — nothing in `src/` ever writes the property.
+ * **The `*-meter` family and `quest-*` are referenced from nowhere in `src/`.** The five
+ * `.meter-fill` divs carried `style="width:100%"`; that lives in
+ * `src/ui/css/hud/meters.css` now — nothing in `src/` ever writes the property, so all
+ * five bars render permanently full, and `#quest-tracker` renders permanently `hidden`.
+ *
+ * ─── PR 34: STILL HERE, DELIBERATELY, AND NO LONGER "PR 34's" ───────────────
+ *
+ * This header used to say the markup was PR 34's call. PR 34 deleted the five deferred
+ * gameplay subsystems — including `SurvivalSystem.js`, whose `generateHUDHTML()` emitted a
+ * SEPARATE, self-contained `#survival-hud` overlay that would have competed with this one,
+ * and `QuestSystem.js` — and it did NOT delete this markup, for the reason that decided the
+ * subsystems: two incompatible HUD designs existed, and choosing between them is a UI
+ * decision, not a refactor step. Deleting the elements makes that choice just as much as
+ * wiring them would; whoever builds survival meters wants a DOM to write into, and this is
+ * a better starting point than a blank `#hud`.
+ *
+ * What HAS changed is that the ambiguity is gone. Before PR 34 there were two candidate
+ * writers for these bars and neither ran. Now there are zero, and `SurvivalSystem`'s
+ * competing overlay is not coming back except through a feature PR with a design. If that
+ * PR decides on a different HUD, deleting this block is a one-line change and
+ * `test/unit/ui/pageLoad.test.js` (which asserts the ASSEMBLED DOM) is where it shows up.
  *
  * Verbatim from `index.html`, which this replaces. Mounted eagerly by
  * `src/ui/templates/index.js` before anything wires a listener — decision 53.

@@ -247,8 +247,12 @@ export function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScal
  * deleting it (decision 42) precisely so this collapse could land here.
  *
  * Both in-file copies are gone. The names below are aliases of `Noise.js`'s exports and
- * exist only so that importers — `src/game/systems/QuestSystem.js` imports `_hashString`
- * — do not change in the same PR that moves the code.
+ * exist only so that importers did not change in the same PR that moved the code. The one
+ * importer that made that necessary was `src/game/systems/QuestSystem.js`, which read
+ * `_hashString`; PR 34 deleted that file, so the aliases now have no external consumer
+ * left. They are kept as aliases rather than collapsed onto `Noise.js` at their use sites
+ * because doing so is a rename inside the terrain generator, and this file's contents are
+ * pinned by the seed-424242 e2e terrain assertions.
  *
  * ─── THE PROOF THAT THIS DID NOT CHANGE TERRAIN ─────────────────────────────
  *

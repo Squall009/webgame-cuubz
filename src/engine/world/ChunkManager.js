@@ -47,7 +47,7 @@
  *
  * ─── EXPORT SURFACE: UNCHANGED ──────────────────────────────────────────────
  *
- * Every constant, the class, `WorkerPool`, `createWorkerPool` and both worker URLs are
+ * Every constant, the class, `WorkerPool` and both worker URLs are
  * still exported from THIS path, and every static the class used to carry
  * (`ChunkManager.key`, `.openDatabase`, `.SCHEMA_STEPS`, `._applySchemaUpgrade`, …) is
  * re-attached at the bottom.
@@ -62,14 +62,16 @@ import { ChunkStorageMethods } from './ChunkStorage.js';
 import { ChunkVoxelAccessMethods } from './ChunkVoxelAccess.js';
 import { RegionTrackerMethods } from './RegionTracker.js';
 import { SCHEMA_STEPS, applySchemaUpgrade, ensureBaseSchema, ensureIndex, ensureStore, openDatabase } from './ChunkSchema.js';
-import { WorkerPool, createWorkerPool } from './WorkerPool.js';
+import { WorkerPool } from './WorkerPool.js';
 import { CHUNK_D, CHUNK_W, DB_NAME, DB_VERSION, STORE_CHUNKS, STORE_MANIFESTS } from './ChunkConstants.js';
 
 // The constants moved to ChunkConstants.js so the files above can read them without
 // importing THIS one — `src/` has no import cycles and must not gain one (D-28). They
 // are re-exported under their original names so no importer has to change.
 export { CHUNK_W, CHUNK_D, DB_NAME, DB_VERSION, STORE_CHUNKS, STORE_MANIFESTS };
-export { WorkerPool, createWorkerPool };
+// `createWorkerPool` was re-exported here too. D-75 deleted it — no call site, and it was
+// missing `init()`'s cache-bust. See the note at the bottom of WorkerPool.js.
+export { WorkerPool };
 
 // ─── Worker source URLs (PR 9) ──────────────────────────────────────
 //
@@ -144,10 +146,10 @@ export class ChunkManager {
     this.renderDistance   = Math.max(2, Math.min(16, options.renderDistance ?? 4));
     this.regionRadius     = Math.max(this.renderDistance + 2, Math.min(32, options.regionRadius ?? 16));
 
-    // Client mode: no local chunk generation, no IndexedDB persistence, only receive from host
-    this.clientMode = !!options.clientMode;
-
-    // Client mode: no generation, no IndexedDB persistence, only receive chunks from host
+    // Client mode: no local chunk generation, no IndexedDB persistence, only receive
+    // chunks from the host.
+    // D-75: this assignment appeared TWICE, back to back, with two wordings of the same
+    // comment. Identical right-hand sides, so the second was a no-op; deleted.
     this.clientMode = !!options.clientMode;
 
     // Texture atlas for UV mapping during mesh build

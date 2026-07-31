@@ -845,6 +845,140 @@ async function run() {
     assertEquals(cb._voxelRegionRadius, 16,
       'The recompute still happens on the instance that carries a stray callback field');
   }
+
+  // ── 24. Mesh disposal has one name, and clientMode has one assignment (D-75) ──
+  //
+  // `ChunkMeshLifecycle.js` carried `_unloadMesh` and `_disposeOldMeshes` as byte-for-byte
+  // the same thirteen lines under two names, and BOTH were live: `_unloadMesh` from
+  // `ChunkManager.dispose()` and `ChunkMeshCoordinator.js:65`, `_disposeOldMeshes` from
+  // `_onMeshBuilt`. PR 23 recorded the duplication rather than merging it (a mechanical
+  // extraction is the wrong PR to change behaviour in); PR 34 collapsed it as D-75, and
+  // `_onMeshBuilt` now calls `_unloadMesh`.
+  //
+  // Nothing in `test/` had ever exercised either one — the whole mesh pipeline was covered
+  // only through `npm run test:e2e`, in a real browser — so the collapse repointed a live
+  // call site with no unit-level net under it. This section is that net. It asserts the
+  // OBSERVABLE effect (removed from the chunk group, geometry and material disposed, map
+  // entry dropped) rather than which method name did it, so it stays meaningful whichever
+  // name a future PR settles on.
+  //
+  // No THREE, no WebGL: the three sub-meshes are plain objects with `dispose` counters,
+  // which is the entire surface `_unloadMesh` touches.
+  {
+    const stubMesh = () => ({
+      geometry: { disposed: 0, dispose() { this.disposed++; } },
+      material: { disposed: 0, dispose() { this.disposed++; } },
+    });
+    const makeCM = (worldName) => {
+      const removed = [];
+      const cm = new ChunkManager({ worldName, renderer: { chunkGroup: { remove: (m) => removed.push(m) } } });
+      return { cm, removed };
+    };
+
+    // ── _unloadMesh: all three sub-meshes leave the scene and are disposed ──
+    {
+      const { cm, removed } = makeCM('world-mesh1');
+      const entry = { solid: stubMesh(), cutout: stubMesh(), trans: stubMesh() };
+      cm.loadedMeshes.set('0,0', entry);
+
+      cm._unloadMesh('0,0');
+      assertEquals(removed.length, 3, '_unloadMesh removes all three sub-meshes from the chunk group');
+      assertEquals(entry.solid.geometry.disposed, 1, '_unloadMesh disposes the solid geometry');
+      assertEquals(entry.solid.material.disposed, 1, '_unloadMesh disposes the solid material');
+      assertEquals(entry.cutout.geometry.disposed, 1, '_unloadMesh disposes the cutout geometry');
+      assertEquals(entry.trans.material.disposed, 1, '_unloadMesh disposes the transparent material');
+      assert(!cm.loadedMeshes.has('0,0'), '_unloadMesh drops the map entry');
+
+      // Idempotent — `dispose()` calls it for every key and the coordinator calls it again.
+      cm._unloadMesh('0,0');
+      assertEquals(removed.length, 3, 'a second _unloadMesh for the same key is a no-op');
+      assertEquals(entry.solid.geometry.disposed, 1, 'and does not double-dispose');
+      cm._unloadMesh('never-loaded');
+      assertEquals(removed.length, 3, '_unloadMesh for an unknown key is a no-op');
+    }
+
+    // ── _onMeshBuilt: THE repointed call site. The previous build must be released. ──
+    //
+    // This is the assertion the collapse needed. Break `_unloadMesh` and it goes red;
+    // it was `_disposeOldMeshes` that used to do this, and nothing checked it.
+    {
+      const { cm, removed } = makeCM('world-mesh2');
+      const old = { solid: stubMesh(), cutout: stubMesh(), trans: stubMesh() };
+      cm.loadedMeshes.set('1,2', old);
+      cm._rebuilding.add('1,2');
+
+      cm._onMeshBuilt('1,2', 1, 2, null); // null geoResult → "this chunk meshes to nothing"
+      assertEquals(removed.length, 3, '_onMeshBuilt takes the PREVIOUS build out of the chunk group');
+      assertEquals(old.solid.geometry.disposed, 1, '_onMeshBuilt disposes the previous solid geometry');
+      assertEquals(old.cutout.material.disposed, 1, '_onMeshBuilt disposes the previous cutout material');
+      assertEquals(old.trans.geometry.disposed, 1, '_onMeshBuilt disposes the previous transparent geometry');
+      assert(!cm._rebuilding.has('1,2'), '_onMeshBuilt clears the rebuilding flag');
+      assertEquals(cm.loadedMeshes.get('1,2'), null,
+        'and records the empty result, so the chunk is not re-queued forever');
+    }
+
+    // ── dispose() releases every loaded mesh ──
+    {
+      const { cm, removed } = makeCM('world-mesh3');
+      const a = { solid: stubMesh(), cutout: null, trans: null };
+      const b = { solid: stubMesh(), cutout: stubMesh(), trans: null };
+      cm.loadedMeshes.set('0,0', a);
+      cm.loadedMeshes.set('0,1', b);
+
+      cm.dispose();
+      assertEquals(removed.length, 3, 'dispose() removes every non-null sub-mesh of every loaded chunk');
+      assertEquals(a.solid.geometry.disposed, 1, 'dispose() disposes the first chunk');
+      assertEquals(b.cutout.material.disposed, 1, 'dispose() disposes the second chunk');
+      assertEquals(cm.loadedMeshes.size, 0, 'dispose() empties loadedMeshes');
+    }
+
+    // ── clientMode: one assignment, and it still reaches init() ──
+    //
+    // The constructor assigned `this.clientMode = !!options.clientMode` TWICE, back to
+    // back, under two wordings of the same comment. Identical right-hand sides, so the
+    // second was a no-op — but a duplicated assignment is one edit away from being two
+    // different values, and the second would win silently. D-75 deleted the second copy;
+    // this pins that the survivor is the live one.
+    {
+      assertEquals(new ChunkManager({ worldName: 'w-cm1', clientMode: true }).clientMode, true,
+        'clientMode: true survives the constructor');
+      assertEquals(new ChunkManager({ worldName: 'w-cm2' }).clientMode, false,
+        'clientMode defaults to false, not undefined');
+      assertEquals(new ChunkManager({ worldName: 'w-cm3', clientMode: 1 }).clientMode, true,
+        'clientMode is coerced to a boolean');
+
+      // The consequence: a client never builds a voxel-generation worker pool, because
+      // it receives its chunks from the host. `init()` reads the field exactly once.
+      const client = new ChunkManager({ worldName: 'w-cm4', clientMode: true });
+      let meshWorkersInitialised = 0;
+      client._initMeshWorkers = async () => { meshWorkersInitialised++; };
+      await client.init();
+      assertEquals(client.workerPool, null, 'client mode skips the voxel generation worker pool');
+      assertEquals(meshWorkersInitialised, 1, 'but still initialises mesh workers, which render host chunks');
+    }
+  }
+
+  // ── 25. WorkerPool is still the export ChunkManager.js publishes (D-75) ──
+  //
+  // `ChunkManager.js` re-exported a `createWorkerPool` factory alongside the class. It had
+  // no call site in `src/`, `test/`, `server/` or `shared/`, and it was missing the
+  // `?v=Date.now()` cache-bust that `ChunkManager.init()` appends — so anyone who wired in
+  // the obvious-looking factory would have reintroduced D-23 (a stale worker script served
+  // from the HTTP cache, generating terrain from old code). D-75 deleted it.
+  //
+  // The class it was a factory for is NOT dead: `init()` and `_initMeshWorkers()` construct
+  // it with two different worker counts, which is the actual reason there is no shared
+  // factory. This asserts the surviving export, so the deletion cannot be mistaken for
+  // permission to remove the class too.
+  {
+    const mod = await import('../../../src/engine/world/ChunkManager.js');
+    assert(typeof mod.WorkerPool === 'function', 'ChunkManager.js still re-exports the WorkerPool class');
+    assertEquals(mod.createWorkerPool, undefined,
+      'and no longer re-exports createWorkerPool — it had no call site and no cache-bust (D-75)');
+    const wp = await import('../../../src/engine/world/WorkerPool.js');
+    assertEquals(wp.createWorkerPool, undefined, 'nor does WorkerPool.js itself export it');
+    assertEquals(mod.WorkerPool, wp.WorkerPool, 'the re-export is the same binding, not a copy');
+  }
 }
 
 // ─── Results ────────────────────────────────────────────────────

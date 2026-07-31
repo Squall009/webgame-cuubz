@@ -14,8 +14,9 @@
  * ChunkMeshCoordinator.js, because mesh builds transfer buffers and need a queue rather
  * than a `setTimeout(0)` retry. That asymmetry predates the split and is unchanged.
  *
- * ChunkManager.js re-exports both symbols, so `import { WorkerPool } from './ChunkManager.js'`
- * still resolves.
+ * ChunkManager.js re-exports `WorkerPool`, so `import { WorkerPool } from './ChunkManager.js'`
+ * still resolves. It used to re-export a `createWorkerPool` factory as well; that had no
+ * call site and is gone — see the note at the bottom of this file (D-75).
  */
 
 // ============================================================
@@ -84,12 +85,19 @@ export class WorkerPool {
   }
 }
 
-export async function createWorkerPool(workerScriptPath) {
-  const response = await fetch(workerScriptPath);
-  const source = await response.text();
-  const blob = new Blob([source], { type: 'application/javascript' });
-  const url = URL.createObjectURL(blob);
-  const pool = new WorkerPool(navigator.hardwareConcurrency || 4, url);
-  pool._blobUrl = url;
-  return pool;
-}
+// ─── D-75: `createWorkerPool` WAS HERE AND IS DELETED ───────────────────────
+//
+// An 8-line async factory — fetch the worker source, wrap it in a Blob, construct a
+// `WorkerPool` over the object URL — with NO call site anywhere in `src/`, `test/`,
+// `server/` or `shared/`. It was exported from here, re-exported from `ChunkManager.js`,
+// and imported by nobody.
+//
+// It was also not merely unused but subtly WRONG relative to the code that does the job:
+// `ChunkManager.init()` fetches with `+ (path.includes('?') ? '&' : '?') + 'v=' + Date.now()`
+// appended. That cache-bust is load-bearing — without it a stale worker script served from
+// the HTTP cache silently generates terrain from old code — and this copy did not have it.
+// Anyone who had wired the "obvious" factory in would have reintroduced D-23.
+//
+// The class itself stays: `ChunkManager` constructs it twice, for the voxel pool and the
+// mesh pool, with the two different worker counts that are the actual reason there is no
+// shared factory.

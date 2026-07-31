@@ -1,7 +1,8 @@
 /**
  * Cuubz — Procedural 3D Mob Model Builder
  * Constructs a THREE.Group from a mob definition's geometry parts array.
- * Supports: box, sphere, cylinder, cone, capsule primitives.
+ * Supports: box, sphere, cylinder, cone primitives. (`capsule` was a fifth, and was
+ * removed as D-88 — see the note at the bottom of this file.)
  * Each part becomes a named child mesh for animation look-up.
  */
 
@@ -100,14 +101,12 @@ export class MobModelBuilder {
         geometry = new THREE.ConeGeometry(partDef.radius || 0.1, partDef.height || 0.3, 8);
         break;
 
-      case 'capsule':
-        geometry = MobModelBuilder._buildCapsule(
-          partDef.radius || 0.1,
-          partDef.length || 0.3,
-          8, 6
-        );
-        break;
-
+      // D-88: there was a `case 'capsule'` here, delegating to a `_buildCapsule` static
+      // that ended in `merged.mergeBufferGeometries(geometries)`. That is not a method of
+      // `THREE.BufferGeometry` in ANY three version — it lives on
+      // `BufferGeometryUtils` — so the branch was a guaranteed TypeError, and it returned
+      // an empty `new THREE.BufferGeometry()` in the impossible case that it did not throw.
+      // Both are gone. See the note under `_createPart`.
       default:
         console.warn(`[MobModelBuilder] Unknown part type: ${partDef.type}`);
         return null;
@@ -155,54 +154,27 @@ export class MobModelBuilder {
     return mesh;
   }
 
-  /**
-   * Build a capsule geometry (cylinder + 2 half-spheres at ends).
-   * @param {number} radius
-   * @param {number} length - Length of the cylindrical section
-   * @param {number} radialSegs
-   * @param {number} heightSegs
-   * @returns {THREE.BufferGeometry}
-   */
-  static _buildCapsule(radius, length, radialSegs, heightSegs) {
-    const group = new THREE.Group();
-
-    // Middle cylinder
-    const cyl = new THREE.Mesh(
-      new THREE.CylinderGeometry(radius, radius, length, radialSegs)
-    );
-    cyl.position.y = 0;
-    group.add(cyl);
-
-    // Top hemisphere
-    const topCap = new THREE.Mesh(
-      new THREE.SphereGeometry(radius, radialSegs, heightSegs, 0, Math.PI * 2, 0, Math.PI / 2)
-    );
-    topCap.position.y = length / 2;
-    group.add(topCap);
-
-    // Bottom hemisphere
-    const botCap = new THREE.Mesh(
-      new THREE.SphereGeometry(radius, radialSegs, heightSegs, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2)
-    );
-    botCap.position.y = -length / 2;
-    group.add(botCap);
-
-    // Merge into single geometry
-    const merged = new THREE.BufferGeometry();
-    const geometries = [];
-    group.children.forEach(child => {
-      if (child.geometry) {
-        child.updateMatrix();
-        geometries.push(child.geometry.clone().applyMatrix4(child.matrix));
-      }
-    });
-    merged.mergeBufferGeometries(geometries);
-
-    // Clean up
-    group.children.forEach(child => {
-      child.geometry.dispose();
-    });
-
-    return merged;
-  }
+  // ─── D-88: `_buildCapsule` WAS HERE, AND IS DELETED RATHER THAN FIXED ───────
+  //
+  // It built a cylinder plus two hemispheres into a THREE.Group, cloned their geometries
+  // with `applyMatrix4`, and then called `merged.mergeBufferGeometries(geometries)` on a
+  // freshly-constructed `THREE.BufferGeometry`. `mergeBufferGeometries` is not a method of
+  // `BufferGeometry` in any three version; in the pinned 0.134 it is a free function in
+  // `three/examples/jsm/utils/BufferGeometryUtils.js`. The branch was a TypeError on its
+  // first execution, and it had never executed: no entry in `MOB_DEFINITIONS` uses
+  // `type: 'capsule'`, which is why 17 PRs of green tests never touched it.
+  //
+  // WHY DELETED AND NOT FIXED. Fixing it correctly means importing `BufferGeometryUtils`,
+  // which would be this repo's first and only import out of three's `examples/jsm` tree —
+  // a new dependency edge, on an unpinned-by-`test/unit/meta/threePin.test.js` subpath,
+  // added to serve zero call sites. That is precisely the trade PR 34's ruling on the five
+  // deferred gameplay modules settles the other way: unexecuted code is deleted, not wired,
+  // and a feature restores it *with a design*. A future mob definition that wants a capsule
+  // adds a working builder and a test in the same change; today the only thing the branch
+  // could do is turn a new definition's first spawn into a crash.
+  //
+  // The four surviving primitives (`box`, `sphere`, `cylinder`, `cone`) all construct their
+  // geometry inline in `_createPart` and are each exercised by
+  // `test/unit/game/mobRendering.test.js`'s "non-empty model for every entry in
+  // MOB_DEFINITIONS" case.
 }

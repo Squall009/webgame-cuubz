@@ -6,6 +6,21 @@
  * Covers todo.md Phase 1 Testing items:
  * - Test: Player movement (WASD + jump, gravity, collision, sprint)
  * - Test: Touch controls (joystick, swipe-to-look, tap)
+ *
+ * ─── PR 34: THE STAMINA AND DEATH/RESPAWN ASSERTIONS ARE GONE ───────────────
+ *
+ * Ten assertion blocks in groups 5 and 8 constructed `new SurvivalSystem()` and asserted
+ * stamina depletion, stamina regen, `canSprint()`, the `STAMINA_COSTS` table, and
+ * death/respawn/meter-clamping. `src/game/systems/SurvivalSystem.js` was deleted in PR 34
+ * (never constructed anywhere in `src/`), so those blocks were deleted with it. This is
+ * the only file where deleted and surviving coverage shared a file, and the split is by
+ * import: everything that touches `Player`, `KeyboardInput` or `TouchInput` stayed.
+ *
+ * What went with them, and what did NOT: the sprint assertions on `Player` itself —
+ * `p.velocity` reaching `moveSpeed * sprintMultiplier`, and `isSprinting` being false when
+ * Shift is held with no movement key — are `Player`'s own behaviour and are still here.
+ * There was never a test that the two systems talk to each other, because they do not:
+ * nothing in `src/` ever passed a survival system to `Player.update()`.
  */
 
 import { it } from 'vitest';
@@ -13,7 +28,6 @@ import { legacy } from '../helpers/legacy.js';
 import { Player } from '../../src/game/entities/Player.js';
 import { KeyboardInput } from '../../src/engine/input/Keyboard.js';
 import { TouchInput } from '../../src/engine/input/Touch.js';
-import { SurvivalSystem, STAMINA_COSTS } from '../../src/game/systems/SurvivalSystem.js';
 import { BLOCK_TYPES, BLOCK_PROPERTIES } from '../../src/engine/world/ChunkData.js';
 import { MIN_Y } from '../../src/engine/world/ChunkData.js';
 import { SEA_LEVEL } from '../../src/engine/world/ChunkData.js';
@@ -450,65 +464,9 @@ console.log('\n=== Group 5: Sprint + Stamina Interaction ===');
     assertApprox(p.velocity.z, 0, 0.001, 'No Z velocity without movement keys');
   }
 
-  // Sprinting consumes stamina (STAMINA_COSTS.SPRINT per second)
-  {
-    const survival = new SurvivalSystem();
-    survival.lastStaminaActionTime = 0; // Prevent regen interference
-    const initialStamina = survival.meters.stamina;
-
-    survival.update(5, { isSprinting: true, isJumping: false, isMoving: true, currentTime: 10 });
-
-    assert(survival.meters.stamina < initialStamina, 'Sprinting depletes stamina');
-    const expectedDepletion = STAMINA_COSTS.SPRINT * 5; // 20 * 5 = 100
-    assert(survival.meters.stamina <= 1, `Stamina after 5s sprint should be ~0, got ${survival.meters.stamina.toFixed(2)}`);
-  }
-
-  // Walking without sprint preserves stamina
-  {
-    const survival = new SurvivalSystem();
-    const initialStamina = survival.meters.stamina;
-
-    survival.update(10, { isSprinting: false, isJumping: false, isMoving: true, currentTime: 100 });
-
-    assert(survival.meters.stamina === initialStamina, 'Walking without sprint preserves stamina');
-  }
-
-  // Stamina regenerates when resting (after delay)
-  {
-    const survival = new SurvivalSystem();
-    // Deplete some stamina first
-    survival.lastStaminaActionTime = 0;
-    survival.update(3, { isSprinting: true, isJumping: false, isMoving: true, currentTime: 10 });
-    const depletedStamina = survival.meters.stamina;
-
-    // Rest for delay + regen period (set last action time far in the past)
-    survival.lastStaminaActionTime = 5; // Set so that at currentTime=18, delay has passed
-    survival.update(3, { isSprinting: false, isJumping: false, isMoving: false, currentTime: 18 });
-
-    assert(survival.meters.stamina > depletedStamina || survival.meters.stamina >= 0, 
-      `Stamina at ${survival.meters.stamina.toFixed(1)} vs depleted ${depletedStamina.toFixed(1)}`);
-  }
-
-  // canSprint returns false with low stamina
-  {
-    const survival = new SurvivalSystem();
-    survival.meters.stamina = 0.1;
-    assert(survival.canSprint() === false, 'Near-zero stamina prevents sprinting');
-  }
-
-  // canSprint returns true with enough stamina
-  {
-    const survival = new SurvivalSystem();
-    assert(survival.canSprint() === true, 'Full stamina allows sprinting');
-  }
-
-  // STAMINA_COSTS constants are defined
-  {
-    assert(STAMINA_COSTS.SPRINT === 20.0, 'SPRINT stamina cost is 20/s');
-    assert(STAMINA_COSTS.JUMP === 8.0, 'JUMP stamina cost is 8');
-    assert(STAMINA_COSTS.BREAK === 5.0, 'BREAK stamina cost is 5');
-    assert(STAMINA_COSTS.PLACE === 3.0, 'PLACE stamina cost is 3');
-  }
+  // PR 34: six SurvivalSystem stamina blocks (depletion, preservation while walking,
+  // regen after the rest delay, canSprint at 0.1 and at full, and the STAMINA_COSTS
+  // table) were deleted here with src/game/systems/SurvivalSystem.js.
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -705,32 +663,10 @@ console.log('\n=== Group 8: Edge Cases ===');
     assert(eye.x === 10 && eye.z === -3, 'Eye X/Z match position');
   }
 
-  // Survival: death and respawn
-  {
-    const survival = new SurvivalSystem();
-    survival.takeDamage(100, 'fall');
-
-    assert(survival.meters.health <= 0, `Health ≤ 0 after massive damage (got ${survival.meters.health})`);
-    assert(survival.isDead === true, 'Player marked dead');
-
-    survival.respawn();
-    assert(survival.meters.health > 0, `Respawn restores health (got ${survival.meters.health})`);
-    assert(survival.isDead === false, 'Respawn clears death state');
-  }
-
-  // Survival: meters clamp during update cycle (not on direct assignment)
-  {
-    const survival = new SurvivalSystem();
-    // Simulate extreme depletion through update (not direct assignment)
-    survival.update(200, { isSprinting: false, isJumping: false, isMoving: false });
-    
-    assert(survival.meters.hunger >= 0, `Hunger clamped to ≥ 0 after long update (got ${survival.meters.hunger})`);
-    assert(survival.meters.thirst >= 0, `Thirst clamped to ≥ 0 (got ${survival.meters.thirst})`);
-    assert(survival.meters.sleep >= 0, `Sleep clamped to ≥ 0 (got ${survival.meters.sleep})`);
-    
-    // Health may decrease from starvation (hunger=0 triggers hunger damage)
-    assert(survival.meters.health >= 0, `Health ≥ 0 after long update (got ${survival.meters.health})`);
-  }
+  // PR 34: two SurvivalSystem blocks (takeDamage → isDead → respawn, and meter clamping
+  // across a 200-second update) were deleted here with
+  // src/game/systems/SurvivalSystem.js. `Player.respawn()` — which is this file's subject
+  // and is a different method on a different class — is still asserted above.
 }
 
 // ═══════════════════════════════════════════════════════════════════════

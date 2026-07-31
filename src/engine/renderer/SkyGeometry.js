@@ -163,7 +163,11 @@ export const SkyGeometryMethods = {
     // method still needs a real 2D canvas, which is why skyClouds.test.js stubs it out
     // rather than relying on the guard to make it a no-op in Node.
     // Generate a radial glow texture on a canvas (no external assets needed)
-    const makeGlowTexture = (coreColor, glowColor, radius) => {
+    // D-75: this took a third parameter, `radius`, and never read it — both call sites
+    // passed 128 and the gradient is built from `size / 2` instead. Dropping it (and the
+    // two `128` arguments) is what makes the sprite scales below the only thing that sets
+    // apparent size, which is what was already true.
+    const makeGlowTexture = (coreColor, glowColor) => {
       const size = 256;
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = size;
@@ -185,7 +189,7 @@ export const SkyGeometryMethods = {
     };
 
     // Sun sprite — warm yellow core with orange glow
-    const sunTexture = makeGlowTexture('rgba(255,255,220,1)', 'rgba(255,200,50,0.6)', 128);
+    const sunTexture = makeGlowTexture('rgba(255,255,220,1)', 'rgba(255,200,50,0.6)');
     const sunMat = new THREE.SpriteMaterial({
       map: sunTexture,
       transparent: true,
@@ -197,7 +201,7 @@ export const SkyGeometryMethods = {
     this.renderer.scene.add(this.sunSprite);
 
     // Moon sprite — pale white core with soft blue glow
-    const moonTexture = makeGlowTexture('rgba(220,220,240,1)', 'rgba(150,160,220,0.5)', 128);
+    const moonTexture = makeGlowTexture('rgba(220,220,240,1)', 'rgba(150,160,220,0.5)');
     const moonMat = new THREE.SpriteMaterial({
       map: moonTexture,
       transparent: true,

@@ -85,9 +85,10 @@ export const ChunkGeneratorMethods = {
 
   /** Generate full world (128×128 chunks). */
   async generateFullWorld(size = 64) {
-    const total = (size * 2) ** 2;
-    let completed = 0;
-
+    // D-75: `const total = (size * 2) ** 2;` and `let completed = 0;` stood here. Neither
+    // was ever read, and nothing incremented `completed` — the remains of a progress
+    // callback that this method does not have. Both deleted; there is no progress reporting
+    // to preserve, and inventing one would be a feature.
     for (let cx = -size; cx < size; cx++) {
       for (let cz = -size; cz < size; cz++) {
         this._genQueue.push({ cx, cz });

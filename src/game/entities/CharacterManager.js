@@ -334,8 +334,19 @@ export class CharacterManager {
   }
 
   // ============================================================
-  // Spawn Point Helpers (integration with SpawnManager)
+  // Spawn Point Helpers
   // ============================================================
+  //
+  // D-69: this banner used to read "(integration with SpawnManager)". There is no
+  // `SpawnManager` — `src/engine/world/SpawnManager.js` was deleted by PR 20 as D-25
+  // triage — and there never was an integration: these two methods only read and write
+  // `character.spawnPoints[worldId]`, a plain field of this class's own record that
+  // `serialize()` below round-trips. The `SurvivalSystem.setSpawnManager()` /
+  // `_spawnManager.setSpawn(...)` branch that was the other half of the claim went with
+  // `SurvivalSystem.js` in PR 34. The methods stay: `test/unit/game/characterManager.test.js`
+  // suite 8 covers them, and the FIELD is live — `src/core/savePlayerState.js:46` writes
+  // `selected.spawnPoints[worldId]` and `src/core/init/initPlayer.js:133` reads it back
+  // (both reach the object directly rather than through these two accessors).
 
   /**
    * Set spawn point for a character in a world.

@@ -111,7 +111,18 @@ export class MobRenderer {
         continue;
       }
 
-      // Sync position from data model
+      // Sync position from data model.
+      //
+      // D-88 (recorded, not fixed): this assignment is UNCONDITIONAL and lands immediately
+      // before the animator runs, so any animation that writes `group.position` has its
+      // write discarded on the following frame. Three do — `dissolveDeath`'s float,
+      // `crumbleDeath`'s sink and shake, and `hurtReaction`'s recoil push — and none of them
+      // can move a mob on screen. Fixing it means deciding whether animations own an offset
+      // from the data-model position or the position itself, which is a renderer design
+      // question, not one of D-88's three clear-cut defects; each of those three carries a
+      // pointer back to this line. Everything animations write to `rotation`, `scale`,
+      // `material.opacity` and `material.emissive` DOES render, because nothing resyncs
+      // those from the data model — which is why the D-88 hurt-flash fix is real.
       entry.group.position.set(mob.position.x, mob.position.y, mob.position.z);
       entry.group.rotation.y = mob.yaw;
 

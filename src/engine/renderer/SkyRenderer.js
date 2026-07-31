@@ -107,8 +107,12 @@ export class Skybox {
     this.cloudCount = 0;
     this.cloudTargetCount = 20 + Math.floor(Math.random() * 8); // 20-27 clouds
 
-    // Sky dome
-    this.skyDome = null;
+    // D-75: `this.skyDome = null;` stood here under a "// Sky dome" comment. The name
+    // appeared exactly once in the whole tree — this assignment — so it was never read,
+    // never re-assigned, and never disposed. There is no dome mesh: the sky is
+    // `scene.background` and `scene.fog.color`, both set from `_updateSkyColor()` below,
+    // plus `SkyGeometry.js`'s sun/moon sprites and cloud meshes — none of which is held in
+    // a field of this name. Deleted.
 
     // Night indicator element reference (for HUD)
     this.nightIndicatorEl = null;

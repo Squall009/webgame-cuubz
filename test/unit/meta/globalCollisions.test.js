@@ -14,6 +14,20 @@
  * the FIX (distinct names, correct lookups, correct thresholds), and delegate the
  * "no duplicates exist" check to scripts/check-globals.js, which parses index.html
  * the way the browser actually loads it.
+ *
+ * ─── PR 34: BUG 1 IS GONE, AND SO IS HALF OF THE distanceBetween PAIR ───────
+ *
+ * Bug 1 was `getBossDefinition` — `boss.js`'s lookup into `BOSS_DEFINITIONS` versus
+ * `damageSystem.js`'s identically-named lookup into `BOSS_ATTACKS`, where the later
+ * script tag won and boss spawning therefore always threw "Unknown boss". PR 34 deleted
+ * BOTH files (never constructed anywhere in `src/`), so there are no longer two functions
+ * to keep distinct and no `new Boss(id)` to construct. The section is deleted rather than
+ * weakened: an assertion about which of two deleted modules owns a name is not coverage.
+ * The collision CLASS is still policed — by `no-undef`, by the single-module-script
+ * assertion on index.html below, and by the ALLOWED_GLOBAL_WRITES block at the bottom.
+ *
+ * This is the same shape as the smoothstep note further down, where PR 20's deletion of
+ * `AmbientAudio.js` took one of that pair's two re-export assertions.
  */
 
 import { it } from 'vitest';
@@ -22,13 +36,10 @@ import { TEST_DIR as __dirname } from '../../helpers/paths.js';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { Boss, BOSS_DEFINITIONS, getBossDefinition } from '../../../src/game/entities/Boss.js';
-// Namespace imports: the three re-export assertions below compare the *module's* exported
+// Namespace imports: the re-export assertions below compare the *module's* exported
 // binding against the canonical one, which is what `require(…).symbol` used to read.
 import * as SkyRendererModule from '../../../src/engine/renderer/SkyRenderer.js';
-import * as BossModule from '../../../src/game/entities/Boss.js';
 import * as PlayerSyncModule from '../../../src/multiplayer/PlayerSync.js';
-import { BOSS_ATTACKS, getBossAttackProfile } from '../../../src/game/systems/DamageSystem.js';
 import { validateHostInventory } from '../../../src/multiplayer/Host.js';
 import { validateInventorySlots } from '../../../src/multiplayer/InventorySync.js';
 import { isMobileViewport, MOBILE_MAX_WIDTH_PERF, MOBILE_MAX_WIDTH_HUD } from '../../../src/util/Viewport.js';
@@ -60,62 +71,13 @@ function assertApprox(actual, expected, tol, msg) {
 console.log('=== Global Collision Regression Tests ===\n');
 
 // ═══════════════════════════════════════════════════════════════════
-// Bug 1 — getBossDefinition: boss spawning threw "Unknown boss: ..."
+// Bug 1 — getBossDefinition — DELETED BY PR 34, see the header note.
 //
-// js/entities/boss.js:317        getBossDefinition(bossId)  → BOSS_DEFINITIONS
-// js/systems/damageSystem.js:134 getBossDefinition(bossKey) → BOSS_ATTACKS
-//
-// damageSystem.js loads later (index.html:563 vs :556), so it won. boss.js:362 then
-// looked up a BOSS_DEFINITIONS id like 'forest_warden' inside BOSS_ATTACKS, whose keys
-// are 'CORRUPT_GUARDIAN'-style. The namespaces are disjoint → always null → always threw.
+// Both owners of the collided name are gone: `src/game/entities/Boss.js` and
+// `src/game/systems/DamageSystem.js`. The 30-odd assertions that lived here proved the
+// two lookups were distinct functions over disjoint key namespaces and that every entry
+// in BOSS_DEFINITIONS constructed. There is nothing left for them to be about.
 // ═══════════════════════════════════════════════════════════════════
-console.log('--- Bug 1: getBossDefinition / getBossAttackProfile ---');
-
-assert(typeof getBossDefinition === 'function', 'boss.js exports getBossDefinition');
-assert(typeof getBossAttackProfile === 'function', 'damageSystem.js exports getBossAttackProfile');
-assert(getBossDefinition !== getBossAttackProfile, 'The two lookups are distinct functions');
-
-// The key namespaces must not overlap — that disjointness is what made the bug total.
-const defKeys = Object.keys(BOSS_DEFINITIONS);
-const atkKeys = Object.keys(BOSS_ATTACKS);
-assert(defKeys.length > 0, 'BOSS_DEFINITIONS is non-empty');
-assert(atkKeys.length > 0, 'BOSS_ATTACKS is non-empty');
-assert(
-  defKeys.every((k) => !atkKeys.includes(k)),
-  'BOSS_DEFINITIONS and BOSS_ATTACKS key namespaces are disjoint'
-);
-
-// Each lookup resolves its OWN table, and returns null for the other's keys.
-for (const id of defKeys) {
-  assert(getBossDefinition(id) !== null, `getBossDefinition('${id}') resolves`);
-  assert(getBossAttackProfile(id) === null, `getBossAttackProfile('${id}') correctly does NOT resolve`);
-}
-for (const key of atkKeys) {
-  assert(getBossAttackProfile(key) !== null, `getBossAttackProfile('${key}') resolves`);
-  assert(getBossDefinition(key) === null, `getBossDefinition('${key}') correctly does NOT resolve`);
-}
-
-// THE regression test named in refactor.md PR 3: every boss must construct.
-for (const id of defKeys) {
-  let threw = null;
-  try {
-    // eslint-disable-next-line no-new
-    new Boss(id, { x: 0, y: 64, z: 0 });
-  } catch (e) {
-    threw = e.message;
-  }
-  assert(threw === null, `new Boss('${id}') constructs without throwing (got: ${threw})`);
-}
-
-// And an genuinely unknown id must still throw — the guard is not simply disabled.
-let unknownThrew = false;
-try {
-  // eslint-disable-next-line no-new
-  new Boss('definitely_not_a_boss', { x: 0, y: 64, z: 0 });
-} catch (e) {
-  unknownThrew = /Unknown boss/.test(e.message);
-}
-assertTrue(unknownThrew, 'new Boss() still throws "Unknown boss" for a genuinely unknown id');
 
 // ═══════════════════════════════════════════════════════════════════
 // Bug 2 — validateInventory: every client→host inventory sync was rejected
@@ -230,11 +192,12 @@ assertEquals(smoothstep(2), 1, 'smoothstep clamps above 1');
 // The surviving former owner must still expose the identical function.
 assertEquals(SkyRendererModule.smoothstep, smoothstep, 'skybox.js re-exports the canonical smoothstep');
 
-// distanceBetween — was duplicated in boss.js and playerSync.js.
+// distanceBetween — was duplicated in boss.js and playerSync.js. `boss.js`
+// (src/game/entities/Boss.js) was DELETED in PR 34, so its re-export assertion went with
+// it, exactly as AmbientAudio's did above. One collision owner left, one assertion.
 assertEquals(distanceBetween({ x: 0, y: 0, z: 0 }, { x: 3, y: 4, z: 0 }), 5, 'distanceBetween 3-4-5 triangle');
 assertEquals(distanceBetween({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }), 0, 'distanceBetween to self is 0');
 assertApprox(distanceBetween({ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 }), Math.sqrt(3), 1e-9, 'distanceBetween diagonal');
-assertEquals(BossModule.distanceBetween, distanceBetween, 'boss.js re-exports the canonical distanceBetween');
 assertEquals(PlayerSyncModule.distanceBetween, distanceBetween, 'playerSync.js re-exports the canonical distanceBetween');
 
 // fbm2 / applySpline — biomeSystem.js no longer aliases over noise.js's versions.

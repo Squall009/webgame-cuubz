@@ -3030,7 +3030,7 @@ mechanical change either.
 | `npm run test:e2e:vite` | 189 / 0 | **189 / 0** |
 | `src/` total | — | **−2,592 lines** |
 
-### PR 34 — the five deferred gameplay subsystems (created by PR 20, decision 42)
+### PR 34 — the five deferred gameplay subsystems (created by PR 20, decision 42) ✅ DONE
 
 `SurvivalSystem.js` (1,152), `DamageSystem.js` (627), `QuestSystem.js` (262), `QuestMarker.js` (602) and `Boss.js` (1,135) — ~3,800 lines of `src/` and ~1,000 test assertions — are the half of **D-25** PR 20 deliberately did not rule on. Every one is a *feature* that has never executed: none is constructed outside `test/`, and the only edges into them are data-table imports (`mobIntegration` takes `DAMAGE_SOURCES`; `SurvivalSystem`'s own import of `calculateFallDamage` is unused, and cutting it makes `DamageSystem` unreachable from `src/` by any path).
 
@@ -3039,6 +3039,80 @@ mechanical change either.
 Also owns **D-69** — `SurvivalSystem` still carries `setSpawnManager()` and a `_spawnManager.setSpawn(...)` branch for a class PR 20 deleted.
 
 - **Accept:** each of the five is wired to a real `System` or deleted, with a line in the outcome saying which and why. If wired, D-21's spawn fix and D-64's block-id tables are preconditions, not follow-ups. `npm test` assertion count moves in whichever direction the ruling implies, and the outcome says by how much.
+
+#### PR 34 outcome — the five are deleted, and it is a product ruling
+
+**Decision 68: all five go.** `SurvivalSystem` (1,159), `Boss` (1,135), `DamageSystem` (627),
+`QuestMarker` (605), `QuestSystem` (262) — **3,788 lines of `src/` and 1,645 assertions across
+eight test files**, plus parts of two more that were split rather than deleted. Not one had ever
+executed outside `test/`. Wiring any of them is a *feature project*: `Boss.js` has no rendering
+at all, `SurvivalSystem` emits a HUD that competes with the markup's, the quest layer has four
+incompatible progress shapes and zero callers. Their tests were **defending defects** — 369 green
+assertions over a `NaN`-frozen unkillable boss, and a pinned `LAVA_ID = 15` against a registry
+where lava is 47. Deleting is the reversible option; the code is in git and at
+`pre-refactor-baseline`, and a feature PR can bring any of it back **with a design**.
+
+D-69 closed with the file, and the check behind it is worth keeping: `CharacterManager`'s
+*"integration with SpawnManager"* banner described a coupling that **had never existed**. Seven of
+D-75's nine fragments went; `_unloadMesh`/`_disposeOldMeshes` collapsed onto one name after their
+bodies were proved byte-identical against `HEAD`; and **`ChunkConstants.js`'s `CHUNK_W`/`CHUNK_D`
+turned out to be live** — eight importers plus an e2e assertion — so the agent stopped rather than
+deleting them. Three of D-88's mob defects are fixed, including the one that meant **no attack
+animation had ever played**.
+
+**The adversarial pass found a defect this PR had just introduced — the eighth consecutive PR.**
+Making the hurt animation's `progress` a real ramp made its material-restore branch unreachable,
+so every mob lost its emissive permanently after one hit and `stone_golem` was left glowing red
+forever at 60 fps. Fixed before landing (**D-92**), by moving the restore to a state-exit hook —
+and the reason the new test missed it is the part worth remembering: it set `mob.aiState` directly
+and never drove a mob *out* of a state.
+
+| Gate | Result |
+|---|---|
+| `npm test` | **55 files / 114 tests / 0 failed**, exit 0 |
+| `npm run test:count` | **5,467** — down 1,547 from 7,014, and the arithmetic is in D-25 |
+| `npm run lint` | **0 errors, 121 warnings** (was 146) |
+| `npm run build` | exit 0 |
+| `npm run test:e2e` | **189 passed, 0 failed** |
+| `npm run test:e2e:vite` | **189 passed, 0 failed** — equal |
+| `npm run test:e2e:mp` | **70 passed, 0 failed** |
+| `./sync.sh --dry-run` | exit 0 |
+| `src/` | **143 files, 32,501 lines** (was 35,970) |
+
+**Reassigned to PR 35 rather than left pointing at a closed PR:** D-68 (the mob half), D-70, D-33,
+D-86, D-89, D-90, D-93.
+
+---
+
+## 15. PR 35 — the mob subsystem's content, and the refactor's residue
+
+**Created by PR 34, and it is not more refactoring.** PR 33 turned mob rendering on for the first
+time since PR 9 (**D-77**), and everything that had been invisible became a live rendering and
+gameplay question in one commit. That is what this slot is for. Nothing here blocks a deploy;
+**decision 20 still governs when anything ships**.
+
+- **D-70** — mobs sink to the seabed and accumulate there, because **D-56** correctly made water
+  and lava passable and nothing replaces buoyancy, swim or drown. Player-visible *now*.
+- **D-68** (mob half) — `deep_ocean`, `ocean`, `beach`, `desert` and `frozen_peaks` are matched by
+  no mob definition. `test_mobBiomes` pins that as an assertion so the day someone adds an ocean
+  mob, the line says to update the row. **This is a content call, not a table fix.**
+- **D-88**'s five survivors — double-applied fog, a shadow pass that discards mob geometry on the
+  block atlas's alpha, ~960 unmerged meshes at `mobCap`, the missing `Game.stop()` teardown, and a
+  dead fog fast path. **Four of the five need a GPU to judge**, which is why they are here.
+- **D-89** — `WorldStep.js:219-221` swallows every per-frame mob exception after frame 10.
+- **D-93** — three animations write `group.position` and the renderer overwrites it the next frame.
+- **D-90** — a dead 3-column mobile crafting grid (a UI decision), `_meshTablesCache` invalidation,
+  and the mixin collision guard's missing regression test.
+- **D-86** — PR 31's migration residue, four inert items.
+- **D-33** — 121 `no-unused-vars` warnings. **Do not close it with a `--max-warnings` ratchet**;
+  freezing a number is what the row objects to.
+
+- **Accept:** each row above is fixed or closed with a stated ruling. `npm test`, `lint` and
+  `build` stay green at every commit; both e2e hosts stay equal; `npm run test:e2e:mp` stays green.
+  If mobs get buoyancy, the assertion `test_mobBiomes` pins gets rewritten into what the fix makes
+  true — **not weakened**.
+
+---
 
 ### PR 21 — `EventBus` — **DROPPED, see §8.7**
 ```js

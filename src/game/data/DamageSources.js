@@ -23,9 +23,14 @@
  * here and neither imports the other's table. `refactor.md` §4.1 already puts data
  * tables under `src/game/data/`, so this is where it was going anyway.
  *
- * Both `SurvivalSystem.js` and `DamageSystem.js` re-export it, so every existing
- * import site — and every test — keeps working unchanged. Logged as **D-26** in
- * `BUGS.md`.
+ * PR 9 left `SurvivalSystem.js` and `DamageSystem.js` re-exporting it so that every
+ * existing import site kept working unchanged. Logged as **D-26** in `BUGS.md`.
+ *
+ * PR 34 deleted both of those files, so this module is now the table's only home and
+ * `src/game/mobs/mobIntegration.js` is its only importer in `src/`. The circular
+ * dependency the extraction existed to break is gone with them; the module stays because
+ * a data table under `game/data/` is where `refactor.md` §4.1 puts it, and because
+ * `mobIntegration.js` reads `DAMAGE_SOURCES.MOB` on every mob attack.
  *
  * The string values are persisted nowhere, but they are compared against saved
  * `lastDamageSource` state in a live session; do not rename them casually.

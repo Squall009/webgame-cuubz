@@ -167,7 +167,21 @@ export function _stateAttack(mob, deltaTime, playerPosition, blockAccess) {
 
   mob.animationTimer += deltaTime;
 
-  // Once the attack animation completes, apply damage and go back to chase
+  // Once the attack animation completes, apply damage and go back to chase.
+  //
+  // D-88 (recorded, not fixed): this flips ATTACK → CHASE from inside `mobManager.update()`'s
+  // AI pass, which runs BEFORE `renderer.update()` in the same tick. So the animator never
+  // sees ATTACK on the frame the attack completes, and `lungeAttack`/`slamAttack`/
+  // `chargeAttack`'s final recovery frame — the one that lerps the body back to its rest
+  // pose — is never dispatched. One-shots are truncated one frame early, at every frame
+  // rate, for the same ordering reason that made the HURT cleanup an exit hook.
+  //
+  // Harmless as it stands: `MobAnimator._resetToInitialPose()` puts every part back at the
+  // top of the next frame, so the dropped frame is the one that would have moved the parts
+  // to where the reset puts them anyway. Do NOT reorder the manager's two passes to "fix"
+  // it — the AI must see the same tick's movement, and the renderer must see the AI's
+  // decision, so this ordering is the correct one and the animator is what has to
+  // accommodate it.
   if (mob.animationTimer >= duration) {
     mob.attackCooldownTimer = 1.0 / (mob.definition.attackSpeed || 1);
     mob.aiState = AI_STATES.CHASE;

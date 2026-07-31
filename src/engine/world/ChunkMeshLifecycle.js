@@ -11,11 +11,11 @@
  * pipeline; ChunkMeshCoordinator.js holds the other half and calls `this._onMeshBuilt`
  * across the boundary exactly as it always did.
  *
- * This is the only file in the split that owns GPU resources. `_unloadMesh` and
- * `_disposeOldMeshes` are byte-for-byte the same thirteen lines under two names — see
- * the note in ChunkManager.js; they are NOT merged here, because a mechanical extraction
- * is the wrong PR to change behaviour in, and the duplication is now visible in one file
- * instead of spread through a 2,000-line monolith.
+ * This is the only file in the split that owns GPU resources. PR 23 left `_unloadMesh` and
+ * `_disposeOldMeshes` here as byte-for-byte the same thirteen lines under two names,
+ * because a mechanical extraction is the wrong PR to change behaviour in — and putting
+ * both in one file is what made the duplication visible. PR 34 collapsed them (D-75):
+ * `_disposeOldMeshes` is gone and its one caller, `_onMeshBuilt`, calls `_unloadMesh`.
  */
 
 import * as THREE from 'three';
@@ -27,8 +27,9 @@ export const ChunkMeshLifecycleMethods = {
     if (this._disposed) return;
     this._rebuilding.delete(key);
 
-    // Dispose old meshes for this chunk
-    this._disposeOldMeshes(key);
+    // Dispose old meshes for this chunk. D-75: this used to call `_disposeOldMeshes`, a
+    // second name for the body of `_unloadMesh` below — see the note there.
+    this._unloadMesh(key);
 
     if (!geoResult) {
       this.loadedMeshes.set(key, null);
@@ -139,27 +140,27 @@ export const ChunkMeshLifecycleMethods = {
   // MESH UNLOADING / DISPOSAL
   // ============================================================
 
-  /** Unload a chunk's mesh from the scene. */
+  /**
+   * Unload a chunk's mesh from the scene: take all three sub-meshes out of the chunk
+   * group, dispose their GPU resources, and drop the map entry.
+   *
+   * D-75: there was a second copy of this body under the name `_disposeOldMeshes`, whose
+   * only difference was that its local was called `existing` instead of `entry`. Both were
+   * live — `_unloadMesh` from `ChunkManager.dispose()` and `ChunkMeshCoordinator.js:65`,
+   * `_disposeOldMeshes` from `_onMeshBuilt` above — so this is not a dead-code deletion but
+   * a collapse of two names onto one. It is behaviour-identical by inspection: the two
+   * bodies were byte-for-byte the same thirteen lines modulo that identifier, which is why
+   * PR 23 recorded the duplication in this file's header rather than merging it mid-move.
+   *
+   * The two call sites did mean slightly different things by it — "this chunk is going
+   * away" versus "this chunk is being rebuilt" — but the operation is the same either way,
+   * and `_onMeshBuilt` re-inserts the fresh entry immediately after.
+   */
   _unloadMesh(key) {
     const entry = this.loadedMeshes.get(key);
     if (!entry) return;
 
     for (const mesh of [entry.solid, entry.cutout, entry.trans]) {
-      if (!mesh) continue;
-      if (this.renderer && this.renderer.chunkGroup) this.renderer.chunkGroup.remove(mesh);
-      if (mesh.geometry) mesh.geometry.dispose();
-      if (mesh.material) mesh.material.dispose();
-    }
-
-    this.loadedMeshes.delete(key);
-  },
-
-  /** Dispose old meshes for a chunk before replacing with new build. */
-  _disposeOldMeshes(key) {
-    const existing = this.loadedMeshes.get(key);
-    if (!existing) return;
-
-    for (const mesh of [existing.solid, existing.cutout, existing.trans]) {
       if (!mesh) continue;
       if (this.renderer && this.renderer.chunkGroup) this.renderer.chunkGroup.remove(mesh);
       if (mesh.geometry) mesh.geometry.dispose();
