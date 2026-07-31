@@ -1,0 +1,157 @@
+/* ============================================================
+   Multiplayer session list and lobby tabs
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Session List (Multiplayer Lobby) --- */
+#session-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-bottom: 20px;
+  width: min(400px, 80vw);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.session-item {
+  padding: var(--space-lg) var(--space-xl);
+  background: var(--overlay-white-06);
+  border: 1px solid var(--overlay-white-10);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.session-item:hover {
+  border-color: var(--color-primary);
+  background: rgba(76,175,80,0.1);
+}
+
+.session-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.session-details {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: var(--space-2xs);
+}
+
+.session-players {
+  font-size: 12px;
+  color: var(--color-primary);
+  text-align: right;
+}
+
+/* --- Lobby Tabs --- */
+.lobby-tabs {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xl);
+  background: rgba(255,255,255,0.05);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xs);
+}
+
+.lobby-tab {
+  padding: 10px var(--space-2xl);
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: transparent;
+  color: var(--color-text-muted);
+  transition: all 0.15s ease;
+}
+
+.lobby-tab:hover {
+  color: var(--color-text);
+  background: var(--overlay-white-08);
+}
+
+.lobby-tab.active {
+  background: rgba(76,175,80,0.3);
+  color: var(--color-primary);
+}
+
+.lobby-panel.hidden {
+  display: none !important;
+}
+
+.lobby-empty {
+  text-align: center;
+  color: var(--color-text-faint);
+  font-size: 14px;
+  padding: 20px;
+}
+
+/* --- Rejoin panel ---
+   Ten `style="…"` attributes on index.html:257-265 before PR 26. Nothing else styles
+   `#rejoin-panel` (`.lobby-panel` has no base rule, only `.lobby-panel.hidden`), so the
+   id selectors here are the only thing setting any of it. */
+#rejoin-panel {
+  background: rgba(76,175,80,0.1);
+  border: 1px solid rgba(76,175,80,0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  margin: var(--space-md) 0;
+}
+
+.rejoin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rejoin-title {
+  color: var(--color-primary);
+  font-weight: bold;
+}
+
+#rejoin-session-name {
+  color: var(--color-text-dim);
+  margin-left: var(--space-md);
+}
+
+/* `margin: 0` was inline on both, and `* { margin: 0 }` in base.css already provides it;
+   it is written out so the pair reads as one decision rather than an accident. The
+   second rule must stay below the first — equal specificity, later wins. */
+#btn-rejoin-session,
+#btn-clear-rejoin {
+  margin: 0;
+}
+
+#btn-clear-rejoin {
+  margin-left: var(--space-xs);
+}
+
+/* --- Browse tab: the "Play as" character picker ---
+   index.html:272-273. The label is reached through the wrapper rather than given a class
+   of its own; it is the only <label> in the block. */
+.browse-character-picker {
+  margin-bottom: var(--space-lg);
+}
+
+.browse-character-picker > label {
+  display: block;
+  font-size: 13px;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-xs);
+}
+
+#btn-refresh-sessions {
+  margin-top: var(--space-md);
+}
+
+/* The lobby's own Back row — the `.menu-buttons` that is a DIRECT child of the screen.
+   `#host-panel`'s Start Hosting row is also `.menu-buttons` but is nested, so `>` is what
+   keeps this off it. Was `style="margin-top:16px;"` on index.html:349. */
+#lobby-screen > .menu-buttons {
+  margin-top: var(--space-xl);
+}

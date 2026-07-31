@@ -1,0 +1,57 @@
+/* ============================================================
+   Cuubz — Game UI Styles
+   Mobile-first, touch-friendly design
+
+   THIS IS THE ONLY STYLESHEET index.html LINKS (D-52). No module
+   under src/ imports a .css file. The reason is the cascade: the
+   responsive block and the crafting/host-form/day-night media
+   blocks carry NO !important and only win because they are later
+   in source order. Vite emits per-module CSS in module-graph
+   order, which does not guarantee that, so the order lives here
+   as an explicit, reviewable list instead.
+
+   THE ORDER BELOW IS THE ORDER OF THE PRE-SPLIT css/style.css.
+   Do not sort it. Three constraints in particular:
+     * responsive.css must stay after every component it overrides
+       and before utilities.css.
+     * utilities.css holds `.hidden { display: none !important }`,
+       which is what every screen, overlay and modal hides with.
+     * crafting.css must stay immediately before equipment.css.
+       The 600px block at the end of crafting.css styles .equipment-*
+       rules that equipment.css only defines afterwards, so those
+       overrides currently LOSE to their own base rules. That is a
+       pre-existing defect, preserved verbatim here; moving either
+       import would silently change mobile rendering.
+   ============================================================ */
+
+@import './tokens.css';
+
+@import './base.css'; /* was style.css:6-40 */
+@import './hud/crosshair.css'; /* was style.css:41-64 */
+@import './layout.css'; /* was style.css:65-100 */
+@import './components/buttons.css'; /* was style.css:101-149 */
+@import './hud/hud.css'; /* was style.css:150-164 */
+@import './hud/meters.css'; /* was style.css:165-207 */
+@import './hud/hotbar.css'; /* was style.css:208-271 */
+@import './hud/quest-tracker.css'; /* was style.css:272-307 */
+@import './hud/damage-flash.css'; /* was style.css:308-342 */
+@import './screens/slots.css'; /* was style.css:343-465 */
+@import './components/modal.css'; /* was style.css:466-522 */
+@import './screens/settings.css'; /* was style.css:523-589 */
+@import './overlays/inventory.css'; /* was style.css:590-667 */
+@import './hud/touch-controls.css'; /* was style.css:668-752 */
+@import './screens/loading.css'; /* was style.css:753-774 */
+@import './screens/lobby.css'; /* was style.css:775-862 */
+@import './screens/host-form.css'; /* was style.css:863-970 */
+@import './components/connection.css'; /* was style.css:971-1063 */
+@import './hud/player-list.css'; /* was style.css:1064-1178 */
+@import './responsive.css'; /* was style.css:1179-1400 */
+@import './utilities.css'; /* was style.css:1401-1418 */
+@import './components/modal-error.css'; /* was style.css:1419-1433 */
+@import './screens/char-slot.css'; /* was style.css:1434-1514 */
+@import './hud/day-night.css'; /* was style.css:1515-1560 */
+@import './debug/overlays.css'; /* was style.css:1561-1649 */
+@import './overlays/pause-menu.css'; /* was style.css:1650-1711 */
+@import './screens/crafting.css'; /* was style.css:1712-1967 */
+@import './screens/equipment.css'; /* was style.css:1968-2085 */
+@import './hud/armor.css'; /* was style.css:2086-2107 */

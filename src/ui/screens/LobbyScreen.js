@@ -21,8 +21,15 @@
  *
  * Both panels can create a character without leaving the lobby, and the host panel can
  * also create a world. They are `./LobbyForms.js`, split out in this same PR: they are
- * near-duplicates of each other and of `CharacterScreen`'s modal (**BUGS.md D-41**,
- * PR 29), and keeping them here put this file over §8.2's 400-line accept criterion.
+ * near-duplicates of each other and of `CharacterScreen`'s modal. **D-41 is closed** —
+ * all five paths run `src/ui/forms/createEntity.js` as of PR 26 — but they stay in their
+ * own file, because folding them back in would put this one over §8.2's 400-line accept
+ * criterion again.
+ *
+ * The three `+ New` toggles are **not** repainted from the managers (decision 59): they
+ * stay enabled and report the limit as a banner when clicked. Only the three
+ * `populate*Select` dropdowns below are derived state, and `refresh()` is what re-derives
+ * them — the lobby is reachable from a screen that creates and deletes.
  */
 
 import { WorldManager } from '../../game/entities/WorldManager.js';
@@ -54,13 +61,37 @@ export class LobbyScreen {
     initHostForm(this);
 
     // The browse dropdown is populated at init so the panel is usable the first time it
-    // is opened, before any tab switch has happened.
+    // is opened, before any tab switch has happened. It is populated *again* by
+    // `refresh()` when the screen is actually shown — see that method.
     this.populateBrowseCharacterSelect();
 
     document.getElementById('btn-start-hosting').addEventListener('click', async () => {
       const sm = this.deps.sessionManager;
       if (sm) await sm.startHosting();
     });
+  }
+
+  /**
+   * Repopulate everything the lobby derives from the two managers. Called by `UIManager`
+   * whenever `#btn-host` or `#btn-join` opens this screen.
+   *
+   * **Why this exists (PR 26).** The browse dropdown is populated once at `init()` and
+   * then only by `switchTab('browse')`. `#browse-panel` is the panel that is *visible*
+   * when the lobby opens, so nothing repopulated it on entry: a character created or
+   * deleted on `CharacterScreen` since the last visit left the browse dropdown showing a
+   * stale list — or a deleted character still selectable — until the player clicked the
+   * Browse tab to force a repaint. `UIManager` calls this on both routes into the lobby.
+   *
+   * (The managers themselves are ready by then. `LobbyScreen.init()` runs inside
+   * `initMenuNavigation()`, which `Bootstrap.js` calls at `:322`, after
+   * `characterManager` and `worldManager` are constructed and awaited at `:301`/`:306`.
+   * The `:199`-declared function's *body* is not its call site — do not read the two line
+   * numbers as an order.)
+   */
+  refresh() {
+    this.populateBrowseCharacterSelect();
+    this.populateHostCharacterSelect();
+    this.populateHostWorldSelect();
   }
 
   // ── Tabs ──────────────────────────────────────────────────────────────

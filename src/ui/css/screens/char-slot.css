@@ -1,0 +1,85 @@
+/* ============================================================
+   Character slot action buttons and avatar
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Character Slot Actions (edit/delete buttons) --- */
+.char-slot-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: var(--space-2xs);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.char-slot:hover .char-slot-actions {
+  opacity: 1;
+}
+
+.char-slot-action-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s ease;
+}
+
+.char-slot-action-btn.edit {
+  background: rgba(33, 150, 243, 0.6);
+  color: var(--color-white);
+}
+
+.char-slot-action-btn.edit:hover {
+  background: rgba(33, 150, 243, 0.9);
+}
+
+.char-slot-action-btn.delete {
+  background: rgba(231, 76, 60, 0.6);
+  color: var(--color-white);
+}
+
+.char-slot-action-btn.delete:hover {
+  background: rgba(231, 76, 60, 0.9);
+}
+
+/* --- Character Slot Avatar --- */
+.char-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-round);
+  margin-bottom: var(--space-md);
+  border: 2px solid var(--overlay-white-30);
+}
+
+.char-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.char-slot.empty {
+  border-style: dashed;
+  cursor: default;
+}
+
+.char-slot.empty:hover {
+  border-color: var(--overlay-white-20);
+  background: rgba(255,255,255,0.03);
+}
+
+.char-slot.selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 12px rgba(76, 175, 80, 0.3);
+}

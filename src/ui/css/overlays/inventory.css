@@ -1,0 +1,82 @@
+/* ============================================================
+   .overlay shell + inventory slots
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Inventory Overlay --- */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.8);
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay.hidden {
+  display: none !important;
+}
+
+.inventory-slot {
+  width: 56px;
+  height: 56px;
+  background: var(--overlay-white-06);
+  border: 2px solid var(--overlay-white-10);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.inventory-slot:hover {
+  border-color: var(--overlay-white-30);
+  background: var(--overlay-white-10);
+}
+
+.inventory-slot.hotbar {
+  border-color: var(--color-primary);
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.inventory-slot.hotbar:hover {
+  border-color: var(--color-primary-light);
+  background: var(--overlay-primary-15);
+}
+
+.inventory-slot .item-count {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--color-white);
+  text-shadow: 1px 1px 2px var(--shadow-black-90), -1px -1px 2px var(--shadow-black-90);
+  pointer-events: none;
+}
+
+/* Hotbar item count */
+.hotbar-item-count {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--color-white);
+  text-shadow: 1px 1px 2px var(--shadow-black-90), -1px -1px 2px var(--shadow-black-90);
+  pointer-events: none;
+}
+
+.overlay-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--color-white);
+  font-size: 24px;
+  cursor: pointer;
+}

@@ -1,0 +1,40 @@
+/* ============================================================
+   .screen — the full-viewport shell every one of the seven screens uses
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Screens (Menu System) --- */
+.screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  background: linear-gradient(135deg, var(--color-bg) 0%, var(--color-bg-mid) 50%, var(--color-bg-deep) 100%);
+}
+
+.screen.hidden {
+  display: none !important;
+}
+
+.game-title {
+  font-size: clamp(48px, 12vw, 96px);
+  font-weight: 900;
+  letter-spacing: 8px;
+  color: var(--color-primary);
+  text-shadow: 0 0 30px rgba(76, 175, 80, 0.5), 0 4px 8px rgba(0,0,0,0.5);
+  margin-bottom: var(--space-md);
+}
+
+.game-subtitle {
+  font-size: clamp(14px, 3vw, 24px);
+  color: var(--color-text-dim);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  margin-bottom: 40px;
+}

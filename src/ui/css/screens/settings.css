@@ -1,0 +1,71 @@
+/* ============================================================
+   Settings screen groups, performance section, checkboxes
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Settings Screen --- */
+.settings-group {
+  margin-bottom: var(--space-xl);
+  width: min(320px, 80vw);
+}
+
+.settings-group label {
+  display: block;
+  font-size: 13px;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-xs);
+}
+
+.settings-group input[type="range"] {
+  width: 100%;
+  accent-color: var(--color-primary);
+}
+
+.settings-group .controls-hint p {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+}
+
+/* Performance settings section */
+.performance-section h4 {
+  color: var(--color-primary);
+  font-size: 14px;
+  margin-bottom: var(--space-lg);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.performance-section select {
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
+  border: 1px solid var(--overlay-white-20);
+  border-radius: var(--radius-md);
+  background: var(--overlay-white-08);
+  color: var(--color-text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.performance-section select:hover {
+  border-color: var(--overlay-white-30);
+  background: rgba(255,255,255,0.12);
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: var(--space-md);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text-soft);
+  margin-bottom: var(--space-xs);
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}

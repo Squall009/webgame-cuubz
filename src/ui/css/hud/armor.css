@@ -1,0 +1,27 @@
+/* ============================================================
+   Armor indicator HUD badge
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* ─── Armor Indicator (HUD) ──────────────────────────────── */
+#armor-indicator {
+  position: fixed;
+  top: 44px;
+  right: 50%;
+  transform: translateX(50%);
+  z-index: 150;
+  background: var(--overlay-black-60);
+  padding: var(--space-xs) 10px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--color-primary);
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  letter-spacing: 0.5px;
+}
+
+#armor-indicator.hidden {
+  display: none !important;
+}

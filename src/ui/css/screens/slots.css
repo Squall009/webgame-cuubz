@@ -1,0 +1,136 @@
+/* ============================================================
+   Character and world slot grids
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Character/World Slots --- */
+#character-slots, #world-slots {
+  display: flex;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-2xl);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* `position: relative` is the containing block for `.char-slot-actions` and
+   `.world-slot-actions`, both of which are `position: absolute` (below, and in
+   screens/char-slot.css). Until PR 26 it was set from JavaScript —
+   `CharacterScreen.js:119` and `WorldScreen.js:146` each did `slot.style.position =
+   'relative'` on every slot they built — so the CSS was silently depending on the
+   renderer. Both lines are deleted; this is where it lives. Removing it puts the edit
+   and delete buttons in the viewport's top-right corner, which the e2e suite clicks
+   (`test/e2e/saveLoad.js:1402`, `:1428`). */
+.char-slot, .world-slot {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  background: var(--overlay-white-06);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.char-slot:hover, .world-slot:hover {
+  border-color: var(--color-primary);
+  background: rgba(76,175,80,0.1);
+}
+
+/* --- World Slot Specific Styles --- */
+.world-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  margin-bottom: var(--space-sm);
+}
+
+.world-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.world-name {
+  color: var(--color-white);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-seed {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.world-biomes {
+  color: var(--color-text-dim);
+  font-size: 10px;
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-slot-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: var(--space-xs);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.world-slot:hover .world-slot-actions {
+  opacity: 1;
+}
+
+.world-slot-action-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.world-slot-action-btn.delete {
+  background: rgba(231,76,60,0.2);
+  color: var(--color-danger);
+}
+
+.world-slot-action-btn.delete:hover {
+  background: rgba(231,76,60,0.5);
+}
+
+.world-slot.empty {
+  border-style: dashed;
+  opacity: 0.5;
+}
+
+.world-slot.empty:hover {
+  opacity: 0.8;
+}
+
+.world-slot.selected {
+  border-color: #2196F3;
+  background: rgba(33,150,243,0.1);
+}

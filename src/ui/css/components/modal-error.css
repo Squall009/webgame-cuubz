@@ -1,0 +1,19 @@
+/* ============================================================
+   Inline modal error message
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Modal Error Message --- */
+.modal-error {
+  font-size: 12px;
+  color: var(--color-danger);
+  background: rgba(231, 76, 60, 0.1);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
+}
+
+.modal-error.hidden {
+  display: none !important;
+}

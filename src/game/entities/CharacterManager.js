@@ -24,6 +24,14 @@ export const CHARACTER_COLORS = [
   '#607D8B', '#F44336', '#8BC34A', '#3F51B5'
 ];
 
+/**
+ * The one over-limit message. `createCharacter` returns it and the lobby's `+ New` toggle
+ * renders it on a refused open (decision 59), so the save and open paths cannot drift. A
+ * constant, not a call: the text is unreachable without a candidate name, because name
+ * validation runs before the slot check.
+ */
+export const CHARACTER_LIMIT_MESSAGE = `Maximum ${MAX_CHARACTERS} characters reached`;
+
 // ============================================================
 // CharacterManager Class
 // ============================================================
@@ -145,7 +153,7 @@ export class CharacterManager {
 
     // Check slot availability
     if (!this.canCreateMore()) {
-      return { success: false, error: `Maximum ${MAX_CHARACTERS} characters reached` };
+      return { success: false, error: CHARACTER_LIMIT_MESSAGE };
     }
 
     // Check for duplicate names (case-insensitive)

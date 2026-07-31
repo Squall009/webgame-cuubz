@@ -1,0 +1,112 @@
+/* ============================================================
+   Host session form (owns its own 600px media block)
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Host Form --- */
+.host-form {
+  width: min(360px, 80vw);
+  margin-bottom: var(--space-xl);
+}
+
+.host-form label {
+  display: block;
+  font-size: 13px;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-xs);
+  margin-top: var(--space-lg);
+}
+
+.host-form input[type="text"],
+.host-form select {
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--overlay-white-20);
+  border-radius: var(--radius-md);
+  background: var(--overlay-white-08);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.host-form input[type="range"] {
+  width: 100%;
+  accent-color: var(--color-primary);
+}
+
+.host-form input[type="color"] {
+  width: 48px;
+  height: 36px;
+  padding: var(--space-2xs);
+  border: 1px solid var(--overlay-white-20);
+  border-radius: var(--radius-md);
+  background: var(--overlay-white-08);
+  cursor: pointer;
+}
+
+/* Host select row: dropdown + button side by side */
+.host-select-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: 0;
+}
+
+.host-select-row select {
+  flex: 1;
+}
+
+/* Inline creation forms (collapsed by default) */
+.host-inline-form {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--overlay-white-10);
+  border-radius: var(--radius-lg);
+  padding: 10px var(--space-lg);
+  margin-bottom: var(--space-xs);
+}
+
+.host-inline-form.hidden {
+  display: none !important;
+}
+
+.host-inline-form-row {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  align-items: center;
+}
+
+.host-inline-form-row input[type="text"] {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* Host select row: dropdown + button side by side */
+.host-select-row {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+  margin-bottom: var(--space-lg);
+}
+
+.host-select-row select {
+  flex: 1;
+}
+
+/* Mobile adjustments for host form */
+@media (max-width: 600px) {
+  .host-form {
+    width: min(320px, 90vw);
+  }
+
+  .host-select-row button {
+    padding: var(--space-md);
+    font-size: 12px;
+  }
+
+  .host-inline-form-row {
+    flex-direction: column;
+  }
+
+  .host-inline-form-row input[type="color"] {
+    align-self: flex-start;
+  }
+}

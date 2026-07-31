@@ -106,6 +106,11 @@ export function installInventoryDrag(state) {
     const dy = e.clientY - _invClickStart.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     const fromIdx = _invClickStart.slot;
+    // **D-52 — CLOSED IN PR 26.** This line is the whole fix. Only `.slot` was captured
+    // before `_invClickStart` was nulled on the next line, so the equipment-slot click
+    // branch 112 lines below read `_invClickStart.equipSlot` off `null`. Its guard was
+    // `if (_invClickStart && …)`, so it never threw — it just never ran.
+    const fromEquip = _invClickStart.equipSlot;
     _invClickStart = null;
 
     // ── Drag drop ──
@@ -210,15 +215,18 @@ export function installInventoryDrag(state) {
 
     // ── Simple click (no drag) ──
     if (dist <= 5 && e.button === 0) {
-      // Click on equipment slot → unequip to hotbar.
+      // Click on equipment slot → unequip into the inventory.
       //
-      // `_invClickStart` was nulled above, so this branch is unreachable — an
-      // equipment-slot click does nothing today. It is carried across verbatim
-      // rather than "fixed": making it live changes click behaviour on the one
-      // surface with no automated coverage, and PR 26 owns the UI paths.
-      // `BUGS.md` **D-52**.
-      if (_invClickStart && _invClickStart.equipSlot) {
-        const equipSlotName = _invClickStart.equipSlot;
+      // **D-52.** PR 17 carried this branch across verbatim knowing it was dead:
+      // `_invClickStart` had been nulled above, so the guard was permanently false.
+      // It reads the captured `fromEquip` now and is live. It fails *safe* at a full
+      // inventory — `addItem` reporting `remaining > 0` re-equips rather than
+      // destroying the item — and the `return` below is also what keeps the
+      // inventory-slot branch from calling `getSlot(undefined)`, which was the other
+      // half of the old behaviour: `getSlot` tests `index < 0 || index >= totalSlots`,
+      // both false for `undefined`, and quietly returned `this.slots[undefined]`.
+      if (fromEquip) {
+        const equipSlotName = fromEquip;
         const item = inventory.unequipItem(equipSlotName);
         if (item) {
           const result = inventory.addItem(item.typeId, item.count);

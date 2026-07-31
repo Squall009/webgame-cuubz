@@ -1,0 +1,119 @@
+/* ============================================================
+   In-game player list overlay
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Player List Overlay (in-game, bottom-right) --- */
+.player-list-overlay {
+  position: fixed;
+  bottom: 80px;
+  right: 8px;
+  width: min(200px, 30vw);
+  background: var(--overlay-black-60);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  z-index: 155;
+  pointer-events: auto;
+  border: 1px solid var(--overlay-white-10);
+  transition: max-height 0.3s ease;
+  overflow: hidden;
+}
+
+.player-list-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-accent);
+  margin-bottom: var(--space-xs);
+  display: flex;
+  align-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Toggle button for mobile collapse */
+.player-list-toggle {
+  background: none !important;
+  border: none !important;
+  color: var(--color-accent) !important;
+  cursor: pointer;
+  font-size: 10px;
+  padding: var(--space-2xs) var(--space-xs);
+  margin-left: var(--space-xs);
+  line-height: 1;
+  pointer-events: auto;
+  min-width: 16px;
+  min-height: 16px;
+  display: none; /* Hidden on desktop, shown via JS on mobile */
+}
+
+.player-list-toggle:hover {
+  color: var(--color-white) !important;
+}
+
+.player-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+  max-height: 500px;
+  opacity: 1;
+}
+
+/* Collapsed state — hide player items */
+.player-list-items.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.player-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  font-size: 11px;
+  color: var(--color-text);
+  pointer-events: none;
+}
+
+.player-list-item-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.player-list-item-pos {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  margin-left: 14px;
+}
+
+.player-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-round);
+  flex-shrink: 0;
+}
+
+.player-name-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-health-bar {
+  width: 40px;
+  height: 4px;
+  background: var(--overlay-white-10);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.player-health-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 2px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}

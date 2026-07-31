@@ -1,0 +1,40 @@
+/* ============================================================
+   Quest tracker panel
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Quest Tracker --- */
+#quest-tracker {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: min(240px, 35vw);
+  background: var(--overlay-black-60);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  border: 1px solid var(--overlay-white-10);
+}
+
+.quest-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-accent);
+  margin-bottom: var(--space-xs);
+}
+
+.quest-current {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: var(--space-2xs);
+}
+
+.quest-objective {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.quest-progress {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+}

@@ -55,6 +55,7 @@ import { RenderLoop } from '../engine/loop/RenderLoop.js';
 // and `Game.js` does not import it — decision 21; it arrives there through `gameDeps`.
 import { publishGameState } from '../testBridge.js';
 import { UIManager } from '../ui/UIManager.js';
+import { mountTemplates } from '../ui/templates/index.js';
 import { CharacterScreen } from '../ui/screens/CharacterScreen.js';
 import { LobbyScreen } from '../ui/screens/LobbyScreen.js';
 import { SettingsScreen } from '../ui/screens/SettingsScreen.js';
@@ -276,6 +277,19 @@ function detectMobile() {
 export async function start() {
   _log('[Cuubz] INIT STARTING');
   try {
+    // ─── The UI, before anything can look for it ───────────────────────────
+    //
+    // PR 26 emptied `index.html` down to `<div id="app">`; every screen, overlay and HUD
+    // element is a template module under `src/ui/templates/` and this call is what puts
+    // them on the page. **It must stay first.** `src/` resolves 141 distinct ids through
+    // 237 `getElementById`/`querySelector` calls, and the earliest of them are eager:
+    // `new UIManager(...)` captures 19 elements in its constructor (`UIManager.js:45-76`)
+    // and `initNavigation()` calls `getElementById(...).addEventListener(...)` unguarded
+    // eleven times. Both run inside `initMenuNavigation()` below. Mount after that and
+    // every one of them is `null`. Decision 53; `src/ui/templates/index.js` has the
+    // argument in full.
+    mountTemplates();
+
     _log('[Cuubz] Initializing...');
 
     // Initialize PersistenceManager (IndexedDB)

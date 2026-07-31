@@ -155,9 +155,19 @@ export const ChunkStorageMethods = {
   // DIRTY FLUSH MANAGER (simplified — single path)
   // ============================================================
 
-  /** Start periodic flush timer. */
+  /**
+   * Start periodic flush timer.
+   *
+   * **D-58, PR 26 — the `_disposed` guard.** This checked only `_flushIntervalId`, so a
+   * *disposed* manager could still be given a permanent `setInterval` nothing would clear.
+   * The caller was real: the pause menu leaked one chunks-per-tick handler per session,
+   * each closing over its own session's `chunkManager`. `flushDirty` early-returns on
+   * `_disposed`, so it corrupted nothing — it pinned a dead manager and everything it
+   * references. `RegionTracker.startRegionCheck` already checked; this is the sibling
+   * that did not.
+   */
   startFlushTimer(intervalMs = 5000) {
-    if (this._flushIntervalId) return;
+    if (this._disposed || this._flushIntervalId) return;
     this._flushIntervalId = setInterval(() => this.flushDirty(), intervalMs);
   },
 
@@ -196,9 +206,7 @@ export const ChunkStorageMethods = {
     const keysToFlush = [...this._flushQueue];
     this._flushQueue.clear();
 
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 1: Encode all dirty chunks (CPU work, parallel-friendly)
-    // ═══════════════════════════════════════════════════════════════
+    // ── Phase 1: Encode all dirty chunks (CPU work, parallel-friendly) ──
     const entries = [];
     for (const key of keysToFlush) {
       const chunk = this.memoryCache.get(key);
@@ -222,9 +230,7 @@ export const ChunkStorageMethods = {
       return;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 2: Write chunks in batched IndexedDB transactions
-    // ═══════════════════════════════════════════════════════════════
+    // ── Phase 2: Write chunks in batched IndexedDB transactions ──
     // Split into batches of 500 to avoid IndexedDB transaction size limits.
     // Most browsers handle thousands of puts per transaction, but keeping
     // batches modest avoids edge cases on mobile / low-memory devices.
@@ -257,9 +263,7 @@ export const ChunkStorageMethods = {
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 3: Update manifest in a SINGLE write
-    // ═══════════════════════════════════════════════════════════════
+    // ── Phase 3: Update manifest in a SINGLE write ──
     try {
       let manifest = this._manifest || await this.loadManifest();
       if (!manifest) {
@@ -282,9 +286,7 @@ export const ChunkStorageMethods = {
       // Chunks are saved even if manifest update fails — not critical
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 4: Mark all chunks clean
-    // ═══════════════════════════════════════════════════════════════
+    // ── Phase 4: Mark all chunks clean ──
     for (const { key, chunk } of entries) {
       chunk.dirty = false;
       this.stats.chunksFlushed++;

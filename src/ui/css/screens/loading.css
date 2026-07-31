@@ -1,0 +1,26 @@
+/* ============================================================
+   Loading screen content and progress bar
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Loading Screen --- */
+.loading-content {
+  text-align: center;
+}
+
+.loading-bar {
+  width: min(300px, 70vw);
+  height: 6px;
+  background: var(--overlay-white-10);
+  border-radius: 3px;
+  margin-top: var(--space-xl);
+  overflow: hidden;
+}
+
+.loading-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--color-primary);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}

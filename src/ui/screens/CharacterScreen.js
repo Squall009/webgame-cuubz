@@ -13,10 +13,23 @@
  * The delete modal is **shared with `WorldScreen`** and its confirm/cancel handler lives
  * in `UIManager`; see that file's header. This screen exposes `openDeleteModal`,
  * `closeDeleteModal` and `confirmDelete` for it to call.
+ *
+ * **D-41, PR 26:** the capacity check, the `disabled`/`'Slots Full'` block and the error
+ * banner are `src/ui/forms/createEntity.js` now — shared with `WorldScreen` and the
+ * lobby's three inline forms. Two things changed here as a result: `canOpen(null)` is
+ * `false`, so a null `characterManager` no longer *opens* the modal (this file's guard was
+ * `if (cm && !cm.canCreateMore())`, the opposite polarity to `WorldScreen`'s), and
+ * `showError` is null-guarded, which it was not.
  */
 
-import { DEFAULT_COLOR, MAX_CHARACTERS } from '../../game/entities/CharacterManager.js';
+import { MAX_CHARACTERS } from '../../game/entities/CharacterManager.js';
 import { escapeHtml } from '../../util/HTMLUtils.js';
+import {
+  canOpen, hideBanner, randomHexColor, setBanner, submitCreate, syncCreateButton,
+} from '../forms/createEntity.js';
+
+/** The create button's two labels. `WorldScreen` has the same pair for its own noun. */
+const CREATE_LABELS = { idle: 'Create Character', full: 'Slots Full' };
 
 export class CharacterScreen {
   /**
@@ -32,31 +45,32 @@ export class CharacterScreen {
   /** Wire this screen's controls. Called once, from `UIManager.initNavigation`. */
   init() {
     document.getElementById('btn-create-char').addEventListener('click', () => {
-      const cm = this.deps.characterManager;
-      if (cm && !cm.canCreateMore()) return;
+      if (!canOpen(this.deps.characterManager)) return;
       this.openCreateModal();
     });
 
     // The create/edit modal's save button serves both modes — `editingId` is the switch.
+    // Edit goes through `submitCreate`'s `submit` override so that update shares the
+    // empty-name message and the banner rather than growing a second copy of each.
     document.getElementById('btn-save-char').addEventListener('click', async () => {
       const name = document.getElementById('char-name').value.trim();
       const color = document.getElementById('char-color').value;
-
-      if (!name) { this.showError('Please enter a character name.'); return; }
-
       const cm = this.deps.characterManager;
       const editing = this.editingId;
-      const result = editing
-        ? await cm.updateCharacter(editing, { name, color })
-        : await cm.createCharacter(name, color);
 
-      if (result.success) {
-        this.closeModal();
-        this.render();
-        this.deps.log(`[Cuubz] Character ${editing ? 'updated' : 'created'}: ${result.character.name}`);
-      } else {
-        this.showError(result.error);
-      }
+      await submitCreate({
+        manager: cm,
+        noun: 'character',
+        name,
+        extra: color,
+        errorEl: document.getElementById('char-error'),
+        submit: editing ? () => cm.updateCharacter(editing, { name, color }) : undefined,
+        onSuccess: (result) => {
+          this.closeModal();
+          this.render();
+          this.deps.log(`[Cuubz] Character ${editing ? 'updated' : 'created'}: ${result.character.name}`);
+        },
+      });
     });
 
     document.getElementById('btn-cancel-char').addEventListener('click', () => this.closeModal());
@@ -98,25 +112,17 @@ export class CharacterScreen {
       slotInfo.textContent = `${characters.length}/${MAX_CHARACTERS} characters (${remaining} slots available)`;
     }
 
-    const createBtn = document.getElementById('btn-create-char');
-    if (createBtn) {
-      if (cm && !cm.canCreateMore()) {
-        createBtn.disabled = true;
-        createBtn.textContent = 'Slots Full';
-        createBtn.style.opacity = '0.5';
-      } else {
-        createBtn.disabled = false;
-        createBtn.textContent = 'Create Character';
-        createBtn.style.opacity = '1';
-      }
-    }
+    syncCreateButton(document.getElementById('btn-create-char'), cm, CREATE_LABELS);
   }
 
   createSlotElement(char) {
     const cm = this.deps.characterManager;
     const slot = document.createElement('div');
     slot.className = 'char-slot' + (cm && cm.selectedId === char.id ? ' selected' : '');
-    slot.style.position = 'relative';
+    // `position: relative` used to be set here. It is `.char-slot`'s own CSS now
+    // (`src/ui/css/screens/slots.css`) — `.char-slot-actions` is `position: absolute` and
+    // was resolving its containing block against a property this renderer happened to
+    // set. PR 26.
     slot.dataset.charId = char.id;
 
     slot.innerHTML = `
@@ -161,7 +167,12 @@ export class CharacterScreen {
     document.getElementById('char-modal-title').textContent = 'Create New Character';
     document.getElementById('btn-save-char').textContent = 'Create';
     document.getElementById('char-name').value = '';
-    document.getElementById('char-color').value = DEFAULT_COLOR;
+    // D-41: this was a fixed `DEFAULT_COLOR`, so every character created from this modal
+    // came out the same green. The lobby's two inline forms already prefilled a random
+    // colour; two of three wins, and three identical avatars in three slots was the worse
+    // of the two behaviours. `DEFAULT_COLOR` survives as `submitCreate`'s fallback for
+    // when the input is missing entirely.
+    document.getElementById('char-color').value = randomHexColor();
     this.hideError();
     this.ui.modals.createCharModal.classList.remove('hidden');
     setTimeout(() => document.getElementById('char-name').focus(), 100);
@@ -215,13 +226,14 @@ export class CharacterScreen {
 
   // ── Error banner ──────────────────────────────────────────────────────
 
+  // One line each: the shared helpers are null-guarded, which these two were not — an
+  // absent `#char-error` threw a TypeError out of the save handler.
+
   showError(message) {
-    const errorEl = document.getElementById('char-error');
-    errorEl.textContent = message;
-    errorEl.classList.remove('hidden');
+    setBanner(document.getElementById('char-error'), message);
   }
 
   hideError() {
-    document.getElementById('char-error').classList.add('hidden');
+    hideBanner(document.getElementById('char-error'));
   }
 }

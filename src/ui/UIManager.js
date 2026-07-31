@@ -131,13 +131,21 @@ export class UIManager {
         this.character.render();
       });
 
+      // `lobby.refresh()` is PR 26. The lobby's three dropdowns are derived from
+      // `characterManager` / `worldManager`, but only `switchTab` re-derived them — and
+      // `#browse-panel` is the panel that is already visible on entry. So a create or a
+      // delete on `CharacterScreen` left the browse dropdown stale until the player
+      // clicked the Browse tab. Both routes into the lobby re-derive now. See
+      // `LobbyScreen.refresh`.
       document.getElementById('btn-host').addEventListener('click', () => {
         this.show('lobbyScreen');
+        this.lobby.refresh();
         this.deps.updateRejoinPanel();
       });
 
       document.getElementById('btn-join').addEventListener('click', () => {
         this.show('lobbyScreen');
+        this.lobby.refresh();
         this.deps.updateRejoinPanel();
       });
 

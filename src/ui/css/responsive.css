@@ -1,0 +1,227 @@
+/* ============================================================
+   Responsive adjustments — the 600px and 360px blocks
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Responsive Adjustments --- */
+@media (max-width: 600px) {
+  .game-title {
+    letter-spacing: 4px;
+  }
+
+  .menu-btn {
+    padding: var(--space-lg) 20px;
+    font-size: 14px;
+  }
+
+  /* === SURVIVAL METERS — Visible on mobile viewport === */
+  #meters-container {
+    width: min(180px, 50vw);
+    bottom: 80px;
+    left: 4px;
+    gap: var(--space-2xs);
+  }
+
+  .meter {
+    gap: 3px;
+  }
+
+  .meter-bar {
+    height: 6px; /* Thinner bars on mobile */
+  }
+
+  .meter-label {
+    font-size: 8px; /* Smaller labels on mobile */
+    min-width: 40px;
+  }
+
+  /* === HOTBAR — Positioned above joystick on mobile === */
+  #hotbar-container {
+    bottom: auto;
+    top: calc(50% + 60px); /* Center vertically, offset below middle */
+    left: 20px;
+    transform: none;
+  }
+
+  #hotbar {
+    gap: var(--space-2xs);
+    padding: var(--space-xs);
+  }
+
+  .hotbar-slot {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+    min-width: 36px; /* Touch target ≥ 36px */
+    min-height: 36px;
+  }
+
+  #joystick-zone {
+    left: 20px;
+    bottom: 60px;
+  }
+
+  #mobile-actions {
+    right: 10px;
+    bottom: 60px;
+  }
+
+  /* === INVENTORY OVERLAY — Full-screen on mobile === */
+  .overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    background: rgba(0,0,0,0.95);
+  }
+
+  .inventory-slot {
+    width: 56px; /* Larger touch targets on mobile */
+    height: 56px;
+    min-width: 48px; /* Touch target ≥ 48px */
+    min-height: 48px;
+  }
+
+  .overlay-close {
+    top: 8px;
+    right: 8px;
+    font-size: 28px;
+    padding: var(--space-md);
+    min-width: 48px; /* Touch target ≥ 48px */
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* === QUEST TRACKER — Compact on mobile === */
+  #quest-tracker {
+    top: auto;
+    bottom: 12px;
+    right: 8px;
+    width: min(160px, 45vw);
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(0,0,0,0.75);
+    border-radius: var(--radius-md);
+    max-height: 80px; /* Limit height to avoid covering gameplay */
+    overflow: hidden;
+  }
+
+  .quest-header {
+    font-size: 9px;
+    margin-bottom: var(--space-2xs);
+  }
+
+  .quest-current {
+    font-size: 10px;
+    margin-bottom: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .quest-objective {
+    font-size: 8px;
+    line-height: 1.2;
+  }
+
+  .quest-progress {
+    font-size: 7px;
+    margin-top: var(--space-2xs);
+  }
+
+  /* === PLAYER LIST HUD — Mobile adjustments === */
+  .player-list-overlay {
+    width: min(150px, 35vw);
+    bottom: 160px;
+    right: 4px;
+    padding: var(--space-sm);
+  }
+
+  .player-list-header {
+    font-size: 10px;
+  }
+
+  .player-list-toggle {
+    display: inline !important; /* Show toggle on mobile */
+    min-width: 24px !important;
+    min-height: 24px !important; /* Touch target ≥ 24px on mobile */
+  }
+
+  .player-list-item {
+    font-size: 10px;
+  }
+
+  .player-color-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .player-health-bar {
+    width: 30px;
+    height: 3px;
+  }
+
+  /* === CRAFTING UI — Mobile adjustments === */
+  #crafting-inv-grid {
+    grid-template-columns: repeat(3, 48px);
+    gap: var(--space-sm);
+  }
+
+  /* The crafting grid's own slots are sized by `#crafting-inv-grid .inventory-slot` in
+     screens/crafting.css (36px in this same breakpoint). A second bare `.inventory-slot`
+     rule stood here — it was `.crafting-slot` until PR 26 renamed the class, and after the
+     rename it silently overrode the 56px touch target six rules above by source order.
+     Deleted: the `.inventory-slot` rule above already covers the selector. */
+
+  /* === DAMAGE FLASH — Mobile adjustments === */
+  #damage-flash {
+    opacity: 0.7; /* Slightly less intense on mobile */
+  }
+
+  /* === CROSSHAIR — Hide on mobile (use touch instead) === */
+  #crosshair {
+    display: none;
+  }
+
+  /* === SETTINGS PANEL — Mobile adjustments ===
+     A `.settings-panel { width: min(300px, 90vw); padding: 16px }` rule stood here and
+     matched nothing: no element in the game has ever carried that class. **Decision 58**
+     deletes it rather than inventing the element, because the element it implies does not
+     fit — `#settings-screen` is a full-viewport `.screen`, and `.settings-group` inside it
+     is `width: min(320px, 80vw)` = 312px, which would overflow the 268px content box a
+     300px panel with 16px padding leaves. Deleting an orphan is triage; designing a mobile
+     settings panel is a UI decision and no test in this repo can tell right from wrong. */
+  .settings-group label {
+    font-size: 12px;
+  }
+
+  .settings-group input[type="range"] {
+    width: 100%;
+    height: 24px; /* Larger touch target for sliders */
+  }
+}
+
+/* Extra small screens (phones in portrait < 360px) */
+@media (max-width: 360px) {
+  #meters-container {
+    width: min(140px, 55vw);
+  }
+
+  .meter-label {
+    display: none; /* Hide labels on very small screens */
+  }
+
+  .hotbar-slot {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+
+  #quest-tracker {
+    width: min(120px, 50vw);
+    padding: var(--space-xs) var(--space-sm);
+  }
+
+  .quest-current {
+    font-size: 9px;
+  }
+}

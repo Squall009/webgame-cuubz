@@ -1,0 +1,97 @@
+/* ============================================================
+   Connection status indicator (lobby) + connection HUD (in-game)
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Connection Status Indicator --- */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: var(--space-xl);
+  width: fit-content;
+}
+
+.connection-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-round);
+}
+
+.connection-status.connected .status-dot {
+  background: var(--color-primary);
+  box-shadow: 0 0 6px rgba(76,175,80,0.5);
+}
+
+.connection-status.connected {
+  background: var(--overlay-primary-15);
+  color: var(--color-primary);
+}
+
+.connection-status.disconnected .status-dot {
+  background: var(--color-danger);
+}
+
+.connection-status.disconnected {
+  background: rgba(231,76,60,0.15);
+  color: var(--color-danger);
+}
+
+.connection-status.connecting .status-dot {
+  background: var(--color-accent);
+  animation: pulse-dot 1s infinite;
+}
+
+.connection-status.connecting {
+  background: rgba(241,196,15,0.15);
+  color: var(--color-accent);
+}
+
+.connection-status.reconnecting .status-dot {
+  background: var(--color-warning);
+  animation: pulse-dot 0.5s infinite;
+}
+
+.connection-status.reconnecting {
+  background: rgba(230,126,34,0.15);
+  color: var(--color-warning);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* --- Connection HUD (in-game) --- */
+.connection-hud {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 10px;
+  border-radius: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 155;
+  pointer-events: none;
+}
+
+.connection-hud .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+}
+
+.connection-hud.connected .status-dot { background: var(--color-primary); }
+.connection-hud.disconnected .status-dot { background: var(--color-danger); }
+.connection-hud.reconnecting .status-dot { background: var(--color-accent); animation: pulse-dot 0.5s infinite; }
+
+.connection-hud.connected { background: rgba(76,175,80,0.2); color: var(--color-primary); }
+.connection-hud.disconnected { background: rgba(231,76,60,0.2); color: var(--color-danger); }
+.connection-hud.reconnecting { background: rgba(241,196,15,0.2); color: var(--color-accent); }

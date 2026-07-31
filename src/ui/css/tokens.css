@@ -1,0 +1,64 @@
+/* ============================================================
+   Cuubz — design tokens
+
+   EXTRACTED, NOT INVENTED. Every value below is a literal that
+   already appeared in the stylesheet; the number in each comment
+   is its measured `var()` use count across src/ui/css/, which is
+   also what the literal counted in the pre-split css/style.css.
+   Eight of them moved in PR 26: de-inlining index.html's `style=`
+   attributes added 20 uses, and the eight are recounted here.
+   Values used once or twice that carry no scale meaning were left
+   as literals on purpose — a token per one-off is indirection,
+   not a system.
+
+   Breakpoints (600px, 360px, 768px) have NO token because custom
+   properties are not permitted in a media query condition.
+   ============================================================ */
+
+:root {
+  /* --- Colours --- */
+  --color-primary: #4CAF50; /* ×29 */
+  --color-text: #e0e0e0; /* ×13 */
+  --color-white: #fff; /* ×13 */
+  --color-text-muted: #888; /* ×10 */
+  --color-accent: #f1c40f; /* ×10 */
+  --color-text-dim: #aaa; /* ×12 */
+  --color-danger: #e74c3c; /* ×9 */
+  --color-text-soft: #ccc; /* ×4 */
+  --color-warning: #e67e22; /* ×3 */
+  --color-text-faint: #666; /* ×3 */
+  --color-bg: #1a1a2e; /* ×2 */
+  --color-primary-light: #66BB6A; /* ×2 */
+  --color-bg-mid: #16213e; /* ×1 */
+  --color-bg-deep: #0f3460; /* ×1 */
+
+  /* --- Alpha overlays --- */
+  --overlay-white-10: rgba(255,255,255,0.1); /* ×18 */
+  --overlay-white-30: rgba(255,255,255,0.3); /* ×9 */
+  --shadow-black-90: rgba(0,0,0,0.9); /* ×9 */
+  --overlay-white-08: rgba(255,255,255,0.08); /* ×8 */
+  --overlay-white-20: rgba(255,255,255,0.2); /* ×8 */
+  --overlay-primary-15: rgba(76,175,80,0.15); /* ×6 */
+  --overlay-white-06: rgba(255,255,255,0.06); /* ×5 */
+  --overlay-black-60: rgba(0,0,0,0.6); /* ×5 */
+
+  /* --- Spacing scale (padding / margin / gap only) --- */
+  --space-2xs: 2px; /* ×14 */
+  --space-xs: 4px; /* ×27 */
+  --space-sm: 6px; /* ×17 */
+  --space-md: 8px; /* ×32 */
+  --space-lg: 12px; /* ×25 */
+  --space-xl: 16px; /* ×16 */
+  --space-2xl: 24px; /* ×5 */
+
+  /* --- Corner radii --- */
+  --radius-sm: 4px; /* ×9 */
+  --radius-md: 6px; /* ×14 */
+  --radius-lg: 8px; /* ×13 */
+  --radius-xl: 12px; /* ×3 */
+  --radius-round: 50%; /* ×7 */
+
+  /* --- Font stacks --- */
+  --font-ui: 'Segoe UI', system-ui, -apple-system, sans-serif; /* ×1 */
+  --font-mono: monospace; /* ×5 */
+}

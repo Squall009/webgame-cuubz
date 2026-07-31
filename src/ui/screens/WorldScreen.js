@@ -16,6 +16,12 @@
 
 import { MAX_WORLDS, WorldManager } from '../../game/entities/WorldManager.js';
 import { escapeHtml } from '../../util/HTMLUtils.js';
+import {
+  canOpen, hideBanner, randomSeed, setBanner, submitCreate, syncCreateButton,
+} from '../forms/createEntity.js';
+
+/** The create button's two labels. `CharacterScreen` has the same pair for its own noun. */
+const CREATE_LABELS = { idle: 'Create New World', full: 'Slots Full' };
 
 /**
  * Swatch colour per dominant biome.
@@ -43,42 +49,34 @@ export class WorldScreen {
   /** Wire this screen's controls. Called once, from `UIManager.initNavigation`. */
   init() {
     document.getElementById('btn-create-world').addEventListener('click', () => {
-      const wm = this.deps.worldManager;
-      if (!wm || !wm.canCreateMore()) return;
+      if (!canOpen(this.deps.worldManager)) return;
       this.openCreateModal();
     });
 
+    // D-41: the empty-name message gained its trailing period (it was the one of five
+    // that lacked it), the seed parse is `createEntity.parseSeed` — byte-identical logic
+    // to the lobby's host-world form, which had a different message — and success now
+    // logs, which this path alone did not.
     document.getElementById('btn-save-world').addEventListener('click', async () => {
-      const name = document.getElementById('world-name').value.trim();
-      if (!name) { this.showError('Please enter a world name'); return; }
-
-      // Blank seed means random; a non-numeric one is rejected rather than silently
-      // falling back, so a typo does not quietly produce a different world.
-      let seed = undefined;
-      const seedInput = document.getElementById('world-seed').value.trim();
-      if (seedInput !== '') {
-        const parsed = parseInt(seedInput, 10);
-        if (!isNaN(parsed)) {
-          seed = parsed;
-        } else {
-          this.showError('Seed must be a valid integer (or leave blank for random)');
-          return;
-        }
-      }
-
-      const result = await this.deps.worldManager.createWorld(name, seed);
-      if (result.success) {
-        this.closeCreateModal();
-        this.render();
-      } else {
-        this.showError(result.error);
-      }
+      await submitCreate({
+        manager: this.deps.worldManager,
+        noun: 'world',
+        name: document.getElementById('world-name').value.trim(),
+        extra: document.getElementById('world-seed').value,
+        errorEl: document.getElementById('world-error'),
+        onSuccess: (result) => {
+          this.closeCreateModal();
+          this.render();
+          this.deps.log(`[Cuubz] World created: ${result.world.name}`);
+        },
+      });
     });
 
     document.getElementById('btn-cancel-world').addEventListener('click', () => this.closeCreateModal());
 
     document.getElementById('world-name').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') document.getElementById('btn-save-world').click();
+      // D-41: `preventDefault()` was missing here and present on the other four.
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('btn-save-world').click(); }
       if (e.key === 'Escape') this.closeCreateModal();
     });
   }
@@ -124,26 +122,17 @@ export class WorldScreen {
       worldSlotInfo.textContent = `${worlds.length}/${MAX_WORLDS} worlds (${remaining} slots available)`;
     }
 
-    const createBtn = document.getElementById('btn-create-world');
-    if (createBtn) {
-      const wm = this.deps.worldManager;
-      if (wm && !wm.canCreateMore()) {
-        createBtn.disabled = true;
-        createBtn.textContent = 'Slots Full';
-        createBtn.style.opacity = '0.5';
-      } else {
-        createBtn.disabled = false;
-        createBtn.textContent = 'Create New World';
-        createBtn.style.opacity = '1';
-      }
-    }
+    syncCreateButton(document.getElementById('btn-create-world'),
+      this.deps.worldManager, CREATE_LABELS);
   }
 
   createSlotElement(world) {
     const wm = this.deps.worldManager;
     const slot = document.createElement('div');
     slot.className = 'world-slot' + (wm && wm.selectedId === world.id ? ' selected' : '');
-    slot.style.position = 'relative';
+    // `position: relative` used to be set here — same fix as `CharacterScreen.js`.
+    // `.world-slot-actions` is `position: absolute`; the containing block is
+    // `.world-slot`'s own CSS now (`src/ui/css/screens/slots.css`). PR 26.
     slot.dataset.worldId = world.id;
 
     // `getWorldPreview` is the tested equivalent of `BrowserWorldManager.getBiomePreview`
@@ -188,7 +177,7 @@ export class WorldScreen {
     document.getElementById('world-name').value = '';
     // Pre-fill a random seed so the field shows what will be used; the player can edit it
     // or clear it for another random one.
-    document.getElementById('world-seed').value = String(Math.floor(Math.random() * 0xFFFFFFFF));
+    document.getElementById('world-seed').value = randomSeed();
     this.hideError();
     this.ui.modals.createWorldModal.classList.remove('hidden');
     // Force modal-content visible — some CSS paths leave it display:none.
@@ -229,13 +218,14 @@ export class WorldScreen {
 
   // ── Error banner ──────────────────────────────────────────────────────
 
+  // One line each: the shared helpers are null-guarded, which these two were not — an
+  // absent `#world-error` threw a TypeError out of the save handler.
+
   showError(message) {
-    const errorEl = document.getElementById('world-error');
-    errorEl.textContent = message;
-    errorEl.classList.remove('hidden');
+    setBanner(document.getElementById('world-error'), message);
   }
 
   hideError() {
-    document.getElementById('world-error').classList.add('hidden');
+    hideBanner(document.getElementById('world-error'));
   }
 }

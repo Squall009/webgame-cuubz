@@ -1,0 +1,122 @@
+/* ============================================================
+   Equipment panel (crafting screen)
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* ─── Equipment Panel (Crafting Screen) ──────────────────── */
+.equipment-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 160px;
+  max-width: 180px;
+  padding: var(--space-lg);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--overlay-white-08);
+  border-radius: var(--radius-lg);
+}
+
+.equipment-label {
+  font-size: 13px;
+  color: var(--color-text-dim);
+  font-weight: 600;
+}
+
+.equipment-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  font-size: 12px;
+  color: var(--color-text-soft);
+  text-align: center;
+}
+
+.defense-stat {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.toughness-stat {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.equipment-slots {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  width: 100%;
+}
+
+.equipment-slot {
+  position: relative;
+  width: 100%;
+  height: 72px;
+  background: rgba(255,255,255,0.05);
+  border: 2px solid var(--overlay-white-10);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2xs);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.equipment-slot:hover {
+  background: var(--overlay-white-10);
+  border-color: var(--overlay-white-30);
+}
+
+.equipment-slot.occupied {
+  border-color: rgba(76, 175, 80, 0.4);
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.equipment-slot.occupied:hover {
+  border-color: var(--color-primary);
+  background: var(--overlay-primary-15);
+}
+
+.equipment-slot .equip-slot-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.equipment-slot .equip-slot-icon canvas.item-icon {
+  width: 36px;
+  height: 36px;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+.equip-slot-label {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.equipment-slot .equip-stat-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-shadow: 1px 1px 2px var(--shadow-black-90);
+  pointer-events: none;
+}
+
+.equipment-help {
+  font-size: 10px;
+  color: var(--color-text-faint);
+  text-align: center;
+  font-style: italic;
+}

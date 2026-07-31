@@ -41,7 +41,31 @@
  * game leaves them in. That failure mode has happened before — D-14, where a call to a
  * method that did not exist skipped six cleanup steps and `showScreen('mainMenu')`, and
  * left the page blank.
+ *
+ * ─── D-58 — CLOSED IN PR 26. THE CLEANUP NOW REMOVES ALL TEN ────────────────
+ *
+ * This added **ten** listeners and removed **three**. The other seven — two chunk-timer
+ * sliders, four performance controls, the time-of-day checkbox — were anonymous arrows,
+ * the exact shape PR 18 hit with D-50: `removeEventListener` had nothing to name.
+ * `Game.js:237` calls this once per session via `Bootstrap.js:132-141`, so seven
+ * accumulated per session, without bound. **Decision 56: option (b) — session lifetime,
+ * complete cleanup.** All seven are named and all seven are removed below, which is what
+ * `Bootstrap.js:134`'s comment already claimed was happening. Option (a), page lifetime
+ * through `deps.gameState`, is a structural change this PR is not for.
+ *
+ * It was worse than a listener count: all seven close over `state`, a per-session
+ * `GameState`, on elements that outlive the session — so every past session's renderer,
+ * chunkManager, skybox, meshes and chunk buffers stayed pinned by the DOM. Two specific
+ * consequences went with it. A stale chunks-per-tick handler called `startFlushTimer` on
+ * a **disposed** ChunkManager, which guarded only `_flushIntervalId` and so scheduled a
+ * permanent `setInterval` on a dead manager (a `_disposed` guard is added there too — its
+ * sibling `startRegionCheck` already had one). And each stale time-of-day handler held a
+ * previous session's `_gameSessionConn` and sent `TIME_SYNC` carrying the **stale
+ * skybox's** `timeOfDay`, so after N hosted sessions one toggle emitted N frames across N
+ * connections, N−1 of them stale. `test/test_pauseMenuListeners.js` pins all of it.
  */
+
+import { setupPauseMenuSettings } from './PauseMenuSettings.js';
 
 /**
  * Wire the pause menu for one session.
@@ -62,15 +86,12 @@ export function setupPauseMenu(state, deps) {
   const resumeBtn = document.getElementById('btn-resume-game');
   const debugStats = document.getElementById('debug-stats');
 
-  // Settings sliders
-  const tickSlider = document.getElementById('setting-tick-interval');
-  const chunksSlider = document.getElementById('setting-chunks-per-tick');
-  const distanceSlider = document.getElementById('setting-render-distance');
-
-  // Value displays
-  const tickVal = document.getElementById('tick-val');
-  const chunksVal = document.getElementById('chunks-val');
-  const distanceVal = document.getElementById('distance-val');
+  // The four sliders and value displays moved to `./PauseMenuSettings.js` with their
+  // handlers. Two dead reads went with them rather than moving: `#setting-render-distance`
+  // and `#distance-val`, into locals nothing read again. Neither id has ever existed in
+  // `index.html` — checked against the pre-PR-26 snapshot, so they were not lost in the
+  // template split. A pause render-distance control was intended; the live one is
+  // `#pause-perf-render-distance`.
 
   if (!pauseMenu || !resumeBtn) return function() {};
 
@@ -268,110 +289,24 @@ export function setupPauseMenu(state, deps) {
   resumeBtn.addEventListener('click', resumeGame);
   if (exitBtn) exitBtn.addEventListener('click', onExit);
 
-  // Settings: Region Check Interval (was Chunk Tick Interval)
-  if (tickSlider && tickVal) {
-    tickSlider.value = 500; // Default region check interval
-    tickVal.textContent = tickSlider.value;
-    tickSlider.addEventListener('input', () => {
-      const val = parseInt(tickSlider.value);
-      tickVal.textContent = val;
-      if (state.chunkManager) {
-        state.chunkManager.stopRegionCheck();
-        state.chunkManager.startRegionCheck(val);
-      }
-    });
-  }
+  // ── The seven settings controls (D-58) ──
+  //
+  // Split into `./PauseMenuSettings.js` in the same PR that made their cleanup
+  // complete — see that file. It returns the function that removes all seven; this
+  // one's cleanup calls it, so the ten registered here are the ten removed below.
+  const cleanupSettings = setupPauseMenuSettings(state, deps);
 
-  // Settings: Chunks Per Tick → now controls flush interval
-  if (chunksSlider && chunksVal) {
-    chunksSlider.value = 5; // Default flush interval in seconds
-    chunksVal.textContent = chunksSlider.value + 's';
-    chunksSlider.addEventListener('input', () => {
-      const val = parseInt(chunksSlider.value);
-      chunksVal.textContent = val + 's';
-      if (state.chunkManager) {
-        state.chunkManager.stopFlushTimer();
-        state.chunkManager.startFlushTimer(val * 1000);
-      }
-    });
-  }
-
-  // ─── Pause Menu Performance Settings ─────────────────────
-  // Sync UI with current settings on pause
-  if (deps.perfSettings) deps.syncPerfSettingsUI();
-
-  const pausePerfRenderDist = document.getElementById('pause-perf-render-distance');
-  const pausePerfShadows = document.getElementById('pause-perf-shadows');
-  const pausePerfTextureRes = document.getElementById('pause-perf-texture-res');
-  const pausePerfAdvShading = document.getElementById('pause-perf-advanced-shading');
-
-  if (pausePerfRenderDist && deps.perfSettings) {
-    pausePerfRenderDist.addEventListener('change', () => {
-      const val = parseInt(pausePerfRenderDist.value, 10);
-      deps.perfSettings.set('renderDistance', val);
-      deps.syncPerfSettingsUI();
-      if (state.chunkManager) {
-        state.chunkManager.setRenderDistance(val);
-      }
-    });
-  }
-
-  if (pausePerfShadows && deps.perfSettings) {
-    pausePerfShadows.addEventListener('change', () => {
-      const val = pausePerfShadows.value;
-      deps.perfSettings.set('shadowQuality', val);
-      deps.syncPerfSettingsUI();
-      if (state.renderer) {
-        state.renderer.setShadowQuality(val);
-      }
-    });
-  }
-
-  if (pausePerfTextureRes && deps.perfSettings) {
-    pausePerfTextureRes.addEventListener('change', async () => {
-      const val = pausePerfTextureRes.value;
-      deps.perfSettings.set('textureResolution', val);
-      deps.syncPerfSettingsUI();
-      await deps.rebuildAtlasAndMaterials(state.renderer, state.chunkManager);
-    });
-  }
-
-  if (pausePerfAdvShading && deps.perfSettings) {
-    pausePerfAdvShading.addEventListener('change', async () => {
-      const val = pausePerfAdvShading.checked;
-      deps.perfSettings.set('advancedShading', val);
-      deps.syncPerfSettingsUI();
-      await deps.rebuildAtlasAndMaterials(state.renderer, state.chunkManager);
-    });
-  }
-
-  // Pause Time of Day checkbox
-  const pauseTimeCheckbox = document.getElementById('pause-pause-time');
-  if (pauseTimeCheckbox && state.skybox) {
-    pauseTimeCheckbox.checked = !state.skybox.timePaused; // checked = time running
-    pauseTimeCheckbox.addEventListener('change', () => {
-      state.skybox.timePaused = !pauseTimeCheckbox.checked;
-      deps.log(`[Cuubz] Time of day ${state.skybox.timePaused ? 'PAUSED' : 'RESUMED'}`);
-      // Immediately broadcast time change to clients.
-      // Use hostingSessionId as the guard — the host is the authority on time,
-      // and time sync is independent of chunk streaming.
-      if (state.session && state.session.hostingSessionId &&
-          state.session.client && state.session.client._gameSessionConn) {
-        state.session.client._gameSessionConn.send({
-          type: 'TIME_SYNC',
-          timeOfDay: state.skybox.timeOfDay,
-          timePaused: state.skybox.timePaused,
-        });
-        deps.log(`[Cuubz] TIME_SYNC sent: timePaused=${state.skybox.timePaused}`);
-      }
-    });
-  }
-
-  // Return cleanup function so listeners can be removed on exit or re-init
+  // ── Cleanup: all ten, not three (D-58) ──
+  //
+  // Every `addEventListener` above has a line here. If you add an eleventh, add its
+  // remover too — `test/test_pauseMenuListeners.js` counts them and will go red if the
+  // count does not return to where it started across a setup/cleanup cycle.
   cleanup = function cleanupPauseMenu() {
     document.removeEventListener('keydown', onPause);
     resumeBtn.removeEventListener('click', resumeGame);
     if (exitBtn) exitBtn.removeEventListener('click', onExit);
+
+    cleanupSettings();
   };
   return cleanup;
 }

@@ -35,6 +35,9 @@ export const MAX_WORLDS = 3;
 export const MIN_WORLD_NAME_LENGTH = 1;
 export const MAX_WORLD_NAME_LENGTH = 32;
 
+/** The one over-limit message — the `WorldManager` half of `CHARACTER_LIMIT_MESSAGE`. */
+export const WORLD_LIMIT_MESSAGE = `Maximum ${MAX_WORLDS} worlds reached`;
+
 export const DEFAULT_SEED = 42;
 export const BIOME_NAMES = [
   'Deep Ocean', 'Ocean', 'Beach', 'Plains', 'Forest', 'Badlands',
@@ -195,7 +198,7 @@ export class WorldManager {
 
     // Check slot availability
     if (!this.canCreateMore()) {
-      return { success: false, error: `Maximum ${MAX_WORLDS} worlds reached` };
+      return { success: false, error: WORLD_LIMIT_MESSAGE };
     }
 
     // Check for duplicate names (case-insensitive)

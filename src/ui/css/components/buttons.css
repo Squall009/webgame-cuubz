@@ -1,0 +1,83 @@
+/* ============================================================
+   Menu buttons (.menu-btn and its variants)
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- Menu Buttons --- */
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  width: min(320px, 80vw);
+}
+
+.menu-btn {
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 600;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: var(--overlay-white-08);
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.menu-btn:hover {
+  background: rgba(255,255,255,0.15);
+  border-color: var(--overlay-white-30);
+  transform: translateY(-1px);
+}
+
+.menu-btn:active {
+  transform: translateY(1px);
+  background: var(--overlay-white-20);
+}
+
+.menu-btn.primary {
+  background: rgba(76, 175, 80, 0.3);
+  border-color: var(--color-primary);
+  color: var(--color-white);
+}
+
+.menu-btn.primary:hover {
+  background: rgba(76, 175, 80, 0.5);
+}
+
+.menu-btn.secondary {
+  background: rgba(255,255,255,0.04);
+  border-color: var(--overlay-white-10);
+  color: var(--color-text-muted);
+}
+
+/* --- The three variants PR 26 lifted out of index.html's inline styles ---
+
+   `.danger` MUST stay below `.menu-btn:hover` and `.menu-btn:active`. It was an inline
+   `style="background:…;border-color:…"` on #btn-confirm-delete-char, and an inline style
+   beats a pseudo-class rule, so hovering the Delete button never changed its background.
+   Same specificity (0,2,0) as :hover means source order decides, and this being last is
+   what reproduces that. The hover `transform` was never inline and still applies.
+
+   `.compact` and `.inline-submit` are the whole of six inline styles — three identical
+   `+ New` toggles (index.html:276, 303, 319) and three identical inline-form submits
+   (:285, :312, :328). Two classes, six attributes retired. Both are (0,2,0), which is
+   what keeps them ahead of `@media (max-width:600px) .menu-btn` in responsive.css and
+   `.host-select-row button` in screens/host-form.css — the two rules the inline styles
+   used to outrank. */
+.menu-btn.danger {
+  background: rgba(231,76,60,0.3);
+  border-color: var(--color-danger);
+}
+
+.menu-btn.compact {
+  padding: var(--space-md) var(--space-lg);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.menu-btn.inline-submit {
+  padding: var(--space-md) var(--space-xl);
+  font-size: 13px;
+}

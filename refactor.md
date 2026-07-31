@@ -3151,6 +3151,22 @@ Phased approach: keep the DOM structure but move each screen's markup into a tem
 **In this same PR**, rewrite or delete `test_responsiveHUD`, `test_mobileViewports`, `test_pageLoad`, `test_textureAssets`, `test_textureGenerator`, `test_chunkBinaryCodec` — they `readFileSync` the HTML/CSS and will break ([§3.6](#36-source-text-tests-conflict-with-phase-5)). Prefer real jsdom DOM assertions; delete anything that only asserts a CSS string exists.
 - **Accept:** `index.html` under 80 lines; `npm test` green; all screens render; mobile touch controls work.
 
+#### PR 26 outcome — `index.html` is 28 lines and `QUARANTINE.md` is empty
+
+`css/style.css` (2,107) became **31 files** under `src/ui/css/`, loaded by one `<link>` and an ordered `@import` manifest — **decision 52**, because §10's `<link>` and §27's per-module imports contradict each other and only the first preserves a cascade in which the 222-line responsive block carries no `!important`. §27's list is **not** what landed (**decision 57**): it leaves 619 of 2,107 lines with no destination and names files that would be empty, and three of its six design tokens were **invented** — `#555` and `'Courier New'` occur zero times in the real stylesheet, and the spacing scale is 4/8/**12**/16. **The split was proved, not asserted:** 1,189 `(media, selector, property, value)` tuples with every `var()` resolved, 0 residual differences, reproduced independently by the adversarial pass with **0 rule-order inversions** and 0 drift across 368 token substitutions. `index.html` went **525 → 28 lines**, its markup moved into 16 `src/ui/templates/*.js` modules mounted eagerly as the first statement of `Bootstrap.start()` (**decision 53** — mount-on-show is impossible when `UIManager`'s constructor resolves 19 elements and `src/` resolves 141 ids; verified by an AST pass showing **zero** module-evaluation-time DOM lookups in all 146 files). The assembled DOM was proved identical across **968 nodes**, the only differences being the **24 inline `style=` attributes** removed and the classes replacing them — six of which were two classes repeated three times each. **`QUARANTINE.md` is at zero rows** (**decision 54**): `test_pageLoad.js` 486 → 136 lines against the assembled DOM with its id list *scraped* from the harness so the two cannot drift, and three deleted — one of which asserted the **dead** `#crafting-grid`/`.crafting-slot` selectors and was therefore pinning a bug rather than catching it. **D-41** unified five creation paths (the row said three) into `src/ui/forms/createEntity.js`; **D-52**'s equipment-slot click works; **D-58**'s seven leaked listeners are removed, and the leak was worse than its row — they pinned every exited session's `GameState`, renderer and meshes in the DOM forever. **The adversarial pass found three things five green gates did not**, all fixed here: a *new* regression where a disabled toggle trapped an inline form open (**decision 59**), `ChunkStorage.js` crossing 400, and two assertions that passed under the code they claimed to check.
+
+| Gate | Before | After |
+|---|---|---|
+| `npm test` | 55 files, 0 failed, **4 quarantined** | **59 files, 0 failed, 0 quarantined** |
+| assertions | 6,359 | **6,532** (+173, and 290 of the old total were the three deleted files') |
+| `npm run lint` | 0 errors, 157 warnings | **0 errors, 151 warnings** |
+| `npm run build` | exit 0 | **exit 0** |
+| `npm run test:e2e` (dist) | 189 / 0 | **189 / 0** |
+| `npm run test:e2e:vite` | 189 / 0 | **189 / 0** — see below |
+| `index.html` | 525 lines, 24 inline styles | **28 lines, 0** |
+
+**The vite host needed two runs and that is logged, not smoothed over.** The first died at assertion 96 with `keyboard.press: Target page, context or browser has been closed` — the browser process died at §7 step 7, against a tree the `dist` host had just passed 189/0 and which the next vite run also passed 189/0 — and it left a `vite` process **still listening on 3100**, which is exactly the condition that has made a green run a lie seven times here. That is **D-83**, owned by PR 31 with the harness's other determinism rows.
+
 ### PR 27 — Reorganize CSS — **ABSORBED INTO PR 26**
 Split `css/style.css` (~2,100 lines) into `src/ui/css/`:
 ```

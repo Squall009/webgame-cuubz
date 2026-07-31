@@ -1,0 +1,19 @@
+/* ============================================================
+   #hud — the pointer-transparent in-game overlay root
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* --- HUD --- */
+#hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 150;
+  pointer-events: none;
+}
+
+#hud.hidden {
+  display: none !important;
+}

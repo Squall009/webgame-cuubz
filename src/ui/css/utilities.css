@@ -1,0 +1,29 @@
+/* ============================================================
+   .hidden, .screen h2, .slot-info
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+
+   `.hidden` is what EVERY screen, overlay and modal hides with, and it
+   is 1,350 lines downstream of `.screen.hidden` (layout.css) and
+   `.modal-error.hidden` (components/modal-error.css). All three carry
+   !important, which is the only reason the two upstream ones still win
+   against the later base rules for their own elements. Do not drop the
+   !important from any of the three, and do not move this import.
+   ============================================================ */
+
+/* --- Utility Classes --- */
+.hidden {
+  display: none !important;
+}
+
+.screen h2 {
+  font-size: clamp(24px, 5vw, 36px);
+  margin-bottom: 20px;
+  color: var(--color-text);
+}
+
+/* --- Slot Info Text --- */
+.slot-info {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-xl);
+}

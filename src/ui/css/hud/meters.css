@@ -1,0 +1,51 @@
+/* ============================================================
+   Survival meters (health/hunger/thirst/sleep/stamina)
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   ============================================================ */
+
+/* Survival Meters — bottom-left corner */
+#meters-container {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  width: min(200px, 35vw);
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.meter-bar {
+  flex: 1;
+  height: 8px;
+  background: rgba(0,0,0,0.5);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* `width` was five `style="width:100%"` attributes in index.html, one per meter.
+   PR 26 moved them here. Nothing in src/ ever writes `.meter-fill` — the survival
+   meters are PR 34's (D-25 / D-69) — so this is the only thing that sets it. */
+.meter-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+#health-meter .meter-fill { background: var(--color-danger); }
+#hunger-meter .meter-fill { background: var(--color-warning); }
+#thirst-meter .meter-fill { background: #3498db; }
+#sleep-meter .meter-fill { background: #9b59b6; }
+#stamina-meter .meter-fill { background: var(--color-accent); }
+
+.meter-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.8);
+  min-width: 60px;
+}
