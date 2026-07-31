@@ -35,7 +35,12 @@ export class MobRenderer {
    * @param {Mob} mob
    */
   addMob(mob) {
-    if (typeof THREE === 'undefined') return;
+    // D-77: the first statement here used to be `if (typeof THREE === 'undefined') return;`.
+    // `THREE` is not imported in this file and there is no global one, so that test was
+    // permanently true and `addMob` returned before doing anything, every call — the
+    // mirror of the dead guard in `mobIntegration.js:72`. Deleted rather than "fixed"
+    // with an import: this file never names THREE, so it needs no import, and adding one
+    // would just turn a constant-false guard into a constant-true one.
     if (this.renderObjects.has(mob.id)) return;
 
     const group = MobModelBuilder.build(mob.definition);

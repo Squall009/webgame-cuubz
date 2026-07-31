@@ -68,8 +68,17 @@ export class MobIntegration {
       };
     }
 
-    // Create MobRenderer
-    if (typeof THREE !== 'undefined' && scene) {
+    // Create MobRenderer.
+    //
+    // D-77: this test used to read `typeof THREE !== 'undefined' && scene`. `THREE` is
+    // not a binding in this module and there is no global one, so `typeof THREE` was
+    // permanently `'undefined'` and the whole branch was dead — `setRenderer()` was never
+    // called and no mob has been drawn since PR 9. `no-undef` cannot see it: `typeof` is
+    // the one operand ESLint exempts from the undefined-variable check, which is why 17
+    // green lint runs went past it. The fix is to delete the condition, NOT to import
+    // THREE — importing it would only flip the same dead guard to constant-true.
+    // `scene` was always the real precondition; it is the whole test now.
+    if (scene) {
       this.mobRenderer = new MobRenderer(scene, this.mobManager);
       if (deps.camera) {
         this.mobRenderer.setCamera(deps.camera);
