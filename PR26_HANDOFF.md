@@ -70,9 +70,8 @@ now five consecutive PRs.** In PR 26 it caught a regression the PR itself had in
 | Owner | Rows |
 |---|---|
 | **PR 31** | **D-20**, **D-28**, **D-33**, **D-47**, **D-48**, **D-62**, **D-73**, **D-79**, **D-80**, **D-83** |
-| PR 33 | D-27, D-30, D-71, D-72, D-74, D-75, **D-77**, **D-78**, **D-81**, **D-82** |
+| PR 33 | D-27, D-30, D-71, D-72, D-74, D-75, **D-76**, **D-77**, **D-78**, **D-81**, **D-82** |
 | PR 34 | D-25 (the five deferred), D-68 (content half), D-69, D-70 |
-| PR 26 | D-76 (deferred — see below) |
 | PR 10 | D-12 (post-deploy) |
 
 `D-53` sits in the Open table with a Fixed status; it was closed in PR 17. Pre-existing.
@@ -80,11 +79,10 @@ now five consecutive PRs.** In PR 26 it caught a regression the PR itself had in
 **Closed this session:** D-51, D-56, D-57, D-60, D-63, D-64, D-65, D-66, D-67 and half of
 D-68 (PR 23); D-41, D-52, D-58, D-61 (PR 26); D-25's `Noise.js` third.
 
-**⚠️ D-76 is owned by PR 26, which has landed.** It was logged during PR 23 and assigned to
-PR 26 before PR 26's scope was known; PR 26 did not reach it. **Whoever takes the next PR must
-reassign it** — it is an inventory stack-cap defect (`setSlot`/`deserialize` accept over-full
-stacks) and its natural home is now **PR 33** with the other sweep-up rows. Do not leave it
-pointing at a closed PR.
+**D-76 was reassigned PR 26 → PR 33 when PR 26 landed without reaching it.** It was logged
+during PR 23 and given to PR 26 before PR 26's scope was known. A row pointing at a closed PR
+is the "documented and unowned" state the process rule forbids, so it moved to the sweep-up PR,
+which already owns **D-72**, the other `ItemDefinitions.js` row.
 
 ### The three that will bite
 
