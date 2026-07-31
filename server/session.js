@@ -3,13 +3,16 @@
  * Handles game session relay: player connections, message broadcasting,
  * server-side validation, heartbeat keepalive, and disconnect cleanup.
  *
- * Message Protocol (JSON over WebSocket):
+ * Message Protocol (JSON over WebSocket). These are the strings that go **on the wire**,
+ * which is why they are written out here rather than as `MESSAGE_TYPES.X` — the symbols
+ * below are how the code names them, this block is what a packet capture shows:
  *   Client → Server:
  *     { type: 'JOIN', playerId, character } — Join the game session
  *     { type: 'MOVE', position, rotation }  — Player position update
  *     { type: 'BREAK_BLOCK', x, y, z }      — Request to break a block
  *     { type: 'PLACE_BLOCK', x, y, z, blockType } — Request to place a block
  *     { type: 'INVENTORY_UPDATE', inventory } — Inventory state sync
+ *     { type: 'TIME_SYNC', timeOfDay, timePaused } — Host's time of day, relayed on
  *     { type: 'HEARTBEAT' }                  — Keepalive ping
  *     { type: 'LEAVE' }                      — Leave the session
  *   Server → Client:
@@ -21,24 +24,16 @@
  *     { type: 'BLOCK_PLACE', x, y, z, blockType }
  *     { type: 'INVENTORY_SYNC', playerId, inventory }
  *     { type: 'CHUNK_DATA', chunkX, chunkZ, data } — Chunk streaming
+ *     { type: 'HEARTBEAT_ACK' }              — Keepalive acknowledgement
  *     { type: 'ERROR', message }
+ *
+ * This file used to declare its own 10-key `MESSAGE_TYPES` — one of three copies, and
+ * the one that agreed with the client on values but not on membership. PR 33 replaced
+ * all three with `shared/protocol.js`; see that file for the arithmetic and for why
+ * `server/package.json` now says `"type": "module"`.
  */
 
-'use strict';
-
-// Message types
-const MESSAGE_TYPES = {
-  JOIN: 'JOIN',
-  LEAVE: 'LEAVE',
-  MOVE: 'MOVE',
-  BREAK_BLOCK: 'BREAK_BLOCK',
-  PLACE_BLOCK: 'PLACE_BLOCK',
-  CHUNK_DATA: 'CHUNK_DATA',
-  INVENTORY_UPDATE: 'INVENTORY_UPDATE',
-  QUEST_UPDATE: 'QUEST_UPDATE',
-  HEARTBEAT: 'HEARTBEAT',
-  HEARTBEAT_ACK: 'HEARTBEAT_ACK',
-};
+import { MESSAGE_TYPES } from '../shared/protocol.js';
 
 class SessionManager {
   /**
@@ -131,7 +126,7 @@ class SessionManager {
           this._handleMessage(ws, msg);
         } catch (err) {
           console.error(`[SESSION ${this.sessionId}] Parse error:`, err.message);
-          this._send(ws, { type: 'ERROR', message: 'Invalid JSON' });
+          this._send(ws, { type: MESSAGE_TYPES.ERROR, message: 'Invalid JSON' });
         }
       });
 
@@ -190,7 +185,7 @@ class SessionManager {
       case MESSAGE_TYPES.QUEST_UPDATE:
         // Broadcast quest progress to all players
         this._broadcast(null, {
-          type: 'QUEST_UPDATE',
+          type: MESSAGE_TYPES.QUEST_UPDATE,
           questId: msg.questId,
           progress: msg.progress,
           updatedBy: playerId,
@@ -201,10 +196,10 @@ class SessionManager {
         this._handleHeartbeat(playerId);
         break;
 
-      case 'TIME_SYNC':
+      case MESSAGE_TYPES.TIME_SYNC:
         // Relay time-of-day sync from host to all non-host players
         this._broadcast(playerId, {
-          type: 'TIME_SYNC',
+          type: MESSAGE_TYPES.TIME_SYNC,
           timeOfDay: msg.timeOfDay,
           timePaused: msg.timePaused,
         });
@@ -242,7 +237,7 @@ class SessionManager {
 
       // Send welcome with current player list so the reconnecting client can resync
       this._send(ws, {
-        type: 'WELCOME',
+        type: MESSAGE_TYPES.WELCOME,
         sessionId: this.sessionId,
         playerId,
         mode: this.gameMode,
@@ -254,7 +249,7 @@ class SessionManager {
 
     // Max players check for NEW players only
     if (this.players.size >= this.maxPlayers) {
-      this._send(ws, { type: 'ERROR', message: 'Session is full' });
+      this._send(ws, { type: MESSAGE_TYPES.ERROR, message: 'Session is full' });
       ws.close();
       return;
     }
@@ -272,7 +267,7 @@ class SessionManager {
 
     // Send welcome to joining player
     this._send(ws, {
-      type: 'WELCOME',
+      type: MESSAGE_TYPES.WELCOME,
       sessionId: this.sessionId,
       playerId,
       mode: this.gameMode,
@@ -283,7 +278,7 @@ class SessionManager {
     // Broadcast to all other players
     if (this.players.size > 1) {
       this._broadcast(playerId, {
-        type: 'PLAYER_JOINED',
+        type: MESSAGE_TYPES.PLAYER_JOINED,
         playerId,
         character: player.character,
         position: player.position,
@@ -311,7 +306,7 @@ class SessionManager {
 
     // Broadcast position update to all other players
     this._broadcast(playerId, {
-      type: 'PLAYER_MOVE',
+      type: MESSAGE_TYPES.PLAYER_MOVE,
       playerId,
       position: player.position,
       rotation: player.rotation,
@@ -328,7 +323,7 @@ class SessionManager {
     // Server-side validation
     const valid = this._validateBlockBreak(playerId, msg.x, msg.y, msg.z);
     if (!valid) {
-      this._send(ws, { type: 'ERROR', message: 'Invalid block break' });
+      this._send(ws, { type: MESSAGE_TYPES.ERROR, message: 'Invalid block break' });
       return;
     }
 
@@ -342,7 +337,7 @@ class SessionManager {
 
     // Broadcast to all players
     this._broadcast(null, {
-      type: 'BLOCK_BREAK',
+      type: MESSAGE_TYPES.BLOCK_BREAK,
       x: msg.x, y: msg.y, z: msg.z,
       blockType: msg.blockType || 0, // AIR
     });
@@ -358,7 +353,7 @@ class SessionManager {
     // Server-side validation
     const valid = this._validateBlockPlace(playerId, msg.x, msg.y, msg.z, msg.blockType);
     if (!valid) {
-      this._send(ws, { type: 'ERROR', message: 'Invalid block place' });
+      this._send(ws, { type: MESSAGE_TYPES.ERROR, message: 'Invalid block place' });
       return;
     }
 
@@ -373,7 +368,7 @@ class SessionManager {
 
     // Broadcast to all players
     this._broadcast(null, {
-      type: 'BLOCK_PLACE',
+      type: MESSAGE_TYPES.BLOCK_PLACE,
       x: msg.x, y: msg.y, z: msg.z,
       blockType: msg.blockType,
     });
@@ -385,7 +380,7 @@ class SessionManager {
   _handleInventoryUpdate(playerId, msg) {
     // Broadcast inventory state to all players (host validates)
     this._broadcast(null, {
-      type: 'INVENTORY_SYNC',
+      type: MESSAGE_TYPES.INVENTORY_SYNC,
       playerId,
       inventory: msg.inventory,
     });
@@ -409,7 +404,7 @@ class SessionManager {
     // Build the forwarded message — include all fields (neighborEdges, humidityMap, etc.)
     // so clients have everything they need for correct rendering
     const chunkMsg = {
-      type: 'CHUNK_DATA',
+      type: MESSAGE_TYPES.CHUNK_DATA,
       chunkX: msg.chunkX,
       chunkZ: msg.chunkZ,
       data: msg.data,
@@ -442,7 +437,7 @@ class SessionManager {
     const player = this.players.get(playerId);
     if (player) {
       player.lastHeartbeat = Date.now();
-      this._send(player.ws, { type: 'HEARTBEAT_ACK' });
+      this._send(player.ws, { type: MESSAGE_TYPES.HEARTBEAT_ACK });
     }
   }
 
@@ -516,7 +511,7 @@ class SessionManager {
 
     // Broadcast to remaining players
     this._broadcast(null, {
-      type: 'PLAYER_LEFT',
+      type: MESSAGE_TYPES.PLAYER_LEFT,
       playerId,
     });
 
@@ -651,4 +646,4 @@ class SessionManager {
   }
 }
 
-module.exports = SessionManager;
+export default SessionManager;

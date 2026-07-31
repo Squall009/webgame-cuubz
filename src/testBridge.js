@@ -23,9 +23,40 @@
  * bootstrap that §4.1 wants under 50 lines) or scattering `window.__cuubz.x =` across
  * `src/`, which is a second sanctioned `window` assignment — the thing every document
  * here tells you not to add. One file, one assignment, one namespace is the shape that
- * was wanted; PR 12 changed the *justification*, not the *need*. **Removal is owned by
- * PR 33**, the sweep-up PR, and the condition is stated there: it goes when something
- * other than a `window` property can hand `page.evaluate` a module binding.
+ * was wanted; PR 12 changed the *justification*, not the *need*.
+ *
+ * ─── PR 33: THIS FILE IS PERMANENT. STOP RE-OPENING THE QUESTION. ───────────
+ *
+ * `BUGS.md` decision 21 handed removal to PR 33 with a condition: the file goes when
+ * "something other than a `window` property can hand `page.evaluate` a module binding
+ * on **both** e2e hosts". **PR 33 measured that condition and it cannot be met.** The
+ * measurement, so nobody has to take it on faith:
+ *
+ *   • `test/e2e/staticServer.js` serves `<root>/dist` (staticServer.js:69) — the built
+ *     artifact, deliberately, so the harness validates what ships.
+ *   • `dist/` contains exactly three `.js` files. Two are the Web Workers, emitted as
+ *     `?url` assets, and both are classic scripts by contract (vite.config.js note 2).
+ *     The third is `dist/assets/index-<hash>.js`, the Rollup entry chunk.
+ *   • That entry chunk contains **zero `export` statements** — measured, not assumed;
+ *     an entry chunk has no exported surface to import. Its final statements are
+ *     `window.addEventListener('beforeunload', …)` and the `DOMContentLoaded`
+ *     bootstrap call. So `await import('/assets/index-<hash>.js')` inside
+ *     `page.evaluate` resolves to `{}` **and boots a second instance of the whole
+ *     application into the same page** — which is worse than useless for a harness
+ *     that is measuring the first instance's IndexedDB writes.
+ *
+ * Making the condition satisfiable means shipping `preserveModules` output — the
+ * unbundled module graph — to the deploy host, so that a test can read one constant.
+ * That is a production build shape chosen for a test's convenience, which is the same
+ * category of mistake as "a harness may not depend on the thing it is validating"
+ * (PR8_HANDOFF.md §4.1). It is not going to happen, and this file is not pending.
+ *
+ * What PR 33 DID do is enforce the file's own rule below — "every symbol here is a
+ * symbol the test suite could not otherwise see". Seven were not: `CHUNK_WIDTH`,
+ * `CHUNK_DEPTH`, `SEA_LEVEL`, `MIN_Y`, `MAX_Y`, `BLOCK_BY_ID` and `BLOCK_BY_NAME` were
+ * exposed and never read, by `test/e2e/`, `test/unit/`, `test/integration/` or `src/`.
+ * They are deleted. If a future assertion genuinely needs one, add it back with the
+ * assertion, in the same commit.
  *
  * ─── WHY IT EXISTED IN THE FIRST PLACE (PR 9) ───────────────────────────────
  *
@@ -58,7 +89,7 @@
  * It is the ONLY sanctioned `window.*` assignment in `src/`. `scripts/check-globals.js`
  * used to enforce that by path and **PR 11 deleted the script**; nothing enforces it
  * mechanically today, because ESLint has no opinion about which properties you hang off a
- * global it declared readonly. `test/test_globalCollisions.js` is where an assertion for
+ * global it declared readonly. `test/unit/meta/globalCollisions.test.js` is where an assertion for
  * it belongs if one is ever wanted — see BUGS.md D-35.
  */
 
@@ -66,8 +97,8 @@ import * as THREE from 'three';
 
 import { ChunkManager, DB_NAME, DB_VERSION, STORE_CHUNKS, STORE_MANIFESTS, CHUNK_W, CHUNK_D } from './engine/world/ChunkManager.js';
 import { ChunkBinaryCodec, CHUNK_MAGIC, CHUNK_VERSION, LEGACY_LAYOUT_MAX, HEADER_SIZE } from './engine/world/ChunkBinaryCodec.js';
-import { Chunk, CHUNK_HEIGHT, CHUNK_WIDTH, CHUNK_DEPTH, SEA_LEVEL, MIN_Y, MAX_Y } from './engine/world/ChunkData.js';
-import { BLOCK_REGISTRY, BLOCK_TYPES, BLOCK_BY_ID, BLOCK_BY_NAME } from './engine/world/BlockRegistry.js';
+import { Chunk, CHUNK_HEIGHT } from './engine/world/ChunkData.js';
+import { BLOCK_REGISTRY, BLOCK_TYPES } from './engine/world/BlockRegistry.js';
 import { PersistenceManager, MAX_WORLD_SLOTS } from './engine/world/Persistence.js';
 
 /**
@@ -92,19 +123,14 @@ window.__cuubz = {
   CHUNK_VERSION,
   LEGACY_LAYOUT_MAX,
   HEADER_SIZE,
-  // Chunk geometry constants
+  // Chunk geometry constants. `CHUNK_WIDTH`, `CHUNK_DEPTH`, `SEA_LEVEL`, `MIN_Y` and
+  // `MAX_Y` were here and unread — deleted by PR 33, see the header.
   Chunk,
-  CHUNK_WIDTH,
-  CHUNK_DEPTH,
   CHUNK_HEIGHT,
-  SEA_LEVEL,
-  MIN_Y,
-  MAX_Y,
-  // Block registry — renumbering reinterprets every saved chunk
+  // Block registry — renumbering reinterprets every saved chunk. `BLOCK_BY_ID` and
+  // `BLOCK_BY_NAME` were here and unread — deleted by PR 33, see the header.
   BLOCK_REGISTRY,
   BLOCK_TYPES,
-  BLOCK_BY_ID,
-  BLOCK_BY_NAME,
   // Live session state — set by publishGameState() below, null until a game starts.
   state: null,
 };

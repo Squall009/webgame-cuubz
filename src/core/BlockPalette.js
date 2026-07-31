@@ -16,14 +16,12 @@ export class BlockPalette {
    * without needing it in inventory.
    */
   constructor() {
-    // Import BLOCK_TYPES when available, use defaults otherwise
+    // D-27: `typeof BLOCK_TYPES !== 'undefined' ? BLOCK_TYPES : null` and the `if (bt)`
+    // it fed were a constant-true pair — `BLOCK_TYPES` is a module import — so the
+    // hard-coded `else` list was unreachable. The `try`/`catch` below is a separate
+    // guard (`_getPlaceableBlocks` iterating a malformed table) and stays.
     try {
-      const bt = typeof BLOCK_TYPES !== 'undefined' ? BLOCK_TYPES : null;
-      if (bt) {
-        this._availableBlocks = this._getPlaceableBlocks(bt);
-      } else {
-        this._availableBlocks = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14];
-      }
+      this._availableBlocks = this._getPlaceableBlocks(BLOCK_TYPES);
     } catch (e) {
       // Fallback: basic block types for testing without full module
       this._availableBlocks = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14];
@@ -31,9 +29,9 @@ export class BlockPalette {
 
     // Default selected block: Stone. Resolve by name — this was hard-coded to 3,
     // which stopped being stone when the blocks were renumbered (3 is cobblestone).
-    this.selectedBlock = (typeof BLOCK_TYPES !== 'undefined' && BLOCK_TYPES.STONE !== undefined)
-      ? BLOCK_TYPES.STONE
-      : 3;
+    // D-27: the `typeof BLOCK_TYPES !== 'undefined' &&` half is dead (module import);
+    // the `.STONE !== undefined` half is a real table lookup and stays.
+    this.selectedBlock = BLOCK_TYPES.STONE !== undefined ? BLOCK_TYPES.STONE : 3;
 
     // Callback for UI updates
     this.onSelectionChange = null;

@@ -12,7 +12,15 @@
  * The `pageOrigin` parameter this function used to take is gone — `BUGS.md` **D-46**. It
  * was documented as a test override and **no line of the function ever read it**, in nine
  * of nine call sites that passed nothing. The override that works is the `?relayUrl=`
- * query parameter below, and it is what `test/e2e/saveLoad.js` points at a local relay.
+ * query parameter below.
+ *
+ * **D-82:** that last sentence used to name `test/e2e/saveLoad.js` as the harness that
+ * uses `?relayUrl=`. It never did — `saveLoad.js` is the single-player save/load harness
+ * and never opens a relay connection at all. The file that points this parameter at a
+ * local relay is **`test/e2e/multiplayer.js`** (PR 31), which spawns a relay child on a
+ * fixed port and loads the page with `?relayUrl=ws://localhost:<port>`. Naming the wrong
+ * harness is worse than naming none: it sends anyone changing this function to a file
+ * whose 189 assertions cannot go red for it.
  */
 
 /**

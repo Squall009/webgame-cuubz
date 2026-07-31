@@ -5,15 +5,29 @@
 
 import { it } from 'vitest';
 import { legacy } from '../../helpers/legacy.js';
-import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-// `server/` is CommonJS. `createRequire` loads it as CommonJS rather than
-// guessing at named-export interop. PR 33 makes `server/` an ES module and
-// these become ordinary imports.
-const cjsRequire = createRequire(import.meta.url);
-const Matchmaking = cjsRequire('../../../server/matchmaking');
-const SessionManager = cjsRequire('../../../server/session');
-const pkg = cjsRequire('../../../server/package.json');
+// `server/` is a Node ES module since PR 33 (`server/package.json` has
+// `"type": "module"`), so these are ordinary imports. They were `createRequire`
+// calls, which is what a CommonJS relay cost every file that wanted to drive it.
+import Matchmaking from '../../../server/matchmaking.js';
+import SessionManager from '../../../server/session.js';
+// `fs`, not `import pkg from '…json'`. A bare JSON import is legal here only because
+// Vite transforms it; plain Node ESM requires `with { type: 'json' }` and throws
+// ERR_IMPORT_ATTRIBUTE_MISSING without it, so the import shape would have made this
+// file the one thing in the suite that could not run outside Vitest. Found by PR 33's
+// adversarial pass.
+const pkg = JSON.parse(
+  fs.readFileSync(new URL('../../../server/package.json', import.meta.url), 'utf8')
+);
+
+// Group 9 used to be `cjsRequire.resolve(...)`. Both specifiers below carry their own
+// extension, so `require.resolve` did exactly this and nothing more: resolve the
+// relative specifier against this file and confirm a file is there. `import()` is NOT
+// the replacement for the `index.js` one — importing it starts a real relay on port
+// 8765, which is why that assertion was never a load in the first place.
+const resolveFromHere = (rel) => fileURLToPath(new URL(rel, import.meta.url));
 
 it('server', () => legacy(async () => {
 let passCount = 0;
@@ -192,24 +206,22 @@ assert(true, 'Double dispose does not throw');
 console.log('\nGroup 9: Server entry point');
 
 // Verify server files exist and are valid JS
-try {
-  cjsRequire.resolve('../../../server/index.js');
-  assert(true, 'server/index.js is a valid module');
-} catch (e) {
-  assert(false, 'server/index.js failed to resolve: ' + e.message);
-}
+assert(fs.existsSync(resolveFromHere('../../../server/index.js')),
+  'server/index.js resolves from this file');
 
-try {
-  cjsRequire.resolve('../../../server/package.json');
-  assert(true, 'server/package.json exists');
-} catch (e) {
-  assert(false, 'server/package.json not found');
-}
+assert(fs.existsSync(resolveFromHere('../../../server/package.json')),
+  'server/package.json exists');
 
 // Verify package.json has ws dependency
 
 assert(pkg.dependencies && pkg.dependencies.ws, 'package.json has ws dependency');
 assert(pkg.scripts && pkg.scripts.start, 'package.json has start script');
+
+// PR 33. This is what made `shared/protocol.js` importable from both the browser
+// bundle and the relay with one copy: the module type is declared HERE, in
+// `server/`, and not at the repo root — where it would also reclassify `scripts/`
+// and `test/e2e/`, which are genuinely CommonJS (eslint.config.mjs:7-14).
+assert(pkg.type === 'module', 'server/package.json declares "type": "module"');
 
 // ─── Group 10: Heartbeat tracking ──────────────────────────────
 

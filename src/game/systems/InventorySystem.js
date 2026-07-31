@@ -79,8 +79,9 @@ import { StackMethods } from './InventoryStacks.js';
 
 // Re-exported under their original names so no importer has to change. The definitions
 // moved to files that sit BELOW this one in the import graph — `src/` has no import cycles
-// and must not gain one, because `test/helpers/esmRequire.js` resolves a cycle to
-// `undefined` rather than to the value (D-28).
+// and must not gain one. (D-82: this cited `test/helpers/esmRequire.js` resolving a cycle
+// to `undefined` rather than to the value (D-28). PR 31 deleted that hook; Vitest loads
+// real ES modules. The rule stands; the automatic early warning for breaking it does not.)
 export { ITEM_CATEGORIES, MAX_STACKS, NAMED_ITEMS };
 export { EQUIPMENT_SLOTS, EQUIPMENT_SLOT_ORDER, getEquipmentSlotForItem };
 
@@ -167,10 +168,14 @@ export class Inventory {
   }
 
   /**
-   * Set slot data directly (internal use)
+   * Set slot data directly (internal use).
+   *
+   * **D-76.** `count` is clamped to the item's own `getMaxStack`. See `_capCount` below
+   * for why, and for why it is loud.
    */
   setSlot(index, item) {
     if (index < 0 || index >= this.totalSlots) return false;
+    this._capCount(item, `setSlot(${index})`);
     const old = this.slots[index];
     this.slots[index] = item;
     if (!this._slotsEqual(old, item)) {
@@ -306,10 +311,14 @@ export class Inventory {
 
     for (const slotData of (data.slots || [])) {
       if (slotData.index >= 0 && slotData.index < inv.totalSlots) {
-        inv.slots[slotData.index] = {
+        const restored = {
           typeId: slotData.typeId,
           count: Math.max(1, slotData.count),
         };
+        // D-76. `Math.max(1, …)` was the ONLY bound: the upper end was open, so a save
+        // holding `{ typeId: 3, count: 9999 }` round-tripped intact.
+        inv._capCount(restored, `deserialize(slot ${slotData.index})`);
+        inv.slots[slotData.index] = restored;
       }
     }
 
@@ -317,10 +326,12 @@ export class Inventory {
     if (data.equipment) {
       for (const slot of EQUIPMENT_SLOT_ORDER) {
         if (data.equipment[slot]) {
-          inv.equipment[slot] = {
+          const restored = {
             typeId: data.equipment[slot].typeId,
             count: Math.max(1, data.equipment[slot].count),
           };
+          inv._capCount(restored, `deserialize(equipment.${slot})`);
+          inv.equipment[slot] = restored;
         }
       }
     }

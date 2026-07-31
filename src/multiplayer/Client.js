@@ -13,11 +13,16 @@
 
 import { CuubzLogger } from '../util/Logger.js';
 
-'use strict';
+// D-82: a `'use strict';` stood here, AFTER the import. An ES module is strict already,
+// and a directive prologue must be the first statement in the body — after an import it
+// is just a discarded string expression. No-op twice over. Same line, same fix, in
+// `src/multiplayer/Host.js`.
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
-export var _clientLog;
-if (typeof CuubzLogger !== 'undefined') { _clientLog = CuubzLogger.log; } else { _clientLog = function() {}; }
+// D-27: the `typeof CuubzLogger !== 'undefined'` test and its `else` branch are gone —
+// `CuubzLogger` is a module import, so the fallback was unreachable. `var` is deliberate
+// (globalCollisions.test.js asserts `^(export )?var _clientLog`).
+export var _clientLog = CuubzLogger.log;
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -38,42 +43,42 @@ export const DEFAULT_CONFIG = {
   messageQueueSize: 500,       // Max queued messages before dropping oldest
 };
 
-// Message types matching server protocol (session.js + matchmaking.js)
-export const MESSAGE_TYPES = {
-  // Client → Server (Game Session)
-  JOIN: 'JOIN',
-  LEAVE: 'LEAVE',
-  MOVE: 'MOVE',
-  BREAK_BLOCK: 'BREAK_BLOCK',
-  PLACE_BLOCK: 'PLACE_BLOCK',
-  INVENTORY_UPDATE: 'INVENTORY_UPDATE',
-  QUEST_UPDATE: 'QUEST_UPDATE',
-  HEARTBEAT: 'HEARTBEAT',
+// The 24-key `MESSAGE_TYPES` that used to be declared here was one of three copies of
+// the protocol — `server/session.js` had a 10-key one, `server/matchmaking.js` had no
+// symbol at all and 14 bare strings. All three are now `shared/protocol.js`, whose
+// header carries the arithmetic. This is a **plain relative import**: `shared/` is
+// inside the Vite project root, so the bundle picks it up with no alias and
+// `vite.config.js` did not change.
+//
+// Re-exported because it was exported from here, and `test/unit/multiplayer/
+// multiplayerClient.test.js` and everything else that reached for it still can.
+import { MESSAGE_TYPES } from '../../shared/protocol.js';
+export { MESSAGE_TYPES };
 
-  // Client → Server (Matchmaking)
-  HOST: 'HOST',
-  BROWSE: 'BROWSE',
-
-  // Server → Client (Game Session)
-  WELCOME: 'WELCOME',
-  PLAYER_JOINED: 'PLAYER_JOINED',
-  PLAYER_LEFT: 'PLAYER_LEFT',
-  PLAYER_MOVE: 'PLAYER_MOVE',
-  BLOCK_BREAK: 'BLOCK_BREAK',
-  BLOCK_PLACE: 'BLOCK_PLACE',
-  INVENTORY_SYNC: 'INVENTORY_SYNC',
-  CHUNK_DATA: 'CHUNK_DATA',
-
-  // Server → Client (Matchmaking)
-  HOST_CREATED: 'HOST_CREATED',
-  SESSION_LIST: 'SESSION_LIST',
-  JOIN_ACCEPTED: 'JOIN_ACCEPTED',
-  JOIN_REJECTED: 'JOIN_REJECTED',
-  LEFT_LOBBY: 'LEFT_LOBBY',
-
-  // Error handling
-  ERROR: 'ERROR',
-};
+/**
+ * Every event name that belongs to the **matchmaking** socket rather than the game
+ * session one. `disconnect` and `stateChange` are connection events, not protocol
+ * types, which is why this list is not simply a slice of `MESSAGE_TYPES`.
+ *
+ * ONE list, deliberately. This was written out three times — twice verbatim in `on()`
+ * and `off()`, and a third time, subtly different, in `_setupMatchmakingHandlers()`.
+ * D-78 is exactly what that costs: `HOST_REJECTED` reached none of the three, so the
+ * relay's refusal arrived on the socket, was never routed, and the lobby sat in
+ * "connecting" with nothing on screen. `_setupMatchmakingHandlers` derives its own
+ * list from this one below rather than keeping a fourth copy.
+ */
+export const MATCHMAKING_EVENTS = Object.freeze([
+  MESSAGE_TYPES.SESSION_LIST,
+  MESSAGE_TYPES.HOST_CREATED,
+  MESSAGE_TYPES.HOST_REJECTED,
+  MESSAGE_TYPES.JOIN_ACCEPTED,
+  MESSAGE_TYPES.JOIN_REJECTED,
+  MESSAGE_TYPES.LEFT_LOBBY,
+  MESSAGE_TYPES.ERROR,
+  MESSAGE_TYPES.WELCOME,
+  'disconnect',
+  'stateChange',
+]);
 
 // ─── Message Queue ──────────────────────────────────────────────────
 
@@ -371,15 +376,15 @@ export class WSConnection {
     if (!data || !data.type) return;
 
     // Special handling for heartbeat responses
-    if (data.type === 'HEARTBEAT_ACK') {
+    if (data.type === MESSAGE_TYPES.HEARTBEAT_ACK) {
       this._clearHeartbeatTimeout();
       return;
     }
 
     // Debug: log only important messages (not PLAYER_MOVE or INVENTORY_SYNC)
     const label = this.url.includes('/session/') ? '[GAME]' : '[MATCH]';
-    if (data.type !== 'PLAYER_MOVE' && data.type !== 'INVENTORY_SYNC') {
-      console.log(`${label} recv: ${data.type}`, data.type === 'CHUNK_DATA' ? `chunk ${data.chunkX},${data.chunkZ}` : JSON.stringify(data).substring(0, 200));
+    if (data.type !== MESSAGE_TYPES.PLAYER_MOVE && data.type !== MESSAGE_TYPES.INVENTORY_SYNC) {
+      console.log(`${label} recv: ${data.type}`, data.type === MESSAGE_TYPES.CHUNK_DATA ? `chunk ${data.chunkX},${data.chunkZ}` : JSON.stringify(data).substring(0, 200));
     }
 
     // Route to event handlers
@@ -576,14 +581,27 @@ export class WSConnection {
     });
   }
 
-  /** Send HOST message to matchmaking */
-  sendHost(name, worldSeed, mode) {
-    this.send({
+  /**
+   * Send HOST message to matchmaking.
+   *
+   * `maxPlayers` is D-84: the host form read `#host-max-players`, `SessionHosting.js:87`
+   * passed it to `hostSession()`, and it stopped there — this method had no such
+   * parameter and the message had no such field, so `server/index.js` hard-coded 4 and a
+   * host who limited a session to 2 got 4. It is omitted from the payload entirely when
+   * the caller does not supply one, so the relay's "missing → default" path is what an
+   * old client still gets.
+   */
+  sendHost(name, worldSeed, mode, maxPlayers) {
+    const msg = {
       type: MESSAGE_TYPES.HOST,
       name,
       worldSeed,
       mode: mode || 'survival',
-    });
+    };
+    if (maxPlayers !== undefined && maxPlayers !== null) {
+      msg.maxPlayers = maxPlayers;
+    }
+    this.send(msg);
   }
 
   /** Send BROWSE message to matchmaking */
@@ -739,11 +757,7 @@ export class MultiplayerClient {
    * Used by SessionManager for simple event wiring.
    */
   on(eventType, callback) {
-    const matchmakingEvents = [
-      'SESSION_LIST', 'HOST_CREATED', 'JOIN_ACCEPTED', 'JOIN_REJECTED',
-      'LEFT_LOBBY', 'ERROR', 'disconnect', 'stateChange', 'WELCOME',
-    ];
-    if (matchmakingEvents.includes(eventType)) {
+    if (MATCHMAKING_EVENTS.includes(eventType)) {
       this.onMatchmaking(eventType, callback);
     } else {
       this.onGame(eventType, callback);
@@ -751,11 +765,7 @@ export class MultiplayerClient {
   }
 
   off(eventType, callback) {
-    const matchmakingEvents = [
-      'SESSION_LIST', 'HOST_CREATED', 'JOIN_ACCEPTED', 'JOIN_REJECTED',
-      'LEFT_LOBBY', 'ERROR', 'disconnect', 'stateChange', 'WELCOME',
-    ];
-    if (matchmakingEvents.includes(eventType)) {
+    if (MATCHMAKING_EVENTS.includes(eventType)) {
       this.offMatchmaking(eventType, callback);
     } else {
       this.offGame(eventType, callback);
@@ -796,26 +806,24 @@ export class MultiplayerClient {
     if (!this._matchmakingConn) return;
 
     // Route WELCOME to capture player ID
-    this._matchmakingConn.on('WELCOME', (data) => {
+    this._matchmakingConn.on(MESSAGE_TYPES.WELCOME, (data) => {
       if (data.playerId) {
         this._playerId = data.playerId;
       }
-      this._emitMatchmaking('WELCOME', data);
+      this._emitMatchmaking(MESSAGE_TYPES.WELCOME, data);
     });
 
-    // Route all other matchmaking events
-    const sessionEvents = [
-      'HOST_CREATED', 'SESSION_LIST', 'JOIN_ACCEPTED', 'JOIN_REJECTED',
-      'LEFT_LOBBY', 'ERROR', 'disconnect', 'stateChange',
-    ];
+    // Route all other matchmaking events. Derived from MATCHMAKING_EVENTS rather than
+    // written out again — a private copy here is how HOST_REJECTED went missing (D-78).
+    const sessionEvents = MATCHMAKING_EVENTS.filter((e) => e !== MESSAGE_TYPES.WELCOME);
     for (const eventType of sessionEvents) {
       this._matchmakingConn.on(eventType, (data) => {
         // Auto-connect to game session when join is accepted
-        if (eventType === 'JOIN_ACCEPTED' && data.sessionId) {
+        if (eventType === MESSAGE_TYPES.JOIN_ACCEPTED && data.sessionId) {
           this._connectToGameSession(data.sessionId);
         }
         // Auto-connect to game session when host is created
-        if (eventType === 'HOST_CREATED' && data.sessionId) {
+        if (eventType === MESSAGE_TYPES.HOST_CREATED && data.sessionId) {
           this._connectToGameSession(data.sessionId);
         }
         this._emitMatchmaking(eventType, data);
@@ -886,15 +894,15 @@ export class MultiplayerClient {
     if (!this._gameSessionConn) return;
 
     const gameEvents = [
-      'WELCOME', 'PLAYER_JOINED', 'PLAYER_LEFT', 'PLAYER_MOVE',
-      'BLOCK_BREAK', 'BLOCK_PLACE', 'INVENTORY_SYNC', 'CHUNK_DATA',
-      'TIME_SYNC',
-      'ERROR', 'disconnect', 'stateChange',
+      MESSAGE_TYPES.WELCOME, MESSAGE_TYPES.PLAYER_JOINED, MESSAGE_TYPES.PLAYER_LEFT,
+      MESSAGE_TYPES.PLAYER_MOVE, MESSAGE_TYPES.BLOCK_BREAK, MESSAGE_TYPES.BLOCK_PLACE,
+      MESSAGE_TYPES.INVENTORY_SYNC, MESSAGE_TYPES.CHUNK_DATA, MESSAGE_TYPES.TIME_SYNC,
+      MESSAGE_TYPES.ERROR, 'disconnect', 'stateChange',
     ];
     for (const eventType of gameEvents) {
       this._gameSessionConn.on(eventType, (data) => {
         // Capture session ID from WELCOME
-        if (eventType === 'WELCOME' && data.sessionId) {
+        if (eventType === MESSAGE_TYPES.WELCOME && data.sessionId) {
           this._currentSessionId = data.sessionId;
         }
         this._emitGame(eventType, data);
@@ -933,15 +941,25 @@ export class MultiplayerClient {
     }
   }
 
-  /** Host a new session */
-  hostSession(name, worldSeed, mode) {
+  /**
+   * Host a new session.
+   *
+   * @param {string|{name: string, seed: number, mode: string, maxPlayers?: number}} name
+   * @param {number} [worldSeed]
+   * @param {string} [mode]
+   * @param {number} [maxPlayers] — session cap. The relay clamps it; see D-84 on
+   *   `sendHost` above for why it used to go no further than this destructure.
+   */
+  hostSession(name, worldSeed, mode, maxPlayers) {
     if (this._matchmakingConn) {
       // Support both positional args and object param for SessionManager compatibility
       if (typeof name === 'object' && name !== null) {
-        const { name: sessionName, seed, mode: gameMode } = name;
-        this._matchmakingConn.sendHost(sessionName, seed, gameMode);
+        // D-84: `maxPlayers` was NOT in this destructure, so `SessionHosting.js`'s
+        // fourth property was read off the object by nobody and silently discarded.
+        const { name: sessionName, seed, mode: gameMode, maxPlayers: cap } = name;
+        this._matchmakingConn.sendHost(sessionName, seed, gameMode, cap);
       } else {
-        this._matchmakingConn.sendHost(name, worldSeed, mode);
+        this._matchmakingConn.sendHost(name, worldSeed, mode, maxPlayers);
       }
     }
   }

@@ -43,16 +43,20 @@
   cursor: pointer;
 }
 
-/* Host select row: dropdown + button side by side */
-.host-select-row {
-  display: flex;
-  gap: var(--space-sm);
-  margin-bottom: 0;
-}
+/* ─── D-81 (3) — A DUPLICATE PAIR OF RULES LIVED HERE ───────────────────────
+   `.host-select-row` and `.host-select-row select` were declared TWICE in this one
+   file, ~35 lines apart, under the same copy-pasted comment, with conflicting values:
+   `gap: var(--space-sm)` / `margin-bottom: 0` here, and `gap: var(--space-md)` /
+   `align-items: center` / `margin-bottom: var(--space-lg)` below. Equal specificity,
+   same file, so the LOWER pair won every property it declared and this one contributed
+   nothing at all — while reading, at a glance, like the definition.
 
-.host-select-row select {
-  flex: 1;
-}
+   The dead copy is deleted rather than merged, which is why this change is provably
+   render-neutral: every declaration that was winning before is still the only one
+   present, `margin-bottom` and `gap` included, and `.host-select-row select { flex: 1 }`
+   was byte-identical in both. Deleting the LOSER of a same-file duplicate cannot change
+   a computed style. The surviving pair is at the bottom of this file's base rules, still
+   ahead of the 600px block that overrides `.host-select-row button`. */
 
 /* Inline creation forms (collapsed by default) */
 .host-inline-form {

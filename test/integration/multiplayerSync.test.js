@@ -15,16 +15,14 @@
 
 import { it } from 'vitest';
 import { legacy } from '../helpers/legacy.js';
-import { createRequire } from 'node:module';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 
-// `server/` is CommonJS. `createRequire` loads it as CommonJS rather than
-// guessing at named-export interop. PR 33 makes `server/` an ES module and
-// these become ordinary imports.
-const cjsRequire = createRequire(import.meta.url);
-const Matchmaking = cjsRequire('../../server/matchmaking');
-const SessionManager = cjsRequire('../../server/session');
+// `server/` is a Node ES module since PR 33 (`server/package.json` has
+// `"type": "module"`), so these are ordinary imports. They were `createRequire`
+// calls, which is what a CommonJS relay cost every file that wanted to drive it.
+import Matchmaking from '../../server/matchmaking.js';
+import SessionManager from '../../server/session.js';
 
 it('multiplayerSync', () => legacy(async () => {
 // ─── Test Harness ──────────────────────────────────────────────

@@ -28,7 +28,9 @@ export function initChunkStreaming(game) {
 
   // ─── Initialize ChunkStreamer (host-side proactive chunk streaming) ───
   let chunkStreamer = null;
-  if (typeof ChunkStreamer !== 'undefined' && sm && sm.hostingSessionId) {
+  // D-27: the `typeof ChunkStreamer !== 'undefined' &&` half is gone (module import);
+  // `sm && sm.hostingSessionId` is the real guard — only the host streams chunks.
+  if (sm && sm.hostingSessionId) {
     chunkStreamer = new ChunkStreamer({
       chunkGrid: chunkManager,
       options: {

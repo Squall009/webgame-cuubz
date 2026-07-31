@@ -48,7 +48,40 @@
  */
 
 /** The one seed-rejection message. Paths 4 and 5 had byte-identical logic and two strings. */
-export const SEED_ERROR = 'Seed must be a valid integer (or leave blank for random)';
+export const SEED_ERROR = 'Seed must be a valid integer';
+
+/**
+ * ─── D-62's CURE — A BLANK SEED IS AN ERROR, NOT A FRESH RANDOM ─────────────
+ *
+ * Both world forms **pre-fill** the seed field with `randomSeed()` when they open
+ * (`WorldScreen.openCreateModal`, `LobbyForms.initHostForm`'s `prefill`). That prefill is
+ * a real feature and it stays: the player sees the number that will be used and may edit
+ * it. `WorldManager.generateSeed()` stays too — it is what `createWorld(name)` uses when
+ * no seed is supplied programmatically, and `test/unit/game/worldManager.test.js` drives
+ * that path directly.
+ *
+ * What is removed is the SECOND random draw. A blank `#world-seed` used to travel as
+ * `parseSeed('') → {seed: undefined} → createWorld(name, undefined) → generateSeed()`,
+ * so a field that had been pre-filled with one random uint32 and then emptied produced a
+ * *different* random uint32 — and the created world looked, byte for byte, exactly like a
+ * world created from a seed the player chose. That is why the e2e flake in
+ * `test/e2e/saveLoad.js:348` was silent rather than loud: a `page.fill` on `#world-seed`
+ * that did not take is **indistinguishable from a successful one** when both outcomes are
+ * "some random uint32", and the run failed later, elsewhere, as a terrain mismatch.
+ *
+ * PR 31 landed the detector in the harness (`fillChecked`). This is the cure in `src/`:
+ * at create time the seed field must say something, and a form that reaches the manager
+ * with nothing in it is reported to the person in front of it.
+ *
+ * WHY HERE AND NOT IN `parseSeed`: `parseSeed` answers "what integer is in this string?",
+ * and `undefined` — "no seed was supplied" — is a truthful answer to that question, one
+ * that `submitCreate`'s `submit` override path and `WorldManager.createWorld`'s own
+ * optional-parameter contract both still rely on. What changed is the create-form
+ * POLICY: this one caller refuses to proceed on "nothing". Pushing the refusal into the
+ * parser would also have made `WorldManager.createWorld(name)` unreachable from the UI
+ * while leaving it reachable from tests, i.e. two contracts for one function.
+ */
+export const BLANK_SEED_ERROR = 'Enter a seed — the field cannot be left blank';
 
 /**
  * May a create form be opened at all?
@@ -89,8 +122,13 @@ export function randomSeed() {
 }
 
 /**
- * Blank means "random, let the generator pick"; anything non-numeric is **rejected**
- * rather than silently falling back, so a typo cannot quietly produce a different world.
+ * Parse the seed field. Anything non-numeric is **rejected** rather than silently falling
+ * back, so a typo cannot quietly produce a different world.
+ *
+ * Blank parses to `seed: undefined` — "no seed was supplied", which is what
+ * `WorldManager.createWorld`'s optional second parameter means. It is `submitCreate`
+ * below, not this function, that refuses to create a world from it; see
+ * `BLANK_SEED_ERROR` for why the policy lives one layer up.
  *
  * @param {string} raw
  * @returns {{ok: true, seed: number|undefined}|{ok: false, error: string}}
@@ -155,6 +193,14 @@ export async function submitCreate({ manager, noun, name, extra, errorEl, onSucc
     const parsed = parseSeed(extra);
     if (!parsed.ok) {
       setBanner(errorEl, parsed.error);
+      return null;
+    }
+    // D-62's cure. Both forms prefill this field; arriving here with nothing in it means
+    // the player cleared it or a script's `fill` did not take, and silently drawing a
+    // fresh random uint32 makes those two outcomes indistinguishable from a chosen seed.
+    // See BLANK_SEED_ERROR at the top of this file.
+    if (parsed.seed === undefined) {
+      setBanner(errorEl, BLANK_SEED_ERROR);
       return null;
     }
     result = await manager.createWorld(name, parsed.seed);

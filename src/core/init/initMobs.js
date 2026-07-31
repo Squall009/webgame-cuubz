@@ -51,9 +51,7 @@ export function initMobs(game) {
   // ══ Step 10 — first-person hand ═══════════════════════════════════════════════════════
 
   // ─── Initialize First-Person Hand ──────────────
-  let firstPersonHand = null;
-  if (typeof FirstPersonHand !== 'undefined') {
-    firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas: state.itemAtlas });
-  }
-  state.firstPersonHand = firstPersonHand;
+  // D-27: was wrapped in `if (typeof FirstPersonHand !== 'undefined')`, whose `null`
+  // fall-through was unreachable — `FirstPersonHand` is a module import.
+  state.firstPersonHand = new FirstPersonHand(renderer.camera, { itemAtlas: state.itemAtlas });
 }

@@ -25,8 +25,11 @@ import { BLOCK_PROPERTIES, BLOCK_TYPES, getBlockDrop } from '../../engine/world/
 // host.js, game.js) happened to load last. Those were renamed on 2026-07-29
 // (refactor.md §2.1 / PR 3), so this file now owns its logger explicitly — otherwise
 // breaking or placing a block would throw ReferenceError.
-export var _interactionLog;
-if (typeof CuubzLogger !== 'undefined') { _interactionLog = CuubzLogger.log; } else { _interactionLog = function() {}; }
+//
+// D-27: the `typeof CuubzLogger !== 'undefined'` test and its `else` branch are gone —
+// `CuubzLogger` is a module import, so the fallback was unreachable. `var` is deliberate
+// (globalCollisions.test.js asserts `^(export )?var _interactionLog`).
+export var _interactionLog = CuubzLogger.log;
 
 export class BlockInteraction {
   /**

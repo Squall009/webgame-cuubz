@@ -218,43 +218,36 @@
     grid-template-columns: repeat(9, 36px);
     grid-template-rows: repeat(4, 36px);
   }
+  /* ─── D-81 (2) — `min-width` BEATS `width`, AND THIS GRID FORGOT IT ───────
+     `overlays/inventory.css` sizes `.inventory-slot` at 56px and `responsive.css:76`
+     re-sizes it at this same breakpoint to `width:56px; min-width:48px` for a touch
+     target. `min-width` is not overridden by a later `width` — the used width is
+     `max(min-width, width)` — so this rule's `width: 36px` was computed and then
+     ignored, and every slot rendered at **48px inside a 36px grid track**.
+     9 x 48 = 432px of slots in a `repeat(9, 36px)` = 348px grid, on a viewport that is
+     600px or less: the grid overflowed its container on every phone.
+
+     The fix is the two `min-*` properties, not a source-order move. `#crafting-inv-grid
+     .inventory-slot` is (1,1,0) against `.inventory-slot`'s (0,1,0), so it wins on
+     SPECIFICITY and cannot be re-broken by a future @import reshuffle — which is the
+     property worth having in a stylesheet whose order is load-bearing (D-52).
+
+     36px is what this file already declared it wanted and is a deliberate, local
+     exception to responsive.css's 48px touch-target floor: nine columns do not fit in
+     348px at 48px, so the choice is 36px slots or a grid that overflows the screen.
+     The 48px floor still applies to every OTHER `.inventory-slot` on the page. */
   #crafting-inv-grid .inventory-slot {
     width: 36px;
     height: 36px;
+    min-width: 36px;
+    min-height: 36px;
   }
   .recipe-name {
     font-size: 11px;
   }
 
-  /* Equipment panel — mobile: stack below inventory */
-  .equipment-panel {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: var(--space-md);
-    min-width: unset;
-  }
-
-  .equipment-slots {
-    flex-direction: row;
-    gap: var(--space-sm);
-  }
-
-  .equipment-slot {
-    width: 56px;
-    height: 64px;
-  }
-
-  .equipment-slot .equip-slot-icon {
-    width: 36px;
-    height: 36px;
-  }
-
-  .equip-slot-label {
-    font-size: 8px;
-  }
-
-  .equipment-stats {
-    font-size: 11px;
-  }
+  /* D-81 (1): the `.equipment-*` half of this media block MOVED to the end of
+     `screens/equipment.css`. It sat here, and `index.css` imports this file one line
+     BEFORE `equipment.css`, so every rule in it was overridden by the base rule it
+     existed to override — equal specificity, later source. See equipment.css. */
 }

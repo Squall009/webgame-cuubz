@@ -9,9 +9,9 @@
  * and the raycast below read them first. Nothing may be inserted between the raycast
  * and that call.
  *
- * The `typeof NAMED_ITEMS !== 'undefined'` guard below is **moved, not written** —
- * decision 29 lets a mechanical extraction carry a dead cross-module `typeof` guard
- * across unchanged. `BUGS.md` D-27 / PR 33 own the sweep.
+ * PR 33 / D-27 removed the `typeof NAMED_ITEMS !== 'undefined' &&` half of the weapon
+ * lookup below. `NAMED_ITEMS` is a module import, so the guard was constant-true; the
+ * `NAMED_ITEMS[item.typeId]` lookup it short-circuited is the whole expression now.
  */
 
 import * as THREE from 'three';
@@ -45,7 +45,7 @@ export function combatStep(state) {
           let attackCooldown = 0.25; // Default fist speed (4 att/sec)
           const item = state.inventory.getSelectedItem();
           if (item && typeof item.typeId === 'string') {
-            const def = (typeof NAMED_ITEMS !== 'undefined' && NAMED_ITEMS[item.typeId]);
+            const def = NAMED_ITEMS[item.typeId];
             if (def && def.attackSpeed !== undefined) {
               const actualSpeed = 4.0 + def.attackSpeed;
               if (actualSpeed > 0) {

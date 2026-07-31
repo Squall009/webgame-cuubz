@@ -38,7 +38,9 @@
  */
 
 import * as THREE from 'three';
-// Single-line named imports, the shape `test/helpers/esmRequire.js` understands.
+// D-82: split across two lines because `test/helpers/esmRequire.js` could only read
+// single-line named imports. **PR 31 deleted that hook** — Vitest loads real ES modules —
+// so this is now a formatting choice, not a constraint. Left as-is; see SkyRenderer.js.
 import { formatGameTime, getAmbientIntensityForTime, getFogDensityForTime, getMoonIntensity, getSkyPhase } from '../data/DayNightCurves.js';
 import { getSunAngleForTime, getSunColorForTime, getSunIntensity, getTimeOfDayLabel, hoursToFraction, isDaytime } from '../data/DayNightCurves.js';
 

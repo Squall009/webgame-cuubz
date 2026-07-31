@@ -376,7 +376,9 @@ export class PlayerSyncManager {
     // 'can this process build three.js meshes with DOM-backed canvas textures' — so
     // it is computed from the thing that actually varies. Browser: true, as before.
     // Node: false, as before. Only the test that reads it needed its message updated.
-    this._threeLoaded = typeof THREE !== 'undefined' && typeof document !== 'undefined';
+    // PR 33 / D-27 deleted the now-constant `typeof THREE !== 'undefined' &&` half;
+    // `typeof document` is the half that was doing the work and it is unchanged.
+    this._threeLoaded = typeof document !== 'undefined';
 
     // Callbacks
     this.onPlayerAdded = null;
@@ -667,8 +669,7 @@ export class PlayerSyncManager {
    * Create a health bar above the player.
    */
   _createHealthBar(player) {
-    if (typeof THREE === 'undefined') return;
-
+    // D-27: `if (typeof THREE === 'undefined') return;` removed — constant-false.
     const canvas = document.createElement('canvas');
     canvas.width = 128;
     canvas.height = 16;

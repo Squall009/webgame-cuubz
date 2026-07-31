@@ -67,7 +67,7 @@ import { attemptAutoRejoin } from '../multiplayer/AutoRejoin.js';
 import { clearLastSession } from '../util/StorageHelper.js';
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
-const _log = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+const _log = CuubzLogger.log;
 
 // ============================================================
 // Module state

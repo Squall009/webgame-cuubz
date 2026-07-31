@@ -25,7 +25,7 @@ import { JSDOM } from 'jsdom';
 import fs from 'fs';
 import path from 'path';
 import { initBrowseCreateChar, initHostForm } from '../../../src/ui/screens/LobbyForms.js';
-import { canOpen, hideBanner, parseSeed, randomHexColor, randomSeed, SEED_ERROR, setBanner, submitCreate, syncCreateButton } from '../../../src/ui/forms/createEntity.js';
+import { BLANK_SEED_ERROR, canOpen, hideBanner, parseSeed, randomHexColor, randomSeed, SEED_ERROR, setBanner, submitCreate, syncCreateButton } from '../../../src/ui/forms/createEntity.js';
 import { CharacterManager, DEFAULT_COLOR, MAX_CHARACTERS } from '../../../src/game/entities/CharacterManager.js';
 import { WorldManager, MAX_WORLDS } from '../../../src/game/entities/WorldManager.js';
 
@@ -181,6 +181,65 @@ await (async function run() {
   assertEquals(result.success, true, 'A padded numeric seed is accepted');
   assertEquals(result.world.seed, 4242, 'The parsed integer, not the string, reaches createWorld');
   assertEquals(seedBanner.classList.contains('hidden'), true, 'Success hides the banner again');
+
+  // ── D-62: a BLANK seed at create time is an error the user sees ────────────
+  //
+  // It used to travel `parseSeed('') → {seed: undefined} → createWorld(name, undefined) →
+  // WorldManager.generateSeed()`, so a field that had been PRE-FILLED with one random
+  // uint32 and then emptied produced a *different* random uint32 — and the resulting world
+  // was byte-indistinguishable from one created from a seed the player chose. That is why
+  // the e2e flake at `test/e2e/saveLoad.js:348` was silent: a `page.fill` that did not take
+  // and a `page.fill` that did produce the same SHAPE of result, and the run failed later,
+  // elsewhere, as a terrain mismatch. PR 31 landed the detector in the harness; this is the
+  // cure in `src/`.
+  console.log('\nGroup 4b: a blank world seed is refused (D-62)');
+
+  const blankBanner = makeBanner();
+  const wm3 = new WorldManager(makeStore());
+  await wm3.init();
+
+  for (const [raw, label] of [['', 'empty string'], ['   ', 'whitespace only'],
+    [undefined, 'no extra field at all'], ['\t\n ', 'tabs and newlines']]) {
+    const before = wm3.getAllWorlds().length;
+    const r = await submitCreate({
+      manager: wm3, noun: 'world', name: `Blank ${label}`, extra: raw, errorEl: blankBanner,
+    });
+    assertEquals(r, null, `A blank seed (${label}) stops before createWorld`);
+    assertEquals(wm3.getAllWorlds().length, before, `and creates no world (${label})`);
+    assertEquals(blankBanner.textContent, BLANK_SEED_ERROR, `and says why (${label})`);
+    assertEquals(blankBanner.classList.contains('hidden'), false, `and the banner is visible (${label})`);
+  }
+
+  // The two rejections are DIFFERENT messages: "not a number" and "nothing there" are
+  // different mistakes with different fixes, and one string for both is what the old
+  // `(or leave blank for random)` wording tried and failed to cover.
+  assert(BLANK_SEED_ERROR !== SEED_ERROR, 'A blank seed and a bad seed do not share one message');
+  assert(!/blank/i.test(SEED_ERROR),
+    'and SEED_ERROR no longer promises "leave blank for random", which is no longer true');
+
+  // `parseSeed` is UNCHANGED — the policy is `submitCreate`'s, not the parser's, so
+  // `WorldManager.createWorld(name)` keeps its optional-seed contract for its own callers.
+  assertEquals(parseSeed('').ok, true, 'parseSeed still ACCEPTS blank — it reports "no seed", it does not judge');
+  assertEquals(parseSeed('').seed, undefined, 'and still reports it as undefined');
+  const wmDirect = new WorldManager(makeStore());
+  await wmDirect.init();
+  const direct = await wmDirect.createWorld('Programmatic');
+  assertEquals(direct.success, true, 'WorldManager.createWorld(name) with no seed still works');
+  assert(typeof direct.world.seed === 'number', 'and still gets a generated seed — generateSeed() is intact');
+
+  // A seed that IS supplied is untouched by any of this, including a falsy one.
+  const wm4 = new WorldManager(makeStore());
+  await wm4.init();
+  const zero = await submitCreate({ manager: wm4, noun: 'world', name: 'Zero Seed', extra: '0', errorEl: blankBanner });
+  assertEquals(zero.success, true, 'Seed 0 is a real seed and is accepted — the guard is on undefined, not on falsy');
+  assertEquals(zero.world.seed, 0, 'and 0 reaches createWorld as 0');
+  const neg = await submitCreate({ manager: wm4, noun: 'world', name: 'Neg Seed', extra: '-7', errorEl: blankBanner });
+  assertEquals(neg.world.seed, -7, 'A negative seed still reaches createWorld unchanged');
+
+  // The prefill is the feature that makes the requirement painless, and it survives.
+  assert(/^\d+$/.test(randomSeed()), 'randomSeed still produces a fillable value for the prefill');
+  assertEquals(parseSeed(randomSeed()).ok, true, 'and what it produces is accepted by the parser');
+  assert(parseSeed(randomSeed()).seed !== undefined, 'so an untouched pre-filled form is never refused');
 
   console.log('\nGroup 5: submitCreate — the manager-level limit still surfaces');
 

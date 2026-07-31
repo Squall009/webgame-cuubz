@@ -111,15 +111,23 @@ call site in `src/`.
 > were re-read after the move; the rest are close, not exact. Grep for the value, not
 > the line. **The invariant values themselves did not change and must not.**
 
+> **D-82, PR 33:** the four storage citations in §2.1 below named
+> `src/engine/world/ChunkManager.js:50-53`. **PR 23 split that file into eleven** and the
+> four constants moved to `src/engine/world/ChunkConstants.js:23-26`, a leaf module that
+> imports nothing — `ChunkManager.js` re-exports all four under their original names, so
+> no importer changed and the move was invisible to every reader who trusted this table.
+> The citations are corrected; **the contract this section states is unchanged**, and
+> `DB_VERSION` is still `2`.
+
 ### 2.1 IndexedDB — worlds and terrain
 
 | Invariant | Location | Value |
 |---|---|---|
-| Database name | `src/engine/world/ChunkManager.js:50` | `'cuubz-worlds'` |
-| Database version | `src/engine/world/ChunkManager.js:51` | `2` — changing it is now a **procedure**, not a prohibition. See below |
-| Object store | `src/engine/world/ChunkManager.js:52`, `_ensureBaseSchema` | `'chunks'`, `keyPath: 'chunkKey'` |
+| Database name | `src/engine/world/ChunkConstants.js:23` | `'cuubz-worlds'` |
+| Database version | `src/engine/world/ChunkConstants.js:24` | `2` — changing it is now a **procedure**, not a prohibition. See below |
+| Object store | `src/engine/world/ChunkConstants.js:25`, `_ensureBaseSchema` | `'chunks'`, `keyPath: 'chunkKey'` |
 | Index on that store | `_ensureBaseSchema` | `'worldName'` → `worldName`, non-unique |
-| Object store | `src/engine/world/ChunkManager.js:53`, `_ensureBaseSchema` | `'manifests'`, `keyPath: 'worldName'` |
+| Object store | `src/engine/world/ChunkConstants.js:26`, `_ensureBaseSchema` | `'manifests'`, `keyPath: 'worldName'` |
 | **Chunk primary key format** | `ChunkManager.prototype._storeKey` | `` `${worldName}:${cx},${cz}` `` — e.g. `"world-1753...:-3,7"`. **Changed by PR 6c**; see below |
 | Logical chunk key format | `ChunkManager.key` | `` `${cx},${cz}` `` — e.g. `"-3,7"`. **Unchanged** |
 | Manifest primary key | `src/main.js:2329` | the world's `id` (`currentWorld.id`) |
@@ -196,8 +204,11 @@ call site in `src/`.
 >    (**D-23** — nothing enforces this yet).
 > 5. Run `npm run test:e2e` **and** `npm test`. Both drive a real 2 → 3 increment against
 >    a database seeded with real chunk and manifest records — the browser harness against
->    real IndexedDB, `test/test_chunkStorage.js` §17 against a stub, in CI. That pair is
->    what makes an increment survivable rather than merely intended.
+>    real IndexedDB, `test/unit/engine/chunkStorage.test.js` §17 against a stub, in CI.
+>    That pair is what makes an increment survivable rather than merely intended.
+>    (**D-82:** this cited `test/test_chunkStorage.js`, a path PR 31 deleted when it
+>    restructured the suite for Vitest. Since `test/integration/storageUpgrade.test.js`
+>    landed, `npm test` alone also drives a real 2 → 3 upgrade.)
 >
 > **Opening the database:** `ChunkManager.openDatabase()` is the only opener in the
 > codebase and it always names `DB_VERSION`. Do not add a second one — a caller that does
@@ -463,9 +474,17 @@ is in force locally.
 Steps 5–8 are a single `&&` chain in one `ssh` invocation. There is no `--delete`,
 no backup, no atomic swap, and no verification that the site still works afterwards.
 
-`PROJECT_NAME` comes from the **local directory name** (`sync.sh:10`), not from
+`PROJECT_NAME` comes from the **local directory name** (`sync-legacy.sh:10`), not from
 `package.json`. In a checkout named `webgame-cuubz` the remote archive is
 `/var/www/html/webgame-cuubz.tar.gz`. Renaming your local clone changes that filename.
+
+> **D-82, PR 33:** the citation above said `sync.sh:10`. This whole subsection describes
+> the **pre-PR-10** script, which is now `sync-legacy.sh` — the table's own header says
+> so — but the line reference still pointed at the rewritten `sync.sh`, whose line 10 is
+> a usage comment. The current script has no `PROJECT_NAME` at all: it packs to
+> `$(mktemp -t cuubz-app-XXXXXX).tar.gz` and stages it as
+> `/home/dadmin/cuubz-deploy/incoming/app-<STAMP>.tar.gz`, **outside** the web root.
+> That is D-7's fix, and it means the local directory name no longer affects anything.
 
 ### 4.1 Measured payload
 
@@ -904,14 +923,22 @@ This is roll-*forward*-to-old-code, not rollback. It is the only option today.
 git tag -l                       # pre-refactor-baseline is the Phase 0 rollback point
 git log --oneline -20
 
-# 2. Check it out into a SEPARATE directory. Do not do this in your working clone:
-#    sync.sh derives the remote archive name from the directory basename (sync.sh:10),
-#    and you want your own branch state left alone.
+# 2. Check it out into a SEPARATE directory. Do not do this in your working clone —
+#    you want your own branch state left alone, and `npm ci` below will rewrite
+#    node_modules. (D-82: this used to add "sync.sh derives the remote archive name from
+#    the directory basename (sync.sh:10)". PR 10 rewrote the script; it uses mktemp and
+#    a UTC stamp, and the directory name reaches nothing.)
 git worktree add ../cuubz-rollback pre-refactor-baseline
 cd ../cuubz-rollback
 
 # 3. Verify before shipping — the gates exist for exactly this moment.
-npm ci && npm test && npm run check-globals
+#    D-82: this line used to read `npm ci && npm test && npm run check-globals`.
+#    PR 11 DELETED scripts/check-globals.js and the npm script that ran it, so under
+#    `set -e`-style shell semantics this step failed with "Missing script: check-globals"
+#    and the rollback stopped here — in the one procedure that is only ever followed
+#    under pressure. The global-collision check did not go away: it is
+#    test/unit/meta/globalCollisions.test.js and `npm test` already runs it.
+npm ci && npm test
 
 # 4. Deploy it.
 ./sync.sh
@@ -923,10 +950,19 @@ ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz-relay'
 cd - && git worktree remove ../cuubz-rollback
 ```
 
-**Step 2 caveat:** the worktree directory is named `cuubz-rollback`, so `sync.sh` will
-stage `/var/www/html/cuubz-rollback.tar.gz` instead of `webgame-cuubz.tar.gz`
-(`sync.sh:10`). Harmless — it extracts to the same place — but if that deploy fails,
-the leftover archive has a different name than you might expect when cleaning up.
+**Step 2 caveat — DELETED, D-82.** This said: "the worktree directory is named
+`cuubz-rollback`, so `sync.sh` will stage `/var/www/html/cuubz-rollback.tar.gz` instead of
+`webgame-cuubz.tar.gz` (`sync.sh:10`) … if that deploy fails, the leftover archive has a
+different name than you might expect when cleaning up." **None of that is true of the
+current script.** PR 10 replaced the basename-derived name with
+`$(mktemp -t cuubz-app-XXXXXX).tar.gz`, staged as
+`/home/dadmin/cuubz-deploy/incoming/app-<STAMP>.tar.gz` — outside the web root (D-7) — and
+`rm -f`'d on the next line whether the deploy succeeded or not. There is no leftover
+archive in the web root to clean up, under any directory name. A false warning in a
+rollback procedure costs the reader time at the exact moment they have none.
+
+**Step 3 note:** the verification line is `npm ci && npm test`. It used to end
+`&& npm run check-globals`, which PR 11 deleted — see the code block above.
 
 ### 6.3 Three ways this still does not fully restore the server
 
@@ -1208,8 +1244,12 @@ verified by execution:
   figure in [§7](#7-saveload-checklist) is real, not a default that never runs.
 - No `.env` exists in the repo.
 - `pre-refactor-baseline` is local-only: `git ls-remote --tags origin` returns nothing.
-- `npm test` exits 0 (50/50 passing, 4 quarantined) and `node scripts/check-globals.js`
-  exits 0 (0 duplicates, 65 script-tagged files, 368 top-level symbols) at this commit.
+- `npm test` exits 0 (50/50 passing, 4 quarantined) and the global-collision check exits 0
+  (0 duplicates, 65 script-tagged files, 368 top-level symbols) at this commit. **D-82:**
+  that check was `node scripts/check-globals.js` when this line was written; PR 11 deleted
+  the script and PR 31 moved the check into the suite as
+  `test/unit/meta/globalCollisions.test.js`, which `npm test` runs. The numbers above are
+  the ones observed at commit `749304b` and are not re-measured here.
 
 ### Verified by execution in a real browser — added by PR 6b
 
@@ -1268,12 +1308,12 @@ are each asserted end to end, against a database the browser itself wrote:
   it — then loads the game. The record is re-keyed under its own `worldName`, the bare row
   is gone, and the payload is **byte-identical** with `savedAt` preserved: the migration
   moves records, it does not re-encode them. Idempotency and the no-`worldName` case are
-  covered by `test/test_chunkStorage.js`, which runs in CI.
+  covered by `test/unit/engine/chunkStorage.test.js`, which runs in CI.
 - **D-15 — the stored length is exactly `20 + runCount * 4`**, asserted as an equality
   against the run count in the chunk's own header. The unit test that missed this bug for
   the life of the codec asserted `< actual * 1.5`, which both the bug and the fix satisfy.
 - **D-17** — `deleteChunk` issues one delete request, asserted by operation count against
-  a stub store in `test/test_chunkStorage.js`.
+  a stub store in `test/unit/engine/chunkStorage.test.js`.
 
 **Nine of the fourteen §7 steps were automated at PR 6b; it is twelve now** — 1, 2, 3,
 **4 (PR 12)**, 5, 6, 7, **8, 9**, 10, 11, 14. Steps 12–13 remain, plus the mouse-driven half
@@ -1312,7 +1352,7 @@ telling people not to do:
   driving an upgrade over it would bet all of them on the thing under test. The ladder
   receives the database, not the name, so the proof is unaffected. The run asserts
   afterwards that `cuubz-worlds` is still at version 2 with its record count unchanged.
-- **The same increment runs in CI**, against the stub in `test/test_chunkStorage.js` §17,
+- **The same increment runs in CI**, against the stub in `test/unit/engine/chunkStorage.test.js` §17,
   together with the H-3 repair path, the create-only property of every shipped step, and
   the abort-on-unregistered-version rule. `npm test` is 52/52 with that file at 129
   assertions.

@@ -12,10 +12,11 @@ export class VoxelRenderer {
     this.width = width || window.innerWidth;
     this.height = height || window.innerHeight;
     
-    // Initialize when Three.js is available
-    if (typeof THREE !== 'undefined') {
-      this._initThree();
-    }
+    // D-27: was `if (typeof THREE !== 'undefined') { this._initThree(); }`. `THREE` is a
+    // module import, so the guard was constant-true and the un-initialised renderer it
+    // implied was unreachable. This constructor is browser-only regardless — the
+    // `window.innerWidth` default two lines up needs a DOM.
+    this._initThree();
   }
 
   _initThree() {

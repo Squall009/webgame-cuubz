@@ -9,18 +9,24 @@
  * Nginx reverse proxy can handle TLS termination.
  */
 
-'use strict';
+import { WebSocketServer } from 'ws';
+import http from 'node:http';
+import Matchmaking from './matchmaking.js';
+import SessionManager from './session.js';
+import { clampMaxPlayers } from '../shared/protocol.js';
 
-const { WebSocketServer, WebSocket } = require('ws');
-const http = require('http');
-const url = require('url');
-const Matchmaking = require('./matchmaking');
-const SessionManager = require('./session');
+// `require('url')` used to be imported here and was never referenced — the upgrade
+// router below uses the global `URL`. It went with the ESM conversion, as did the
+// unused `WebSocket` half of the `ws` destructure. `'use strict'` went too: a module
+// is always strict.
 
 // ─── Configuration ────────────────────────────────────────────
 
 const PORT = parseInt(process.env.MATCHMAKING_PORT) || 8765;
-const MAX_PLAYERS_PER_SESSION = 4;
+// `MAX_PLAYERS_PER_SESSION = 4` used to be declared here. It moved to
+// `shared/protocol.js` as `MAX_PLAYERS_LIMIT` so the ceiling, the clamp that enforces
+// it and the client's slider range (src/ui/templates/lobbyScreen.js:117, min=2 max=4)
+// cannot drift apart. D-84.
 const HEARTBEAT_INTERVAL = 120000; // 120s keepalive (browser throttles background tabs hard)
 
 // ─── State ────────────────────────────────────────────────────
@@ -123,10 +129,18 @@ function destroySession(sessionId) {
 
 const matchmaking = new Matchmaking({
   wss,
-  onHostRequest: (playerId, sessionName, worldSeed, mode) => {
+  onHostRequest: (playerId, sessionName, worldSeed, mode, maxPlayers) => {
     const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
 
-    console.log(`[MATCHMAKING] Creating session ${sessionId} for "${sessionName}"`);
+    // D-84. This used to be `maxPlayers: MAX_PLAYERS_PER_SESSION`, full stop — the host
+    // form's slider was read, passed to `hostSession()` and then dropped by a destructure
+    // in Client.js that did not name it, so a host who asked for 2 got 4. The field now
+    // arrives; it is still not trusted, so it is clamped to
+    // [MIN_PLAYERS_LIMIT, MAX_PLAYERS_LIMIT] and a missing or unusable value falls back
+    // to the old hard-coded default of 4.
+    const cap = clampMaxPlayers(maxPlayers);
+
+    console.log(`[MATCHMAKING] Creating session ${sessionId} for "${sessionName}" (cap ${cap})`);
 
     // Create a dedicated WebSocket server for this session
     const sessionWss = new WebSocketServer({ noServer: true });
@@ -137,7 +151,7 @@ const matchmaking = new Matchmaking({
       worldSeed: worldSeed || 42,
       gameMode: mode || 'survival',
       hostId: playerId,
-      maxPlayers: MAX_PLAYERS_PER_SESSION,
+      maxPlayers: cap,
       heartbeatInterval: HEARTBEAT_INTERVAL,
       onSessionEmpty: () => {
         destroySession(sessionId);
@@ -262,4 +276,4 @@ process.on('unhandledRejection', (reason, promise) => {
   shutdown('unhandledRejection', 1);
 });
 
-module.exports = { matchmaking, sessions };
+export { matchmaking, sessions };

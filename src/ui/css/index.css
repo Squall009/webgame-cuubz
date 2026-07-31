@@ -11,17 +11,26 @@
    as an explicit, reviewable list instead.
 
    THE ORDER BELOW IS THE ORDER OF THE PRE-SPLIT css/style.css.
-   Do not sort it. Three constraints in particular:
+   Do not sort it. Two constraints in particular:
      * responsive.css must stay after every component it overrides
        and before utilities.css.
      * utilities.css holds `.hidden { display: none !important }`,
        which is what every screen, overlay and modal hides with.
-     * crafting.css must stay immediately before equipment.css.
-       The 600px block at the end of crafting.css styles .equipment-*
-       rules that equipment.css only defines afterwards, so those
-       overrides currently LOSE to their own base rules. That is a
-       pre-existing defect, preserved verbatim here; moving either
-       import would silently change mobile rendering.
+
+   D-81 (1), PR 33 — THE THIRD CONSTRAINT IS GONE, AND SO IS THE
+   DEFECT IT DESCRIBED. This header used to read "crafting.css must
+   stay immediately before equipment.css", because the 600px block at
+   the end of crafting.css styled .equipment-* rules that equipment.css
+   only defined afterwards — equal specificity, later source, no
+   !important — so the entire mobile equipment block LOST to its own
+   base rules and the equipment panel never shrank on a phone. It was
+   documented as "a pre-existing defect, preserved verbatim".
+
+   The fix moved that block to the END of equipment.css. NO @import
+   LINE BELOW MOVED. The two files may now sit in any order relative to
+   each other without changing rendering, because neither declares a
+   selector the other overrides any more. The rest of the list is still
+   the original style.css order and is still load-bearing.
    ============================================================ */
 
 @import './tokens.css';

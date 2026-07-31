@@ -99,7 +99,8 @@ export const LOBBY_SCREEN_TEMPLATE = `  <!-- Multiplayer Lobby Screen -->
         <div id="host-create-world-form" class="host-inline-form hidden">
           <div class="host-inline-form-row">
             <input type="text" id="host-world-name" maxlength="32" placeholder="World name...">
-            <input type="text" id="host-world-seed" maxlength="15" placeholder="Seed (optional)">
+            <!-- D-62: prefilled on open and required — not optional. See createEntity.js. -->
+            <input type="text" id="host-world-seed" maxlength="15" placeholder="Seed">
           </div>
           <div id="host-world-error" class="modal-error hidden"></div>
           <button id="btn-host-save-world" class="menu-btn primary inline-submit">Create World</button>

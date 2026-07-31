@@ -1,0 +1,7 @@
+{
+  "name": "cuubz-shared",
+  "version": "1.0.0",
+  "description": "Wire protocol shared verbatim by the browser bundle (src/) and the relay (server/)",
+  "private": true,
+  "type": "module"
+}

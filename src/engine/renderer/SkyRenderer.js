@@ -41,7 +41,11 @@ import * as THREE from 'three';
 import { smoothstep } from '../../util/MathUtils.js';
 import { SkyGeometryMethods } from './SkyGeometry.js';
 import { TimeOfDayMethods } from '../../game/systems/TimeOfDaySystem.js';
-// Single-line named imports, the shape `test/helpers/esmRequire.js` understands.
+// D-82: these four lines are split this way because `test/helpers/esmRequire.js` — a
+// require hook that regex-rewrote ESM into CommonJS — could only read single-line named
+// imports. **PR 31 deleted that hook**; Vitest loads real ES modules, so the split is now
+// a formatting choice with no constraint behind it and one long import would work. It is
+// left as it is because reflowing it changes nothing and risks a typo in 24 names.
 import { AMBIENT_LIGHT, DAWN_END, DAWN_END_HOUR, DAWN_START, DAWN_START_HOUR, DEFAULT_CYCLE_DURATION } from '../../game/data/DayNightCurves.js';
 import { DUSK_END, DUSK_END_HOUR, DUSK_LABEL_END_HOUR, DUSK_START, DUSK_START_HOUR, FOG_DENSITY_DAY } from '../../game/data/DayNightCurves.js';
 import { FOG_DENSITY_NIGHT, SKY_COLORS, SUN_COLORS, formatGameTime, fractionToHours, hexToRGB } from '../../game/data/DayNightCurves.js';

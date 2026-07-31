@@ -20,10 +20,9 @@
  * `_getBlockProperties` (nothing reads block properties through the inventory). They are
  * moved rather than deleted — dead-code triage is D-25's sweep, not a mechanical split's.
  *
- * `_getBlockProperties`'s `typeof BLOCK_PROPERTIES === 'undefined'` guard is now provably
- * dead: the name is a module import, so it is either bound or the module fails to load.
- * Decision 29 says a mechanical extraction moves such a guard unchanged rather than
- * recreating it; PR 33 owns the sweep.
+ * `_getBlockProperties`'s `typeof BLOCK_PROPERTIES === 'undefined'` guard was provably
+ * dead — the name is a module import, so it is either bound or the module fails to load
+ * — and PR 33 / D-27 removed it.
  */
 
 import { NAMED_ITEMS } from '../data/ItemDefinitions.js';
@@ -104,7 +103,8 @@ export const BlockItemMethods = {
    * in the browser and silently fell back to a stale table. Reference it directly.
    */
   _getBlockProperties(blockType) {
-    if (typeof BLOCK_PROPERTIES === 'undefined') return undefined;
+    // D-27: `if (typeof BLOCK_PROPERTIES === 'undefined') return undefined;` removed —
+    // constant-false; the name is a module import.
     return BLOCK_PROPERTIES[blockType];
   },
 };

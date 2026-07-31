@@ -21,18 +21,18 @@ export function initSkybox(game) {
   const textureAtlas = state.textureAtlas;
 
   // ─── Initialize Day/Night Cycle (Skybox) ─────────
-  let skybox = null;
-  if (typeof Skybox !== 'undefined') {
-    skybox = new Skybox(renderer, { startTime: 8, cycleDuration: 300 });
-    skybox.init();
-    // Wire up the HUD day-night indicator
-    const dayNightEl = document.getElementById('day-night-indicator');
-    if (dayNightEl) {
-      skybox.setNightIndicatorElement(dayNightEl);
-    }
-    log('[Cuubz] Day/night cycle initialized (5-min cycle, starting at 8:00)');
+  // D-27: this block used to be wrapped in `if (typeof Skybox !== 'undefined')`, with
+  // `state.skybox` assigned after the `if` so a missing `Skybox` recorded `null`.
+  // `Skybox` is a module import, so the guard was constant-true and the `null` path
+  // unreachable — the import either binds or the module fails to load.
+  const skybox = new Skybox(renderer, { startTime: 8, cycleDuration: 300 });
+  skybox.init();
+  // Wire up the HUD day-night indicator
+  const dayNightEl = document.getElementById('day-night-indicator');
+  if (dayNightEl) {
+    skybox.setNightIndicatorElement(dayNightEl);
   }
-  // Assigned after the `if`, never inside it, so `null` (no Skybox) is recorded too.
+  log('[Cuubz] Day/night cycle initialized (5-min cycle, starting at 8:00)');
   state.skybox = skybox;
 
   // Wire up texture atlas to debug overlay (top-right corner)

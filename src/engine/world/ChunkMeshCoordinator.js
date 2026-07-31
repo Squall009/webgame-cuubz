@@ -166,8 +166,15 @@ export const ChunkMeshCoordinatorMethods = {
    * build (structured-cloned on postMessage, so the worker cannot mutate ours).
    */
   _ensureMeshTablesCache() {
-    if (this._meshTablesCache) return;
-    this._meshTablesCache = buildMeshTables(FACE_TABLE);
+    // D-74: `uvFallbackSize` travels with the tables, so the worker and
+    // `ChunkMeshBuilder` cannot disagree about the missing-atlas tile size. It is only
+    // knowable once the atlas has built its grid, so the cache is NOT taken until then
+    // — a first mesh build that raced the atlas would otherwise freeze a 0 into the
+    // payload for the rest of the session. Once resolved it is cached as before.
+    if (this._meshTablesCache && this._meshTablesCache.uvFallbackSize > 0) return;
+    const atlas = this.textureAtlas;
+    this._meshTablesCache = buildMeshTables(
+      FACE_TABLE, atlas && atlas.loaded ? atlas.uvTileSize() : 0);
   },
 
   /**

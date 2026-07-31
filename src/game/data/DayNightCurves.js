@@ -74,12 +74,16 @@ export const DUSK_LABEL_END_HOUR = 20;
 
 // Smoothstep transition ranges for dawn/dusk (fraction of cycle: 0-1).
 //
-// One `export const` per line, deliberately. The originals were two comma-separated
-// declarators — `export const DAWN_START = 0.20, DAWN_END = 0.30;` — and
-// `test/helpers/esmRequire.js` only ever collects the FIRST name on such a line, so
-// `DAWN_END` and `DUSK_END` were silently `undefined` on the CommonJS side of every Node
-// test. Nothing imported them, so nothing noticed; the boundary assertions added for D-67
-// do import them.
+// One `export const` per line. The originals were two comma-separated declarators —
+// `export const DAWN_START = 0.20, DAWN_END = 0.30;` — and `test/helpers/esmRequire.js`
+// only ever collected the FIRST name on such a line, so `DAWN_END` and `DUSK_END` were
+// silently `undefined` on the CommonJS side of every Node test. Nothing imported them, so
+// nothing noticed; the boundary assertions added for D-67 do import them.
+//
+// D-82: **PR 31 deleted that hook.** Vitest loads real ES modules, which export every
+// declarator on a line, so the one-per-line split is no longer required for correctness.
+// It stays because the defect it prevented was invisible for months and one name per line
+// is how it stays that way — but it is now a convention, not a constraint.
 export const DAWN_START = DAWN_START_HOUR / 24; // 05:00
 export const DAWN_END = DAWN_END_HOUR / 24;     // 07:00
 export const DUSK_START = DUSK_START_HOUR / 24; // 17:00

@@ -19,14 +19,26 @@
 import { MESSAGE_TYPES } from './Client.js';
 import { CuubzLogger } from '../util/Logger.js';
 
-'use strict';
+// D-82: a `'use strict';` directive stood here, AFTER the imports. Two things were wrong
+// with it and both are silent. An ES module is strict mode already, so it could never
+// have any effect; and a directive prologue must be the FIRST statement in the body, so
+// once imports precede it, it is not a directive at all — it is an expression statement
+// evaluating a string literal and discarding it. It read as a guarantee and was a no-op
+// twice over. `src/multiplayer/Client.js` carried the identical line.
 
 // Debug logging — set CuubzLogger.DEBUG = true in browser console to enable
-export var _hostLog;
-if (typeof CuubzLogger !== 'undefined') { _hostLog = CuubzLogger.log; } else { _hostLog = function() {}; }
+// D-27: the `typeof CuubzLogger !== 'undefined'` test and its `else` branch are gone.
+// `CuubzLogger` is a module import, so `typeof` was a constant `'function'` and the
+// no-op fallback was unreachable. `var` is deliberate: globalCollisions.test.js asserts
+// each of these four files declares `^(export )?var <name>` of its own.
+export var _hostLog = CuubzLogger.log;
 
-// Re-export from client.js for protocol consistency
-// Use globals from client.js: CLIENT_STATE, MESSAGE_TYPES (server-side only)
+// D-82: this said "Use globals from client.js: CLIENT_STATE, MESSAGE_TYPES (server-side
+// only)", which the `import { MESSAGE_TYPES } from './Client.js'` ten lines above
+// contradicts outright. Nothing here has come off a global since PR 9 turned the tree
+// into ES modules; `MESSAGE_TYPES` is a named import and `CLIENT_STATE` is not used in
+// this file at all. A comment that claims a global is not merely stale — it is the exact
+// assumption `test/unit/meta/globalCollisions.test.js` exists to stop anyone acting on.
 
 // ─── Constants ──────────────────────────────────────────────────────
 

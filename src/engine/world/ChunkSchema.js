@@ -16,7 +16,7 @@
  *     ChunkManager.SCHEMA_STEPS        ← SCHEMA_STEPS   (the SAME object, not a copy)
  *
  * `SCHEMA_STEPS` being the same object reference is load-bearing, not incidental:
- * `test/test_chunkStorage.js` and `test/e2e/saveLoad.js` both register a synthetic step
+ * `test/unit/engine/chunkStorage.test.js` and `test/e2e/saveLoad.js` both register a step
  * with `ChunkManager.SCHEMA_STEPS[3] = ...` and then drive a real 2 → 3 upgrade through
  * `applySchemaUpgrade`, which reads the module-local binding. Mutating the object works;
  * REPLACING it (`ChunkManager.SCHEMA_STEPS = {...}`) would not, and nothing does.
@@ -63,10 +63,20 @@ import { DB_NAME, DB_VERSION, STORE_CHUNKS, STORE_MANIFESTS } from './ChunkConst
 //      a half-applied one aborts the entire upgrade. Write it as an `_openDB`
 //      migration next to `_migrateToWorldScopedKeys`, which every one of the seven
 //      chunk-store boundary sites awaits, and make it idempotent.
-//   d. Run `npm run test:e2e`. Its schema-upgrade block seeds a v2 database with
-//      real chunk and manifest records and drives a real 2 → 3 upgrade through
-//      this ladder in a real browser. That run is the only thing that makes an
-//      increment survivable rather than merely intended.
+//   d. Run `npm test` AND `npm run test:e2e`. Both drive a real 2 → 3 upgrade
+//      through this ladder against a database seeded with real chunk and manifest
+//      records: `test/integration/storageUpgrade.test.js` in the Node suite, and
+//      `npm run test:e2e`'s schema-upgrade block in a real browser against real
+//      IndexedDB. That PAIR is what makes an increment survivable rather than
+//      merely intended.
+//
+//      D-82: this step used to say `npm run test:e2e` was "the only thing" that
+//      made an increment survivable. That stopped being true when
+//      `test/integration/storageUpgrade.test.js` landed in `npm test` — and it
+//      mattered, because it told a reader that the fast gate could not see a
+//      schema mistake and that the slow browser run was optional-until-release.
+//      The browser run is still the only one that exercises REAL IndexedDB, which
+//      is why it is still named here rather than dropped.
 
 /** Create an object store only if it is absent. Never deletes. Returns it, or null. */
 export function ensureStore(db, name, options) {

@@ -58,7 +58,10 @@ export class PlayerListOverlay {
       const item = document.createElement('div');
       item.className = 'player-list-item';
 
-      const healthPercent = player.health !== undefined ? Math.max(0, Math.min(100, player.health)) : 100;
+      // D-85: `!= null`, not `!== undefined`. `Math.min(100, null)` is 0, so a literal
+      // `health: null` — which `SessionManager` used to pass straight through — drew a
+      // 0%, red bar for a player at full health. Same guard, same default, on both sides.
+      const healthPercent = player.health != null ? Math.max(0, Math.min(100, player.health)) : 100;
       const healthColor = healthPercent > 60 ? '#4CAF50' : healthPercent > 30 ? '#f1c40f' : '#e74c3c';
 
       let posHtml = '';

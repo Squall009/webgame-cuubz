@@ -1,8 +1,9 @@
 /**
  * Cuubz — Item definitions (PR 23)
  *
- * Split out of `src/game/systems/InventorySystem.js`. Pure data: three frozen-by-convention
- * tables and nothing else. **A real module, not a prototype mixin** — the seam is genuinely
+ * Split out of `src/game/systems/InventorySystem.js`. Pure data: three DEEP-FROZEN
+ * tables (PR 33 / D-72 — they were "frozen by convention", i.e. not frozen) and nothing
+ * else. **A real module, not a prototype mixin** — the seam is genuinely
  * zero-crossing (no `this`, no behaviour), which is the one case decision 44 says a real
  * module is the right shape.
  *
@@ -11,9 +12,13 @@
  * It also has to be a leaf: `EquipmentSystem.js`, `InventoryItemTypes.js`,
  * `InventoryBlockItems.js` and `InventorySystem.js` all read `NAMED_ITEMS`, and the first
  * three are imported *by* `InventorySystem.js`. Anything they need must sit BELOW them in
- * the graph or `src/` gains an import cycle, which `test/helpers/esmRequire.js` resolves to
- * `undefined` rather than to the value (D-28) — every Node test would go red. This file
- * therefore imports nothing.
+ * the graph or `src/` gains an import cycle. This file therefore imports nothing.
+ *
+ * D-82: that used to end "…which `test/helpers/esmRequire.js` resolves to `undefined`
+ * rather than to the value (D-28) — every Node test would go red". **PR 31 deleted that
+ * hook.** Vitest loads real ES modules, so a cycle no longer turns the suite red on
+ * sight; it resolves the way the browser resolves it, and the failure surfaces later and
+ * further away. The leaf rule is kept for that reason, not weakened by it.
  *
  * All three names are still re-exported from `src/game/systems/InventorySystem.js` under
  * their original identifiers, so `test/test_inventory.js`,
@@ -31,24 +36,58 @@
 // Item Definitions
 // ============================================================
 
-export const ITEM_CATEGORIES = {
+/**
+ * D-72 — "frozen by convention" is not frozen.
+ *
+ * The header above called these three tables "frozen-by-convention". They were plain
+ * mutable objects exported by reference to every consumer in the process, and PR 23
+ * raised the stakes: `src/multiplayer/InventorySync.js` used to hold its own private
+ * copy of the item metadata and now **aliases** the shared one
+ * (`const MAX_STACK = MAX_STACKS`). A single `NAMED_ITEMS[x].maxStack = …` would have
+ * changed stack limits for the inventory UI, the crafting system, the combat weapon
+ * lookup and the over-the-wire multiplayer sync at once, with no error raised.
+ *
+ * No such write exists — verified across `src/`, `test/`, `server/` and `scripts/`.
+ * Deep-freezing is what keeps that verifiable rather than remembered: ES modules are
+ * strict, so an assignment to a frozen object throws a TypeError at the write instead
+ * of silently succeeding.
+ *
+ * `Object.freeze` alone would not do it. `NAMED_ITEMS` is an object OF objects — a
+ * shallow freeze stops `NAMED_ITEMS.coal = …` but allows `NAMED_ITEMS.coal.maxStack = …`,
+ * which is the mutation that would actually happen.
+ *
+ * Defined locally rather than imported from a util: this file's header states that it
+ * imports nothing, and that is load-bearing (D-28 — `InventorySystem.js` and the three
+ * mixins it imports all read `NAMED_ITEMS`, so anything this file imported would sit
+ * below them or close a cycle — see the D-82 note in this file's header for what did and
+ * did not change about how a cycle gets caught).
+ */
+const deepFreeze = (o) => {
+  if (o && (typeof o === 'object') && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
+};
+
+export const ITEM_CATEGORIES = deepFreeze({
   BLOCK: 'block',       // Placeable blocks (BLOCK_TYPES IDs)
   RESOURCE: 'resource', // Mined resources, quest items (string names)
   FOOD: 'food',         // Consumable food items
   TOOL: 'tool',         // Tools and equipment
-};
+});
 
 // Max stack sizes by category
-export const MAX_STACKS = {
+export const MAX_STACKS = deepFreeze({
   [ITEM_CATEGORIES.BLOCK]: 64,
   [ITEM_CATEGORIES.RESOURCE]: 64,
   [ITEM_CATEGORIES.FOOD]: 16,
   [ITEM_CATEGORIES.TOOL]: 1,
-};
+});
 
 // Named item definitions (non-block items)
 // Each entry: { name, category, maxStack [, durability, damage, attackSpeed, armorValue, armorToughness, foodRestore, foodSaturation ] }
-export const NAMED_ITEMS = {
+export const NAMED_ITEMS = deepFreeze({
   // ── Resources ──────────────────────────────────────────────
   coal:            { name: 'Coal', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   stick:           { name: 'Stick', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
@@ -171,4 +210,4 @@ export const NAMED_ITEMS = {
   rabbit_meat:    { name: 'Raw Rabbit', category: ITEM_CATEGORIES.FOOD, maxStack: 64, foodRestore: 2, foodSaturation: 1.2 },
   raw_venison:    { name: 'Raw Venison', category: ITEM_CATEGORIES.FOOD, maxStack: 64, foodRestore: 4, foodSaturation: 2.4 },
   corrupt_fang:   { name: 'Corrupt Fang', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
-};
+});

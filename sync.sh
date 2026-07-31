@@ -127,14 +127,44 @@ grep -q '<script type="module"' dist/index.html \
 #
 # Layout on the host:
 #   /var/www/html/            ← dist/* (index.html + assets/)
-#   /var/www/html/server/     ← server/ (CommonJS relay, unchanged by PR 9)
+#   /var/www/html/server/     ← server/ (the relay — a Node ES MODULE since PR 33)
+#   /var/www/html/shared/     ← shared/ (PR 33) — see below, this one is load-bearing
 #   /var/www/html/textures/   ← uploaded separately, see step 5
 #   /var/www/html/cuubz-relay.service   ← data only; systemd reads it from /etc
+#
+# ─── WHY `shared` IS IN THIS ARCHIVE (PR 33) ──────────────────────────────────
+#
+# `server/index.js`, `server/session.js` and `server/matchmaking.js` all
+# `import ... from '../shared/protocol.js'`. `WorkingDirectory` in cuubz-relay.service
+# is `/var/www/html/server`, so that specifier resolves to `/var/www/html/shared/…` —
+# one level UP from the deployed relay, outside the `server` member this archive used
+# to carry. Ship `server` without `shared` and the relay dies on boot with
+# ERR_MODULE_NOT_FOUND, systemd retries it every 5 s forever, and the site keeps
+# serving perfectly while multiplayer is simply gone. That is D-2's shape exactly.
+# `shared/package.json` (`"type": "module"`) must travel with it or Node reparses the
+# file with a MODULE_TYPELESS_PACKAGE_JSON warning on every boot.
 say "Packing application"
+# `--exclude='*.map'` is D-13 again, and it is the reason `vite.config.js` may keep
+# `sourcemap` on — decision 67. `dist/assets/index-<hash>.js.map` carries `sourcesContent`
+# for 148 files / 2,526,003 bytes: the whole of `src/` plus `node_modules/three`. Shipping
+# it puts the source tree back in the web root at a URL that is just the bundle's plus
+# `.map`, chmod 644, which is precisely what the header above says this script exists to
+# stop. `sourcemap: 'hidden'` was NOT enough — it drops the `//# sourceMappingURL` comment
+# and still emits, packs and deploys the file. The map stays in the local `dist/`, where
+# `npm run test:e2e` uses it and where an operator debugging a production stack trace
+# loads it by hand against the same build (the hash in `index.html` names which one).
+# BOTH `--exclude`s MUST STAY BEFORE THE FIRST `-C`. GNU tar processes options in order
+# and an `--exclude` applies only to members named AFTER it — so with them at the end,
+# where `--exclude='server/node_modules'` used to sit, neither one filters `dist/` and the
+# map ships anyway. Verified by building the archive both ways and listing it: trailing
+# excludes give 18 members including `./assets/index-<hash>.js.map`, leading excludes give
+# 17 without it. `server/node_modules` never existed at pack time, which is why the old
+# placement looked like it worked.
 tar czf "$ARCHIVE" \
-    -C dist . \
-    -C "$SOURCE_DIR" server \
     --exclude='server/node_modules' \
+    --exclude='*.map' \
+    -C dist . \
+    -C "$SOURCE_DIR" server shared \
     cuubz-relay.service
 printf '  %s (%s)\n' "$ARCHIVE" "$(du -h "$ARCHIVE" | cut -f1)"
 
@@ -160,7 +190,7 @@ remote "ls -1t ${BACKUP_DIR}/webroot-*.tar.gz 2>/dev/null | tail -n +$((KEEP_BAC
 # outside it: this removes only what this script puts there. A blanket `rm -rf
 # ${REMOTE_DIR}/*` would take textures with it and would be unrecoverable if the path
 # were ever wrong.
-remote "cd ${REMOTE_DIR} && rm -rf assets server index.html cuubz-relay.service \
+remote "cd ${REMOTE_DIR} && rm -rf assets server shared index.html cuubz-relay.service \
         js css test scripts .claude src dist node_modules \
         *.md *.json *.tar.gz .gitignore .prettierrc eslint.config.js vite.config.js 2>/dev/null || true"
 
@@ -269,7 +299,9 @@ remote "set -e
   test -f \".\${bundle}\" || { echo \"  ! index.html points at \$bundle, which is not on disk\" >&2; exit 1; }
   echo \"  index.html -> \$bundle  (\$(stat -c%s \".\${bundle}\") bytes)\"
   test -f textures/blocks/manifest.json || echo '  ! textures/blocks/manifest.json missing — run ./sync.sh --textures' >&2
-  test -f server/index.js || echo '  ! server/index.js missing' >&2"
+  test -f server/index.js || echo '  ! server/index.js missing' >&2
+  test -f shared/protocol.js || echo '  ! shared/protocol.js missing — server/ imports it as ../shared/protocol.js and the relay will not boot without it (PR 33)' >&2
+  test -f shared/package.json || echo '  ! shared/package.json missing — without its \"type\": \"module\" Node warns on every relay boot' >&2"
 
 say "Deploy complete"
 cat <<EOF

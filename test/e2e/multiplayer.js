@@ -228,9 +228,10 @@ function isNoise(entry) {
  * for the same measured reason.
  *
  * `#host-world-seed` is pre-filled with a random uint32 every time the inline world form
- * is opened (`LobbyForms.js` → `createEntity.randomSeed`), and a BLANK seed field also
- * yields a random uint32 (`WorldManager.generateSeed`). So a fill that lands on nothing,
- * races the prefill, or is reverted still produces a plausible numeric seed, and the run
+ * is opened (`LobbyForms.js` → `createEntity.randomSeed`). A blank field is an explicit
+ * error since PR 33 landed **D-62**'s cure, but the prefill is not blank — so a fill that
+ * lands on nothing, races the prefill, or is reverted still produces a plausible numeric
+ * seed rather than an error, and the run
  * carries on hosting a world this harness did not choose — which would turn assertion 1
  * into "two clients agree on a number", true of any number at all. Stopping here is the
  * only way that stays visible.

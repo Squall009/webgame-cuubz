@@ -120,3 +120,59 @@
   text-align: center;
   font-style: italic;
 }
+
+/* ─── D-81 (1) — THE MOBILE BLOCK, MOVED HERE FROM crafting.css ─────────────
+   This `@media (max-width: 600px)` block was the tail of `screens/crafting.css`, which
+   `index.css` imports on the line BEFORE this file. A media query adds no specificity,
+   so `.equipment-panel { flex-direction: row }` inside it lost to `.equipment-panel
+   { flex-direction: column }` twenty lines above — same (0,1,0) specificity, later in
+   source order, no `!important` anywhere in the responsive layer. The whole block was
+   dead: the equipment panel never shrank, never went horizontal and never dropped its
+   160px `min-width` on a phone. `index.css`'s own header documented this as a
+   pre-existing defect "preserved verbatim". It is fixed rather than preserved now.
+
+   WHY MOVING IT CANNOT BREAK THE CASCADE ELSEWHERE. The manifest order is unchanged —
+   not one `@import` line moved, so nothing that depended on `crafting.css` preceding
+   `equipment.css` (or on either preceding `hud/armor.css`) is affected. What moved is a
+   block of six rules whose selectors are `.equipment-panel`, `.equipment-slots`,
+   `.equipment-slot`, `.equipment-slot .equip-slot-icon`, `.equip-slot-label` and
+   `.equipment-stats`. Across all 31 files those six selectors are declared in exactly
+   two places: this file, and the block below. So the only rules whose relative order
+   changed are the ones that were always meant to be in this order, and the block's new
+   neighbours — `hud/armor.css` and everything after it — declare none of them.
+
+   The `#crafting-inv-grid` rules stayed in `crafting.css`, where they belong: they were
+   never affected, because nothing later re-declares that id. */
+@media (max-width: 600px) {
+  /* Equipment panel — mobile: lay the slots out in a row under the inventory */
+  .equipment-panel {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-md);
+    min-width: unset;
+  }
+
+  .equipment-slots {
+    flex-direction: row;
+    gap: var(--space-sm);
+  }
+
+  .equipment-slot {
+    width: 56px;
+    height: 64px;
+  }
+
+  .equipment-slot .equip-slot-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .equip-slot-label {
+    font-size: 8px;
+  }
+
+  .equipment-stats {
+    font-size: 11px;
+  }
+}

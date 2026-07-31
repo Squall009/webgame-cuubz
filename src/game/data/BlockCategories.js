@@ -34,16 +34,50 @@
 
 import { BLOCK_BY_NAME, BLOCK_PROPERTIES, BLOCK_REGISTRY } from '../../engine/world/BlockRegistry.js';
 
+/**
+ * `Object.freeze` is SHALLOW — D-72.
+ *
+ * Every table below was `Object.freeze`d, which froze the outer array and nothing
+ * inside it. `SPECIAL_MESH_TYPES` is `[id, { type, height }]` pairs and
+ * `BLOCK_COLOR_MULTIPLIERS` is `[id, [r,g,b]]` pairs, so the pair arrays and the info
+ * objects stayed writable — and `ChunkMeshBuilder`'s constructor does
+ * `new Map(SPECIAL_MESH_TYPES)`, which copies the REFERENCES. Where the pre-PR-23 code
+ * built a fresh table per instance, every `ChunkMeshBuilder` in the process now shares
+ * one set of objects, and one `meshInfo.height = …` anywhere would have retuned every
+ * chunk mesh in the game with no error and no obvious cause.
+ *
+ * No such write exists today — verified across `src/`, `test/`, `server/` and
+ * `scripts/`; `ChunkMeshBuilder` reads `meshInfo.type`/`meshInfo.height` and indexes
+ * `blockColor[0..2]`, and builds a fresh `finalColor` array. Freezing deeply is what
+ * keeps that true: ES modules are strict, so a future write throws instead of
+ * silently corrupting shared state.
+ *
+ * Defined locally rather than imported. This file's header states its import set is
+ * load-bearing (D-28: `BlockRegistry.js` and nothing else, so it cannot close a cycle),
+ * and a six-line recursion is not worth spending that invariant on.
+ *
+ * NOTE: `BLOCK_COLOR_MULTIPLIERS`'s inner arrays are `b.color` from `BLOCK_REGISTRY`
+ * itself, not copies, so this also freezes those two registry entries' `color` arrays.
+ * That is intended — the registry is static by contract.
+ */
+const deepFreeze = (o) => {
+  if (o && (typeof o === 'object') && !Object.isFrozen(o)) {
+    Object.freeze(o);
+    for (const v of Object.values(o)) deepFreeze(v);
+  }
+  return o;
+};
+
 const idsWhere = (pred) => BLOCK_REGISTRY.filter(pred).map((b) => b.id);
 
 /** Ids whose category is `air`. Exactly `[0]` today; derived so it stays true. */
-export const AIR_IDS = Object.freeze(idsWhere((b) => b.category === 'air'));
+export const AIR_IDS = deepFreeze(idsWhere((b) => b.category === 'air'));
 
 /** Alpha-tested blocks: leaves, flowers, torches, vines. */
-export const CUTOUT_IDS = Object.freeze(idsWhere((b) => b.category === 'cutout'));
+export const CUTOUT_IDS = deepFreeze(idsWhere((b) => b.category === 'cutout'));
 
 /** Alpha-blended blocks: water, lava, the four ices, toxic slime. */
-export const TRANSPARENT_IDS = Object.freeze(idsWhere((b) => b.category === 'transparent'));
+export const TRANSPARENT_IDS = deepFreeze(idsWhere((b) => b.category === 'transparent'));
 
 /**
  * Blocks that receive the humidity-based green tint.
@@ -58,13 +92,13 @@ export const TRANSPARENT_IDS = Object.freeze(idsWhere((b) => b.category === 'tra
  * asserted in `test/test_meshTables.js`, which is what keeps the rule honest.
  */
 const TINT_GROUND_COVERS = ['grass_block', 'podzol', 'short_grass', 'tall_grass'];
-export const TINTABLE_IDS = Object.freeze([
+export const TINTABLE_IDS = deepFreeze([
   ...idsWhere((b) => /_leaves$/.test(b.name)),
   ...TINT_GROUND_COVERS.map((n) => BLOCK_BY_NAME[n].id),
 ]);
 
 /** Blocks with a non-cube mesh: `[id, { type, height }]` pairs. */
-export const SPECIAL_MESH_TYPES = Object.freeze(
+export const SPECIAL_MESH_TYPES = deepFreeze(
   BLOCK_REGISTRY.filter((b) => b.meshType).map((b) => [b.id, { type: b.meshType, height: b.meshHeight || 0.5 }])
 );
 
@@ -72,12 +106,12 @@ export const SPECIAL_MESH_TYPES = Object.freeze(
  * Explicit per-block vertex-colour multipliers: `[id, [r,g,b]]` pairs.
  * Two entries today (red_flower, yellow_flower — one shared texture, two colours).
  */
-export const BLOCK_COLOR_MULTIPLIERS = Object.freeze(
+export const BLOCK_COLOR_MULTIPLIERS = deepFreeze(
   BLOCK_REGISTRY.filter((b) => Array.isArray(b.color)).map((b) => [b.id, b.color])
 );
 
 /** Emissive blocks: `[id, intensity]` pairs. */
-export const EMISSIVE_BLOCKS = Object.freeze(
+export const EMISSIVE_BLOCKS = deepFreeze(
   BLOCK_REGISTRY.filter((b) => b.emissive && b.emissive > 0).map((b) => [b.id, b.emissive])
 );
 
@@ -156,10 +190,17 @@ export function isAir(blockId) {
  *
  * @param {ReadonlyArray} faceTable — `FACE_TABLE` from `./FaceTable.js`, passed in
  *   rather than imported so this module stays purely registry-derived.
+ * @param {number} uvFallbackSize — `TextureAtlas.uvTileSize()`, likewise passed in.
+ *   D-74: the UV tile size the worker must use when the atlas has no entry for a block
+ *   id. It rides along with the tables for exactly the reason the tables themselves do
+ *   — the worker cannot import, so anything it does not receive it has to hard-code,
+ *   and the two hand-written copies of this number disagreed by 171%. See
+ *   `TextureAtlas.uvTileSize()`.
  */
-export function buildMeshTables(faceTable) {
+export function buildMeshTables(faceTable, uvFallbackSize) {
   return {
     faces: faceTable,
+    uvFallbackSize,
     airIds: [...AIR_IDS],
     cutoutIds: [...CUTOUT_IDS],
     transparentIds: [...TRANSPARENT_IDS],

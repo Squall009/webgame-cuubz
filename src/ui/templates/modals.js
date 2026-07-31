@@ -50,8 +50,12 @@ export const MODALS_TEMPLATE = `  <!-- Character Create/Edit Modal -->
       <h3>Create New World</h3>
       <label for="world-name">World Name:</label>
       <input type="text" id="world-name" maxlength="32" placeholder="Enter world name...">
-      <label for="world-seed">Seed (optional, leave blank for random):</label>
-      <input type="text" id="world-seed" maxlength="15" placeholder="Random seed will be generated">
+      <!-- D-62: the field is prefilled with a random seed when the modal opens and it is
+           REQUIRED. Blank used to draw a second, different random seed, which made a
+           cleared field indistinguishable from a chosen one. The label said so; it does
+           not any more. -->
+      <label for="world-seed">Seed:</label>
+      <input type="text" id="world-seed" maxlength="15" placeholder="A random seed is filled in for you">
       <div id="world-error" class="modal-error hidden"></div>
       <div class="modal-buttons">
         <button id="btn-save-world" class="menu-btn primary">Create World</button>

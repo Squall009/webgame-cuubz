@@ -50,6 +50,9 @@ export class SessionManager {
     this._hostCreatedCallback = null;
     this._joinAcceptedCallback = null;
     this._joinRejectedCallback = null;
+    // D-78's other half. `_joinRejectedCallback` had a sibling on the wire the whole
+    // time and no field, no handler and no routing entry to land in.
+    this._hostRejectedCallback = null;
     this._playerJoinedCallback = null;
     this._playerLeftCallback = null;
   }
@@ -182,10 +185,40 @@ export class SessionManager {
       if (this._joinAcceptedCallback) this._joinAcceptedCallback(data);
     });
 
+    // ─── A REJECTION MUST ALSO PUT THE INDICATOR BACK — D-78's other half ────
+    //
+    // `joinSession()` writes `'connecting'` before it calls the relay and `startHosting()`
+    // does the same. Neither rejection handler wrote a status at all, so the banner said
+    // "Join failed: …" / "Host failed: …" while `#connection-status` and `#connection-hud`
+    // both still read "Connecting…" — forever, because nothing else on this path fires.
+    // That standing "Connecting…" IS the original complaint ("the host form sits in
+    // connecting forever"); adding the handler alone left it in place.
+    //
+    // `'disconnected'` is the existing vocabulary's term for "not in a session" — it is
+    // what `leaveSession()` writes and what `joinSession()`'s own catch block already
+    // writes when the relay call throws. The matchmaking socket is still open at this
+    // point, and that is deliberate: these two indicators track the SESSION, not the
+    // socket. No new state is invented (`ConnectionHUD.STATUS_TEXT` has exactly four).
     this.client.on('JOIN_REJECTED', (data) => {
       const reason = data.reason || 'Unknown error';
+      this.updateConnectionStatus('disconnected');
       this._showHostError(`Join failed: ${reason}`);
       if (this._joinRejectedCallback) this._joinRejectedCallback(data);
+    });
+
+    // D-78. `server/matchmaking.js` has sent HOST_REJECTED since the relay was written
+    // — its `onHostRequest` returns `{ error }` and the reply goes out on the socket —
+    // and NOTHING on this side listened. Not a MESSAGE_TYPES key, not an entry in
+    // `MultiplayerClient`'s matchmaking routing list, not a handler here. So a host
+    // whose request the relay refused saw `startHosting()`'s `connecting` status and
+    // then nothing at all, indefinitely. This is JOIN_REJECTED above, mirrored: same
+    // banner, same default reason, same optional callback — and the same status reset,
+    // see the block above `JOIN_REJECTED`.
+    this.client.on('HOST_REJECTED', (data) => {
+      const reason = data.reason || 'Unknown error';
+      this.updateConnectionStatus('disconnected');
+      this._showHostError(`Host failed: ${reason}`);
+      if (this._hostRejectedCallback) this._hostRejectedCallback(data);
     });
 
     this.client.on('PLAYER_JOINED', (data) => {
@@ -193,7 +226,13 @@ export class SessionManager {
         id: data.playerId,
         name: data.character?.name || 'Player',
         color: data.character?.color || '#888888',
-        health: data.health !== undefined ? data.health : 100,
+        // D-85: `!= null`, not `!== undefined`. A literal `health: null` on the wire
+        // passed the old test and reached `PlayerListOverlay`, where
+        // `Math.max(0, Math.min(100, null))` is **0** — a full-health player rendered as
+        // an empty red bar. `null` and `undefined` both mean "the relay did not tell us",
+        // and the sane default for an unknown is full health, which is what a player who
+        // has just joined has. `PlayerListOverlay.js:61` carries the identical guard.
+        health: data.health != null ? data.health : 100,
         position: data.position,
       });
       this._renderPlayerList();

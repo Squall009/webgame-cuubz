@@ -216,6 +216,61 @@ describe('SessionManager relay events (the real _wireClientEvents)', () => {
     client.emit('JOIN_REJECTED', {});
     eq(banner(), 'Join failed: Unknown error', 'a missing reason has a default');
   });
+  it('JOIN_REJECTED also puts the connection indicator back (D-78)', async () => {
+    // `joinSession()` writes 'connecting' before it calls the relay. This handler wrote
+    // the banner and NO status at all, so both indicators sat on "Connecting…" underneath
+    // a "Join failed:" banner, permanently — nothing else fires on this path.
+    const h = harness();
+    const client = connected(h);
+    await h.manager.joinSession('S1', { mode: 'survival', name: 'X', seed: 1 });
+    eq(statusText(), 'Connecting...', 'the join left the indicator on Connecting…');
+    eq(hudText(), 'Connecting...', 'both of them');
+    client.emit('JOIN_REJECTED', { reason: 'Session full' });
+    eq(statusText(), 'Disconnected', 'the rejection resets the lobby indicator');
+    eq(hudText(), 'Disconnected', 'and the in-game one');
+    eq(el('connection-status').className, 'connection-status disconnected', 'and the class follows the text');
+    eq(banner(), 'Join failed: Session full', 'the banner still says what happened');
+  });
+  it('HOST_REJECTED reports the reason in the host error banner (D-78)', () => {
+    // The sibling above always worked. HOST_REJECTED has been on the wire since the
+    // relay was written (server/matchmaking.js:141, the `{ error }` branch of
+    // onHostRequest) and had NO handler here, no entry in MultiplayerClient's
+    // matchmaking routing list and no MESSAGE_TYPES key — so a host whose request the
+    // relay refused was left on startHosting()'s 'connecting' with a blank screen.
+    const h = harness();
+    const client = connected(h);
+    is(hidden('host-error'), 'the banner starts hidden');
+    client.emit('HOST_REJECTED', { reason: 'Session name taken' });
+    eq(banner(), 'Host failed: Session name taken', 'banner text');
+    nope(hidden('host-error'), 'and it is actually visible — not merely written to');
+    client.emit('HOST_REJECTED', {});
+    eq(banner(), 'Host failed: Unknown error', 'a missing reason has a default, as JOIN_REJECTED does');
+    let handed = null;
+    h.manager._hostRejectedCallback = (d) => { handed = d; };
+    client.emit('HOST_REJECTED', { reason: 'Relay full' });
+    eq(handed && handed.reason, 'Relay full', 'the optional callback receives the payload');
+  });
+  it('HOST_REJECTED drops the indicator out of Connecting… — the original complaint (D-78)', async () => {
+    // "The host form sits in connecting forever." Adding the HOST_REJECTED handler put a
+    // banner on the screen and left that exactly as it was: `SessionHosting.js:83` writes
+    // 'connecting' before the relay call and nothing on the rejection path wrote a status.
+    // Driven through the REAL `startHosting()` and the real form, not by poking the HUD.
+    const h = harness();
+    const client = connected(h);
+    fillHostForm(h, { name: 'Quarry' });
+    await h.manager.startHosting();
+    eq(statusText(), 'Connecting...', "startHosting left the indicator on Connecting… (SessionHosting.js:83)");
+    eq(hudText(), 'Connecting...', 'both indicators');
+    client.emit('HOST_REJECTED', { reason: 'Session name taken' });
+    eq(statusText(), 'Disconnected', 'the rejection resets the lobby indicator — no more "Connecting…" forever');
+    eq(hudText(), 'Disconnected', 'and the in-game one');
+    eq(el('connection-hud').className, 'connection-hud disconnected', 'and the class follows the text');
+    eq(banner(), 'Host failed: Session name taken', 'the banner still says what happened');
+    eq(h.manager.hostingSessionId, null, 'and nothing is recorded as hosted');
+    // 'disconnected' is one of ConnectionHUD's four existing states, not a new one.
+    is(['Disconnected', 'Connecting...', 'Connected', 'Reconnecting...'].includes(statusText()),
+      'the status written is from the existing four-word vocabulary');
+  });
   it('PLAYER_JOINED / PLAYER_LEFT maintain the roster and repaint the overlay', () => {
     const h = harness();
     const client = connected(h);
@@ -228,6 +283,40 @@ describe('SessionManager relay events (the real _wireClientEvents)', () => {
     client.emit('PLAYER_LEFT', { playerId: 'p1' });
     eq(h.manager.players.length, 1, 'one left'); eq(h.manager.players[0].id, 'p2', 'the right one');
     eq(el('player-count').textContent, '1', 'overlay count follows');
+  });
+  it('a literal health: null is unknown health, not zero health (D-85)', () => {
+    // `data.health !== undefined` let a literal `null` through, and downstream
+    // `Math.max(0, Math.min(100, null))` is **0** — a joining player rendered as an empty
+    // red bar. `server/session.js` sends no `health` field today, so this was latent; the
+    // two guards had drifted apart and only agreed by accident.
+    const h = harness();
+    const client = connected(h);
+    client.emit('PLAYER_JOINED', { playerId: 'p1', health: null });
+    client.emit('PLAYER_JOINED', { playerId: 'p2' });
+    client.emit('PLAYER_JOINED', { playerId: 'p3', health: 0 });
+    eq(h.manager.players[0].health, 100, 'null health defaults to 100, the same as absent');
+    eq(h.manager.players[1].health, 100, 'undefined health still defaults to 100');
+    eq(h.manager.players[2].health, 0, 'a REAL zero is still zero — the guard is null-ish, not falsy');
+    const fills = rows('player-list-items', '.player-health-fill');
+    has(fills[0].getAttribute('style'), 'width:100%', 'and the null player draws a full bar');
+    has(fills[0].getAttribute('style'), 'background:#4CAF50', 'in green, not red');
+    has(fills[2].getAttribute('style'), 'width:0%', 'while the genuinely dead player draws an empty one');
+  });
+  it('PlayerListOverlay makes the same call on its own (D-85)', () => {
+    // The overlay is reachable without SessionManager — `PlayerListHUD` and the rejoin
+    // path both render rosters — so it carries the guard rather than trusting its caller.
+    const h = harness();
+    h.ui.playerList.render([
+      { id: 'a', name: 'Null', color: '#fff', health: null },
+      { id: 'b', name: 'Undef', color: '#fff' },
+      { id: 'c', name: 'Zero', color: '#fff', health: 0 },
+    ]);
+    const fills = rows('player-list-items', '.player-health-fill');
+    has(fills[0].getAttribute('style'), 'width:100%', 'null -> 100%, not 0%');
+    has(fills[0].getAttribute('style'), 'background:#4CAF50', 'null -> green, not red');
+    has(fills[1].getAttribute('style'), 'width:100%', 'undefined -> 100% (unchanged)');
+    has(fills[2].getAttribute('style'), 'width:0%', '0 -> 0% (unchanged)');
+    has(fills[2].getAttribute('style'), 'background:#e74c3c', '0 -> red (unchanged)');
   });
   it('stateChange maps every client state onto both connection indicators', () => {
     const h = harness();
@@ -291,6 +380,30 @@ describe('startHosting — host form validation (src/multiplayer/SessionHosting.
     const rec = readLastSession();
     eq(rec.mode, 'creative', 'rejoin record mode'); eq(rec.name, 'Quarry', 'rejoin record name');
     eq(rec.seed, 12345, 'rejoin record seed'); is(rec.isHost, 'rejoin record isHost');
+  });
+  it("carries the Max Players slider into the relay's host request (D-84)", async () => {
+    // `SessionHosting.js:74` has always read `#host-max-players`. What it read went into
+    // `client.hostSession({ name, seed, mode, maxPlayers })` and no further:
+    // `MultiplayerClient.hostSession` destructured the first three and dropped the
+    // fourth, `sendHost` had no such parameter, and `server/index.js` hard-coded 4. This
+    // asserts the first link — that the SLIDER's value, not the template default,
+    // reaches the object the client is handed.
+    const h = harness();
+    const client = connected(h);
+    fillHostForm(h, { name: 'Duo' });
+    el('host-max-players').value = '2';
+    await h.manager.startHosting();
+    eq(client.hosted && client.hosted.maxPlayers, 2,
+      'the host request carries the 2 the slider was set to, not the template default of 4');
+    eq(client.hosted && client.hosted.name, 'Duo', 'and still carries the name');
+    eq(client.hosted && client.hosted.seed, 12345, 'and the seed');
+
+    const h2 = harness();
+    const client2 = connected(h2);
+    fillHostForm(h2, { name: 'Default' });
+    await h2.manager.startHosting();
+    eq(client2.hosted && client2.hosted.maxPlayers, 4,
+      "an untouched slider sends the template's 4 (src/ui/templates/lobbyScreen.js:117)");
   });
 });
 describe('LobbyScreen (src/ui/screens/LobbyScreen.js)', () => {

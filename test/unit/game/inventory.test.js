@@ -596,6 +596,107 @@ console.log('\n[D-65: splitStack bounds]');
   assertEquals(noRoom.getSlot(1).count, 64, 'Full target is unchanged');
 }
 
+// --- Test: D-76 — the stack ceiling, and splitStack's missing same-slot guard (PR 33) ---
+console.log('\n[D-76: count is bounded above, and from === to]');
+
+// (a) `setSlot` stored any count it was handed. `getMaxStack(3)` is 64 for a block.
+{
+  const overfill = new Inventory();
+  const handed = { typeId: 3, count: 9999 };
+  overfill.setSlot(0, handed);
+  assertEquals(overfill.getSlot(0).count, 64, 'setSlot clamps an over-full stack to getMaxStack');
+  assertEquals(handed.count, 64, "and clamps the CALLER's object too — the two cannot disagree");
+  assertEquals(overfill.countTotalItems(), 64, 'the inventory holds 64, not 9999');
+  // Unclamped counts still pass through untouched.
+  overfill.setSlot(1, { typeId: 3, count: 64 });
+  assertEquals(overfill.getSlot(1).count, 64, 'exactly maxStack is NOT clamped');
+  overfill.setSlot(2, { typeId: 3, count: 1 });
+  assertEquals(overfill.getSlot(2).count, 1, 'a normal count is untouched');
+  overfill.setSlot(3, null);
+  assertNull(overfill.getSlot(3), 'setSlot(i, null) still clears — the cap is null-safe');
+}
+
+// Per-item maxima, not one global 64. `ender_eye` is 6, `quest_key` and CORRUPT_CRYSTAL are 1.
+{
+  const perItem = new Inventory();
+  perItem.setSlot(0, { typeId: 'ender_eye', count: 99 });
+  assertEquals(perItem.getSlot(0).count, 6, "clamped to the ITEM's own maxStack (ender_eye = 6)");
+  perItem.setSlot(1, { typeId: 'quest_key', count: 5 });
+  assertEquals(perItem.getSlot(1).count, 1, 'quest_key is a single-stack item');
+  perItem.setSlot(2, { typeId: 'apple', count: 70 });
+  assertEquals(perItem.getSlot(2).count, 64, 'apple caps at 64');
+}
+
+// (b) `deserialize` clamped with Math.max(1, count) — a LOWER bound only — so an
+// over-full stack survived a save/load round trip and re-entered the game intact.
+{
+  const save = { rows: 4, cols: 9, slots: [
+    { index: 0, typeId: 3, count: 9999 },
+    { index: 1, typeId: 'ender_eye', count: 40 },
+    { index: 2, typeId: 3, count: 0 },
+  ], equipment: { helmet: { typeId: 'iron_helmet', count: 12 } } };
+  const restored = Inventory.deserialize(save);
+  assertEquals(restored.getSlot(0).count, 64, 'deserialize clamps a corrupt count to maxStack');
+  assertEquals(restored.getSlot(1).count, 6, "and to the ITEM's max, not a global one");
+  assertEquals(restored.getSlot(2).count, 1, 'the existing LOWER bound (Math.max(1, …)) still applies');
+  assertEquals(restored.equipment.helmet.count, 1, 'equipment counts are clamped on the same path');
+  // And the round trip now converges instead of preserving the corruption.
+  assertEquals(Inventory.deserialize(restored.serialize()).getSlot(0).count, 64,
+    'a second round trip is a fixed point — the clamp is idempotent');
+}
+
+// (c) The clamp is LOUD. That is the whole of the data decision: it is lossy, so it
+// must not be silent. See InventoryStacks.js `_capCount`.
+{
+  const warned = [];
+  const realWarn = console.warn;
+  console.warn = (...a) => { warned.push(a.join(' ')); };
+  try {
+    const loud = new Inventory();
+    loud.setSlot(0, { typeId: 3, count: 100 });
+    Inventory.deserialize({ rows: 4, cols: 9, slots: [{ index: 0, typeId: 3, count: 500 }] });
+    loud.setSlot(1, { typeId: 3, count: 10 }); // in range — must NOT warn
+  } finally {
+    console.warn = realWarn;
+  }
+  // `|| ''` so a REGRESSION (no warning emitted at all) reports as a failed assertion
+  // instead of a TypeError that kills the runner before it prints its results.
+  const w0 = warned[0] || '', w1 = warned[1] || '';
+  assertEquals(warned.length, 2, 'exactly one warning per clamp — setSlot and deserialize, not the in-range set');
+  assertTrue(w0.includes('setSlot(0)'), 'the warning names the call site it came through');
+  assertTrue(w0.includes('36 item(s) discarded'), 'and says exactly how many items were destroyed');
+  assertTrue(w1.includes('deserialize(slot 0)'), 'the deserialize warning names the slot');
+  assertTrue(w1.includes('D-76'), 'and points at the BUGS.md row that explains why');
+}
+
+// (d) The consequence D-65 could only mitigate: an over-full stack makes `space` negative.
+// With the cap in place `space` cannot go negative in the first place.
+{
+  const neg = new Inventory();
+  neg.setSlot(0, { typeId: 3, count: 10 });
+  neg.setSlot(1, { typeId: 3, count: 9999 }); // was: a 9999 stack, space = 64 - 9999
+  assertEquals(neg.getSlot(1).count, 64, 'the destination cannot exceed its own maximum');
+  assertFalse(neg.splitStack(0, 1), 'so the split is refused for being full, not for being negative');
+  assertEquals(neg.getSlot(0).count, 10, 'and the source is not grown by a backwards transfer');
+}
+
+// (e) `swapSlots` has `if (from === to) return false;`. `splitStack` did not — so a
+// same-slot split read one object as both source and destination, decremented and
+// incremented it, fired two notifications and returned true.
+{
+  const same = new Inventory();
+  same.setSlot(0, { typeId: 3, count: 10 });
+  let notifications = 0;
+  same.onSlotChange = () => { notifications++; };
+  assertFalse(same.splitStack(0, 0), 'splitStack(0, 0) returns false, as swapSlots(0, 0) does');
+  assertEquals(notifications, 0, 'and fires no slot-change notification');
+  assertEquals(same.getSlot(0).count, 10, 'the stack is exactly as it was');
+  assertEquals(same.countTotalItems(), 10, 'no items were created or destroyed');
+  // The two siblings now agree for every argument shape they share.
+  assertFalse(same.swapSlots(3, 3), 'swapSlots(3, 3) — the guard it always had');
+  assertFalse(same.splitStack(3, 3), 'splitStack(3, 3) — the guard it now has');
+}
+
 // --- Test: isFull edge case ---
 console.log('\n[isFull Edge Cases]');
 

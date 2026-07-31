@@ -21,7 +21,7 @@
 import { CuubzLogger } from '../util/Logger.js';
 
 /** Same fallback `Game.js` uses — `CuubzLogger.log` is gated on `DEBUG`. */
-const _gameLog = typeof CuubzLogger !== 'undefined' ? CuubzLogger.log : function() {};
+const _gameLog = CuubzLogger.log;
 
 /**
  * Persist the selected character's inventory, equipment and spawn point.

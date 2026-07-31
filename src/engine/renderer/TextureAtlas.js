@@ -500,8 +500,34 @@ export class PBRTextureAtlas {
     return {
       u: gapFrac + tile.col * cellFrac,
       v: 1.0 - (tile.row + 1) * cellFrac,
-      size: this.tileSize / atlasSize,
+      size: this.uvTileSize(),
     };
+  }
+
+  /**
+   * One tile's edge length in UV space — D-74.
+   *
+   * `getFaceUV` returns `size: 0` for a block id the atlas has no entry for, and both
+   * mesh paths substitute a fallback. Those two fallbacks were hand-written and did not
+   * agree: `ChunkMeshBuilder.js` used `1.0/16` (0.0625, **1.7% too large**) and
+   * `meshWorker.js` used `1.0/6` (0.1667, **171% too large** — a worker-built
+   * missing-atlas face was drawn at 2.7× its tile footprint, so whether a texture was
+   * wrong depended on whether the browser spawned a mesh worker).
+   *
+   * `1.0/gridW` is not right either: the grid is genuinely 16×16 today (244 slots →
+   * `ceil(sqrt(244)) = 16`) but the tiles do not tile the canvas edge to edge. There are
+   * `gridW + 1` two-pixel gaps, so with `tileSize = 128` the canvas is
+   * `16*128 + 17*2 = 2082` px and one tile is `128/2082 = 0.0614793…` of it.
+   *
+   * This is the SAME expression `getFaceUV` returns above, factored out so there is one
+   * copy of it, and it is what `buildMeshTables` now ships to the worker in
+   * `msg.tables.uvFallbackSize`. The two paths can no longer disagree by construction.
+   *
+   * @returns {number} `0` before `build()` has run (no grid yet).
+   */
+  uvTileSize() {
+    if (!this.gridW) return 0;
+    return this.tileSize / (this.gridW * this.tileSize + (this.gridW + 1) * this._gap);
   }
 
   /**

@@ -63,7 +63,12 @@ console.log('=============================\n');
 // ── Preconditions ─────────────────────────────────────────────
 console.log('[Preconditions]');
 assert(fs.existsSync(SCRIPT_PATH), 'scripts/generate-manifest.js exists');
-assert(fs.existsSync(REGISTRY_PATH), 'js/world/blockRegistry.js exists');
+// D-82: this message read `js/world/blockRegistry.js`, a path PR 9 renamed 17 PRs before
+// this line was last touched. REGISTRY_PATH above has pointed at
+// src/engine/world/BlockRegistry.js the whole time, so the assertion was correct and only
+// its message lied — which is the worst shape for a message, because it is the only thing
+// a reader sees when the assertion goes red.
+assert(fs.existsSync(REGISTRY_PATH), 'src/engine/world/BlockRegistry.js exists');
 
 // Snapshot the existing manifest so the run leaves no trace.
 const hadManifest = fs.existsSync(MANIFEST_PATH);

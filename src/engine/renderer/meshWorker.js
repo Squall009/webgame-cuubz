@@ -25,6 +25,11 @@
  * `ChunkMeshCoordinator._ensureMeshTablesCache`. `msg.tables` is REQUIRED: there is no
  * built-in default to fall back to, because a default is exactly the thing that goes
  * stale. Do not add one. Do not add an id literal to this file.
+ *
+ * **PR 33 / D-74 added `msg.tables.uvFallbackSize` for the same reason.** The one
+ * remaining hand-written number in here was the missing-atlas UV tile size, `1.0 / 6`,
+ * against `ChunkMeshBuilder.js`'s `1.0 / 16` and a true value of `0.0614793…`. See
+ * `getUV` below and `TextureAtlas.uvTileSize()`.
  */
 
 var CHUNK_W = 16;
@@ -46,20 +51,28 @@ function idMap(pairs) {
 }
 
 // uvLookup: Array[256] where each entry is [topU,topV,botU,botV,sideU,sideV,size] or null
-function getUV(blockType, faceName, uvLookup) {
+//
+// D-74: `fallbackSize` is `msg.tables.uvFallbackSize`, i.e. `TextureAtlas.uvTileSize()`,
+// and it is NOT a literal here for the same reason no block-id table is (see the file
+// header / D-63). This line used to read `info[6] || (1.0 / 6)`. The real tile is
+// `128 / 2082 = 0.0614793…` of the atlas, so `1.0/6` was **171% too large** — a face
+// whose block id the atlas had no entry for was drawn at 2.7× its tile footprint, but
+// only on the worker path; `ChunkMeshBuilder` used `1.0/16` and was 1.7% off. Which one
+// you got depended on whether the browser managed to spawn a mesh worker.
+function getUV(blockType, faceName, uvLookup, fallbackSize) {
   var defaultUV = [[0,0],[1,0],[1,1],[0,1]];
-  
+
   if (!uvLookup || !uvLookup[blockType]) return defaultUV;
   var info = uvLookup[blockType];
   if (!info) return defaultUV;
-  
+
   // Pick face UV from flat array: [topU,topV,botU,botV,sideU,sideV,size]
   var u, v, size;
   if (faceName === 'top') { u = info[0]; v = info[1]; }
   else if (faceName === 'bottom') { u = info[2]; v = info[3]; }
   else { u = info[4]; v = info[5]; } // front, back, right, left all use side
-  size = info[6] || (1.0 / 6);
-  
+  size = info[6] || fallbackSize;
+
   var result = [];
   for (var i = 0; i < 4; i++) {
     result.push([u + defaultUV[i][0] * size, v + defaultUV[i][1] * size]);
@@ -69,7 +82,8 @@ function getUV(blockType, faceName, uvLookup) {
 
 /**
  * @param tables — the derived tables from the build message. See the file header:
- *   { faces, airIds, cutoutIds, transparentIds, tintableIds, specialMeshTypes, blockColors }
+ *   { faces, uvFallbackSize, airIds, cutoutIds, transparentIds, tintableIds,
+ *     specialMeshTypes, blockColors }
  */
 function buildMeshData(blocks, neighbors, uvLookup, humidityMap, tables) {
   var FACES = tables.faces;
@@ -79,6 +93,8 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap, tables) {
   var TINTABLE_IDS = idSet(tables.tintableIds);
   var SPECIAL_MESH_TYPES = idMap(tables.specialMeshTypes);
   var BLOCK_COLORS = idMap(tables.blockColors);
+  // D-74 — see getUV above. Shipped by BlockCategories.buildMeshTables, never a literal.
+  var UV_FALLBACK_SIZE = tables.uvFallbackSize;
 
   function isNonSolid(b) {
     return AIR_IDS[b] || CUTOUT_IDS[b] || TRANSPARENT_IDS[b] ? true : false;
@@ -128,7 +144,7 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap, tables) {
   function addCrossbillboard(x, y, z, blockType, uvLookup, posArr, normArr, uvArr, colorArr, idxArr, vColor, faceName) {
     faceName = faceName || 'side';
     // Get UV info — use specified face for crossbillboard planes
-    var faceUVs = getUV(blockType, faceName, uvLookup);
+    var faceUVs = getUV(blockType, faceName, uvLookup, UV_FALLBACK_SIZE);
 
     // Helper: emit a single-sided quad (material is already double-sided)
     var emitQuad = function(verts, normal) {
@@ -172,7 +188,7 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap, tables) {
     var flowerY = 0.05; // Slightly above ground
 
     // Get UV info — use 'top' face for the flower
-    var faceUVs = getUV(blockType, 'top', uvLookup);
+    var faceUVs = getUV(blockType, 'top', uvLookup, UV_FALLBACK_SIZE);
 
     // Apply block color (e.g. red_flower → [1, 0.25, 0.25], yellow_flower → [1, 1, 0.25])
     var blockColor = BLOCK_COLORS[blockType];
@@ -286,7 +302,7 @@ function buildMeshData(blocks, neighbors, uvLookup, humidityMap, tables) {
 
           // Face is visible — proceed to build geometry
 
-          var faceUVs = getUV(blockType, face.name, uvLookup);
+          var faceUVs = getUV(blockType, face.name, uvLookup, UV_FALLBACK_SIZE);
           var vColor = getVertexColor(x, y, z, blockType);
           addFace(posArr, normArr, uvArr, (isCutout ? cutoutColor : (isTransparent ? transColor : solidColor)), idxArr, face.vertices, face.dir, faceUVs, vColor, x, y, z);
         }

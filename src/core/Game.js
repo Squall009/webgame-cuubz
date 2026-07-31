@@ -65,8 +65,10 @@ import { initInventory } from './init/initInventory.js';           // steps 12�
 import { initHud } from './init/initHud.js';                       // step 14
 
 // Debug logging — set CuubzLogger.DEBUG = true in console to enable
-export var _gameLog;
-if (typeof CuubzLogger !== 'undefined') { _gameLog = CuubzLogger.log; } else { _gameLog = function() {}; }
+// D-27: the `typeof CuubzLogger !== 'undefined'` test and its `else` branch are gone —
+// `CuubzLogger` is a module import, so the fallback was unreachable. `var` is deliberate
+// (globalCollisions.test.js asserts `^(export )?var _gameLog`).
+export var _gameLog = CuubzLogger.log;
 
 // ============================================================
 // Mode Constants

@@ -19,7 +19,7 @@
  * `mergeManifestEntries` is the single writer that normalises them, and it is exported
  * as a plain function because `flushDirty` (ChunkStorage.js) and `_batchEnsureChunks`
  * (RegionTracker.js) both need it. ChunkManager.js re-attaches it as the static
- * `ChunkManager._mergeManifestEntries` that test/test_chunkStorage.js calls.
+ * `ChunkManager._mergeManifestEntries` that test/unit/engine/chunkStorage.test.js calls.
  */
 
 /**

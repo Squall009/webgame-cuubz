@@ -4,10 +4,14 @@
  * Uses TextureAtlas for proper UV mapping based on block type.
  */
 
-import * as THREE from 'three';
+// PR 33: `three` is no longer imported here. Every one of this file's 15 `THREE.`
+// references was inside `buildThreeGeometry`, which now lives in `./ChunkMeshGeometry.js`.
 import { BLOCK_TYPES } from '../world/BlockRegistry.js';
 import { CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH, MAX_Y, MIN_Y } from '../world/ChunkData.js';
-import { FACE_TABLE, HORIZONTAL_FACES } from '../../game/data/FaceTable.js';
+// D-74: `HORIZONTAL_FACES` was imported here for `_buildSourceFluidFace`, which is gone.
+// The EXPORT stays in FaceTable.js — `test/unit/engine/meshTables.test.js:130` asserts
+// its shape, and that assertion is the thing keeping FACE_TABLE's order honest.
+import { FACE_TABLE } from '../../game/data/FaceTable.js';
 import {
   AIR_IDS,
   BLOCK_COLOR_MULTIPLIERS,
@@ -17,6 +21,11 @@ import {
   TINTABLE_IDS,
   TRANSPARENT_IDS,
 } from '../../game/data/BlockCategories.js';
+// PR 33: `_addCrossbillboard` and `_addTopFace` live in their own file for the 400-line
+// ceiling and are put back on the prototype at the bottom of this one. See that file's
+// header for the field-crossing measurement that chose the seam (decision 44).
+import { ChunkMeshBillboardMethods } from './ChunkMeshBillboards.js';
+import { ChunkMeshGeometryMethods } from './ChunkMeshGeometry.js';
 
 export class ChunkMeshBuilder {
   constructor() {
@@ -125,19 +134,12 @@ export class ChunkMeshBuilder {
             idxArr = indices;
           }
 
-          // DISABLED: fluid block / water level logic (tied to WaterFlowSystem)
-          // All water/ice/lava/toxic_slime now use standard transparent face culling below.
-          /*
-          const hasWaterLevels = typeof chunk.getWaterLevel === 'function';
-          const fluidBlockType = (blockType === BLOCK_TYPES.WATER || blockType === BLOCK_TYPES.LAVA);
-          const waterLevel = hasWaterLevels && fluidBlockType ? chunk.getWaterLevel(x, y, z) : 0;
-          const isSourceFluid = (waterLevel >= 8); // Level 8 = source (ocean/lake - flat surface)
-
-          if (fluidBlockType && hasWaterLevels && !isSourceFluid) {
-            this._buildFlowingFluidFace(x, y, z, blockType, waterLevel, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup, waterLevelLookup);
-          } else if (fluidBlockType && hasWaterLevels && isSourceFluid) {
-            this._buildSourceFluidFace(x, y, z, blockType, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup);
-          } */
+          // D-74: a 13-line commented-out fluid dispatch stood here, calling
+          // `_buildFlowingFluidFace` / `_buildSourceFluidFace` behind a `WaterFlowSystem`
+          // that does not exist in the tree. It was the ONLY call site of either method,
+          // so both were unreachable; PR 33 deleted the comment and all 253 lines of the
+          // two methods. Water, ice, lava and toxic slime go through the standard
+          // transparent face culling below and always did.
 
           // Special mesh types: crossbillboard (grass X-shape) and topface (flowers)
           const meshInfo = this.specialMeshTypes.get(blockType);
@@ -210,7 +212,7 @@ export class ChunkMeshBuilder {
                 const faceUV = atlas.getFaceUV(blockType, face.name);
                 uvU = faceUV.u || 0;
                 uvV = faceUV.v || 0;
-                uvSize = faceUV.size || (1.0 / 16);
+                uvSize = faceUV.size || atlas.uvTileSize();
               } else {
                 // Fallback: simple 0-1 UV per face
                 uvU = 0;
@@ -298,462 +300,41 @@ export class ChunkMeshBuilder {
   }
 
   /**
-   /**
-    * Render source (level-8) fluid as a flat surface.
-    * Only renders top face + side faces at the edges of connected fluid bodies.
-    */
-   _buildSourceFluidFace(x, y, z, blockType, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup = null) {
-     const getUV = (faceName) => {
-       if (atlas && atlas.loaded) {
-         const f = atlas.getFaceUV(blockType, faceName);
-         return { u: f.u || 0, v: f.v || 0, size: f.size || (1.0 / 16) };
-       }
-       return { u: 0, v: 0, size: 1 };
-     };
-
-     // Start vertex index from current array length — each block appends to shared arrays
-     let vIdx = posArr.length / 3;
-     const addQuad = (verts, normal, faceName) => {
-       const uvInfo = getUV(faceName);
-       for (let i = 0; i < 4; i++) {
-         posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
-         normArr.push(normal[0], normal[1], normal[2]);
-         const uvCoords = this.faceNormals.find(f => f.name === faceName)?.uvCoords || [[0,0],[1,0],[1,1],[0,1]];
-         uvArr.push(uvInfo.u + uvCoords[i][0] * uvInfo.size, uvInfo.v + uvCoords[i][1] * uvInfo.size);
-       }
-       idxArr.push(vIdx, vIdx+1, vIdx+2, vIdx, vIdx+2, vIdx+3);
-       vIdx += 4;
-     };
-
-     // Helper to query neighbor blocks (cross-chunk aware)
-     const queryBlock = (nx, ny, nz) => {
-       if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && ny >= MIN_Y && ny < MAX_Y) {
-         return chunk.getBlock(nx, ny, nz);
-       }
-       // Out of local chunk bounds — use cross-chunk lookup or default to air
-       if (neighborLookup) {
-         const worldX = chunk.chunkX * 16 + x;
-         const worldZ = chunk.chunkZ * 16 + z;
-         return neighborLookup(worldX + nx - x, ny, worldZ + nz - z);
-       }
-       return BLOCK_TYPES.AIR || 0;
-     };
-
-     // TOP face: only if air above (visible surface) — do NOT draw when another water block is on top
-     {
-       const above = queryBlock(x, y + 1, z);
-       if (above === BLOCK_TYPES.AIR || above === 0) {
-         addQuad([[0,1,1],[1,1,1],[1,1,0],[0,1,0]], [0, 1, 0], 'top');
-       }
-     }
-
-     // SIDE faces: only if neighbor is NOT the same fluid type (edge of body)
-     // HORIZONTAL_FACES is FACE_TABLE minus top/bottom, in the same order this table
-     // used to spell out by hand (refactor.md §9).
-     for (const side of HORIZONTAL_FACES) {
-       const nx = x + side.dir[0];
-       const nz = z + side.dir[2];
-       const neighborBlock = queryBlock(nx, y, nz);
-       // Only render if neighbor is NOT the same fluid type — this creates the "edge" effect
-       if (neighborBlock !== blockType) {
-         addQuad(side.verts, side.normal, side.faceName);
-       }
-     }
-   }
-
-   /**
-    * Render flowing fluid with sloped geometry based on water level and neighbors.
-    * Level 1-7: partial height creates slope effect against terrain.
-    * Top always at full height (y+1), sides blend down to neighbor levels or ground.
-    * UVs are interpolated vertically so texture scales proportionally with height.
-    */
-   _buildFlowingFluidFace(x, y, z, blockType, waterLevel, chunk, atlas, posArr, normArr, uvArr, idxArr, neighborLookup = null, waterLevelLookup = null) {
-     const getUV = (faceName) => {
-       if (atlas && atlas.loaded) {
-         const f = atlas.getFaceUV(blockType, faceName);
-         return { u: f.u || 0, v: f.v || 0, size: f.size || (1.0 / 16) };
-       }
-       return { u: 0, v: 0, size: 1 };
-     };
-
-     // Start vertex index from current array length — each block appends to shared arrays
-     let vIdx = posArr.length / 3;
-
-     // Add a single triangle with per-vertex UVs for proper interpolation on slopes
-     const addTriUV = (v0, uv0, v1, uv1, v2, uv2, normal) => {
-       posArr.push(x + v0[0], y + v0[1], z + v0[2]);
-       normArr.push(normal[0], normal[1], normal[2]);
-       uvArr.push(uv0[0], uv0[1]);
-
-       posArr.push(x + v1[0], y + v1[1], z + v1[2]);
-       normArr.push(normal[0], normal[1], normal[2]);
-       uvArr.push(uv1[0], uv1[1]);
-
-       posArr.push(x + v2[0], y + v2[1], z + v2[2]);
-       normArr.push(normal[0], normal[1], normal[2]);
-       uvArr.push(uv2[0], uv2[1]);
-
-       idxArr.push(vIdx, vIdx+1, vIdx+2);
-       vIdx += 3;
-     };
-
-     // Add a quad split into two triangles with per-vertex UVs for slopes
-     const addQuadUV = (v0, uv0, v1, uv1, v2, uv2, v3, uv3, normal) => {
-       addTriUV(v0, uv0, v1, uv1, v2, uv2, normal);
-       addTriUV(v0, uv0, v2, uv2, v3, uv3, normal);
-     };
-
-     // Helper: get effective fluid level for a neighbor (cross-chunk aware)
-     const getNeighborLevel = (nx, ny, nz) => {
-       // Try local chunk first
-       if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && ny >= MIN_Y && ny < MAX_Y) {
-         const nb = chunk.getBlock(nx, ny, nz);
-         if ((nb === BLOCK_TYPES.WATER || nb === BLOCK_TYPES.LAVA) && typeof chunk.getWaterLevel === 'function') {
-           return Math.max(1, chunk.getWaterLevel(nx, ny, nz));
-         }
-       }
-       // Try cross-chunk lookup
-       if (waterLevelLookup) {
-         const worldX = chunk.chunkX * 16 + x;
-         const worldZ = chunk.chunkZ * 16 + z;
-         return Math.max(0, waterLevelLookup(worldX + nx - x, ny, worldZ + nz - z));
-       }
-       return 0; // Not fluid or lookup unavailable
-     };
-
-     // Helper: query neighbor block (cross-chunk aware)
-     const queryBlock = (nx, ny, nz) => {
-       if (nx >= 0 && nx < 16 && nz >= 0 && nz < 16 && ny >= MIN_Y && ny < MAX_Y) {
-         return chunk.getBlock(nx, ny, nz);
-       }
-       if (neighborLookup) {
-         const worldX = chunk.chunkX * 16 + x;
-         const worldZ = chunk.chunkZ * 16 + z;
-         return neighborLookup(worldX + nx - x, ny, worldZ + nz - z);
-       }
-       return BLOCK_TYPES.AIR || 0;
-     };
-
-     // Convert water level (1-7) to height fraction
-     const thisHeight = Math.max(0.125, waterLevel / 8);
-
-     // Base UV info for side faces
-     const sideUVInfo = getUV('front'); // Use 'front' as default for all sides
-     const topUVInfo = getUV('top');
-
-     // TOP face: always at full block height — only if air above (visible surface)
-     {
-       const above = queryBlock(x, y + 1, z);
-       if (above === BLOCK_TYPES.AIR || above === 0) {
-         addQuadUV(
-           [0, 1, 1], [topUVInfo.u, topUVInfo.v],
-           [1, 1, 1], [topUVInfo.u + topUVInfo.size, topUVInfo.v],
-           [1, 1, 0], [topUVInfo.u + topUVInfo.size, topUVInfo.v + topUVInfo.size],
-           [0, 1, 0], [topUVInfo.u, topUVInfo.v + topUVInfo.size],
-           [0, 1, 0]
-         );
-       }
-     }
-
-     // SIDE faces: sloped based on neighbor fluid levels vs this level
-     const sides = [
-       { dir: [0, 0, 1], faceName: 'front', axis: 'z', sign: 1 },
-       { dir: [0, 0,-1], faceName: 'back',  axis: 'z', sign: -1 },
-       { dir: [1, 0, 0], faceName: 'right', axis: 'x', sign: 1 },
-       { dir: [-1,0, 0], faceName: 'left',  axis: 'x', sign: -1 },
-     ];
-
-     for (const side of sides) {
-       const nx = x + side.dir[0];
-       const nz = z + side.dir[2];
-       const neighborBlock = queryBlock(nx, y, nz);
-
-       // Skip if solid block next to us — don't render into terrain
-       if (neighborBlock !== BLOCK_TYPES.AIR && !this.nonSolidIds.has(neighborBlock)) {
-         continue;
-       }
-
-       const neighborLevel = getNeighborLevel(nx, y, nz);
-
-       if (neighborLevel === 0) {
-         // Neighbor is air/solid: render side face from bottom to this water height
-         const h = thisHeight;
-         const uvH = sideUVInfo.v + h * sideUVInfo.size; // UV scales with height
-        
-         let v0, uv0, v1, uv1, v2, uv2, v3, uv3;
-         if (side.axis === 'z' && side.sign > 0) {
-           v0=[0,0,1]; uv0=[sideUVInfo.u, sideUVInfo.v];
-           v1=[1,0,1]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
-           v2=[1,h,1]; uv2=[sideUVInfo.u + sideUVInfo.size, uvH];
-           v3=[0,h,1]; uv3=[sideUVInfo.u, uvH];
-         } else if (side.axis === 'z' && side.sign < 0) {
-           v0=[1,0,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
-           v1=[0,0,0]; uv1=[sideUVInfo.u, sideUVInfo.v];
-           v2=[0,h,0]; uv2=[sideUVInfo.u, uvH];
-           v3=[1,h,0]; uv3=[sideUVInfo.u + sideUVInfo.size, uvH];
-         } else if (side.axis === 'x' && side.sign > 0) {
-           v0=[1,0,1]; uv0=[sideUVInfo.u, sideUVInfo.v];
-           v1=[1,0,0]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
-           v2=[1,h,0]; uv2=[sideUVInfo.u + sideUVInfo.size, uvH];
-           v3=[1,h,1]; uv3=[sideUVInfo.u, uvH];
-         } else {
-           v0=[0,0,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v];
-           v1=[0,0,1]; uv1=[sideUVInfo.u, sideUVInfo.v];
-           v2=[0,h,1]; uv2=[sideUVInfo.u, uvH];
-           v3=[0,h,0]; uv3=[sideUVInfo.u + sideUVInfo.size, uvH];
-         }
-         addQuadUV(v0,uv0,v1,uv1,v2,uv2,v3,uv3, side.dir);
-
-       } else if (neighborLevel < waterLevel) {
-         // Neighbor has lower level: render sloped face from neighbor height to this height
-         const nHeight = Math.max(0.125, neighborLevel / 8);
-         const h = thisHeight;
-        
-         let v0, uv0, v1, uv1, v2, uv2, v3, uv3;
-         if (side.axis === 'z' && side.sign > 0) {
-           v0=[0,nHeight,1]; uv0=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v1=[1,nHeight,1]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v2=[1,h,1];     uv2=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
-           v3=[0,h,1];     uv3=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
-         } else if (side.axis === 'z' && side.sign < 0) {
-           v0=[1,nHeight,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v1=[0,nHeight,0]; uv1=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v2=[0,h,0];     uv2=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
-           v3=[1,h,0];     uv3=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
-         } else if (side.axis === 'x' && side.sign > 0) {
-           v0=[1,nHeight,1]; uv0=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v1=[1,nHeight,0]; uv1=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v2=[1,h,0];     uv2=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
-           v3=[1,h,1];     uv3=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
-         } else {
-           v0=[0,nHeight,0]; uv0=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v1=[0,nHeight,1]; uv1=[sideUVInfo.u, sideUVInfo.v + nHeight * sideUVInfo.size];
-           v2=[0,h,1];     uv2=[sideUVInfo.u, sideUVInfo.v + h * sideUVInfo.size];
-           v3=[0,h,0];     uv3=[sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + h * sideUVInfo.size];
-         }
-         addQuadUV(v0,uv0,v1,uv1,v2,uv2,v3,uv3, side.dir);
-       }
-       // If neighbor level >= this level: don't render (neighbor covers us)
-     }
-
-     // BOTTOM face: only if there's air below (waterfall edge / exposed bottom)
-     {
-       const below = queryBlock(x, y - 1, z);
-       if (below === BLOCK_TYPES.AIR || this.nonSolidIds.has(below)) {
-         addQuadUV(
-           [0,0,0], [sideUVInfo.u, sideUVInfo.v],
-           [1,0,0], [sideUVInfo.u + sideUVInfo.size, sideUVInfo.v],
-           [1,0,1], [sideUVInfo.u + sideUVInfo.size, sideUVInfo.v + sideUVInfo.size],
-           [0,0,1], [sideUVInfo.u, sideUVInfo.v + sideUVInfo.size],
-           [0,-1, 0]
-         );
-       }
-     }
-   }
-
-  /**
    * Check if a block type is transparent (for face culling)
    */
   _isTransparent(blockType) {
     return this.transparentIds.has(blockType);
   }
+}
 
-  /**
-   * Build a crossbillboard (two vertical 1×1 planes forming an X) for grass blocks.
-   * Two planes, each double-sided, crossing at the block center.
-   * Each plane is full cube-face size (1×1 units).
-   * @param {number} x - Block X
-   * @param {number} y - Block Y
-   * @param {number} z - Block Z
-   * @param {number} blockType - Block ID for texture lookup
-   * @param {object} atlas - Texture atlas
-   * @param {array} posArr - Position array
-   * @param {array} normArr - Normal array
-   * @param {array} uvArr - UV array
-   * @param {array} colorArr - Color array
-   * @param {array} idxArr - Index array
-   * @param {array} vColor - Vertex color [r, g, b]
-   */
-  _addCrossbillboard(x, y, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor, faceName = 'side') {
-    // Get UV info — use specified face (default 'side') for crossbillboard planes
-    let uvU = 0, uvV = 0, uvSize = 1;
-    if (atlas && atlas.loaded) {
-      const faceUV = atlas.getFaceUV(blockType, faceName);
-      uvU = faceUV.u || 0;
-      uvV = faceUV.v || 0;
-      uvSize = faceUV.size || (1.0 / 16);
-    }
+// ============================================================
+// PROTOTYPE MIXINS — the method groups, put back on the class
+// ============================================================
+//
+// Decision 44, and the same idiom as `ChunkManager.js` and `InventorySystem.js`. The
+// guard throws at MODULE LOAD if a mixin and the class body ever define the same method
+// name: a silent overwrite is the one failure mode a mixin split has that a single class
+// does not, and it is the shared-global-scope collision class that refactor.md §2 and
+// `test/unit/meta/globalCollisions.test.js` exist for. `Object.assign` copies own
+// enumerable properties, which is exactly what an object literal's methods are.
+const MIXINS = [
+  ['ChunkMeshBillboards', ChunkMeshBillboardMethods],
+  ['ChunkMeshGeometry', ChunkMeshGeometryMethods],
+];
 
-    const quadUVs = [[0, 0], [1, 0], [1, 1], [0, 1]];
-
-    // Helper: emit a single-sided quad (material is already double-sided)
-    const emitQuad = (verts, normal) => {
-      const startIdx = posArr.length / 3;
-      for (let i = 0; i < 4; i++) {
-        posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
-        normArr.push(normal[0], normal[1], normal[2]);
-        uvArr.push(uvU + quadUVs[i][0] * uvSize, uvV + quadUVs[i][1] * uvSize);
-        colorArr.push(vColor[0], vColor[1], vColor[2]);
+{
+  const seen = new Map();
+  for (const [file, methods] of MIXINS) {
+    for (const name of Object.keys(methods)) {
+      const prior = seen.get(name) ||
+        (Object.prototype.hasOwnProperty.call(ChunkMeshBuilder.prototype, name) ? 'the class body' : null);
+      if (prior) {
+        throw new Error(`[ChunkMeshBuilder] Mixin collision: '${name}' is defined by both ` +
+          `${prior} and ${file}.js. Two files cannot own the same method.`);
       }
-      idxArr.push(startIdx, startIdx + 1, startIdx + 2, startIdx, startIdx + 2, startIdx + 3);
-    };
-
-    // Two vertical planes forming an X (criss-cross), centered at block center (0.5, 0.5, 0.5).
-    // Each plane is a W×1 rectangle rotated 45° apart around Y axis.
-    // Normals point straight up (0,1,0) so both planes receive equal sunlight.
-    // Small depth offset along each plane's horizontal normal prevents z-fighting.
-    const c = Math.cos(Math.PI / 4); // 0.7071
-    const s = Math.sin(Math.PI / 4); // 0.7071
-    const hw = 0.4;  // half-width (0.8 total, fits within block when rotated)
-    const off = 0.02; // depth offset along horizontal normal
-
-    // Plane 1: diagonal / direction, horizontal normal (c, 0, s)
-    // Vertices of a rectangle centered at (0.5, 0, 0.5), rotated 45°
-    const ox1 = off * c, oz1 = off * s;
-    emitQuad([
-      [0.5 - hw*c + ox1, 0, 0.5 - hw*s + oz1],
-      [0.5 + hw*c + ox1, 0, 0.5 + hw*s + oz1],
-      [0.5 + hw*c + ox1, 1, 0.5 + hw*s + oz1],
-      [0.5 - hw*c + ox1, 1, 0.5 - hw*s + oz1],
-    ], [0, 1, 0]); // Normal points up for even lighting
-
-    // Plane 2: diagonal \ direction, horizontal normal (-s, 0, c)
-    const ox2 = -off * s, oz2 = -off * c;
-    emitQuad([
-      [0.5 + hw*s + ox2, 0, 0.5 - hw*c + oz2],
-      [0.5 - hw*s + ox2, 0, 0.5 + hw*c + oz2],
-      [0.5 - hw*s + ox2, 1, 0.5 + hw*c + oz2],
-      [0.5 + hw*s + ox2, 1, 0.5 - hw*c + oz2],
-    ], [0, 1, 0]); // Normal points up for even lighting
-  }
-
-  /**
-   * Build a single top face near the ground for flower blocks.
-   * @param {number} x - Block X
-   * @param {number} y - Block Y
-   * @param {number} z - Block Z
-   * @param {number} blockType - Block ID for texture lookup
-   * @param {object} atlas - Texture atlas
-   * @param {array} posArr - Position array
-   * @param {array} normArr - Normal array
-   * @param {array} uvArr - UV array
-   * @param {array} colorArr - Color array
-   * @param {array} idxArr - Index array
-   * @param {array} vColor - Vertex color [r, g, b]
-   */
-  _addTopFace(x, y, z, blockType, atlas, posArr, normArr, uvArr, colorArr, idxArr, vColor) {
-    const flowerY = 0.05; // Slightly above ground
-
-    // Get UV info — use 'top' face for the flower
-    let uvU = 0, uvV = 0, uvSize = 1;
-    if (atlas && atlas.loaded) {
-      const faceUV = atlas.getFaceUV(blockType, 'top');
-      uvU = faceUV.u || 0;
-      uvV = faceUV.v || 0;
-      uvSize = faceUV.size || (1.0 / 16);
+      seen.set(name, file + '.js');
     }
-
-    // Apply block color (e.g. red_flower → [1, 0.25, 0.25], yellow_flower → [1, 1, 0.25])
-    const blockColor = this.colorMap.get(blockType);
-    const finalColor = blockColor
-      ? [vColor[0] * blockColor[0], vColor[1] * blockColor[1], vColor[2] * blockColor[2]]
-      : vColor;
-
-    const vi = posArr.length / 3;
-    const quadUVs = [[0, 0], [1, 0], [1, 1], [0, 1]];
-
-    // Full 1×1 top face (+Y normal), counter-clockwise winding
-    const verts = [
-      [0, flowerY, 0], [1, flowerY, 0],
-      [1, flowerY, 1], [0, flowerY, 1]
-    ];
-    const normal = [0, 1, 0];
-
-    for (let i = 0; i < 4; i++) {
-      posArr.push(x + verts[i][0], y + verts[i][1], z + verts[i][2]);
-      normArr.push(normal[0], normal[1], normal[2]);
-      uvArr.push(uvU + quadUVs[i][0] * uvSize, uvV + quadUVs[i][1] * uvSize);
-      colorArr.push(finalColor[0], finalColor[1], finalColor[2]);
-    }
-    idxArr.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
-  }
-
-  /**
-   * Build Three.js BufferGeometry from mesh data.
-   */
-  buildThreeGeometry(meshData, chunk) {
-    if (typeof THREE === 'undefined') return null;
-
-    // Skip empty chunks (all air) — no geometry to build
-    if (meshData.indices.length === 0 && (!meshData.cutoutIndices || meshData.cutoutIndices.length === 0) && (!meshData.transparentIndices || meshData.transparentIndices.length === 0)) {
-      return null;
-    }
-
-    const result = {};
-
-    // Build solid geometry from mesh data
-    if (meshData.indices.length > 0) {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.positions, 3));
-      geometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.normals, 3));
-      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.uvs, 2));
-      if (meshData.colors && meshData.colors.length > 0) {
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(meshData.colors, 3));
-      }
-      geometry.setIndex(meshData.indices);
-      geometry.computeBoundingSphere(); // Required for raycasting
-      result.solidGeometry = geometry;
-    }
-
-    // Build cutout geometry (leaves, flowers, torches) — alpha-tested rendering
-    if (meshData.cutoutIndices && meshData.cutoutIndices.length > 0) {
-      const cutoutGeometry = new THREE.BufferGeometry();
-      cutoutGeometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.cutoutPositions, 3));
-      cutoutGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.cutoutNormals, 3));
-      cutoutGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.cutoutUvs, 2));
-      if (meshData.cutoutColors && meshData.cutoutColors.length > 0) {
-        cutoutGeometry.setAttribute('color', new THREE.Float32BufferAttribute(meshData.cutoutColors, 3));
-      }
-      cutoutGeometry.setIndex(meshData.cutoutIndices);
-      cutoutGeometry.computeBoundingSphere(); // Required for raycasting
-      result.cutoutGeometry = cutoutGeometry;
-    }
-
-    // Build transparent geometry (water, ice, toxic slime) — opacity blending
-    if (meshData.transparentIndices && meshData.transparentIndices.length > 0) {
-      const transGeometry = new THREE.BufferGeometry();
-      transGeometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.transparentPositions, 3));
-      transGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.transparentNormals, 3));
-      transGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.transparentUvs, 2));
-      if (meshData.transparentColors && meshData.transparentColors.length > 0) {
-        transGeometry.setAttribute('color', new THREE.Float32BufferAttribute(meshData.transparentColors, 3));
-      }
-      transGeometry.setIndex(meshData.transparentIndices);
-      transGeometry.computeBoundingSphere(); // Required for raycasting
-      result.transparentGeometry = transGeometry;
-    }
-
-    return result;
-  }
-
-  /**
-   * Get face count estimate for a chunk
-   */
-  estimateFaceCount(chunk) {
-    let faces = 0;
-
-    for (let x = 0; x < CHUNK_WIDTH; x++) {
-      for (let z = 0; z < CHUNK_DEPTH; z++) {
-        for (let y = MIN_Y; y < MAX_Y; y++) {
-          const blockType = chunk.getBlock(x, y, z);
-          if (blockType === BLOCK_TYPES.AIR || blockType === BLOCK_TYPES.CAVE_AIR) continue;
-
-          // Count exposed faces (simplified — doesn't check neighbors)
-          faces += 6;
-        }
-      }
-    }
-
-    return faces;
   }
 }
+
+Object.assign(ChunkMeshBuilder.prototype, ...MIXINS.map(([, methods]) => methods));

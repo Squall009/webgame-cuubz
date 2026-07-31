@@ -3279,7 +3279,7 @@ Automate the [§1.5](#15-player-data-must-survive-byte-for-byte) save/load check
 
 **PR 32 also owns `BUGS.md` D-47** — `test/test_sessionUI.js` is 730 lines that `require` nothing from `src/` and reimplement `SessionManager`, `updateConnectionStatus`, `renderSessionList`, `renderPlayerList`, host-form validation and tab switching inline beside a `MockElement` DOM. It is the same shape as **D-45**, and D-45 proved the failure mode is real for this file's sibling: that copy had drifted into asserting a relay URL scheme the game does not implement, and stayed green for it. PR 16 moved all six of these things into importable files, so the copies can only drift further. Rewriting it needs `document`, a `MultiplayerClient` and a `UIManager` stubbed, which is test infrastructure rather than an extraction — hence here and not in PR 16.
 
-### PR 33 — Shared protocol, shims, and final cleanup
+### PR 33 — Shared protocol, shims, and final cleanup ✅ DONE
 
 > **Absorbs PR 30** (§8.7). `shared/protocol.js` is two files' worth of `MESSAGE_TYPES` (`src/multiplayer/Client.js` and `server/session.js`) and belongs with the other sweep-up. Also owns **D-27** (the `typeof X !== 'undefined'` guards — 61 across 20 files, of which 29 are the genuine cross-module ones), **D-30** (`minify: false`) and deleting `src/testBridge.js` (decision 21 states the condition).
 Delete the remaining `typeof module !== 'undefined'` blocks (62 at the start) now that tests import ESM. Final gate: `npm run dev`, `npm run build`, `npm test`, `npm run lint`, `./sync.sh` all pass.
@@ -3304,6 +3304,51 @@ Also owned here, all four moved by an earlier PR that stated its reason:
   If that never becomes true, this PR's job is to write that down as permanent rather than
   leave it looking pending. Whatever happens, `test/test_globalCollisions.js`'s
   `ALLOWED_WINDOW_WRITERS` (D-35) must be updated in the same commit.
+
+#### PR 33 outcome — two commits, fourteen rows closed
+
+**D-77 landed first and alone, with the e2e pair as its gate** (the owner's instruction):
+`mobIntegration.js` and `mobRenderer.js` guarded on `typeof THREE` with THREE not imported,
+so **no mob had been rendered since PR 9**. Both conditions deleted; the whole newly-live
+path was executed in Node against real three 0.134 first — all five definitions build,
+disposal confirmed by three's own `'dispose'` events — and `mobRendering.test.js` pins the
+guards **by their effects**, not by a source-text grep, because a grep cannot tell a live
+guard from a sentence describing a dead one.
+
+The main commit is three slices. **`shared/protocol.js`** is one frozen table of **27**
+`MESSAGE_TYPES` replacing a 24-key copy, a 10-key copy and **14 bare string literals**;
+`server/` became an ES module (`server/package.json`, **12 CommonJS lines**, no
+`vite.config.js` change) and `shared/` needed its own `package.json`. **D-27**'s sweep
+removed 30 constant guards — **6 of which were constant-FALSE, so the guarded body was dead
+code** — and putting those sites under `no-undef` for the first time is most of the point.
+**D-30** flipped `minify` and `sourcemap` together: browser JS+CSS **−46.5% raw / −39.4%
+gzip**. `ChunkMeshBuilder.js` went **759 → 340** plus two mixin files after D-74's 253 dead
+lines went, and the UV fallback now ships in the worker payload so the two paths cannot
+disagree. `src/testBridge.js`'s removal condition is written down as **permanent** —
+`dist/`'s entry chunk has zero `export`s and `import()`ing it starts a second application —
+and seven unread bindings are gone.
+
+The adversarial pass found a real defect for the **seventh consecutive PR**, and it was one
+this PR had just created: `sourcemap` was about to publish **2,526,003 bytes of
+`sourcesContent` — the whole of `src/` — to the deploy web root**, which is D-13 returning
+through the change meant to make the first deploy debuggable. It also caught that D-74's
+`1.0/16` regression guard **went vacuous the moment the file it guards was split**.
+
+| Gate | Result |
+|---|---|
+| `npm test` | **63 files / 113 tests / 0 failed**, exit 0 |
+| `npm run test:count` | **7,014** assertions (6,532 at PR 31's start) |
+| `npm run lint` | **0 errors, 146 warnings** (was 149) |
+| `npm run build` | exit 0 — 1,073,402 B browser JS+CSS, down from 2,004,583 |
+| `npm run test:e2e` | **189 passed, 0 failed** — the only host that can see `minify` |
+| `npm run test:e2e:vite` | **189 passed, 0 failed** — equal, unchanged |
+| `npm run test:e2e:mp` | **70 passed, 0 failed** — and the browse row now reads **`1/3`** (D-84) |
+| `./sync.sh --dry-run` | exit 0; 17 archive members, `shared/` present, `*.map` excluded |
+| largest file this PR split | `ChunkMeshBuilder.js`, **340** |
+
+**Not reached, and reassigned rather than left pointing at a closed PR: D-75** (nine inert
+split fragments), **D-86** (PR 31's migration residue) and **D-33** (146 warnings, whose
+remaining half is `src/`) all move to **PR 34**.
 
 ---
 

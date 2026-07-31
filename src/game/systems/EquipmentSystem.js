@@ -19,7 +19,9 @@
  *
  * IMPORT DIRECTION: this file is imported BY `InventorySystem.js` and imports nothing from
  * it — `NAMED_ITEMS` comes from the leaf data module. `src/` has no import cycles and must
- * not gain one: `test/helpers/esmRequire.js` resolves a cycle to `undefined` (D-28).
+ * not gain one. (**D-82:** the reason cited here was that `test/helpers/esmRequire.js`
+ * resolved a cycle to `undefined` (D-28). PR 31 deleted that hook — Vitest loads real ES
+ * modules — so the rule survives but its automatic early warning does not.)
  *
  * `EQUIPMENT_SLOTS`, `EQUIPMENT_SLOT_ORDER` and `getEquipmentSlotForItem` are re-exported
  * from `src/game/systems/InventorySystem.js` under their original names, so

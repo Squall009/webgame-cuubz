@@ -6,9 +6,14 @@
  *
  * **`.mjs`, not `.js`.** §4.1 names this file `eslint.config.js`; the extension is the one
  * deviation and it is not a design change. This file is an ES module and package.json has
- * no `"type": "module"` — adding one would reclassify every `.js` in `server/`, `test/`
- * and `scripts/`, which are CommonJS. Without it Node prints a MODULE_TYPELESS_PACKAGE_JSON
+ * no `"type": "module"` — adding one would reclassify every `.js` in `test/` and
+ * `scripts/`, which are CommonJS. Without it Node prints a MODULE_TYPELESS_PACKAGE_JSON
  * warning on every single lint run. `.mjs` is ESLint's documented answer and costs nothing.
+ *
+ * **PR 33 note.** `server/` *did* get a `"type": "module"`, in `server/package.json` —
+ * scoped to that subtree precisely so the root does not need one and `scripts/` and
+ * `test/e2e/` keep the CommonJS they actually are. That is what let `shared/protocol.js`
+ * be one ES module both the browser bundle and the relay import; see that file.
  *
  * ─── `no-undef` IS THE POINT ────────────────────────────────────────────────
  *
@@ -27,8 +32,9 @@
  * This codebase has three, and they are genuinely different:
  *
  *   1. `src/**`      — browser ES modules. `window`, `document`, `IndexedDB`, `WebGL`.
- *   2. `server/**`, `scripts/**`, `test/**` — Node CommonJS. `require`, `module`,
- *      `__dirname`, `process`.
+ *   2. `scripts/**` and `test/e2e/**` — Node CommonJS. `require`, `module`, `__dirname`.
+ *      (`server/**` was in this bucket until PR 33 and is now a Node ES module; `test/**`
+ *      left at PR 31.)
  *   3. `src/engine/renderer/meshWorker.js` and `src/engine/world/workerGeneration.js`
  *      — Web Worker **classic scripts**. Not modules, no `window`, but `self`,
  *      `postMessage` and `onmessage`. They are fetched as text and wrapped in a Blob
@@ -189,20 +195,67 @@ export default [
     rules: BASE_RULES,
   },
 
-  // ── 3. Node CommonJS: the relay, the scripts, and the e2e harness ─────────
+  // ── 3. Node CommonJS: the scripts and the e2e harness ─────────────────────
   //
   // `test/**` used to be in this list and is not any more — PR 31 moved the unit suite
   // to Vitest and ES modules, and the first converted file failed `no-undef` on its own
-  // `import` until this block was split (**D-79**). What is left here is genuinely still
-  // CommonJS: `server/` (the relay), `scripts/` (both shell out or are shelled out to),
-  // and `test/e2e/` — the browser harness, which is a standalone Node program rather
-  // than a Vitest file and is excluded from the Vitest glob for that reason.
+  // `import` until this block was split (**D-79**). `server/**` left at PR 33 for the
+  // same reason, one block down. What is left here is genuinely still CommonJS:
+  // `scripts/` (both shell out or are shelled out to) and `test/e2e/` — the browser
+  // harness, a standalone Node program rather than a Vitest file, which is excluded
+  // from the Vitest glob for that reason. Its `page.evaluate` callbacks are serialised
+  // into a browser, which is why this block keeps the browser globals.
   {
-    files: ['server/**/*.js', 'scripts/**/*.js', 'test/e2e/**/*.js'],
+    files: ['scripts/**/*.js', 'test/e2e/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'commonjs',
       globals: { ...NODE_GLOBALS, ...BROWSER_GLOBALS },
+    },
+    rules: BASE_RULES,
+  },
+
+  // ── 3a. The relay: Node ES modules (PR 33) ────────────────────────────────
+  //
+  // `server/package.json` says `"type": "module"`, so Node parses these as ES modules
+  // and `require` / `module.exports` / `__dirname` are **ReferenceErrors at runtime**,
+  // not merely unfashionable. They are therefore switched off here rather than
+  // inherited from NODE_GLOBALS: a leftover `module.exports` in a converted file is a
+  // `no-undef` error at lint time instead of a crash on the deploy host. `test/**`
+  // does the same thing with `__dirname` for the same reason.
+  //
+  // No BROWSER_GLOBALS. The relay is Node; `WebSocket` here comes from `ws` by import,
+  // and anything that reaches for a browser global is a bug worth an error.
+  {
+    files: ['server/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...NODE_GLOBALS,
+        require: 'off',
+        module: 'off',
+        exports: 'off',
+        __dirname: 'off',
+        __filename: 'off',
+      },
+    },
+    rules: BASE_RULES,
+  },
+
+  // ── 3c. `shared/`: ES modules BOTH environments import ────────────────────
+  //
+  // `shared/protocol.js` is imported by `src/multiplayer/Client.js` (browser, through
+  // Vite) and by `server/` (Node). Only the **intersection** of the two environments is
+  // available to it, which is why this block does not spread NODE_GLOBALS or
+  // BROWSER_GLOBALS: a `process.env` read here would work on the relay and be a
+  // ReferenceError in the bundle, and the linter should be the one that says so.
+  {
+    files: ['shared/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { console: 'readonly' },
     },
     rules: BASE_RULES,
   },

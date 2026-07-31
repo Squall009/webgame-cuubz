@@ -32,6 +32,7 @@ import path from 'path';
 import vm from 'vm';
 import { BLOCK_REGISTRY, BLOCK_BY_ID, BLOCK_BY_NAME } from '../../../src/engine/world/BlockRegistry.js';
 import { ChunkMeshBuilder } from '../../../src/engine/renderer/ChunkMeshBuilder.js';
+import { PBRTextureAtlas } from '../../../src/engine/renderer/TextureAtlas.js';
 import { FACE_TABLE, HORIZONTAL_FACES } from '../../../src/game/data/FaceTable.js';
 import { AIR_IDS, CUTOUT_IDS, TRANSPARENT_IDS, TINTABLE_IDS, buildMeshTables, isPassable, isSolidBlock } from '../../../src/game/data/BlockCategories.js';
 import { BLOCK_PROPERTIES } from '../../../src/engine/world/BlockRegistry.js';
@@ -143,7 +144,7 @@ const idx = (x, y, z) => x + z * CHUNK_W + y * CHUNK_W * CHUNK_D;
  * Evaluate the real meshWorker.js source in a sandbox and build one chunk containing a
  * single block of `blockId`, floating in air. Returns the three geometry streams.
  */
-function runWorker(blockId, tables) {
+function runWorker(blockId, tables, uvLookup = null) {
   let result = null;
   const sandbox = { console, self: {} };
   sandbox.self.postMessage = (msg) => { result = msg; };
@@ -160,7 +161,7 @@ function runWorker(blockId, tables) {
       blocks: blocks.buffer,
       neighbors: { positiveX: null, negativeX: null, positiveZ: null, negativeZ: null },
       humidityMap: humidity.buffer,
-      uvLookup: null,
+      uvLookup,
       tables,
     },
   });
@@ -170,6 +171,7 @@ function runWorker(blockId, tables) {
   const read = (s) => ({
     verts: new Float32Array(s.pos).length / 3,
     colors: Array.from(new Float32Array(s.color).slice(0, 3)),
+    uvs: Array.from(new Float32Array(s.uv)),
   });
   return { solid: read(result.solid), cutout: read(result.cutout), trans: read(result.trans) };
 }
@@ -311,6 +313,119 @@ assertTrue(isPassable(46), 'water (46) is passable — the old mob code walked O
 assertTrue(isPassable(47), 'lava (47) is passable');
 assertTrue(isSolidBlock(61), 'ice (61) is solid despite category:transparent — it carries an explicit `solid: true`');
 assertTrue(isSolidBlock(999), 'an id the registry does not know is treated as solid (the safe answer)');
+
+// ═══════════════════════════════════════════════════════════════════
+// 7 — the missing-atlas UV fallback is ONE number, and it travels (D-74)
+// ═══════════════════════════════════════════════════════════════════
+//
+// `TextureAtlas.getFaceUV` returns `size: 0` for a block id it has no tile for, and both
+// mesh paths substitute a fallback. Those two fallbacks were hand-written and disagreed:
+// `ChunkMeshBuilder.js` used `1.0/16` and `meshWorker.js` used `1.0/6`. The true tile is
+// `0.0614793…`, so the worker drew such a face at 2.7× its footprint while the main
+// thread drew it 1.7% too large — the same class of defect as D-63 and with the same
+// tell, that which one you got depended on whether a worker spawned.
+//
+// The fix is not a corrected literal in two places. `uvFallbackSize` rides in the
+// `msg.tables` payload the worker already receives, so there is one number.
+console.log('--- 7: the UV fallback (D-74) ---');
+
+// The real `uvTileSize` implementation, called against the atlas geometry the game
+// actually builds (244 slots → ceil(sqrt) = 16 grid, 128px tiles, 17 × 2px gaps).
+// Read off the prototype so no canvas is needed and the assertion still tests the
+// shipping arithmetic rather than a copy of it.
+const UV_TILE = PBRTextureAtlas.prototype.uvTileSize.call({ gridW: 16, tileSize: 128, _gap: 2 });
+assertEquals(UV_TILE, 128 / 2082, 'uvTileSize() is tileSize/atlasSize — 128 / (16*128 + 17*2) = 128/2082');
+assertTrue(Math.abs(UV_TILE - 0.0614793) < 1e-6, 'and that is 0.0614793…, not 1/16 (0.0625) and not 1/6 (0.1667)');
+assertEquals(PBRTextureAtlas.prototype.uvTileSize.call({ gridW: 0 }), 0,
+  'uvTileSize() is 0 before build() has set up a grid — which is why ChunkMeshCoordinator does not cache the tables until the atlas is loaded');
+
+// The payload carries it.
+const uvTables = buildMeshTables(FACE_TABLE, UV_TILE);
+assertEquals(uvTables.uvFallbackSize, UV_TILE, 'buildMeshTables ships uvFallbackSize in the worker payload');
+
+// A uvLookup entry that EXISTS but has size 0 — exactly what a block id with no atlas
+// tile produces. This is the only input that reaches the fallback at all.
+const missingAtlas = new Array(256).fill(null);
+missingAtlas[115] = [0, 0, 0, 0, 0, 0, 0]; // [topU,topV,botU,botV,sideU,sideV,size]
+
+// The worker returns its UVs in a Float32Array, so every comparison below is to 1e-6:
+// float32 carries ~7 significant digits. That is still three orders of magnitude
+// tighter than the errors being caught (1/16 is 0.001 off, 1/6 is 0.105 off).
+const uvSpan = (uvs) => Math.max(...uvs) - Math.min(...uvs);
+
+const workerUV = uvSpan(runWorker(115, uvTables, missingAtlas).solid.uvs);
+assertTrue(Math.abs(workerUV - UV_TILE) < 1e-6,
+  `worker: a missing-atlas face spans one true tile (${workerUV}), not 1/6`);
+
+// And the main-thread builder, given an atlas in the same state.
+const stubAtlas = {
+  loaded: true,
+  getFaceUV: () => ({ u: 0, v: 0, size: 0 }),
+  uvTileSize: () => UV_TILE,
+};
+const mtUv = [];
+new ChunkMeshBuilder()._addCrossbillboard(
+  0, 0, 0, 115, stubAtlas, [], [], mtUv, [], [], [1, 1, 1], 'side');
+const builderUV = uvSpan(mtUv);
+assertTrue(Math.abs(builderUV - UV_TILE) < 1e-6,
+  `ChunkMeshBuilder: a missing-atlas face spans one true tile (${builderUV}), not 1/16`);
+assertTrue(Math.abs(builderUV - workerUV) < 1e-6,
+  'THE POINT: the two mesh paths produce the SAME missing-atlas UV span');
+
+// NON-VACUITY — feed the worker the old literal and watch the bug come back.
+const staleUvTables = buildMeshTables(FACE_TABLE, 1.0 / 6);
+const staleWorkerUV = uvSpan(runWorker(115, staleUvTables, missingAtlas).solid.uvs);
+assertTrue(Math.abs(staleWorkerUV - 1.0 / 6) < 1e-6,
+  'NON-VACUITY: with the old 1.0/6 the worker span is 1/6 — the assertion above can fail');
+assertTrue(staleWorkerUV / UV_TILE > 2.7,
+  `NON-VACUITY: 1/6 is ${(staleWorkerUV / UV_TILE).toFixed(2)}× the true tile — this is the defect D-74 describes`);
+assertTrue(Math.abs(staleWorkerUV - builderUV) > 0.1,
+  'NON-VACUITY: with the old literal the two paths DISAGREE, which is what section 7 exists to prevent');
+
+// Structural guard: neither number may come back as a literal.
+assertFalse(/1\.0\s*\/\s*6\b/.test(stripped), 'meshWorker.js carries no `1.0 / 6` UV literal');
+// All THREE files, not just the class file. `_addCrossbillboard` and `_addTopFace` — two
+// of the three sites this guard exists to police — moved to `ChunkMeshBillboards.js` in
+// the same PR that wrote the guard, so reading only `ChunkMeshBuilder.js` would have let
+// the literal come back in the file it actually lives in. Found by PR 33's adversarial
+// pass: a guard that survives the split of the file it guards is a guard that stopped
+// guarding.
+// Comments stripped, the same way the `meshWorker.js` half of this check already does
+// it: the first version of this loop read raw text and went red on the sentence in
+// `ChunkMeshBillboards.js`'s header that *documents* the fix, which is a guard failing on
+// its own changelog. A guard on source text has to read code.
+const stripComments = (s) =>
+  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\/\/.*$/gm, '');
+for (const rel of [
+  'src/engine/renderer/ChunkMeshBuilder.js',
+  'src/engine/renderer/ChunkMeshBillboards.js',
+  'src/engine/renderer/ChunkMeshGeometry.js',
+]) {
+  assertFalse(
+    /1\.0\s*\/\s*16\b/.test(stripComments(readSrc(rel))),
+    `${rel} carries no \`1.0 / 16\` UV literal`
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 8 — D-74's dead fluid path is gone
+// ═══════════════════════════════════════════════════════════════════
+//
+// `_buildSourceFluidFace` and `_buildFlowingFluidFace` (253 lines) had one call site
+// each, both inside a commented-out `DISABLED: fluid block / water level logic` block,
+// so neither could ever run. `HORIZONTAL_FACES` existed only for the first of them; the
+// EXPORT stays because the assertion in section 2 is what keeps FACE_TABLE's order
+// honest, but nothing may import it back without a live caller.
+console.log('--- 8: the dead fluid path (D-74) ---');
+
+const cmbSrc = readSrc('src/engine/renderer/ChunkMeshBuilder.js');
+assertFalse(/_buildSourceFluidFace|_buildFlowingFluidFace/.test(
+  cmbSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')),
+  'ChunkMeshBuilder.js no longer declares or calls the fluid face builders');
+assertFalse(/^\s*import\b[^;]*HORIZONTAL_FACES/m.test(cmbSrc),
+  'ChunkMeshBuilder.js no longer imports HORIZONTAL_FACES — it had no other caller');
+assertTrue(typeof HORIZONTAL_FACES !== 'undefined' && HORIZONTAL_FACES.length === 4,
+  'but FaceTable.js still EXPORTS it — section 2 asserts its shape');
 
 // ═══════════════════════════════════════════════════════════════════
 console.log(`\n===================================`);

@@ -241,7 +241,8 @@ export class QuestMarker {
    * @returns {Object} Created meshes for cleanup
    */
   createMesh(scene) {
-    if (typeof THREE === 'undefined' || !scene) {
+    // D-27: the `typeof THREE === 'undefined' ||` half is gone; `!scene` is the live one.
+    if (!scene) {
       return { mesh: null, glowMesh: null, particles: [] };
     }
 
@@ -300,7 +301,8 @@ export class QuestMarker {
    * @param {number} deltaTime — Time elapsed since last frame
    */
   updateVisuals(deltaTime) {
-    if (!this.mesh || typeof THREE === 'undefined') return;
+    // D-27: `|| typeof THREE === 'undefined'` removed; `!this.mesh` is the live guard.
+    if (!this.mesh) return;
 
     // Pulse emissive intensity
     if (this.mesh.material && this.mesh.material.emissiveIntensity !== undefined) {
@@ -329,7 +331,8 @@ export class QuestMarker {
    * Remove all Three.js meshes from the scene.
    */
   dispose(scene) {
-    if (!scene || typeof THREE === 'undefined') return;
+    // D-27: `|| typeof THREE === 'undefined'` removed; `!scene` is the live guard.
+    if (!scene) return;
 
     // Remove all children of marker group (mesh, glow, particles, light)
     if (this.mesh && this.mesh.parent) {
@@ -422,9 +425,9 @@ export class QuestMarkerManager {
     if (!this._questSystem) return 0;
 
     this.markers = [];
-    const qr = typeof QUEST_REGISTRY !== 'undefined' ? QUEST_REGISTRY : [];
-
-    for (const quest of qr) {
+    // D-27: was `typeof QUEST_REGISTRY !== 'undefined' ? QUEST_REGISTRY : []` — dead,
+    // `QUEST_REGISTRY` is a module import.
+    for (const quest of QUEST_REGISTRY) {
       const pos = this._questSystem.getMarkerPosition(quest.id, this.worldSeed);
       if (!pos) continue;
 
@@ -507,9 +510,9 @@ export class QuestMarkerManager {
    * @returns {Array<QuestMarker>} Markers in the given stage range
    */
   getMarkersByStageRange(minStage, maxStage) {
-    const qr = typeof QUEST_REGISTRY !== 'undefined' ? QUEST_REGISTRY : [];
+    // D-27: was `typeof QUEST_REGISTRY !== 'undefined' ? QUEST_REGISTRY : []`.
     const stageIds = new Set(
-      qr.filter(q => q.stage >= minStage && q.stage <= maxStage).map(q => q.id)
+      QUEST_REGISTRY.filter(q => q.stage >= minStage && q.stage <= maxStage).map(q => q.id)
     );
     return this.markers.filter(m => stageIds.has(m.questId));
   }

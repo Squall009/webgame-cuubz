@@ -33,9 +33,10 @@
  * ~430 lines, over the ceiling.
  *
  * The `typeof THREE === 'undefined'` guards in `init`, `_createClouds` and
- * `_createSunMoonSprites` are provably dead — `THREE` is a module import, so it is either
- * bound or the module fails to load. Decision 29: a mechanical extraction moves such a
- * guard unchanged rather than recreating it. PR 33 owns the sweep.
+ * `_createSunMoonSprites` were provably dead — `THREE` is a module import, so it is
+ * either bound or the module fails to load — and **PR 33 / D-27 removed all three**.
+ * `init`'s `!this.renderer || !this.renderer.scene` half is PR 9's null-dereference fix
+ * and is untouched.
  */
 
 import * as THREE from 'three';
@@ -51,7 +52,11 @@ export const SkyGeometryMethods = {
     // an import now, the guard is a constant `false`, and a null `renderer` reaches the
     // dereference. In the browser nothing changes — THREE was always defined there, so
     // the second half already ran — but the null check was always missing.
-    if (typeof THREE === 'undefined' || !this.renderer || !this.renderer.scene) return;
+    //
+    // PR 33 deleted the dead `typeof` half. **The null guard below is PR 9's actual
+    // D-27 fix and must not be removed with it** — it is the only thing standing
+    // between a null `renderer` and a TypeError.
+    if (!this.renderer || !this.renderer.scene) return;
 
     const scene = this.renderer.scene;
 
@@ -81,8 +86,7 @@ export const SkyGeometryMethods = {
    * Managed by _updateClouds() for wrapping and distance culling.
    */
   _createClouds() {
-    if (typeof THREE === 'undefined') return;
-
+    // D-27: `if (typeof THREE === 'undefined') return;` removed — constant-false.
     const cloudGroup = new THREE.Group();
     cloudGroup.userData.cloudSpeed = 0.4 + Math.random() * 0.3; // blocks/sec drift
 
@@ -155,8 +159,9 @@ export const SkyGeometryMethods = {
    * a soft glow halo via the generated canvas texture.
    */
   _createSunMoonSprites() {
-    if (typeof THREE === 'undefined') return;
-
+    // D-27: `if (typeof THREE === 'undefined') return;` removed — constant-false. This
+    // method still needs a real 2D canvas, which is why skyClouds.test.js stubs it out
+    // rather than relying on the guard to make it a no-op in Node.
     // Generate a radial glow texture on a canvas (no external assets needed)
     const makeGlowTexture = (coreColor, glowColor, radius) => {
       const size = 256;

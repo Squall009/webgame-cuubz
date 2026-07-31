@@ -171,7 +171,12 @@ async function start(root, port = 3100) {
     const onData = (chunk) => {
       output += chunk;
       // Vite colourises its banner; strip ANSI before matching.
-      const clean = output.replace(/\[[0-9;]*m/g, '');
+      // D-87: the escape below was a LITERAL 0x1B byte in the source until PR 33 — invisible
+      // in an editor, in `Read`, and in `git diff`, so the line read as a broken ANSI strip
+      // that could not possibly work, and every reviewer had to rediscover that it did.
+      // `\x1b` is the same pattern spelled in printable characters; verified by matching
+      // both spellings over a corpus of real vite banners and near-misses.
+      const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
       const m = READY_RE.exec(clean);
       if (m && !settled) {
         settled = true;

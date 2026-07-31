@@ -62,7 +62,9 @@ export function initInventory(game) {
 
   // ─── Multiplayer: Inventory Sync ────────────────
   let inventorySync = null;
-  if (typeof InventorySync !== 'undefined' && sm && sm.client) {
+  // D-27: the `typeof InventorySync !== 'undefined' &&` half is gone (module import);
+  // `sm && sm.client` is the real guard — single-player has no session manager.
+  if (sm && sm.client) {
     inventorySync = new InventorySync(inventory, { playerId: sm.client.playerId });
 
     // On join: send full inventory to host
@@ -108,11 +110,11 @@ export function initInventory(game) {
         inventory.slots[i] = savedInv.slots[i];
       }
       // Copy saved equipment
-      if (typeof EQUIPMENT_SLOT_ORDER !== 'undefined') {
-        for (const slot of EQUIPMENT_SLOT_ORDER) {
-          if (savedInv.equipment[slot]) {
-            inventory.equipment[slot] = { ...savedInv.equipment[slot] };
-          }
+      // D-27: was wrapped in `if (typeof EQUIPMENT_SLOT_ORDER !== 'undefined')` — dead,
+      // `EQUIPMENT_SLOT_ORDER` is a module import.
+      for (const slot of EQUIPMENT_SLOT_ORDER) {
+        if (savedInv.equipment[slot]) {
+          inventory.equipment[slot] = { ...savedInv.equipment[slot] };
         }
       }
       log('[Cuubz] Loaded saved inventory with ' + savedInv.getItems().length + ' items' +

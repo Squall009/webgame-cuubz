@@ -51,6 +51,73 @@
 
 export const StackMethods = {
   // ============================================================
+  // The stack ceiling — D-76
+  // ============================================================
+
+  /**
+   * ─── D-76 — THE ONE PLACE `count` IS BOUNDED ABOVE ────────────────────────
+   *
+   * `addItem`, `addToSlot` and `splitStack` above have always respected `getMaxStack`.
+   * The two doors that bypass every one of them did not: `InventorySystem.setSlot(i,
+   * {typeId, count})` stored whatever it was handed, and `Inventory.deserialize` clamped
+   * with `Math.max(1, count)` — a LOWER bound only. So an over-full stack could be
+   * created (a stale `data-slot` in `InventoryDrag.js`, a malformed `InventorySync`
+   * payload) and, once created, it SURVIVED a save/load round trip, because nothing on
+   * the way back down looked at the maximum either. Downstream, `space = maxStack -
+   * slot.count` in this very file goes negative; D-65's `actualMove <= 0` guard catches
+   * that and refuses the split, but it does not repair the stack — the inventory stays
+   * wrong and the player simply cannot split it, with no message.
+   *
+   * It lives HERE, in the write half of `slots`, and not next to `setSlot`, for the
+   * reason this file's header gives: "did an item get created or destroyed?" is a
+   * question about one file. Capping a count destroys items. It is reached as
+   * `this._capCount(...)` / `inv._capCount(...)` through the prototype mixin, exactly as
+   * `this.getMaxStack` is.
+   *
+   * ─── THE DATA DECISION, MADE EXPLICITLY ───────────────────────────────────
+   *
+   * Enforcing a cap changes what an existing save deserializes to, so it is a data
+   * question and not merely a validation one. Three options were on the table:
+   *
+   *   1. Leave it. The corruption persists forever and spreads through every save.
+   *   2. Refuse to load a save containing an over-full stack. The player loses the WHOLE
+   *      world to one bad number. Strictly worse than 3.
+   *   3. **Clamp on read, and say so out loud.** Chosen. It is lossy — items above the
+   *      maximum are destroyed and cannot be recovered — but it is bounded loss on a
+   *      state that was never reachable by playing, and it converges the save on
+   *      something the rest of the code can reason about.
+   *
+   * The lossiness is the whole reason this is not silent. A `console.warn` naming the
+   * call site, the item, the old count and the new one is the difference between "the
+   * game quietly ate 9,935 stone" and a line an operator can paste into a bug report. It
+   * is a warn and not a throw because a throw here would take down `deserialize`, which
+   * is option 2 wearing a different hat.
+   *
+   * Only the UPPER bound is applied here. The lower bound stays where it already was
+   * (`Math.max(1, …)` in `deserialize`) — moving it would change `setSlot`'s behaviour
+   * for counts of 0, which is a separate question with its own call sites.
+   *
+   * @param {{typeId: *, count: number}|null|undefined} item — mutated IN PLACE when it is
+   *   over the maximum, so the object the caller kept a reference to and the object the
+   *   inventory stores cannot disagree.
+   * @param {string} where — call-site label, so the warning names the door it came through.
+   * @returns {boolean} true if a clamp was applied.
+   */
+  _capCount(item, where) {
+    if (!item || typeof item.count !== 'number') return false;
+    const max = this.getMaxStack(item.typeId);
+    if (!(item.count > max)) return false;
+    console.warn(
+      `[Inventory] ${where}: ${JSON.stringify(item.typeId)} count ${item.count} exceeds ` +
+      `its max stack of ${max} — clamped to ${max}. ${item.count - max} item(s) discarded. ` +
+      'This state is not reachable by playing; the source is a malformed save, an ' +
+      'InventorySync payload or a stale data-slot (BUGS.md D-76).'
+    );
+    item.count = max;
+    return true;
+  },
+
+  // ============================================================
   // Add Items
   // ============================================================
 
@@ -221,6 +288,16 @@ export const StackMethods = {
    * Split a stack — move half to another slot
    */
   splitStack(from, to) {
+    // D-76, second row: `swapSlots` above opens with `if (from === to) return false;` and
+    // this method did not, though both take the same argument pair from the same places.
+    // A same-slot split read `fromSlot` and `toSlot` as the SAME object, so
+    // `fromSlot.count -= actualMove` and `toSlot.count += actualMove` cancelled — and the
+    // method then fired `_notifySlotChange(from)` and `_notifySlotChange(to)` for the one
+    // slot and returned `true`. A no-op reported as a successful split, with two spurious
+    // repaints: the exact shape D-65's second half already fixed for a full destination.
+    // Reachable from a stale `data-slot` attribute in `InventoryDrag.js`, which is where
+    // `swapSlots` gets its own identical guard's workout.
+    if (from === to) return false;
     // D-65: the same bounds guard `swapSlots` has, for the same two arguments. Without it
     // an out-of-range `to` wrote past `totalSlots` and `serialize()` dropped the items.
     if (from < 0 || from >= this.totalSlots || to < 0 || to >= this.totalSlots) return false;

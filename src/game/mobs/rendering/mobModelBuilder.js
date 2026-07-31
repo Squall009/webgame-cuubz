@@ -14,11 +14,10 @@ export class MobModelBuilder {
    * @returns {THREE.Group} Assembled model group
    */
   static build(mobDefinition) {
-    if (typeof THREE === 'undefined') {
-      console.warn('[MobModelBuilder] THREE not available — returning empty group');
-      return new THREE.Group();
-    }
-
+    // D-27: this used to open with
+    //   `if (typeof THREE === 'undefined') { console.warn(…); return new THREE.Group(); }`
+    // which was dead twice over — `THREE` is a module import here, so the branch never
+    // ran, and its body dereferenced the very binding it claimed was missing.
     const group = new THREE.Group();
     const geo = mobDefinition.geometry;
     if (!geo || !geo.parts) return group;

@@ -380,7 +380,7 @@ Object.assign(ChunkManager.prototype, ...MIXINS.map(([, methods]) => methods));
 //
 // These stopped being class members when they moved to modules that touch no instance
 // field, but they are part of this class's published surface: `src/testBridge.js`
-// exposes the class itself, and `test/test_chunkStorage.js`, `test/e2e/saveLoad.js` and
+// exposes the class itself, and `test/unit/engine/chunkStorage.test.js`, `test/e2e/saveLoad.js` and
 // `src/engine/world/Persistence.js` reach for these names on it. Re-attaching costs
 // eleven lines and keeps every one of those call sites byte-identical.
 //

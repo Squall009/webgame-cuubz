@@ -6,8 +6,17 @@ After=network.target
 Type=simple
 User=dadmin
 
-# WorkingDirectory is unchanged by PR 9 and PR 10. `server/` still deploys to
-# /var/www/html/server as CommonJS; only the browser half of the repo moved.
+# WorkingDirectory is unchanged by PR 9, PR 10 and PR 33. `server/` still deploys to
+# /var/www/html/server; PR 33 made it a Node **ES module** (`"type": "module"` in
+# server/package.json) rather than CommonJS, which changes nothing here — `node
+# index.js` is the same command either way.
+#
+# It does change what has to be ON DISK. Every file in `server/` now imports
+# `../shared/protocol.js`, which resolves relative to the FILE, not to this directory:
+# /var/www/html/shared/protocol.js. `sync.sh` ships `shared` alongside `server` for
+# exactly that reason, and its post-deploy verification checks for it. Without that
+# directory the relay exits with ERR_MODULE_NOT_FOUND and Restart=on-failure retries
+# it every RestartSec forever.
 WorkingDirectory=/var/www/html/server
 
 # D-10 (PR 10). This used to name node by absolute, version-pinned path:

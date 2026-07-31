@@ -296,7 +296,8 @@ assert(
 );
 
 // ═══════════════════════════════════════════════════════════════════
-// One `window.*` assignment in src/, at one path (PR 12, BUGS.md D-35)
+// Every write to a property of the global object in src/, by (file, property)
+// (PR 12 / BUGS.md D-35, rewritten by PR 33 / BUGS.md D-71)
 // ═══════════════════════════════════════════════════════════════════
 //
 // `check-globals.js` also asserted this, and it is the other half `no-undef` cannot
@@ -305,28 +306,131 @@ assert(
 // deleting the script and this block, nothing checked it — which PR 12 noticed while
 // deciding whether `src/testBridge.js` could be deleted, and logged as D-35.
 //
-// The rule is not "never touch window". It is that the module boundary has exactly one
-// sanctioned hole in it, at a path whose entire file explains why. A second one added
-// somewhere else is how a codebase drifts back to the shared global scope that
-// refactor.md §2 is about — silently, because each individual assignment looks harmless.
-// If a future PR genuinely needs another, change ALLOWED_WINDOW_WRITERS deliberately and
+// ─── D-71: WHAT THIS BLOCK USED TO MISS, AND WHY WIDENING THE REGEX IS WRONG ──
+//
+// It matched the literal token `window.<name> =` and nothing else, so it saw exactly
+// one of the three files that write to the global object:
+//
+//   • `src/engine/world/workerGeneration.js:1060` assigns
+//     `globalScope._voxelgenGenerateChunk`. `globalScope` is the IIFE parameter, and
+//     the tail `})(typeof self !== 'undefined' ? self : … window …)` means it IS
+//     `window` on the main thread. That is a real second property on `window` — and it
+//     is WANTED, because it is D-57's fix (the inline main-thread generation fallback).
+//     The old check could not see it, so it could not have been deliberate.
+//   • `src/engine/renderer/meshWorker.js` assigns `self.onmessage` / `self.onerror`.
+//     Also invisible for the same reason.
+//
+// The fix is NOT "add `self|globalThis` to the alternation" — that still misses
+// `globalScope`, which is the whole point. Nor is it "match any identifier before the
+// dot", which makes every `foo.bar = 1` in the tree a hit. So:
+//
+//   (a) Resolve, PER FILE, which names actually denote the global object: the three
+//       literals, plus a name bound by the IIFE-tail idiom, plus `const X = window`.
+//       Then match only those.
+//   (b) Allowlist (file, PROPERTY) PAIRS, not files. `workerGeneration.js` is exempt
+//       for `onmessage`, `onerror` and `_voxelgenGenerateChunk` and for NOTHING else —
+//       a fourth property added to that file is a failure, which is what a file-level
+//       allowlist could never express.
+//
+// The rule is not "never touch the global object". It is that the module boundary has a
+// small, enumerated set of sanctioned holes, each at a path whose own file explains why.
+// A new one added somewhere else is how a codebase drifts back to the shared global
+// scope that refactor.md §2 is about — silently, because each assignment looks harmless.
+// If a future PR genuinely needs another, change ALLOWED_GLOBAL_WRITES deliberately and
 // say why in the PR outcome. Do not delete the assertion to make a build pass.
-const ALLOWED_WINDOW_WRITERS = ['src/testBridge.js'];
+const ALLOWED_GLOBAL_WRITES = {
+  // The one sanctioned bridge — see the header of that file.
+  'src/testBridge.js': ['__cuubz'],
+  // Web Worker handler installs. Both workers are classic scripts by contract
+  // (vite.config.js note 2), so `self` is how they register; this is not module drift.
+  'src/engine/renderer/meshWorker.js': ['onerror', 'onmessage'],
+  // Same two handlers, plus D-57's main-thread inline-generation fallback, which
+  // `src/engine/world/ChunkGenerator.js:51` reads back as `window._voxelgenGenerateChunk`.
+  'src/engine/world/workerGeneration.js': ['_voxelgenGenerateChunk', 'onerror', 'onmessage'],
+};
+
+/**
+ * The names that denote the global object inside one file's source text.
+ * `window`/`self`/`globalThis` always, MINUS any of those three the file shadows with a
+ * local declaration; plus the IIFE parameter when the call tail is the
+ * `typeof self !== 'undefined' ? self : window` idiom; plus `const X = window`.
+ *
+ * The shadow subtraction is not hypothetical. `src/engine/world/RegionTracker.js:32`
+ * writes `const self = this;` — the closure-capture idiom — and then
+ * `self._regionCheckTimerId = setTimeout(...)` at :36. Without the subtraction that is
+ * reported as a write to `Worker.self`, which is a false positive and precisely the
+ * failure mode that makes "just widen the regex" the wrong fix.
+ */
+function globalAliases(src) {
+  const LITERALS = ['window', 'self', 'globalThis'];
+  const names = new Set(LITERALS);
+
+  // A literal re-bound as a local is that local, not the global — UNLESS it is rebound
+  // to another spelling of the global (`const self = globalThis`), which is still it.
+  for (const lit of LITERALS) {
+    const decl = src.match(new RegExp(`\\b(?:const|let|var)\\s+${lit}\\s*=\\s*([^;\\n]*)`));
+    if (decl && !/^\s*(?:window|self|globalThis)\s*$/.test(decl[1])) names.delete(lit);
+  }
+
+  // `})(typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : this));`
+  // paired with a `(function (globalScope) {` head.
+  if (/\}\s*\)\s*\(\s*typeof\s+(?:self|globalThis|window)\s*!==\s*['"]undefined['"]/.test(src)) {
+    const head = src.match(/\(\s*function\s*\(\s*([A-Za-z_$][\w$]*)\s*\)/);
+    if (head) names.add(head[1]);
+  }
+  // `const g = window;` / `let g = globalThis;` / `var g = self;`
+  for (const m of src.matchAll(
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:window|self|globalThis)\s*(?=[;\n])/g)) {
+    names.add(m[1]);
+  }
+  return [...names];
+}
 
 const srcRoot = path.join(__dirname, '..', 'src');
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
   const full = path.join(dir, e.name);
   return e.isDirectory() ? walk(full) : (e.name.endsWith('.js') ? [full] : []);
 });
-const windowWriters = walk(srcRoot).filter((full) => {
-  // Strip line comments so the prose in testBridge.js and elsewhere is not a match.
-  const body = fs.readFileSync(full, 'utf8').replace(/^\s*(\/\/|\*|\/\*).*$/gm, '');
-  return /(^|[^\w.$])window\s*\.\s*[A-Za-z_$][\w$]*\s*=(?!=)/.test(body);
-}).map((full) => path.relative(path.join(__dirname, '..'), full).replace(/\\/g, '/')).sort();
 
-assertEquals(windowWriters.join(', '), ALLOWED_WINDOW_WRITERS.join(', '),
-  'Exactly one file in src/ assigns to a window property, and it is src/testBridge.js — ' +
-  'no-undef cannot see this, because assigning to a property of a readonly global is not a lint error');
+const globalWrites = [];
+for (const full of walk(srcRoot)) {
+  const raw = fs.readFileSync(full, 'utf8');
+  // Strip line comments so the prose in testBridge.js and elsewhere is not a match.
+  const body = raw.replace(/^\s*(\/\/|\*|\/\*).*$/gm, '');
+  const rel = path.relative(path.join(__dirname, '..'), full).replace(/\\/g, '/');
+  for (const alias of globalAliases(raw)) {
+    const re = new RegExp(
+      `(^|[^\\w.$])${alias.replace(/\$/g, '\\$')}\\s*\\.\\s*([A-Za-z_$][\\w$]*)\\s*=(?!=)`, 'g');
+    for (const m of body.matchAll(re)) globalWrites.push(`${rel} → ${m[2]}`);
+  }
+}
+
+const expectedGlobalWrites = Object.entries(ALLOWED_GLOBAL_WRITES)
+  .flatMap(([file, props]) => props.map((p) => `${file} → ${p}`)).sort();
+const actualGlobalWrites = [...new Set(globalWrites)].sort();
+
+assertEquals(actualGlobalWrites.join('\n'), expectedGlobalWrites.join('\n'),
+  'Every (file, property) pair in src/ that writes to the global object is one of the ' +
+  'six sanctioned ones — no-undef cannot see any of them, because assigning to a ' +
+  'property of a readonly global is not a lint error');
+
+// Non-vacuity, checked in-process rather than trusted: the resolver must actually find
+// the alias `workerGeneration.js` writes through. If `globalAliases` regressed to the
+// three literals, this goes red and the assertion above would silently pass empty.
+const wgSrc = fs.readFileSync(
+  path.join(__dirname, '..', 'src', 'engine', 'world', 'workerGeneration.js'), 'utf8');
+assertTrue(globalAliases(wgSrc).includes('globalScope'),
+  'globalAliases() resolves the IIFE parameter `globalScope` in workerGeneration.js — ' +
+  'this is the alias the pre-D-71 literal-`window` check was blind to');
+assertTrue(actualGlobalWrites.includes('src/engine/world/workerGeneration.js → _voxelgenGenerateChunk'),
+  'and the D-57 main-thread fallback write is therefore actually seen by this check');
+assertTrue(globalAliases('const g = window;\ng.x = 1;').includes('g'),
+  'globalAliases() also resolves the `const X = window` form');
+assertFalse(globalAliases('const self = this;\nself.x = 1;').includes('self'),
+  'globalAliases() drops a literal the file shadows — `const self = this` is a closure ' +
+  'alias, not the worker global (src/engine/world/RegionTracker.js:32 does exactly this)');
+assertTrue(globalAliases('const self = globalThis;\nself.x = 1;').includes('self'),
+  'but a literal rebound to another spelling of the global is still the global');
 
 // ═══════════════════════════════════════════════════════════════════
 console.log(`\n===================================`);

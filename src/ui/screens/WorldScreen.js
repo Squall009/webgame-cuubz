@@ -175,8 +175,11 @@ export class WorldScreen {
 
   openCreateModal() {
     document.getElementById('world-name').value = '';
-    // Pre-fill a random seed so the field shows what will be used; the player can edit it
-    // or clear it for another random one.
+    // Pre-fill a random seed so the field shows what will be used; the player can edit it.
+    // D-62: clearing it is NOT "give me another random one" any more — a blank field is
+    // refused by `submitCreate` with `BLANK_SEED_ERROR`, because the old behaviour made a
+    // cleared field byte-indistinguishable from a chosen seed. Reopening the modal draws
+    // a fresh one, which is the way to ask for a new random seed.
     document.getElementById('world-seed').value = randomSeed();
     this.hideError();
     this.ui.modals.createWorldModal.classList.remove('hidden');

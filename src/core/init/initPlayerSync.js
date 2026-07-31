@@ -29,7 +29,9 @@ export function initPlayerSync(game) {
 
   // ─── Initialize Multiplayer Player Sync ─────────
   let playerSync = null;
-  if (typeof PlayerSyncManager !== 'undefined' && sm && sm.client) {
+  // D-27: the `typeof PlayerSyncManager !== 'undefined' &&` half is gone (module
+  // import); `sm && sm.client` is the real guard — single-player has no session.
+  if (sm && sm.client) {
     playerSync = new PlayerSyncManager();
     playerSync.setGameMode(game.requestedMode || 'survival');
 
@@ -85,7 +87,9 @@ export function initPlayerSync(game) {
 
   // ─── Initialize PlayerListHUD (connected to live player data) ───
   let playerListHUD = null;
-  if (typeof PlayerListHUD !== 'undefined' && sm && sm.client) {
+  // D-27: the `typeof PlayerListHUD !== 'undefined' &&` half is gone (module import);
+  // `sm && sm.client` is the real guard.
+  if (sm && sm.client) {
     const overlayEl = document.getElementById('player-list-overlay');
     const countEl = document.getElementById('player-count');
     const itemsEl = document.getElementById('player-list-items');
