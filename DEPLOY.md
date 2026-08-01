@@ -72,7 +72,7 @@ no-op (**D-23**).
 
 # Static assets are live immediately (raw file serving, no build, no cache to bust).
 # Relay code is NOT. If you changed anything under server/, also:
-ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz-relay && systemctl status cuubz-relay'
+ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz && systemctl status cuubz'
 ```
 
 That is the entire deploy. There is no build step, no CI deployment, no release
@@ -377,7 +377,7 @@ and the procedure that replaced it are the box in
                                  │    node_modules/  ← NOT shipped      │    files
                                  │    (+ test/, scripts/, *.md ...)     │
                                  │                                      │
-                                 │  systemd: cuubz-relay.service        │
+                                 │  systemd: cuubz.service        │
                                  │    WorkingDirectory=…/html/server    │
                                  │    node index.js  →  port 8765       │
                                  └──────────────────────────────────────┘
@@ -391,33 +391,68 @@ and the procedure that replaced it are the box in
 | Host | `10.0.30.160` | `sync.sh:12` |
 | User | `dadmin` | `sync.sh:11` |
 | Web root / deploy target | `/var/www/html` | `sync.sh:13` |
-| Relay working directory | `/var/www/html/server` | `cuubz-relay.service:8` |
-| Relay port | `8765` | `cuubz-relay.service:13`, `server/index.js:22` |
-| Relay entry point | `index.js` | `cuubz-relay.service:9` |
-| Relay node binary | `/home/dadmin/.local/node-v22.22.0-linux-x64/bin/node` | `cuubz-relay.service:9` |
+| Relay working directory | `/var/www/html/server` | `cuubz.service:8` |
+| Relay port | `8765` | `cuubz.service:13`, `server/index.js:22` |
+| Relay entry point | `index.js` | `cuubz.service:9` |
+| Relay node binary | `/home/dadmin/.local/node-v22.22.0-linux-x64/bin/node` | `cuubz.service:9` |
 | Relay public hostname | `cuubz-relay.thehomelabguy.com` | `src/main.js:2126`, `multiplayer.md:35` |
-| Service unit name | `cuubz-relay` | `cuubz-relay.service` |
+| Service unit name | `cuubz` — **the repo file was renamed `cuubz-relay.service` → `cuubz.service` to match the host (D-95).** The hostname `cuubz-relay.thehomelabguy.com` and `SyslogIdentifier=cuubz-relay` are unrelated and unchanged | `journalctl`, first deploy 2026-07-31 |
 
-### 3.1 What serves `/var/www/html` is UNVERIFIED
+### 3.1 What serves `/var/www/html` — ANSWERED 2026-07-31
 
-Nothing in this repo states it. Every `nginx` reference found
-(`src/main.js:2112,2126`, `server/index.js:9`, `multiplayer.md:35,94,413`) describes
-nginx **only** as the TLS reverse proxy in front of the *relay* on port 8765.
-`multiplayer.md:47-48` hedges the static server as `"(nginx / built-in)"`. There is no
-nginx config, no Apache config, and no `systemctl` invocation in the repo.
+**Apache 2, not nginx.** Settled by the first deploy. `apache2.service` is the only web
+server running, and `/etc/apache2/sites-enabled/000-default.conf` is a stock vhost:
 
-So: nginx is confirmed to be in the picture for `wss://cuubz-relay.thehomelabguy.com`
-→ `127.0.0.1:8765`, and **unconfirmed** for the static root.
-
-To determine it:
-
-```bash
-ssh dadmin@10.0.30.160 'ss -ltnp | grep -E ":(80|443) " ; ls /etc/nginx/sites-enabled/ 2>/dev/null'
+```apache
+<VirtualHost *:80>
+	ServerAdmin webmaster@localhost
+	DocumentRoot /var/www/html
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
 ```
 
-Why it matters: it decides whether a deploy needs a reload at all (raw file serving
-does not), whether directory indexes expose the files listed in [§4.2](#42-what-gets-shipped),
-and whether any caching sits in front of `index.html`.
+Every prior guess in this repo said nginx. That was inference from
+`src/main.js:2112,2126`, `server/index.js:9` and `multiplayer.md:35,94,413`, all of which
+describe nginx **only** as the TLS reverse proxy in front of the *relay*. **There is no
+nginx on this host at all**, and no proxy configuration of any kind.
+
+The three things this section said it would decide, now decided:
+
+- **Does a deploy need a reload?** No. Apache serves the files off disk; `sync.sh` never
+  needs to touch `apache2`.
+- **Do directory indexes expose what [§4.2](#42-what-gets-shipped) lists?** **Yes.**
+  `http://10.0.30.160/textures/` returns `Index of /textures`. `Options -Indexes` is not
+  set. This is why **D-97** (the six files `sync.sh`'s `rm` list missed) mattered more
+  than "reachable at a guessable URL" — it was browsable. Taking `Indexes` off the vhost
+  is a root change on the box and is **open**.
+- **Is anything caching `index.html`?** No — no proxy, no cache layer. What is on disk is
+  what is served.
+
+**Nothing listens on 443, and nothing proxies 8765.** The relay is exposed directly on
+`*:8765`. `getRelayUrl()` (`src/multiplayer/RelayUrl.js:44-45`) returns
+`ws://cuubz-relay.thehomelabguy.com` with **no port** when the page is served over plain
+HTTP — so multiplayer reached via `http://10.0.30.160/` depends on that hostname
+resolving and something fronting it on port 80, which this host does not do. For a
+direct LAN test, use the documented override:
+
+```
+http://10.0.30.160/?relayUrl=ws://10.0.30.160:8765
+```
+
+#### 3.1.1 There is no `sudo` on this host — D-98
+
+`dadmin` is `uid=1000(dadmin) gid=1000(dadmin) groups=1000(dadmin),100(users)`: no
+`sudo` group. `dpkg-query` finds no `sudo` package, and `/usr/bin/sudo`, `/usr/sbin/sudo`
+and `/bin/sudo` do not exist. Only `/usr/bin/su` does.
+
+Consequences, both load-bearing:
+
+- **Every `sudo -n` in `sync.sh` step 7 fails**, so the relay restart takes the warning
+  path on every run. See **D-98** for the two ways out.
+- The non-interactive PATH is `/usr/local/bin:/usr/bin:/bin:/usr/games` — **no node, no
+  npm, no curl.** This is exactly what **D-94** predicted, and it is why step 4 resolves
+  `~/.local/node` and step 5 exports it before `npm ci`.
 
 ### 3.2 The relay is stateless. All player data is client-side.
 
@@ -515,7 +550,7 @@ Excluded: `node_modules`, `.git`, `dist`, and (added by this PR) `.env`.
 `.claude/settings.local.json` · `.github/` · `.gitignore` · `CRAFTING_PLAN.md` ·
 `IMPLEMENTATION_PLAN.md` · `MOB_PLAN.md` · `PR4_HANDOFF.md` · `README.md` ·
 `multiplayer.md` · `performance.md` · `refactor.md` · `DEPLOY.md` (this file) ·
-`cuubz-relay.service` · `sync.sh` · `package.json` · `package-lock.json` ·
+`cuubz.service` · `sync.sh` · `package.json` · `package-lock.json` ·
 `scripts/` · `test/` (1.2 MB)
 
 All of it then `chmod 644`, i.e. world-readable, under a web root. Whether it is
@@ -696,7 +731,7 @@ requires PR 9 and PR 10 to land together.
 |---|---|---|
 | `dist/*` | `/var/www/html/` | `index.html` + `assets/` — the built application |
 | `server/` | `/var/www/html/server/` | unchanged by PR 9; still CommonJS, still the relay |
-| `cuubz-relay.service` | `/var/www/html/` | data only; systemd reads it from `/etc` |
+| `cuubz.service` | `/var/www/html/` | data only; systemd reads it from `/etc` |
 | `textures/` | `/var/www/html/textures/` | **separate artifact** — skipped unless `--textures` or absent on the host |
 
 Nothing else. Not `src/`, `test/`, `scripts/`, `node_modules/`, `.git/`, `.claude/`, or
@@ -715,7 +750,7 @@ any planning `.md`.
 | 7 | `npm ci --omit=dev` in `/var/www/html/server` | **D-9** |
 | 8 | Textures uploaded only on `--textures`, or automatically if `textures/blocks/manifest.json` is missing on the host | **D-11** |
 | 9 | Point `~/.local/node` at the newest `node-v*-linux-x64` under `~/.local` | **D-10** |
-| 10 | Install the unit file **only if it differs**, `daemon-reload` if so, then `systemctl restart cuubz-relay` and confirm it came back | **D-2** |
+| 10 | Install the unit file **only if it differs**, `daemon-reload` if so, then `systemctl restart cuubz` and confirm it came back | **D-2** |
 | 11 | Verify on the host: `index.html` exists, it references a `.js`, and that file is on disk. Then `textures/blocks/manifest.json` and `server/index.js` | the D-4 failure mode |
 
 `StrictHostKeyChecking` went from `no` to `accept-new` (**D-12**): the first key is
@@ -750,12 +785,31 @@ take a site down for real. The backup in step 4 is the rollback until that is kn
 
 ## 5. Restarting the relay
 
-> **PR 10 fixed this (D-2).** `sync.sh` now installs the unit file if it changed,
-> `daemon-reload`s if so, runs `systemctl restart cuubz-relay`, and confirms the unit
-> came back active. If `dadmin` has no passwordless sudo the script **warns and prints
-> the two commands below** rather than failing the deploy — the static site is already
-> live and correct at that point, and only the relay is stale. `[UNVERIFIED]` against the
-> host, like everything else on the remote side.
+> **PR 10 fixed this (D-2).** `sync.sh` installs the unit file if it changed,
+> `daemon-reload`s if so, runs `systemctl restart cuubz`, and confirms the unit came back
+> active. If sudo is unavailable the script **warns and prints the commands to run**
+> rather than failing the deploy — the static site is already live and correct at that
+> point, and only the relay is stale. **Verified against the host 2026-07-31.**
+>
+> ### ⚠ On 10.0.30.160 the automated restart never runs — D-98
+>
+> **There is no `sudo` package on this host** ([§3.1.1](#311-there-is-no-sudo-on-this-host--d-98)),
+> so step 7 always takes the warning path. That is the owner's standing decision, not a
+> defect to fix: **restart by hand, as root, after any change under `server/`.**
+> Every `sudo systemctl …` in this section is the *generic* form; on this box it is:
+>
+> ```bash
+> ssh dadmin@10.0.30.160 -t "su -c 'systemctl restart cuubz && systemctl status cuubz --no-pager'"
+> ```
+>
+> `su` reads its password from a TTY, which is what `ssh -t` is for — without it you get
+> `su: must be run from a terminal`.
+>
+> **You do not always need this.** If the relay is already *down* — crash-looping or
+> stopped by a failure — `Restart=on-failure` + `RestartSec=5` picks up the new code on
+> its own within five seconds of the deploy finishing. That is exactly how the relay came
+> back on 2026-07-31 with no root access at all. The manual restart is only needed when
+> the relay is **healthy** and therefore has no reason to restart itself.
 >
 > The paragraph below is the pre-PR-10 state and the reason the step exists.
 
@@ -770,11 +824,11 @@ old code kept running from memory. The failure mode was silent — the deploy pr
 
 ```bash
 # Restart (required after any server/ change)
-ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz-relay'
+ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz'
 
 # Confirm it came back
-ssh dadmin@10.0.30.160 'systemctl status cuubz-relay --no-pager'
-ssh dadmin@10.0.30.160 'journalctl -u cuubz-relay -n 50 --no-pager'
+ssh dadmin@10.0.30.160 'systemctl status cuubz --no-pager'
+ssh dadmin@10.0.30.160 'journalctl -u cuubz -n 50 --no-pager'
 ```
 
 A healthy start logs three lines (`server/index.js:190-194`):
@@ -788,13 +842,13 @@ A healthy start logs three lines (`server/index.js:190-194`):
 First-time setup only (`multiplayer.md:376-377`, `[UNVERIFIED]`):
 
 ```bash
-sudo cp /var/www/html/cuubz-relay.service /etc/systemd/system/
+sudo cp /var/www/html/cuubz.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now cuubz-relay
+sudo systemctl enable --now cuubz
 ```
 
 Note the unit file is deployed *into the web root* as data; it is not read from there
-by systemd. Editing `cuubz-relay.service` in the repo and running `sync.sh` changes
+by systemd. Editing `cuubz.service` in the repo and running `sync.sh` changes
 nothing until it is copied to `/etc/systemd/system/` and `daemon-reload`ed.
 
 ### 5.1 Restarting drops every connected player
@@ -809,7 +863,7 @@ no world data is lost — the host player's browser holds it. Clients reconnect 
 exponential backoff (`multiplayer.md:125`) and `'cuubz_last_session'` supports rejoin.
 Still: restart when nobody is playing if you can.
 
-`Restart=on-failure` + `RestartSec=5` (`cuubz-relay.service:10-11`) means a crash
+`Restart=on-failure` + `RestartSec=5` (`cuubz.service:10-11`) means a crash
 self-heals in 5 s. Note that `uncaughtException` and `unhandledRejection`
 (`server/index.js:219-225`) both route into the clean-shutdown path with
 `process.exit(0)` — **exit code 0 is not a failure**, so `on-failure` will *not*
@@ -861,18 +915,18 @@ The specific ways it can fail, in order of likelihood:
    and continues; the relay then fails `203/EXEC` on restart. **Read the deploy output.**
 2. The symlink is created but systemd's `PATH` override is wrong for this systemd
    version — quote handling around `Environment=` differs across releases.
-   `systemctl show cuubz-relay -p Environment` is the check.
+   `systemctl show cuubz -p Environment` is the check.
 3. It works and silently starts a *different* node than 22.22.0, because the glob picks
    the newest. That is the intent, and it is why CI's node 22.23.x is now the closer
    match rather than the skew this section used to describe.
 
 If any of it goes wrong the fallback is one line — put the absolute path back in
-`/etc/systemd/system/cuubz-relay.service` and `daemon-reload`. Verify with:
+`/etc/systemd/system/cuubz.service` and `daemon-reload`. Verify with:
 
 ```bash
 ssh dadmin@10.0.30.160 'ls -l ~/.local/node && ~/.local/node/bin/node --version'
-ssh dadmin@10.0.30.160 'systemctl show cuubz-relay -p ExecStart -p Environment'
-ssh dadmin@10.0.30.160 'systemctl status cuubz-relay --no-pager'
+ssh dadmin@10.0.30.160 'systemctl show cuubz -p ExecStart -p Environment'
+ssh dadmin@10.0.30.160 'systemctl status cuubz --no-pager'
 ```
 
 The CI-skew note above still stands and is now smaller: CI runs the latest 22.x and the
@@ -944,7 +998,7 @@ npm ci && npm test
 ./sync.sh
 
 # 5. If server/ differed, restart the relay.
-ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz-relay'
+ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz'
 
 # 6. Clean up.
 cd - && git worktree remove ../cuubz-rollback
@@ -1025,12 +1079,12 @@ ssh dadmin@10.0.30.160 'ls -lt /home/dadmin/cuubz-deploy/backups/'
 #    the broken files that the backup does not happen to contain (the same D-5 trap
 #    the deploy itself had to solve).
 ssh dadmin@10.0.30.160 'cd /var/www/html \
-  && rm -rf assets server index.html cuubz-relay.service \
+  && rm -rf assets server index.html cuubz.service \
   && tar xzf /home/dadmin/cuubz-deploy/backups/webroot-<STAMP>.tar.gz -C /var/www/html'
 
 # 3. The relay is a separate concern — server/ came back with the tarball, but the
 #    running process did not.
-ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz-relay && systemctl status cuubz-relay --no-pager'
+ssh dadmin@10.0.30.160 'sudo systemctl restart cuubz && systemctl status cuubz --no-pager'
 
 # 4. Confirm the site serves JS. This is the check whose absence was D-4.
 curl -s http://10.0.30.160/ | grep -o 'src="[^"]*\.js"'
@@ -1046,10 +1100,10 @@ curl -sI "http://10.0.30.160/$(curl -s http://10.0.30.160/ | grep -o 'assets/[^\
    host. A rollback of the site does not roll back player data, and a rollback that
    moves `DB_VERSION` *down* is the one genuinely dangerous case —
    [§2.1](#21-indexeddb--worlds-and-terrain)'s five-step procedure exists for that.
-3. **`/etc/systemd/system/cuubz-relay.service` is not in the backup.** `sync.sh` only
+3. **`/etc/systemd/system/cuubz.service` is not in the backup.** `sync.sh` only
    copies the unit into `/etc` when it differs, so rolling back the web root can leave a
    *newer* unit installed than the code you just restored. Check with
-   `systemctl cat cuubz-relay` and re-copy from the restored `/var/www/html/` if needed.
+   `systemctl cat cuubz` and re-copy from the restored `/var/www/html/` if needed.
 
 **Still preferred where it applies: re-deploy a known-good commit**
 ([§6.2](#62-what-you-can-actually-do-re-deploy-a-known-good-commit)). It is reproducible
@@ -1413,16 +1467,16 @@ remote host. The following are inferences from the scripts, and each is marked
 |---|---|
 | What serves `/var/www/html` | `ss -ltnp \| grep -E ':(80\|443) '` ; `ls /etc/nginx/sites-enabled/` |
 | The site is actually reachable and playable | load `http://10.0.30.160/` in a browser |
-| `cuubz-relay` is installed, enabled and running | `systemctl status cuubz-relay --no-pager` |
+| `cuubz` is installed, enabled and running | `systemctl status cuubz --no-pager` |
 | A node tarball exists under `~/.local` for the D-10 symlink to point at | `ls -1d ~/.local/node-v*-linux-x64` |
-| The D-10 symlink resolves and the unit picks it up | `ls -l ~/.local/node` ; `systemctl show cuubz-relay -p ExecStart -p Environment` |
+| The D-10 symlink resolves and the unit picks it up | `ls -l ~/.local/node` ; `systemctl show cuubz -p ExecStart -p Environment` |
 | `rm -rf` of the managed web-root paths removes the stale pre-PR-9 `js/` tree and nothing else | `ls -la /var/www/html` before and after the first deploy |
 | The backup is actually written and readable | `ls -lt /home/dadmin/cuubz-deploy/backups/` |
 | `npm ci --omit=dev` works in `/var/www/html/server` (needs npm on PATH for a non-login ssh) | `ssh dadmin@10.0.30.160 "cd /var/www/html/server && npm --version"` |
-| The relay comes back after `systemctl restart`, and exits **non-zero** on a crash (D-8) | `systemctl status cuubz-relay --no-pager` ; `journalctl -u cuubz-relay -n 50` |
+| The relay comes back after `systemctl restart`, and exits **non-zero** on a crash (D-8) | `systemctl status cuubz --no-pager` ; `journalctl -u cuubz -n 50` |
 | `ws` is installed on the host | `ls -d /var/www/html/{,server/}node_modules/ws` |
 | `dadmin` owns everything under `/var/www/html` (the D-6 risk) | `find /var/www/html ! -user dadmin -print -quit` |
-| `dadmin` has `sudo` for `systemctl` | `sudo -n systemctl status cuubz-relay` |
+| `dadmin` has `sudo` for `systemctl` | `sudo -n systemctl status cuubz` |
 | Whether stale files from past deploys are already present | `ls -la /var/www/html` |
 | Deployed docs/tests are fetchable over HTTP (D-13) | `curl -sI http://10.0.30.160/refactor.md` |
 

@@ -74,7 +74,7 @@ Cuubz uses a **client-host relay architecture** with three tiers:
 # Environment variables
 MATCHMAKING_PORT=8765          # Single port for everything
 
-# Systemd service file: cuubz-relay.service (in repo root)
+# Systemd service file: cuubz.service (in repo root)
 ```
 
 ### What the Relay Does
@@ -373,13 +373,13 @@ npm install
 node server/index.js
 
 # Or via systemd (production)
-sudo systemctl start cuubz-relay
-sudo systemctl enable cuubz-relay
+sudo systemctl start cuubz
+sudo systemctl enable cuubz
 ```
 
 ### Systemd Service
 
-The repo includes `cuubz-relay.service` at the root. Current server config:
+The repo includes `cuubz.service` at the root. Current server config:
 
 ```ini
 [Unit]
