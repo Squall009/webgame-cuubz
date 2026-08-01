@@ -60,7 +60,12 @@ export function combatStep(state) {
           const dx = hit.mob.position.x - state.player.position.x;
           const dz = hit.mob.position.z - state.player.position.z;
           const dist = Math.sqrt(dx*dx + dz*dz) || 1;
-          hit.mob.knockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
+          // D-101: was `hit.mob.knockback(...)`, which is a NUMBER — the constructor's
+          // `this.knockback = def.knockback || 0` shadows the method of the same name. This
+          // threw on every single hit, and the throw is why the two lines below it never
+          // ran: no hand swing, and `_attackOverride` never set, so attacking a mob also
+          // broke the block behind it. Silenced after frame 10 by the catch below.
+          hit.mob.applyKnockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
 
           // Trigger hand swing animation
           if (state.firstPersonHand) state.firstPersonHand.swing();

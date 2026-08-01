@@ -53,12 +53,33 @@ function withLocation(loc, fn) {
 const RELAY_HOST = 'cuubz-relay.thehomelabguy.com';
 
 console.log('Group 1: the fixed relay host, chosen by page protocol');
-assertEqual(withLocation({ protocol: 'https:', search: '' }, getRelayUrl),
-  `wss://${RELAY_HOST}`, 'An https page gets wss:// — nginx terminates TLS in front of the relay');
-assertEqual(withLocation({ protocol: 'http:', search: '' }, getRelayUrl),
-  `ws://${RELAY_HOST}`, 'An http page gets ws://');
-assertEqual(withLocation({ protocol: 'file:', search: '' }, getRelayUrl),
+//
+// D-102: these now pass a `hostname` on the public domain. Before D-102 the function read
+// no hostname at all, so omitting it was the same thing; now omitting it would exercise
+// the same-origin branch instead and these would be asserting the wrong arm.
+assertEqual(withLocation({ protocol: 'https:', search: '', hostname: 'cuubz.thehomelabguy.com' }, getRelayUrl),
+  `wss://${RELAY_HOST}`, 'An https page on the public domain gets wss:// — the proxy terminates TLS in front of the relay');
+assertEqual(withLocation({ protocol: 'http:', search: '', hostname: 'cuubz.thehomelabguy.com' }, getRelayUrl),
+  `ws://${RELAY_HOST}`, 'An http page on the public domain gets ws://');
+assertEqual(withLocation({ protocol: 'file:', search: '', hostname: 'cuubz.thehomelabguy.com' }, getRelayUrl),
   `ws://${RELAY_HOST}`, 'Any non-https protocol gets ws:// — only https: is special-cased');
+
+console.log('Group 1b: D-102 — anything NOT on the public domain uses its own host:8765');
+//
+// This is the arm that makes multiplayer work when the game is reached any way other than
+// through the reverse proxy. `http://10.0.30.160/` used to resolve to
+// `ws://cuubz-relay.thehomelabguy.com` — a different machine, port 80, no relay — so the
+// host's HOST never arrived and the guest's BROWSE never saw it. The port is explicit
+// because `server/index.js` binds 8765 directly and nothing proxies it off the public
+// domain.
+assertEqual(withLocation({ protocol: 'http:', search: '', hostname: '10.0.30.160' }, getRelayUrl),
+  'ws://10.0.30.160:8765', 'The production server reached by IP talks to the relay ON that server');
+assertEqual(withLocation({ protocol: 'http:', search: '', hostname: 'localhost' }, getRelayUrl),
+  'ws://localhost:8765', 'localhost talks to a local relay');
+assertEqual(withLocation({ protocol: 'https:', search: '', hostname: '192.168.1.50' }, getRelayUrl),
+  'wss://192.168.1.50:8765', 'The scheme still follows the page protocol on the same-origin arm');
+assertEqual(withLocation({ protocol: 'https:', search: '', hostname: 'cuubz-relay.thehomelabguy.com' }, getRelayUrl),
+  `wss://${RELAY_HOST}`, 'The relay subdomain itself is on the public domain and is not rewritten to name a port');
 
 console.log('Group 2: no location at all (Node, a worker, a unit test)');
 assertEqual(withLocation(undefined, getRelayUrl), `ws://${RELAY_HOST}`,
@@ -77,17 +98,19 @@ assertEqual(withLocation({ protocol: 'https:', search: '?seed=1&relayUrl=wss%3A%
   'wss://custom:9999', 'It is found among other parameters, and percent-decoded');
 
 console.log('Group 4: what does NOT override it');
-assertEqual(withLocation({ protocol: 'https:', search: '?relayUrl=' }, getRelayUrl),
+assertEqual(withLocation({ protocol: 'https:', search: '?relayUrl=', hostname: 'cuubz.thehomelabguy.com' }, getRelayUrl),
   `wss://${RELAY_HOST}`, 'An empty ?relayUrl= falls through to the default rather than returning ""');
-assertEqual(withLocation({ protocol: 'https:', search: '?seed=12345&mode=creative' }, getRelayUrl),
+assertEqual(withLocation({ protocol: 'https:', search: '?seed=12345&mode=creative', hostname: 'cuubz.thehomelabguy.com' }, getRelayUrl),
   `wss://${RELAY_HOST}`, 'Unrelated query parameters change nothing');
 assertEqual(withLocation({ protocol: 'https:', search: '', hostname: 'webgame-cuubz.thehomelabguy.com' }, getRelayUrl),
   `wss://${RELAY_HOST}`,
-  'The page hostname is NOT consulted — the per-game relay subdomain this file used to assert does not exist');
+  'D-102 consults the hostname only to ask "is this the public domain?" — it does NOT build a per-game relay subdomain, which is the vacuous logic D-45 deleted from this file');
+assertEqual(withLocation({ protocol: 'http:', search: '?relayUrl=', hostname: '10.0.30.160' }, getRelayUrl),
+  'ws://10.0.30.160:8765', 'An empty ?relayUrl= falls through on the same-origin arm too');
 
 console.log('Group 5: shape of the result');
 {
-  const wss = withLocation({ protocol: 'https:', search: '' }, getRelayUrl);
+  const wss = withLocation({ protocol: 'https:', search: '', hostname: 'cuubz.thehomelabguy.com' }, getRelayUrl);
   assert(wss.startsWith('wss://'), 'The deployed URL uses the wss scheme');
   assert(!/:\d+$/.test(wss), 'The deployed URL names no port — nginx forwards 443 to 8765');
   assert(!wss.endsWith('/'), 'The URL has no trailing slash; the client appends /matchmaking and /session/:id');

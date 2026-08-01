@@ -40,7 +40,41 @@ export function getRelayUrl() {
     if (relayOverride) return relayOverride;
   }
 
-  // Fixed relay subdomain — works regardless of how the game is reached.
-  const protocol = (globalThis.location && globalThis.location.protocol === 'https:') ? 'wss' : 'ws';
+  const loc = globalThis.location;
+  const protocol = loc && loc.protocol === 'https:' ? 'wss' : 'ws';
+
+  // ─── D-102: the page's own host, when it is not the public one ──────────────
+  //
+  // This function used to return `${protocol}://cuubz-relay.thehomelabguy.com`
+  // unconditionally, and the test above this one asserted, deliberately, that "the page
+  // hostname is NOT consulted". That is correct for the public deployment — the relay
+  // subdomain is fronted by a reverse proxy that terminates TLS and forwards to 8765, so
+  // the game names no port — and it is **unconditionally wrong for every other way the
+  // game is reached.**
+  //
+  // Loading the game straight off the production server, `http://10.0.30.160/`, made the
+  // client open `ws://cuubz-relay.thehomelabguy.com` — a different machine, on port 80,
+  // where no relay listens. **Multiplayer could not work from an IP at all**: the host's
+  // HOST never reached the relay and the guest's BROWSE never saw it, which reads exactly
+  // like "hosting works but sessions do not show up".
+  //
+  // The relay itself was never the problem. Verified against 10.0.30.160:8765 by hand:
+  // `HOST` returns `HOST_CREATED` and a second socket's `BROWSE` returns that session.
+  // `npm run test:e2e:mp` passes 70 assertions across two browser contexts. Both talk to
+  // a relay they name explicitly; neither exercises this function's default.
+  //
+  // The rule below is additive on purpose. The public hostname keeps byte-identical
+  // behaviour, so the proxied path is untouched; the only inputs whose result changes are
+  // the ones that were already broken.
+  const host = loc && loc.hostname;
+  if (host && !/(^|\.)thehomelabguy\.com$/.test(host)) {
+    // Served from an IP, localhost, or any other host: the relay is the one on THIS
+    // machine. `server/index.js` binds 8765 directly and nothing proxies it there, so
+    // unlike the public path this URL has to name the port.
+    return `${protocol}://${host}:8765`;
+  }
+
+  // Public deployment (or no `location` at all — Node, a worker, a unit test): the fixed
+  // relay subdomain, no port, TLS terminated in front of it.
   return `${protocol}://cuubz-relay.thehomelabguy.com`;
 }

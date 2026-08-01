@@ -163,11 +163,31 @@ export class Mob {
 
   /**
    * Apply knockback impulse.
+   *
+   * ─── D-101: THIS WAS NAMED `knockback` AND WAS UNREACHABLE ───────────────────
+   *
+   * The constructor assigns `this.knockback = def.knockback || 0` (line 31) — an own
+   * data property, a NUMBER. An own property shadows a prototype method of the same
+   * name, so `mob.knockback` was `0` for deer and rabbit and `1.5` for stone_golem, and
+   * `mob.knockback(...)` threw `TypeError: mob.knockback is not a function` at the only
+   * call site there has ever been, `CombatStep.js:63`. **Every player attack on every
+   * mob threw**, and the method below had never executed once.
+   *
+   * The body is the proof the collision was accidental rather than a rename gone half
+   * done: `force !== undefined ? force : this.knockback` reads the property as its own
+   * default, so the author expected the number AND the method to coexist under one name.
+   * They cannot.
+   *
+   * The method is what got renamed, not the property. `def.knockback` → `this.knockback`
+   * is the mob's knockback stat, it is read by this method as a default, and renaming a
+   * data field that comes straight off the definition table would drift the two apart —
+   * which is the shape of D-68 and D-39. Renaming the method touches one call site.
+   *
    * @param {number} dx - X direction
    * @param {number} dz - Z direction
-   * @param {number} [force] - Knockback force (defaults to mob definition knockback)
+   * @param {number} [force] - Knockback force (defaults to `this.knockback`, the stat)
    */
-  knockback(dx, dz, force) {
+  applyKnockback(dx, dz, force) {
     const kb = force !== undefined ? force : this.knockback;
     if (kb <= 0) return;
     this.velocity.x += dx * kb;
