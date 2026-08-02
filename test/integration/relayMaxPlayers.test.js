@@ -74,22 +74,60 @@ async function waitForHealth(port, timeoutMs = 20000) {
   return null;
 }
 
-/** Open a matchmaking socket, send one HOST, resolve with the reply. */
+/**
+ * Open a matchmaking socket, send one HOST, resolve with the reply — and with the
+ * `playerId` the lobby greeting carried, because {@link claimSession} needs it.
+ */
 function hostOnce(port, payload, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/matchmaking`);
     const timer = setTimeout(() => { try { ws.close(); } catch {} reject(new Error('HOST timed out')); }, timeoutMs);
+    let playerId = null;
     ws.on('error', (err) => { clearTimeout(timer); reject(err); });
     ws.on('open', () => {
       ws.send(JSON.stringify({ type: 'HOST', ...payload }));
     });
     ws.on('message', (raw) => {
       const msg = JSON.parse(raw.toString());
-      if (msg.type === 'WELCOME') return; // the lobby greeting, not the answer
+      if (msg.type === 'WELCOME') { playerId = msg.playerId; return; } // the lobby greeting
       clearTimeout(timer);
       // The socket is deliberately left OPEN: closing it is what tells the relay the
       // host left, and `/sessions` is read while the session is still live.
-      resolve({ msg, ws });
+      resolve({ msg, ws, playerId });
+    });
+  });
+}
+
+/**
+ * Open the host's `/session/:id` socket and JOIN it, resolving on the session `WELCOME`.
+ *
+ * ─── WHY EVERY CASE BELOW NOW DOES THIS — D-103 ─────────────────────────────
+ *
+ * This suite used to read `/sessions` with nothing but a `HOST` behind it, and asserted
+ * `players: 0` on the row it got back. That row was the D-103 leak: `HOST` registers a
+ * session in the relay's map before anyone opens its game socket, and `listSessions()`
+ * answered "is it in the map". A session in that state has no host, streams nothing, and
+ * had no path to collection at all — so it stayed in the browse list until the relay
+ * restarted, advertised to guests as something they could click.
+ *
+ * `server/index.js` now lists a session only once its host has actually joined it. The
+ * `maxPlayers` clamp this file exists to pin (D-84) is unchanged and still asserted on
+ * exactly the same field of exactly the same row; what changed is that the row has to be
+ * a real session first. The `players` count therefore reads 1, not 0 — that is the point.
+ */
+function claimSession(port, sessionId, playerId, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/session/${sessionId}`);
+    const timer = setTimeout(() => { try { ws.close(); } catch {} reject(new Error('JOIN timed out')); }, timeoutMs);
+    ws.on('error', (err) => { clearTimeout(timer); reject(err); });
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'JOIN', playerId, character: { name: 'Host', color: '#fff' } }));
+    });
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type !== 'WELCOME') return;
+      clearTimeout(timer);
+      resolve(ws);
     });
   });
 }
@@ -123,20 +161,30 @@ try {
 
   // ── 1. The number the host asked for is the number it gets ──
   {
-    const { msg, ws } = await hostOnce(PORT, { name: 'Trio', worldSeed: 4242, mode: 'survival', maxPlayers: 3 });
+    const { msg, ws, playerId } = await hostOnce(PORT, { name: 'Trio', worldSeed: 4242, mode: 'survival', maxPlayers: 3 });
     openSockets.push(ws);
     assertEquals(msg.type, 'HOST_CREATED', 'the relay accepted the HOST');
+
+    // D-103: an unclaimed session is not advertised. See `claimSession` above.
+    assertEquals((await readSessions()).length, 0,
+      'D-103: a session whose host has not joined it is not in the browse list');
+
+    const gameWs = await claimSession(PORT, msg.sessionId, playerId);
+    openSockets.push(gameWs);
+
     const list = await readSessions();
     assertEquals(list.length, 1, 'the relay holds one session');
     assertEquals(list[0].maxPlayers, 3,
       'D-84: a host who asked for 3 gets a session capped at 3. server/index.js:140 used ' +
       'to read `maxPlayers: MAX_PLAYERS_PER_SESSION` and this was 4 no matter what');
-    assertEquals(list[0].players, 0, 'nobody has joined the game session yet');
+    assertEquals(list[0].players, 1, 'the host is in its own session');
+    assertEquals(list[0].hasHost, true, 'D-103: and the row says so, so the lobby can grey out the ones that do not');
     assertEquals(list[0].name, 'Trio', 'and the name still crossed the wire');
     assertEquals(list[0].seed, 4242, 'and the seed');
     // This is the string test/e2e/multiplayer.js reads out of the browse list.
-    assertEquals(`${list[0].players}/${list[0].maxPlayers}`, '0/3',
-      'the browse row renders "0/3" — one join short of the "1/3" the e2e harness sees');
+    assertEquals(`${list[0].players}/${list[0].maxPlayers}`, '1/3',
+      'the browse row renders "1/3" — the host, and two seats free');
+    gameWs.close();
     ws.close();
   }
 
@@ -146,9 +194,10 @@ try {
 
   // ── 2. A client that sends no field at all still works ──
   {
-    const { msg, ws } = await hostOnce(PORT, { name: 'OldClient', worldSeed: 7, mode: 'survival' });
+    const { msg, ws, playerId } = await hostOnce(PORT, { name: 'OldClient', worldSeed: 7, mode: 'survival' });
     openSockets.push(ws);
     assertEquals(msg.type, 'HOST_CREATED', 'a HOST with no maxPlayers is still accepted');
+    openSockets.push(await claimSession(PORT, msg.sessionId, playerId));
     const row = (await readSessions()).find((s) => s.name === 'OldClient');
     assertEquals(row && row.maxPlayers, 4,
       'D-84: a client built before this change sends no maxPlayers and gets the old ' +
@@ -160,8 +209,9 @@ try {
 
   // ── 3. The client is not trusted ──
   {
-    const { ws } = await hostOnce(PORT, { name: 'Greedy', worldSeed: 8, mode: 'survival', maxPlayers: 99 });
+    const { msg, ws, playerId } = await hostOnce(PORT, { name: 'Greedy', worldSeed: 8, mode: 'survival', maxPlayers: 99 });
     openSockets.push(ws);
+    openSockets.push(await claimSession(PORT, msg.sessionId, playerId));
     const row = (await readSessions()).find((s) => s.name === 'Greedy');
     assertEquals(row && row.maxPlayers, 4,
       'D-84: a client asking for 99 is clamped DOWN to the ceiling — the cap is enforced ' +
@@ -172,8 +222,9 @@ try {
   await sleep(200);
 
   {
-    const { ws } = await hostOnce(PORT, { name: 'Lonely', worldSeed: 9, mode: 'survival', maxPlayers: 1 });
+    const { msg, ws, playerId } = await hostOnce(PORT, { name: 'Lonely', worldSeed: 9, mode: 'survival', maxPlayers: 1 });
     openSockets.push(ws);
+    openSockets.push(await claimSession(PORT, msg.sessionId, playerId));
     const row = (await readSessions()).find((s) => s.name === 'Lonely');
     assertEquals(row && row.maxPlayers, 2,
       'D-84: and asking for 1 is clamped UP to the floor');
@@ -183,8 +234,9 @@ try {
   await sleep(200);
 
   {
-    const { ws } = await hostOnce(PORT, { name: 'Junk', worldSeed: 10, mode: 'survival', maxPlayers: 'banana' });
+    const { msg, ws, playerId } = await hostOnce(PORT, { name: 'Junk', worldSeed: 10, mode: 'survival', maxPlayers: 'banana' });
     openSockets.push(ws);
+    openSockets.push(await claimSession(PORT, msg.sessionId, playerId));
     const row = (await readSessions()).find((s) => s.name === 'Junk');
     assertEquals(row && row.maxPlayers, 4,
       'D-84: garbage in the field falls back to the default rather than producing NaN');

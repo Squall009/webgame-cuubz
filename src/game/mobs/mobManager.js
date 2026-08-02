@@ -7,7 +7,7 @@
 import { updateAI } from './ai/mobAI.js';
 import { addDropsToInventory } from './drops/mobDropTable.js';
 import { Mob } from './mob.js';
-import { AI_STATES, getMobDefinition, selectMobForBiome } from './mobDefinitions.js';
+import { AI_STATES, MOB_CATEGORIES, getMobDefinition, selectMobForBiome } from './mobDefinitions.js';
 import { applyMovement } from './movement/mobMovement.js';
 import { isPassable, isSolidBlock } from '../data/BlockCategories.js';
 
@@ -20,8 +20,22 @@ export class MobManager {
     this.renderer = null;
 
     // Configuration
-    this.mobCap = options.mobCap || 60;
-    this.mobsPerChunk = options.mobsPerChunk || 8;
+    //
+    // D-110: the caps were 60 / 8 and there was no hostile-specific limit, so a badlands
+    // chunk could fill with wolves and wisps up to the global cap. `hostileCap` is the
+    // one that matters for how a fight feels; the total is generous on purpose because
+    // deer and rabbits are ambience and cost nothing but a draw call.
+    this.mobCap = options.mobCap || 28;
+    this.mobsPerChunk = options.mobsPerChunk || 3;
+    this.hostileCap = options.hostileCap || 12;
+    /**
+     * Hostiles may not spawn within this many blocks of the player. Spawning is chunk-
+     * driven and the radius includes the player's OWN chunk, so without this a hostile
+     * could appear a few blocks away — inside its own (now much shorter) aggro range,
+     * with no approach to react to. Passive mobs are exempt; a deer appearing nearby is
+     * scenery, not an ambush.
+     */
+    this.minHostileSpawnDistance = options.minHostileSpawnDistance || 24;
     this.spawnInterval = options.spawnInterval || 2.0; // Seconds between spawn ticks
     this.spawnTimer = 0;
 
@@ -150,6 +164,11 @@ export class MobManager {
     // Check up to 20 chunks per tick (spread, not clustered)
     const maxChecks = Math.min(20, allChunks.length);
 
+    // Counted once and incremented as we spawn, so a single tick cannot overshoot the
+    // hostile budget the way it would if each iteration re-derived the count from a map
+    // it is in the middle of mutating.
+    let hostileCount = this._countHostiles();
+
     for (let i = 0; i < maxChecks && this.mobs.size < this.mobCap; i++) {
       const { cx, cz } = allChunks[i];
 
@@ -173,9 +192,14 @@ export class MobManager {
       const def = getMobDefinition(mobType);
       if (!def) continue;
 
+      // Hostiles get their own budget on top of the global cap (D-110)
+      if (def.category === MOB_CATEGORIES.HOSTILE && hostileCount >= this.hostileCap) continue;
+
       // Find a valid spawn position
-      const spawnPos = this._findSpawnPosition(cx, cz, def, blockAccess);
+      const spawnPos = this._findSpawnPosition(cx, cz, def, blockAccess, playerPosition);
       if (!spawnPos) continue;
+
+      if (def.category === MOB_CATEGORIES.HOSTILE) hostileCount++;
 
       // Spawn the mob
       const mob = new Mob(mobType, spawnPos, this.worldSeed);
@@ -186,6 +210,21 @@ export class MobManager {
         this.renderer.addMob(mob);
       }
     }
+  }
+
+  /**
+   * Count living hostile mobs currently in the world.
+   * Dead-but-not-yet-removed mobs are excluded — they cannot attack, and counting them
+   * would suppress spawning for the length of a death animation.
+   * @returns {number}
+   */
+  _countHostiles() {
+    let count = 0;
+    for (const [, mob] of this.mobs) {
+      if (mob.isDead) continue;
+      if (mob.definition && mob.definition.category === MOB_CATEGORIES.HOSTILE) count++;
+    }
+    return count;
   }
 
   /**
@@ -209,13 +248,27 @@ export class MobManager {
 
   /**
    * Find a valid spawn position for a mob within / near a chunk.
+   * @param {?{x:number,y:number,z:number}} playerPosition - Enforces the hostile
+   *   minimum-distance rule when supplied; omitting it skips that check only.
    */
-  _findSpawnPosition(cx, cz, def, blockAccess) {
+  _findSpawnPosition(cx, cz, def, blockAccess, playerPosition = null) {
     const halfWidth = Math.ceil(def.hitbox.width / 2);
+    const isHostile = def.category === MOB_CATEGORIES.HOSTILE;
 
     for (let attempt = 0; attempt < 5; attempt++) {
       const x = (cx * 16) + 4 + Math.random() * 8;
       const z = (cz * 16) + 4 + Math.random() * 8;
+
+      // Hostiles keep their distance on arrival (D-110). Horizontal only, matching every
+      // other proximity test in this file — a mob on the ceiling of a cave you are
+      // standing in is still an ambush.
+      if (isHostile && playerPosition) {
+        const pdx = x - playerPosition.x;
+        const pdz = z - playerPosition.z;
+        const minSq = this.minHostileSpawnDistance * this.minHostileSpawnDistance;
+        if (pdx * pdx + pdz * pdz < minSq) continue;
+      }
+
       const minY = def.spawnMinY || 0;
       const maxY = def.spawnMaxY || 80;
 

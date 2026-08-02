@@ -287,17 +287,51 @@ export class WSConnection {
     }
   }
 
-  /** Disconnect gracefully */
-  disconnect() {
+  /**
+   * Disconnect gracefully — sends `LEAVE`, which the relay reads as "this player is
+   * done", not "this player blinked".
+   *
+   * @param {object} [leavePayload] — extra fields merged into the `LEAVE` message, e.g.
+   *   `{ sessionId }` for the matchmaking socket.
+   */
+  disconnect(leavePayload) {
     if (this._disposed) return;
 
     // Send LEAVE message before closing
     if (this._socket && this._socket.readyState === 1) {
-      this._sendRaw({ type: MESSAGE_TYPES.LEAVE });
+      this._sendRaw(Object.assign({ type: MESSAGE_TYPES.LEAVE }, leavePayload || {}));
     }
 
+    this._closeSocket();
+  }
+
+  /**
+   * Tear the socket down **without** sending `LEAVE`, for paths that intend to reconnect.
+   *
+   * D-107. The heartbeat-timeout handler called `disconnect()`, so a socket that had
+   * merely gone quiet — a backgrounded tab, a 30 s network stall — announced a
+   * deliberate departure to the relay and then reconnected. With `server/session.js` now
+   * (correctly) treating an explicit host `LEAVE` as "destroy the session, do not wait",
+   * that mislabelling would destroy live games on a hiccup. It was already wrong before:
+   * `disconnect()` also calls `_cancelReconnect()`, which zeroes `_reconnectAttempts`, so
+   * every heartbeat timeout restarted the backoff at 1 s no matter how many had failed.
+   */
+  _dropForReconnect() {
+    if (this._disposed) return;
+    this._closeSocket({ keepReconnectAttempts: true });
+  }
+
+  /** Shared socket teardown. */
+  _closeSocket(opts = {}) {
     this._stopHeartbeat();
-    this._cancelReconnect();
+    if (opts.keepReconnectAttempts) {
+      if (this._reconnectTimer) {
+        clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = null;
+      }
+    } else {
+      this._cancelReconnect();
+    }
 
     if (this._socket) {
       try {
@@ -448,7 +482,7 @@ export class WSConnection {
       // No heartbeat ACK received — connection may be dead
       console.warn('[WSConnection] Heartbeat timeout — reconnecting');
       if (!this._disposed) {
-        this.disconnect();
+        this._dropForReconnect(); // NOT disconnect() — see D-107 on that method
         this._scheduleReconnect();
       }
     }, this._options.heartbeatTimeout);
@@ -478,9 +512,32 @@ export class WSConnection {
 
   // ── Reconnection ──────────────────────────────────────────────
 
-  /** Schedule a reconnection attempt with exponential backoff */
+  /**
+   * Schedule a reconnection attempt with exponential backoff.
+   *
+   * ─── D-106: `maxReconnectAttempts` HAD NO READER ────────────────────────────
+   *
+   * `DEFAULT_CONFIG.maxReconnectAttempts = 10` was declared, documented, and never
+   * consulted anywhere in this file — so every connection retried forever. That alone is
+   * waste; combined with how the matchmaking socket "disabled" its reconnect it was a
+   * live fault. `MultiplayerClient.connectMatchmaking()` set
+   * `_options.reconnectBaseDelay = 0` and commented it "effectively disables reconnect".
+   * It does not: `_calculateReconnectDelay()` floors its result at `Math.max(100, …)`, so
+   * a base of 0 yields **100 ms** and a dead matchmaking socket reconnected ten times a
+   * second, indefinitely. Each reconnect drew a fresh `WELCOME` with a fresh `playerId`
+   * (D-105), which is how a host could stop being recognised as the host of its own
+   * session mid-game.
+   *
+   * `autoReconnect: false` is what "do not reconnect" is spelled as now, and the attempt
+   * cap is enforced here.
+   */
   _scheduleReconnect() {
     if (this._disposed) return;
+    if (this._options.autoReconnect === false) return;
+    if (this._reconnectAttempts >= this._options.maxReconnectAttempts) {
+      console.warn(`[WSConnection] Giving up on ${this.url} after ${this._reconnectAttempts} attempts`);
+      return;
+    }
 
     const delay = this._calculateReconnectDelay();
     this._reconnectAttempts++;
@@ -616,6 +673,20 @@ export class WSConnection {
       sessionId,
     });
   }
+
+  /**
+   * Tell matchmaking this player is leaving its session, **without closing the socket**.
+   *
+   * D-108. The lobby is reached through this socket: browse, host and join all send on
+   * it. Leaving a session used to close it, which is why the lobby was dead afterwards.
+   * `LEAVE` is the message the relay already has for exactly this (server/matchmaking.js
+   * clears `sessionId`/`isHost` and leaves the client connected).
+   */
+  sendLeaveSession(sessionId) {
+    const msg = { type: MESSAGE_TYPES.LEAVE };
+    if (sessionId) msg.sessionId = sessionId;
+    this.send(msg);
+  }
 }
 
 // ─── Multiplayer Client (High-Level API) ──────────────────────────
@@ -672,6 +743,11 @@ export class MultiplayerClient {
     this._matchmakingConn = null;
     this._gameSessionConn = null;
     this._currentSessionId = null;
+    // Which session `_gameSessionConn` is actually bolted to. Distinct from
+    // `_currentSessionId`, which `joinSession()` sets optimistically before the relay has
+    // accepted. D-108 uses it to tell "reconnecting to the same session" from "this is a
+    // different session now".
+    this._connectedGameSessionId = null;
     this._playerId = null;
     this._disposed = false;
 
@@ -789,8 +865,12 @@ export class MultiplayerClient {
       // Wire up matchmaking event handlers
       this._setupMatchmakingHandlers();
 
-      // Disable automatic reconnection — SessionManager controls lifecycle
-      this._matchmakingConn._options.reconnectBaseDelay = 0; // Effectively disables reconnect
+      // D-106. This line used to read `_options.reconnectBaseDelay = 0` under the comment
+      // "Effectively disables reconnect". It disabled nothing — `_calculateReconnectDelay`
+      // floors at 100 ms — and turned a dropped lobby socket into a ten-per-second
+      // reconnect storm. The lobby genuinely does want to come back after a blip (browse,
+      // host and join all ride this socket), so it keeps the default 1 s → 30 s backoff
+      // and the attempt cap `_scheduleReconnect` now honours.
       this._matchmakingConn.connect();
     } catch (err) {
       console.warn(`[MultiplayerClient] Matchmaking unavailable:`, err.message);
@@ -805,9 +885,25 @@ export class MultiplayerClient {
   _setupMatchmakingHandlers() {
     if (!this._matchmakingConn) return;
 
-    // Route WELCOME to capture player ID
+    // Route WELCOME to capture player ID.
+    //
+    // ─── D-105: THE FIRST `WELCOME` WINS ────────────────────────────────────
+    //
+    // The relay mints a new `playerId` per matchmaking *connection*
+    // (`matchmaking.js:_generatePlayerId`), and this used to overwrite `_playerId` with
+    // every one of them. `_playerId` is the identity the **game** socket joins under
+    // (`joinGame` → `sendJoin(this._playerId, …)`) and the identity the relay recorded as
+    // `hostId` when the session was created — so a matchmaking reconnect mid-session
+    // silently renamed the player. For a host that is fatal in a specific, silent way:
+    // `session.js:_handleChunkData` compares the sender against `hostId`, so after the
+    // rename the host's own chunk streams were rejected as "Non-host sent CHUNK_DATA"
+    // and joiners saw an empty world. Under D-106's 100 ms reconnect storm this was not
+    // a rare race.
+    //
+    // The id is therefore taken once and kept for the lifetime of the client, and
+    // `setPlayerId()` is the only other way to set it (a rejoin reclaiming its session).
     this._matchmakingConn.on(MESSAGE_TYPES.WELCOME, (data) => {
-      if (data.playerId) {
+      if (data.playerId && !this._playerId) {
         this._playerId = data.playerId;
       }
       this._emitMatchmaking(MESSAGE_TYPES.WELCOME, data);
@@ -843,9 +939,30 @@ export class MultiplayerClient {
     }
   }
 
-  /** Connect to game session server via path-based routing */
+  /**
+   * Connect to game session server via path-based routing.
+   *
+   * D-108. The guard was `if (this._disposed || this._gameSessionConn) return` — any
+   * existing game socket, for any session, made this a no-op. Host once, leave, host
+   * again in the same page and the second `HOST_CREATED` arrived at a client still bolted
+   * to the first session's socket: the new session got a relay entry, no host ever joined
+   * it, and it sat in the browse list as a row nobody could enter. Re-entering the
+   * **same** session is still a no-op (that is the reconnect path); a **different** one
+   * replaces the socket.
+   */
   _connectToGameSession(sessionId) {
-    if (this._disposed || this._gameSessionConn) return;
+    if (this._disposed) return;
+
+    if (this._gameSessionConn) {
+      if (this._connectedGameSessionId === sessionId) return;
+      console.log(`[MP] Switching game session ${this._connectedGameSessionId} → ${sessionId}`);
+      try {
+        this._gameSessionConn.disconnect();
+        this._gameSessionConn.dispose();
+      } catch (e) { /* already gone */ }
+      this._gameSessionConn = null;
+    }
+    this._connectedGameSessionId = sessionId;
 
     console.log(`[MP] Connecting to game session: ${sessionId}`);
 
@@ -1018,7 +1135,7 @@ export class MultiplayerClient {
 
   // ── Disconnect / Dispose ──────────────────────────────────────
 
-  /** Disconnect from all servers */
+  /** Disconnect from all servers, matchmaking included. */
   disconnect() {
     try {
       if (this._matchmakingConn) {
@@ -1033,12 +1150,73 @@ export class MultiplayerClient {
       console.error(`[MultiplayerClient] Disconnect error:`, err.message);
     } finally {
       this._currentSessionId = null;
+      this._connectedGameSessionId = null;
+      this._pendingGameJoin = null;
+      this._lastGameJoin = null;
     }
   }
 
-  /** Leave the current session — alias for disconnect() */
+  /**
+   * Leave the current session and return to the lobby.
+   *
+   * ─── D-108 — THIS WAS `disconnect()`, AND THAT IS THE WHOLE BUG ─────────────
+   *
+   * `leaveSession()` was a one-line alias for `disconnect()`, which closes the
+   * **matchmaking** socket and sets `_matchmakingConn = null`. Nothing ever calls
+   * `connectMatchmaking()` a second time — `Bootstrap.js:226` runs it once per page load
+   * — and every lobby action is guarded on that field:
+   *
+   *   browseSessions() → `if (this._matchmakingConn)`   … silent no-op
+   *   hostSession()    → `if (this._matchmakingConn)`   … silent no-op
+   *   joinSession()    → `if (this._matchmakingConn)`   … silent no-op
+   *
+   * So the first exit-to-menu killed the lobby for the rest of the page, silently and
+   * with no error anywhere. That is all three reported symptoms at once: Refresh drew
+   * nothing, so `#session-list` kept the rows it had painted before the game started
+   * ("duplicates … stale"); clicking one sent no `JOIN` ("cannot actually be entered");
+   * and hosting again sent no `HOST`, so the new session never reached the relay
+   * ("another one doesn't show up if you create a new one").
+   *
+   * Leaving a session and leaving the lobby are different things. This one keeps the
+   * matchmaking socket, tells the relay with `LEAVE` (which `server/matchmaking.js`
+   * already handles), and drops only the game socket.
+   */
   leaveSession() {
-    this.disconnect();
+    const sessionId = this._currentSessionId;
+    try {
+      if (this._gameSessionConn) {
+        // Explicit LEAVE on the game socket — `server/session.js` reads it as a
+        // deliberate exit and collects the session immediately rather than holding it
+        // for the 30 s reconnect grace. D-103.
+        this._gameSessionConn.disconnect();
+        this._gameSessionConn.dispose();
+        this._gameSessionConn = null;
+      }
+      if (this._matchmakingConn) {
+        this._matchmakingConn.sendLeaveSession(sessionId);
+      } else if (!this._disposed) {
+        // The socket died at some point during the session — put the lobby back.
+        this.connectMatchmaking();
+      }
+    } catch (err) {
+      console.error(`[MultiplayerClient] Leave error:`, err.message);
+    } finally {
+      this._currentSessionId = null;
+      this._connectedGameSessionId = null;
+      this._pendingGameJoin = null;
+      this._lastGameJoin = null;
+    }
+  }
+
+  /**
+   * Adopt a previously-issued player id, so a reloaded page can reclaim its own seat in
+   * a session instead of arriving as a stranger. Paired with D-105's sticky `_playerId`:
+   * set before the matchmaking `WELCOME` lands, it is what the relay sees on `JOIN`.
+   *
+   * @param {string} playerId
+   */
+  setPlayerId(playerId) {
+    if (playerId) this._playerId = playerId;
   }
 
   /** Dispose — release all resources */
@@ -1052,6 +1230,7 @@ export class MultiplayerClient {
       this._gameSessionConn.dispose();
       this._gameSessionConn = null;
     }
+    this._connectedGameSessionId = null;
     this._matchmakingHandlers = {};
     this._gameHandlers = {};
   }

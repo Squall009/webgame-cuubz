@@ -80,9 +80,14 @@ console.log('\n[2] One shape — every record carries every field');
 {
   const r = normaliseSessionRecord({ sessionId: 's1' });
   assertEquals(Object.keys(r).sort().join(','),
-    'characterId,isHost,mode,name,seed,sessionId,timestamp,worldId',
-    'A minimal record is normalised to all eight fields');
+    'characterId,isHost,mode,name,playerId,seed,sessionId,timestamp,worldId',
+    'A minimal record is normalised to all nine fields');
   assertEquals(r.seed, null, 'An unknown seed is an explicit null, not absent');
+  // `playerId` is D-109's — the relay-issued id the session was joined under, and what
+  // lets a reloaded page reclaim its own seat instead of re-hosting a same-named twin.
+  assertEquals(r.playerId, null, 'An unknown playerId is an explicit null');
+  assertEquals(normaliseSessionRecord({ sessionId: 's1', playerId: 'player_7' }).playerId, 'player_7',
+    'A supplied playerId is carried through');
   assertEquals(r.characterId, null, 'An unknown characterId is an explicit null');
   assertEquals(r.worldId, null, 'An unknown worldId is an explicit null');
   assertEquals(r.isHost, false, 'isHost defaults to false, and is a boolean');

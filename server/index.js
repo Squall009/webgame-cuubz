@@ -168,16 +168,34 @@ const matchmaking = new Matchmaking({
     if (!entry) {
       return { error: 'Session not found' };
     }
-    const canJoin = entry.session.canPlayerJoin();
-    if (!canJoin) {
+    if (!entry.session.canPlayerJoin()) {
       return { error: 'Session is full' };
+    }
+    // D-103. `canPlayerJoin()` is a capacity check and nothing else, so a hostless
+    // session — one whose host never arrived, or left — passed it and the joiner got
+    // `JOIN_ACCEPTED` for a world nobody was serving. `isJoinable()` is capacity **and**
+    // a host that is either present or still inside its reaper window.
+    if (!entry.session.isJoinable()) {
+      return { error: 'Session host is not connected' };
     }
     return { sessionId };
   },
   listSessions: () => listSessions(),
-  // Host leaving matchmaking is normal (tab background, network blip) — don't destroy the session.
-  // The game session itself will clean up when the host actually disconnects from it.
+  // Host leaving matchmaking is normal (tab background, network blip) — a session whose
+  // host has actually joined it cleans up through `server/session.js`'s own reapers.
+  //
+  // D-103's first half: the log line here used to say "stays alive" while the caller in
+  // `matchmaking.js:105` logged "destroying session", and neither of them destroyed
+  // anything. A session the host has **never** joined has no other collection path — the
+  // claim timer would get it eventually, but the host closing its lobby socket is
+  // positive evidence right now that it is not coming, so take it.
   onHostLeave: (sessionId, playerId) => {
+    const entry = sessions.get(sessionId);
+    if (entry && !entry.session._hostEverConnected) {
+      console.log(`[MATCHMAKING] Host ${playerId} left matchmaking before ever joining session ${sessionId} — destroying`);
+      destroySession(sessionId);
+      return;
+    }
     console.log(`[MATCHMAKING] Host ${playerId} left matchmaking (session ${sessionId} stays alive)`);
   },
   // Non-host clients disconnecting from matchmaking is normal — session stays alive
@@ -188,9 +206,14 @@ const matchmaking = new Matchmaking({
 
 // ─── Helper: List Active Sessions ─────────────────────────────
 
+// D-103. This used to list every entry in the map. The map holds a session from the
+// instant `HOST` is answered — before the host has opened `/session/:id`, and after it
+// has gone — so "in the map" and "worth showing a guest" are different questions.
+// `isListable()` is the second one; see `server/session.js`.
 function listSessions() {
   const list = [];
   for (const [id, entry] of sessions) {
+    if (!entry.session.isListable()) continue;
     const info = entry.session.getSessionInfo();
     if (info) {
       list.push(info);

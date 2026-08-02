@@ -45,6 +45,10 @@ class SessionManager {
    * @param {number} config.maxPlayers — Maximum players (default: 4)
    * @param {number} config.heartbeatInterval — Heartbeat timeout in ms (default: 30000)
    * @param {function} [config.onSessionEmpty] — Called when the session has 0 players (for relay cleanup)
+   * @param {number} [config.claimTimeout=60000] — How long the host has to open its
+   *   `/session/:id` socket before the session is collected as never-claimed. D-103.
+   * @param {number} [config.hostGrace=30000] — How long a session survives with its host
+   *   absent but other players still connected. D-103.
    */
   constructor(config) {
     this.wss = config.wss;
@@ -56,6 +60,8 @@ class SessionManager {
     this.maxPlayers = config.maxPlayers || 4;
     this.heartbeatInterval = config.heartbeatInterval || 30000;
     this.onSessionEmpty = config.onSessionEmpty || (() => {});
+    this.claimTimeout = config.claimTimeout !== undefined ? config.claimTimeout : 60000;
+    this.hostGrace = config.hostGrace !== undefined ? config.hostGrace : 30000;
 
     // Connected players: playerId → { ws, character, position, rotation, lastHeartbeat }
     this.players = new Map();
@@ -69,8 +75,70 @@ class SessionManager {
     this._disposed = false;
     this._heartbeatTimer = null;
 
+    // ─── D-103 — the three ways a session ends ────────────────────────────
+    //
+    // Before this, there was exactly **one**: `_removePlayer` observing the ≥1 → 0
+    // transition. That path cannot fire for a session no player ever joined, which is
+    // the whole of the leak — `HOST` registers the session in the relay's map before
+    // anybody opens `/session/:id`, so an abandoned "Host" click left a permanent,
+    // hostless, unplayable row in every guest's browse list until the relay restarted.
+    //
+    //   `_claimTimer`     — the host never showed up at all. Armed here, cleared the
+    //                       moment `hostId` joins. This is the leak D-103 describes.
+    //   `_hostGraceTimer` — the host showed up and left, but other players are still
+    //                       connected. Without it a session outlives its host for as
+    //                       long as one guest keeps a socket open, and a hostless
+    //                       session relays nothing: no chunks, no validation.
+    //   `_emptyTimer`     — the pre-existing 0-players grace. Unchanged in duration;
+    //                       `_removePlayer` now skips it when the **host said LEAVE**,
+    //                       because a deliberate exit is not a reconnect.
+    this._hostEverConnected = false;
+    this._claimTimer = null;
+    this._hostGraceTimer = null;
+    this._emptyTimer = null;
+
     this._setupConnectionHandler();
     this._startHeartbeatCheck();
+    this._startClaimTimer();
+  }
+
+  // ── Session lifetime timers (D-103) ─────────────────────────────────────
+
+  /** Arm the never-claimed reaper. Cleared by the host's first JOIN. */
+  _startClaimTimer() {
+    if (this.claimTimeout <= 0) return;
+    this._claimTimer = setTimeout(() => {
+      if (this._disposed || this._hostEverConnected) return;
+      console.log(`[SESSION ${this.sessionId}] Host never connected within ${this.claimTimeout}ms — destroying`);
+      this.onSessionEmpty(this.sessionId);
+    }, this.claimTimeout);
+    if (this._claimTimer.unref) this._claimTimer.unref();
+  }
+
+  _clearClaimTimer() {
+    if (this._claimTimer) {
+      clearTimeout(this._claimTimer);
+      this._claimTimer = null;
+    }
+  }
+
+  /** Arm the host-absent reaper. Cleared when `hostId` rejoins. */
+  _startHostGraceTimer() {
+    this._clearHostGraceTimer();
+    if (this.hostGrace <= 0) return;
+    this._hostGraceTimer = setTimeout(() => {
+      if (this._disposed || this.players.has(this.hostId)) return;
+      console.log(`[SESSION ${this.sessionId}] Host did not return within ${this.hostGrace}ms — destroying`);
+      this.onSessionEmpty(this.sessionId);
+    }, this.hostGrace);
+    if (this._hostGraceTimer.unref) this._hostGraceTimer.unref();
+  }
+
+  _clearHostGraceTimer() {
+    if (this._hostGraceTimer) {
+      clearTimeout(this._hostGraceTimer);
+      this._hostGraceTimer = null;
+    }
   }
 
   /**
@@ -206,8 +274,12 @@ class SessionManager {
         break;
 
       case MESSAGE_TYPES.LEAVE:
+        // `explicit` — the client said goodbye rather than dropping. D-103: the 30 s
+        // grace in `_removePlayer` exists so a WS auto-reconnect does not destroy a live
+        // game; a host that deliberately left is not coming back, and making it wait
+        // 30 s is exactly how an exited session stays in the browse list.
         if (playerId) {
-          this._removePlayer(playerId);
+          this._removePlayer(playerId, { explicit: true });
         }
         break;
 
@@ -225,6 +297,12 @@ class SessionManager {
     // Handle reconnection — update the WebSocket for an existing player.
     // This happens when a player's WebSocket auto-reconnects after a network blip.
     // We must NOT broadcast PLAYER_JOINED again for a reconnecting player.
+    if (playerId === this.hostId) {
+      this._hostEverConnected = true;
+      this._clearClaimTimer();
+      this._clearHostGraceTimer();
+    }
+
     if (this.players.has(playerId)) {
       const existing = this.players.get(playerId);
       existing.ws = ws;
@@ -495,8 +573,12 @@ class SessionManager {
 
   /**
    * Remove a player from the session
+   *
+   * @param {string} playerId
+   * @param {{explicit?: boolean}} [opts] — `explicit` when the player sent `LEAVE` rather
+   *   than having its socket drop. D-103: only a drop earns the reconnect grace.
    */
-  _removePlayer(playerId) {
+  _removePlayer(playerId, opts = {}) {
     const player = this.players.get(playerId);
     if (!player) return;
 
@@ -522,6 +604,13 @@ class SessionManager {
     // so we must NOT destroy the session just because the host left briefly.
     // The grace period allows the host time to reconnect before cleanup.
     if (this.players.size === 0) {
+      if (opts.explicit && playerId === this.hostId) {
+        // D-103. The host exited to the menu. Waiting 30 s here is what put a dead
+        // session in front of the next guest who opened the browse list.
+        console.log(`[SESSION ${this.sessionId}] Host left deliberately and session is empty — destroying now`);
+        this.onSessionEmpty(this.sessionId);
+        return;
+      }
       console.log(`[SESSION ${this.sessionId}] Session empty — scheduling cleanup in 30s`);
       // Give the host 30 seconds to reconnect before destroying the session
       if (this._emptyTimer) clearTimeout(this._emptyTimer);
@@ -531,17 +620,57 @@ class SessionManager {
           this.onSessionEmpty(this.sessionId);
         }
       }, 30000);
-    } else {
-      // Host left but others are still here — just remove host, session stays alive
-      console.log(`[SESSION ${this.sessionId}] Host ${playerId} disconnected but ${this.players.size} players remain — session stays alive`);
+    } else if (playerId === this.hostId) {
+      // Host left but others are still here. The relay is a dumb forwarder — with no
+      // host there is no chunk streaming and no validation, so this is a countdown, not
+      // a steady state. D-103: it used to be a steady state, and the session lived for
+      // as long as one guest held a socket open.
+      console.log(`[SESSION ${this.sessionId}] Host ${playerId} disconnected but ${this.players.size} players remain — ${this.hostGrace}ms to return`);
+      this._startHostGraceTimer();
     }
   }
 
   /**
    * Check if a new player can join
+   *
+   * Capacity only — {@link isJoinable} is the question the relay's join handler asks.
    */
   canPlayerJoin() {
     return this.players.size < this.maxPlayers;
+  }
+
+  /**
+   * Is the host in the session right now?
+   */
+  hasHost() {
+    return this.players.has(this.hostId);
+  }
+
+  /**
+   * Should this session appear in the browse list?
+   *
+   * D-103. `listSessions()` used to answer "does the object exist", which is not the same
+   * question: a session whose host never connected, or left minutes ago, is an entry that
+   * renders, accepts a click, hands out `JOIN_ACCEPTED` and then does nothing — there is
+   * no host to stream a world. That is the "stale rows I cannot enter" report.
+   *
+   * A session is listed while its host is connected, and — once the host has joined at
+   * least once — for as long as a reaper is still counting down on its absence. That
+   * second clause is not slack: it is the window a host's **page refresh** lands in, and
+   * it is what lets `AutoRejoin` find the session it is about to reclaim. A session the
+   * host has never joined is never listed; there is nothing behind it yet.
+   */
+  isListable() {
+    if (this._disposed) return false;
+    if (!this._hostEverConnected) return false;
+    if (this.hasHost()) return true;
+    // Host is absent: only listable while a reaper is still counting down for it.
+    return !!(this._hostGraceTimer || this._emptyTimer);
+  }
+
+  /** Listable and not full. This is what `onJoinRequest` asks. */
+  isJoinable() {
+    return this.isListable() && this.canPlayerJoin();
   }
 
   /**
@@ -555,6 +684,7 @@ class SessionManager {
       seed: this.worldSeed,
       players: this.players.size,
       maxPlayers: this.maxPlayers,
+      hasHost: this.hasHost(),
     };
   }
 
@@ -634,6 +764,10 @@ class SessionManager {
       clearTimeout(this._emptyTimer);
       this._emptyTimer = null;
     }
+    // …and the two D-103 reapers, which would otherwise keep the process alive and fire
+    // `onSessionEmpty` for a session the relay has already dropped from its map.
+    this._clearClaimTimer();
+    this._clearHostGraceTimer();
 
     // Disconnect all players
     for (const player of this.players.values()) {

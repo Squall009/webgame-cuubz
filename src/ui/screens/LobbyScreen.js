@@ -92,6 +92,14 @@ export class LobbyScreen {
     this.populateBrowseCharacterSelect();
     this.populateHostCharacterSelect();
     this.populateHostWorldSelect();
+    // The session list is derived state too, and it was the one piece `refresh()` left
+    // stale. `#browse-panel` is the visible panel on entry, so without this the rows a
+    // player sees on walking into the lobby are whatever was painted the last time they
+    // were here — before the game they just left, in the common case. That is what made
+    // D-108's dead lobby socket look like "duplicate sessions" rather than like a lobby
+    // that had stopped talking to the relay: the rows were real once.
+    const sm = this.deps.sessionManager;
+    if (sm) sm.browseSessions();
   }
 
   // ── Tabs ──────────────────────────────────────────────────────────────
@@ -199,6 +207,19 @@ export class LobbyScreen {
       const maxPlayers = session.maxPlayers || 4;
       const mode = session.mode || 'survival';
       const isFull = playerCount >= maxPlayers;
+      // `hasHost` is `server/session.js.getSessionInfo()`'s, added with D-103. The relay
+      // no longer lists a session whose host is gone for good, but it does list one whose
+      // host is inside a reconnect window — a row that is real, will probably come back,
+      // and is not enterable this second. Saying so beats a click that appears to do
+      // nothing. A relay predating the field sends no `hasHost`; `!== false` keeps those
+      // rows behaving exactly as before.
+      const hasHost = session.hasHost !== false;
+      const blocked = isFull || !hasHost;
+
+      let statusHtml;
+      if (isFull) statusHtml = '<span style="color:#e74c3c;">Full</span>';
+      else if (!hasHost) statusHtml = '<span style="color:#e6a23c;">Host offline</span>';
+      else statusHtml = `${playerCount}/${maxPlayers}`;
 
       item.innerHTML = `
         <div class="session-info">
@@ -206,11 +227,11 @@ export class LobbyScreen {
           <div class="session-details">${mode.charAt(0).toUpperCase() + mode.slice(1)} · ${session.seed ? 'Seed: ' + session.seed : ''}</div>
         </div>
         <div class="session-players">
-          ${isFull ? '<span style="color:#e74c3c;">Full</span>' : `${playerCount}/${maxPlayers}`}
+          ${statusHtml}
         </div>
       `;
 
-      if (!isFull) {
+      if (!blocked) {
         item.addEventListener('click', () => this._joinSession(session, mode));
       } else {
         item.style.opacity = '0.5';

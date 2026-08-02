@@ -42,10 +42,15 @@ export class MobIntegration {
     const { scene, player, inventory, survivalSystem, worldSeed, onMobDeath } = deps;
 
     // Create MobManager
+    // D-110: was 60 / 8 with no hostile budget. These now restate `MobManager`'s own
+    // defaults rather than overriding them — kept explicit because this is the file a
+    // future tuning pass will look in, and a silent default is worse than a duplicated
+    // number when the question is "why does this world feel crowded".
     this.mobManager = new MobManager({
       worldSeed: worldSeed || 0,
-      mobCap: 60,
-      mobsPerChunk: 8,
+      mobCap: 28,
+      mobsPerChunk: 3,
+      hostileCap: 12,
       spawnInterval: 2.0,
     });
 

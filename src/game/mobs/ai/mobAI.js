@@ -4,7 +4,7 @@
  * Designed to be called once per frame from the MobManager.
  */
 
-import { shouldLoseAggro, triggerPackAggro } from './mobSenses.js';
+import { shouldAggro, shouldLoseAggro, triggerPackAggro } from './mobSenses.js';
 import { AI_STATES, MOB_BEHAVIORS } from '../mobDefinitions.js';
 
 /**
@@ -72,10 +72,17 @@ export function updateAI(mob, deltaTime, blockAccess, playerPosition, allMobs, a
       break;
   }
 
-  // Check for aggro transitions (hostile mobs only)
+  // Check for aggro transitions (hostile mobs only).
+  //
+  // The range + line-of-sight test used to be inlined here, duplicating `shouldAggro`,
+  // which was exported and had no callers at all. Routing through it puts the aggro
+  // gate — including the MAX_ENGAGED_MOBS budget, which is the ceiling on how many mobs
+  // may converge at once — in exactly one place, so the two cannot drift apart again.
+  // The predicate's `isDead`/`hurtTimer` checks are redundant with `updateAI`'s early
+  // return, not contradictory, so this is the same decision plus the budget.
   if (mob.definition.behavior === MOB_BEHAVIORS.AGGRESSIVE && playerPosition) {
     if (mob.aiState !== AI_STATES.CHASE && mob.aiState !== AI_STATES.ATTACK && mob.aiState !== AI_STATES.HURT) {
-      if (playerInAggro && mob.canSee(playerPosition, blockAccess)) {
+      if (shouldAggro(mob, playerPosition, blockAccess, allMobs)) {
         mob.targetEntity = playerPosition;
         mob.aiState = AI_STATES.CHASE;
       }
@@ -83,6 +90,9 @@ export function updateAI(mob, deltaTime, blockAccess, playerPosition, allMobs, a
       // Check if we should lose aggro
       if (shouldLoseAggro(mob, playerPosition)) {
         mob.targetEntity = null;
+        // Disengaging clears the pack-recruit mark, so a mob that was pulled in once can
+        // pull others in later — the flag suppresses the cascade, it is not a life sentence.
+        mob.recruitedByPack = false;
         mob.aiState = AI_STATES.RETURN_HOME;
       }
     }

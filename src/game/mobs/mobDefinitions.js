@@ -218,13 +218,19 @@ export const MOB_DEFINITIONS = {
     experience: 8,
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
-      aggroRange: 20,
+      // D-110: was aggro 20 / lose 40 / sense 24 / packRadius 10. A 20-block aggro on the
+      // game's highest-weight hostile meant a player crossing badlands picked up wolves
+      // faster than they could shed them, and a 40-block lose-interest — 2x the range that
+      // gained it — meant they could not be shed by retreating at all. Lose-interest is now
+      // ~1.6x aggro: enough hysteresis that a mob does not flicker at the boundary, little
+      // enough that backing off is a real option.
+      aggroRange: 10,
       attackRange: 1.5,
       attackCooldown: 1.2,
-      loseInterestRange: 40,
-      senseRange: 24,
+      loseInterestRange: 16,
+      senseRange: 14,
       packAggro: true,
-      packRadius: 10,
+      packRadius: 6,
       wanderInterval: [3, 8],
       fleeRange: 0,
     },
@@ -298,10 +304,13 @@ export const MOB_DEFINITIONS = {
     experience: 20,
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
-      aggroRange: 15,
+      // D-110: was aggro 15 / lose 32. The golem moves at 2.0 — slower than a walking
+      // player — so a long aggro leash bought nothing but a permanent escort. Its
+      // leashDistance is already 16, the tightest of any mob; aggro now matches that scale.
+      aggroRange: 8,
       attackRange: 2.5,
       attackCooldown: 1.8,
-      loseInterestRange: 32,
+      loseInterestRange: 13,
       senseRange: 12,
       packAggro: false,
       packRadius: 0,
@@ -375,13 +384,17 @@ export const MOB_DEFINITIONS = {
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     flying: true,
     ai: {
-      aggroRange: 16,
+      // D-110: was aggro 16 / lose 32 / sense 20 / packRadius 8. The wisp flies at 6.0 —
+      // faster than any other mob and unobstructed by terrain — so its effective reach is
+      // larger than the number suggests, and it is the second `packAggro` type. Cut hardest
+      // in proportion for that reason.
+      aggroRange: 9,
       attackRange: 1.2,
       attackCooldown: 1.0,
-      loseInterestRange: 32,
-      senseRange: 20,
+      loseInterestRange: 14,
+      senseRange: 12,
       packAggro: true,
-      packRadius: 8,
+      packRadius: 5,
       wanderInterval: [2, 5],
       fleeRange: 0,
     },

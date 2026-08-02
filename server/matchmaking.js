@@ -102,7 +102,12 @@ class Matchmaking {
         const client = this.clients.get(ws);
         if (client && client.sessionId) {
           if (client.isHost) {
-            console.log(`[MATCHMAKING] Host ${playerId} disconnected — destroying session ${client.sessionId}`);
+            // D-103. This line read "— destroying session ${…}" and destroyed nothing:
+            // `onHostLeave` is the relay's, and `server/index.js`'s implementation logged
+            // "stays alive" one line later. Two adjacent log lines asserting opposite
+            // outcomes is how the leak stayed invisible in the journal for as long as it
+            // did. The handler decides; this line reports the handoff and nothing more.
+            console.log(`[MATCHMAKING] Host ${playerId} disconnected from matchmaking — notifying relay about session ${client.sessionId}`);
             this.onHostLeave(client.sessionId, playerId);
           } else {
             console.log(`[MATCHMAKING] Client ${playerId} disconnected from matchmaking (session ${client.sessionId} stays alive)`);
@@ -119,7 +124,7 @@ class Matchmaking {
         const client = this.clients.get(ws);
         if (client && client.sessionId) {
           if (client.isHost) {
-            console.log(`[MATCHMAKING] Host ${playerId} error — destroying session ${client.sessionId}`);
+            console.log(`[MATCHMAKING] Host ${playerId} socket error — notifying relay about session ${client.sessionId}`);
             this.onHostLeave(client.sessionId, playerId);
           } else {
             console.log(`[MATCHMAKING] Client ${playerId} matchmaking error (session stays alive)`);

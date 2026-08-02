@@ -15,6 +15,30 @@ import { HostManager } from './Host.js';
  */
 
 /**
+ * Give `manager` the host-authority object that validates remote players' movement,
+ * block edits and inventory.
+ *
+ * Extracted from `startHosting()` below because it is **not** only `startHosting()`'s.
+ * The two rejoin paths put a player back in a session as its host and neither ever
+ * created one, so a re-hosted session ran with no rate limiting, no speed check and no
+ * validation at all — every remote action was taken on trust. D-109.
+ *
+ * @param {import('./SessionManager.js').SessionManager} manager
+ */
+export function attachHostManager(manager) {
+  if (!manager.client || manager._hostManager) return;
+  const deps = manager.deps;
+  manager._hostManager = new HostManager({ client: manager.client });
+  manager._hostManager.onPlayerJoined = (data) => {
+    deps.log(`[HostManager] Player joined: ${data.playerId} (${data.character?.name})`);
+  };
+  manager._hostManager.onPlayerLeft = (data) => {
+    deps.log(`[HostManager] Player left: ${data.playerId}`);
+  };
+  deps.log('[SessionManager] HostManager initialized for server-authoritative validation');
+}
+
+/**
  * Validate the host form, select the character and world it names, create the session on
  * the relay, and start the game.
  *
@@ -101,18 +125,7 @@ export async function startHosting(manager) {
   deps.log(`[SessionManager] Starting game in ${mode} mode (hosting)`);
   deps.startGame(mode);
 
-  // HostManager validates remote player actions (movement, blocks, inventory). It is
-  // wired in startGame() once the chunk manager is ready.
-  if (manager.client) {
-    manager._hostManager = new HostManager({ client: manager.client });
-    manager._hostManager.onPlayerJoined = (data) => {
-      deps.log(`[HostManager] Player joined: ${data.playerId} (${data.character?.name})`);
-    };
-    manager._hostManager.onPlayerLeft = (data) => {
-      deps.log(`[HostManager] Player left: ${data.playerId}`);
-    };
-    deps.log('[SessionManager] HostManager initialized for server-authoritative validation');
-  }
+  attachHostManager(manager);
 
   // The block-validation callbacks are NOT wired here. `startHosting` used to take an
   // `options` argument and register BLOCK_BREAK / BLOCK_PLACE from it, duplicating

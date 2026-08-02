@@ -1,7 +1,7 @@
 import { MultiplayerClient } from './Client.js';
 import { startHosting } from './SessionHosting.js';
 import { getRelayUrl } from './RelayUrl.js';
-import { writeLastSession } from '../util/StorageHelper.js';
+import { writeLastSession, clearLastSession } from '../util/StorageHelper.js';
 
 /**
  * Cuubz — multiplayer session lifecycle in the browser (PR 16, refactor.md §8.3)
@@ -55,6 +55,9 @@ export class SessionManager {
     this._hostRejectedCallback = null;
     this._playerJoinedCallback = null;
     this._playerLeftCallback = null;
+
+    // Set for the window between `reclaimHostedSession()` and its `JOIN_ACCEPTED`. D-109.
+    this._reclaimingAsHost = false;
   }
 
   // ── UI access ───────────────────────────────────────────────────────────
@@ -125,6 +128,10 @@ export class SessionManager {
         ? this._sessionSeed
         : (world ? world.seed : null),
       isHost,
+      // D-109 — what lets the next page load reclaim this seat rather than create a new
+      // session beside it. `MultiplayerClient` keeps the first id the relay issued and
+      // never lets a reconnect overwrite it (D-105), so this is stable for the session.
+      playerId: this.client ? this.client.playerId : null,
       characterId: char ? char.id : null,
       worldId: world ? world.id : null,
       timestamp: Date.now(),
@@ -174,6 +181,16 @@ export class SessionManager {
 
     this.client.on('JOIN_ACCEPTED', (data) => {
       this.currentSessionId = data.sessionId;
+      // A reclaim rides the ordinary JOIN path — the relay has no "re-host" verb and does
+      // not need one, because `server/session.js._handleJoin` keys on `playerId` and the
+      // reclaiming client asserts the id the session was created under. What the relay
+      // cannot tell us is that this client is the host, so we carry it ourselves; without
+      // it `registerHostCallbacks()` would decline and `registerClientCallbacks()` would
+      // take over, and the host's own block edits would stop reaching IndexedDB. D-109.
+      if (this._reclaimingAsHost) {
+        this.hostingSessionId = data.sessionId;
+        this._reclaimingAsHost = false;
+      }
       // `JOIN_ACCEPTED` carries sessionId, sessionPort and a message — no name and no
       // mode (server/matchmaking.js). Reading `data.mode || 'survival'` here, as this
       // handler used to, could therefore only ever produce 'survival'. That is the other
@@ -318,10 +335,66 @@ export class SessionManager {
     }
   }
 
-  /** Leave the current session. */
+  /**
+   * Reclaim a session this client was already hosting — the page-reload path.
+   *
+   * ─── WHY THIS IS NOT `hostSession()` — D-109 ────────────────────────────────
+   *
+   * Both rejoin paths (`AutoRejoin.js`, `SessionRejoin.js`) sent `HOST` for a stored
+   * record with `isHost: true`. `HOST` has exactly one meaning to the relay: *create a
+   * session*. It does not look for an existing one, so re-hosting produced a second
+   * session carrying the first one's name while the first was still being advertised —
+   * an identical-looking row that no host was serving. Reload twice and there were three.
+   *
+   * The relay already supports what was actually wanted. `server/session.js._handleJoin`
+   * treats a `JOIN` whose `playerId` it recognises as a reconnect, and `hostId` is just a
+   * player id — so asserting the stored id over an ordinary `JOIN` restores this client
+   * as the host of the original session, chunk-streaming rights included
+   * (`_handleChunkData` compares against `hostId`).
+   *
+   * @param {string} sessionId
+   * @param {Object} sessionInfo — `{name, mode, seed}`, as `joinSession()` takes.
+   * @param {string} playerId — the id from the rejoin record.
+   * @returns {Promise<boolean>} false when there is no client or no stored id, in which
+   *   case the caller should fall back to hosting a fresh session.
+   */
+  async reclaimHostedSession(sessionId, sessionInfo, playerId) {
+    if (!this.client || !sessionId || !playerId) return false;
+    this.client.setPlayerId(playerId);
+    this._reclaimingAsHost = true;
+    await this.joinSession(sessionId, sessionInfo);
+    return true;
+  }
+
+  /**
+   * Leave the current session and go back to the lobby.
+   *
+   * ─── WHAT "LEAVE" HAS TO MEAN — D-108, D-109 ────────────────────────────────
+   *
+   * Three things, and before this it did none of them:
+   *
+   * 1. **The lobby survives.** `client.leaveSession()` used to be an alias for
+   *    `disconnect()`, which closed the matchmaking socket for good; see that method in
+   *    `Client.js`. `connectMatchmaking()` below is belt-and-braces — it returns early
+   *    when a connection already exists, so it only bites when the socket died mid-game.
+   *
+   * 2. **The relay is told.** The `LEAVE` on the game socket is what lets
+   *    `server/session.js` collect the session immediately instead of holding it through
+   *    the 30 s reconnect grace (D-103).
+   *
+   * 3. **The rejoin record goes.** D-109. Exit-to-menu left `cuubz_last_session` behind,
+   *    so the next page load ran `attemptAutoRejoin`, found the record, and — for a host
+   *    — called `hostSession()`, which does not rejoin anything. It creates a **new**
+   *    session with the old one's name. Every reload after an exit therefore minted
+   *    another identically-named row in the browse list. Those are the duplicates.
+   *    A deliberate exit is the one moment we know for certain the player is finished
+   *    with that session, so it is the moment to forget it; a crash or a refresh
+   *    mid-session does not come through here, which is exactly the case rejoin is for.
+   */
   leaveSession() {
     if (this.client) {
       this.client.leaveSession();
+      this.client.connectMatchmaking();
     }
     this.currentSessionId = null;
     this.hostingSessionId = null;
@@ -329,6 +402,8 @@ export class SessionManager {
     this._gameMode = null;
     this._sessionName = null;
     this._sessionSeed = null;
+    clearLastSession();
+    this.deps.updateRejoinPanel();
     this.updateConnectionStatus('disconnected');
     this.hideInGameOverlays();
   }

@@ -109,6 +109,9 @@ const fakeClient = () => {
     connectMatchmaking() { this.connected = true; }, browseSessions() { this.browsed++; },
     async joinSession(id) { this.joined = id; }, async hostSession(o) { this.hosted = o; },
     leaveSession() { this.left = true; }, dispose() { this.disposed = true; },
+    // D-105/D-109's two additions to the client's surface: the id is read into the
+    // rejoin record, and set back on it when a reload reclaims the session.
+    playerId: null, setPlayerId(id) { this.adoptedId = id; this.playerId = id; },
   };
 };
 
@@ -171,6 +174,56 @@ describe('SessionManager (src/multiplayer/SessionManager.js)', () => {
     eq(h.manager._gameMode, null, '_gameMode'); eq(h.manager._sessionName, null, '_sessionName');
     eq(h.manager._sessionSeed, null, '_sessionSeed'); eq(statusText(), 'Disconnected', 'status');
     is(hidden('player-list-overlay'), 'roster hidden'); is(hidden('connection-hud'), 'indicator hidden');
+  });
+  it('leaveSession forgets the rejoin record and re-arms the lobby socket (D-108, D-109)', async () => {
+    const h = harness();
+    const client = connected(h);
+    client.playerId = 'player_1';
+    await h.manager.joinSession('sess-1', { mode: 'creative', name: 'X', seed: 7 });
+    h.manager.hostingSessionId = 'host-1';
+    is(!!h.manager.saveSessionRecord(), 'a record exists to forget');
+
+    client.connected = false; // so the re-arm below is observable
+    h.manager.leaveSession();
+
+    // D-109. Exit-to-menu used to leave `cuubz_last_session` behind, so the next page
+    // load auto-rejoined — and for a host that meant `hostSession()`, which creates a
+    // *new* session carrying the old one's name beside the one already listed. Those
+    // were the duplicate rows.
+    eq(readLastSession(), null, 'the rejoin record is gone');
+    is(client.connected, 'the matchmaking socket is re-armed, not left dead (D-108)');
+  });
+  it('the rejoin record carries the player id a reclaim needs (D-109)', async () => {
+    const h = harness();
+    const client = connected(h);
+    client.playerId = 'player_host_7';
+    await h.manager.joinSession('sess-1', { mode: 'creative', name: 'X', seed: 7 });
+    h.manager.hostingSessionId = 'host-1';
+
+    eq(h.manager.getSessionRecord().playerId, 'player_host_7',
+      'without this the reloaded page cannot assert the id it hosted under');
+  });
+  it('reclaimHostedSession joins under the stored id and stays the host (D-109)', async () => {
+    const h = harness();
+    const client = connected(h);
+
+    const ok = await h.manager.reclaimHostedSession('sess-9', { mode: 'creative', name: 'Old', seed: 3 }, 'player_host_7');
+    is(ok, 'a reclaim with a stored id is attempted');
+    eq(client.adoptedId, 'player_host_7', 'the stored id is asserted before JOIN');
+    eq(client.joined, 'sess-9', 'it goes out as an ordinary JOIN — the relay has no re-host verb');
+
+    client.emit('JOIN_ACCEPTED', { sessionId: 'sess-9' });
+    // `JOIN_ACCEPTED` sets `currentSessionId`; without the reclaim flag `hostingSessionId`
+    // would stay null and `registerHostCallbacks()` would decline, so the reclaimed host
+    // would stop persisting its own block edits.
+    eq(h.manager.hostingSessionId, 'sess-9', 'the reclaimed session is held as hosted');
+    eq(h.manager._reclaimingAsHost, false, 'and the flag is consumed');
+  });
+  it('reclaimHostedSession declines without a stored id, so the caller can re-host', async () => {
+    const h = harness();
+    connected(h);
+    eq(await h.manager.reclaimHostedSession('sess-9', {}, null), false, 'no id, no reclaim');
+    eq(await h.manager.reclaimHostedSession(null, {}, 'p1'), false, 'no session, no reclaim');
   });
   it('browseSessions delegates online, renders empty offline, and dispose releases', () => {
     const h = harness();

@@ -652,4 +652,93 @@ describe('leaving HURT restores the materials it changed (D-88)', () => {
     record(() => expect(() => tick(manager, 1 / 60), 'ticking on after the removal').not.toThrow());
     eq(renderer.count, 0, 'nothing was resurrected');
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // D-104: the flash must not give a material an `emissive` its shader has no uniform for
+  // ═══════════════════════════════════════════════════════════════════════════════
+  //
+  // THE GAP THIS CLOSES: every assertion in the suite above compares the emissive state
+  // BEFORE a hit to the state AFTER it, and `emissiveState` was even written to record
+  // `'ABSENT'` so that adding a property and restoring a black Color could not pass. All of
+  // that was green while `hurtReaction` crashed the renderer on contact — because the
+  // damage is done DURING the window, on frames nobody looked at, and because the scene here
+  // is a stub, so no material ever reaches a uniform refresh.
+  //
+  // `hurtReaction` added `emissive` to any material lacking one, which is every
+  // `MeshBasicMaterial` — the eye meshes `mobModelBuilder` gives every mob. Three r134's
+  // `refreshUniformsCommon` (three.module.js:24534) branches on the MATERIAL and then
+  // dereferences the UNIFORM:
+  //
+  //     if ( material.emissive ) uniforms.emissive.value.copy( material.emissive )...
+  //
+  // `ShaderLib.basic` has no `emissive` uniform. So the first draw call after the first hit
+  // on any mob threw `Cannot read properties of undefined (reading 'value')` out of
+  // `renderBufferDirect` and took the render loop down with it.
+  describe('the hurt flash never adds `emissive` to a basic material (D-104)', () => {
+    // The r134 material.type → ShaderLib key table (WebGLPrograms `shaderIDs`), restricted to
+    // the material types `mobModelBuilder` actually builds.
+    const SHADER_ID = { MeshBasicMaterial: 'basic', MeshLambertMaterial: 'lambert', MeshStandardMaterial: 'physical' };
+
+    /**
+     * Run the exact expression that threw, against the real `ShaderLib` uniform set for the
+     * material's own shader. This is the crash, reproduced without a GL context: nothing here
+     * is a stand-in for the renderer's behaviour, it IS the renderer's line.
+     */
+    const refreshUniformsCommon = (mat) => {
+      const id = SHADER_ID[mat.type];
+      if (!id) throw new Error(`unmapped material type ${mat.type} — extend SHADER_ID`);
+      const uniforms = THREE.UniformsUtils.clone(THREE.ShaderLib[id].uniforms);
+      if (mat.emissive) uniforms.emissive.value.copy(mat.emissive).multiplyScalar(mat.emissiveIntensity);
+    };
+
+    it('every mob type survives a full hurt window fed through the real uniform refresh', () => {
+      for (const type of MOB_TYPES) {
+        const { manager, mob, group } = rig(type);
+        mob._grp = group;
+
+        mob.takeDamage(1, 'test');
+        let frames = 0, flashed = false, basics = 0;
+        while (mob.aiState === AI_STATES.HURT && frames < 2000) {
+          tick(manager, 1 / 60);
+          frames++;
+          if (flashIsOn(group)) flashed = true;
+          group.traverse(c => {
+            if (!c.isMesh || !c.material) return;
+            if (c.material.isMeshBasicMaterial) basics++;
+            record(() => expect(() => refreshUniformsCommon(c.material),
+              `${type} frame ${frames}: ${c.name} (${c.material.type}) through refreshUniformsCommon`).not.toThrow());
+          });
+        }
+
+        // Non-vacuity, both halves: the flash has to have run, and the mob has to actually
+        // own a basic material — otherwise this passes for the wrong reason.
+        is(flashed, `${type}: the flash rendered during the window under test`);
+        gt(basics, 0, `${type}: has at least one MeshBasicMaterial to put at risk`);
+      }
+    });
+
+    it('the eye meshes are the ones at risk, and they stay untouched', () => {
+      // Named directly rather than left implicit in the sweep above, because `eye_0` is the
+      // concrete thing `mobModelBuilder` builds with a `MeshBasicMaterial` and the concrete
+      // thing that broke. If eyes ever stop being basic materials this goes red and says so.
+      const { manager, mob, group } = rig('corrupt_wolf');
+      mob._grp = group;
+      const eye = group.userData.parts.eye_0;
+      is(eye.material.isMeshBasicMaterial === true, 'eye_0 is a MeshBasicMaterial');
+      nope('emissive' in eye.material, 'and has no emissive before the hit');
+
+      mob.takeDamage(1, 'test');
+      let sawFlashFrame = false;
+      for (let i = 0; i < 40 && mob.aiState === AI_STATES.HURT; i++) {
+        tick(manager, 1 / 60);
+        if (flashIsOn(group)) sawFlashFrame = true;
+        // Checked on EVERY frame, including the dark half of each pulse: the old code took
+        // the `flashIntensity > 0` branch to assign the Color, so a probe that only sampled
+        // one frame could easily sample a dark one and miss it.
+        nope('emissive' in eye.material, `frame ${i + 1}: eye_0 still has no emissive`);
+      }
+      is(sawFlashFrame, 'the body did flash while the eye was being watched');
+      nope('emissiveIntensity' in eye.material, 'and no emissiveIntensity was left on it either');
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import { createSessionManager } from './SessionManager.js';
+import { attachHostManager } from './SessionHosting.js';
 import { readLastSession } from '../util/StorageHelper.js';
 
 /**
@@ -111,18 +112,33 @@ export async function rejoinSession(deps, adoptSessionManager) {
 
   if (session.isHost && sessionManager.client) {
     try {
-      await sessionManager.client.hostSession({
-        name: session.name,
-        seed: session.seed || Math.floor(Math.random() * 0xFFFFFFFF),
-        mode: session.mode,
-      });
-      deps.log(`[Cuubz] Re-hosting session: ${session.name}`);
+      // Reclaim the stored session rather than creating a same-named twin beside it —
+      // see `AutoRejoin.js`'s copy of this branch and `SessionManager.reclaimHostedSession`
+      // for why `HOST` is the wrong verb here. D-109. Unlike the automatic path this one
+      // has *not* probed `/sessions` first, so the reclaim may find nothing; a `JOIN` for
+      // a session the relay has collected comes back as `JOIN_REJECTED` and the lobby's
+      // error banner reports it, which is the same failure report this button already had.
+      const reclaimed = await sessionManager.reclaimHostedSession(
+        session.sessionId, session, session.playerId
+      );
+      if (reclaimed) {
+        attachHostManager(sessionManager);
+        deps.log(`[Cuubz] Reclaimed hosted session: ${session.sessionId}`);
+      } else {
+        await sessionManager.client.hostSession({
+          name: session.name,
+          seed: session.seed || Math.floor(Math.random() * 0xFFFFFFFF),
+          mode: session.mode,
+        });
+        deps.log(`[Cuubz] Re-hosting session (no stored player id): ${session.name}`);
+      }
     } catch (err) {
       sessionManager.updateConnectionStatus('disconnected');
       deps.ui.lobby.showHostError(`Failed to re-host: ${err.message}`);
     }
   } else if (sessionManager.client) {
     try {
+      sessionManager.client.setPlayerId(session.playerId);
       await sessionManager.joinSession(session.sessionId, session);
       deps.log(`[Cuubz] Re-joining session: ${session.sessionId}`);
     } catch (err) {

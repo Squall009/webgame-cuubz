@@ -28,6 +28,7 @@
  */
 
 import { createSessionManager } from './SessionManager.js';
+import { attachHostManager } from './SessionHosting.js';
 import { getRelayUrl } from './RelayUrl.js';
 import { readLastSession } from '../util/StorageHelper.js';
 
@@ -114,12 +115,32 @@ export async function attemptAutoRejoin(deps, adoptSessionManager) {
 
         if (lastSession.isHost && sessionManager.client) {
           try {
-            await sessionManager.client.hostSession({
-              name: lastSession.name,
-              seed: lastSession.seed || Math.floor(Math.random() * 0xFFFFFFFF),
-              mode: lastSession.mode || 'survival',
-            });
-            log(`[Cuubz] Re-hosting session: ${lastSession.name}`);
+            // ─── RECLAIM, DO NOT RE-HOST — D-109 ────────────────────────────
+            //
+            // We are inside `if (activeSession)`: the relay has just told us this exact
+            // session is still up. Sending `HOST` here — which is what this branch used
+            // to do, unconditionally — asks the relay to *create* one, so the session we
+            // just confirmed was alive got a same-named twin standing next to it in every
+            // guest's browse list, with no host behind it. `reclaimHostedSession()` sends
+            // `JOIN` under the stored player id instead, which `server/session.js` matches
+            // against `hostId` and restores this client as the host of the original.
+            //
+            // The `HOST` fallback survives for a record written before `playerId` was part
+            // of the shape, and for a client that never got an id.
+            const reclaimed = await sessionManager.reclaimHostedSession(
+              lastSession.sessionId, lastSession, lastSession.playerId
+            );
+            if (reclaimed) {
+              attachHostManager(sessionManager);
+              log(`[Cuubz] Reclaimed hosted session: ${lastSession.sessionId}`);
+            } else {
+              await sessionManager.client.hostSession({
+                name: lastSession.name,
+                seed: lastSession.seed || Math.floor(Math.random() * 0xFFFFFFFF),
+                mode: lastSession.mode || 'survival',
+              });
+              log(`[Cuubz] Re-hosting session (no stored player id): ${lastSession.name}`);
+            }
           } catch (err) {
             log(`[Cuubz] Re-host failed: ${err.message}`);
             deps.showScreen('mainMenu');
@@ -127,7 +148,12 @@ export async function attemptAutoRejoin(deps, adoptSessionManager) {
           }
         } else if (sessionManager.client) {
           try {
-            await sessionManager.joinSession(lastSession.sessionId);
+            // A joiner reclaims its seat the same way, for a smaller but real reason:
+            // arriving under a fresh id leaves the previous one in the relay's `players`
+            // map holding a dead socket until its 120 s heartbeat lapses, occupying one
+            // of the four slots and rendering as a frozen twin of the player. D-109.
+            sessionManager.client.setPlayerId(lastSession.playerId);
+            await sessionManager.joinSession(lastSession.sessionId, lastSession);
             log(`[Cuubz] Re-joining session: ${lastSession.sessionId}`);
           } catch (err) {
             log(`[Cuubz] Re-join failed: ${err.message}`);

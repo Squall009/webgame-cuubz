@@ -44,27 +44,37 @@ export function hurtReaction(group, progress) {
   const flashIntensity = Math.sin(progress * Math.PI * 8) > 0 ? 0.5 : 0;
 
   group.traverse(child => {
-    if (child.isMesh && child.material) {
-      if (!child.material._origEmissive) {
-        // `_origEmissiveAbsent` records that the material had NO `emissive` at all, which
-        // is the case for every `MeshBasicMaterial` — the eye meshes. The flash below adds
-        // the property to them anyway (harmless: MeshBasicMaterial's shader never reads it),
-        // so without this flag the restore would put a black Color and a 0 intensity onto a
-        // material that had neither before, and the round-trip would not be exact.
-        child.material._origEmissiveAbsent = !child.material.emissive;
-        child.material._origEmissive = child.material.emissive ? child.material.emissive.clone() : new THREE.Color(0x000000);
-        child.material._origEmissiveIntensity = child.material.emissiveIntensity || 0;
-      }
-      // Check for emissive parts - they get boosted red
-      if (child.material.emissive && child.material.emissive.getHex() !== 0) {
-        // Emissive parts: mix red into their glow
-        child.material.emissive.setHex(0xff2200);
-      } else if (flashIntensity > 0) {
-        // Non-emissive parts: brief red flash
-        child.material.emissive = new THREE.Color(0xff0000);
-      }
-      child.material.emissiveIntensity = flashIntensity;
+    if (!child.isMesh || !child.material) return;
+    const mat = child.material;
+
+    // D-104: a material that does not ALREADY have `emissive` must never be given one.
+    //
+    // This used to add the property to any material that lacked it — every
+    // `MeshBasicMaterial`, i.e. the eye meshes from `mobModelBuilder` — on the theory that
+    // it was harmless because the basic shader never reads it. It is not harmless. Three
+    // r134's `refreshUniformsCommon` (three.module.js:24534) branches on the MATERIAL:
+    //
+    //     if ( material.emissive ) uniforms.emissive.value.copy( material.emissive )...
+    //
+    // `ShaderLib.basic` has no `emissive` uniform, so `uniforms.emissive` is undefined and
+    // that line threw `Cannot read properties of undefined (reading 'value')` out of
+    // `renderBufferDirect` — every hit on a mob killed the whole render loop. The eyes
+    // simply do not flash now; they are 0x000000 spheres a few pixels across.
+    if (!mat.emissive) return;
+
+    if (!mat._origEmissive) {
+      mat._origEmissive = mat.emissive.clone();
+      mat._origEmissiveIntensity = mat.emissiveIntensity || 0;
     }
+    // Check for emissive parts - they get boosted red
+    if (mat.emissive.getHex() !== 0) {
+      // Emissive parts: mix red into their glow
+      mat.emissive.setHex(0xff2200);
+    } else if (flashIntensity > 0) {
+      // Non-emissive parts: brief red flash
+      mat.emissive = new THREE.Color(0xff0000);
+    }
+    mat.emissiveIntensity = flashIntensity;
   });
 
   // Recoil push back (first 40% of animation).
@@ -113,18 +123,13 @@ export function clearHurtReaction(group) {
     const mat = child.material;
     if (!mat._origEmissive) return; // never flashed, or already cleared — nothing to undo
 
-    if (mat._origEmissiveAbsent) {
-      // The material never had these properties; `hurtReaction` added them. Removing them
-      // is the exact inverse — assigning black would leave a MeshBasicMaterial carrying two
-      // fields it did not have before the hit.
-      delete mat.emissive;
-      delete mat.emissiveIntensity;
-    } else {
-      mat.emissive = mat._origEmissive;
-      mat.emissiveIntensity = mat._origEmissiveIntensity;
-    }
+    // D-104: there used to be an `_origEmissiveAbsent` branch here that `delete`d `emissive`
+    // and `emissiveIntensity` off materials `hurtReaction` had added them to. It is gone
+    // with the thing it undid — `hurtReaction` now skips those materials outright, so a
+    // banked `_origEmissive` only ever exists on a material that had one to begin with.
+    mat.emissive = mat._origEmissive;
+    mat.emissiveIntensity = mat._origEmissiveIntensity;
     delete mat._origEmissive;
     delete mat._origEmissiveIntensity;
-    delete mat._origEmissiveAbsent;
   });
 }

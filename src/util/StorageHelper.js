@@ -63,6 +63,11 @@ export function normaliseSessionRecord(record) {
     mode: record.mode || 'survival',
     seed: record.seed === undefined ? null : record.seed,
     isHost: !!record.isHost,
+    // The relay-issued player id this session was joined under. D-109: without it a
+    // reloaded page arrives as a stranger, and a **host** therefore could not reclaim its
+    // own session — `attemptAutoRejoin` fell back to `hostSession()`, which creates a
+    // second session with the first one's name rather than rejoining anything.
+    playerId: record.playerId === undefined ? null : record.playerId,
     characterId: record.characterId === undefined ? null : record.characterId,
     worldId: record.worldId === undefined ? null : record.worldId,
     timestamp: record.timestamp || Date.now(),

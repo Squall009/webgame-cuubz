@@ -47,6 +47,11 @@ export class Mob {
     this.wanderTarget = null;
     this.fleeTarget = null;
 
+    // True when this mob was pulled into a fight by a packmate rather than by its own
+    // senses. Recruits are not allowed to recruit — see `triggerPackAggro` — which is
+    // what stops pack aggro propagating hop by hop across the whole population.
+    this.recruitedByPack = false;
+
     // Animation
     this.animationTimer = 0;
     this.animationState = this.aiState;
