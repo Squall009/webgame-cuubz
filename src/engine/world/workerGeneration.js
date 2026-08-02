@@ -180,17 +180,20 @@
   // redFlowerChance / yellowFlowerChance: per-column probability of placing a flower
   // treeMaxY: trees won't place above this height
   // flowerMaxY: flowers won't place above this height
+  // grassChance is the per-column odds of short/tall grass on a grass-like
+  // surface — it is rolled before (and independently of) the flower pass, so
+  // tuning it does not disturb flower or mushroom density.
   var FEATURE_RATES = {
-    'Forest':       { treeChance: 0.008, redFlowerChance: 0.005, yellowFlowerChance: 0.005, treeMaxY: 125, flowerMaxY: 120 },
-    'Plains':       { treeChance: 0.004, redFlowerChance: 0.015, yellowFlowerChance: 0.015, treeMaxY: 125, flowerMaxY: 120 },
-    'Mountains':    { treeChance: 0.003, redFlowerChance: 0.002, yellowFlowerChance: 0.002, treeMaxY: 110, flowerMaxY: 115 },
-    'Beach':        { treeChance: 0.001, redFlowerChance: 0.001, yellowFlowerChance: 0.001, treeMaxY: 125, flowerMaxY: 120 },
-    'Tundra':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
-    'Desert':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
-    'Badlands':     { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
-    'Frozen Peaks': { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
-    'Ocean':        { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
-    'Deep Ocean':   { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, treeMaxY: 125, flowerMaxY: 120 }
+    'Forest':       { treeChance: 0.008, redFlowerChance: 0.005, yellowFlowerChance: 0.005, grassChance: 0.30, treeMaxY: 125, flowerMaxY: 120 },
+    'Plains':       { treeChance: 0.004, redFlowerChance: 0.015, yellowFlowerChance: 0.015, grassChance: 0.35, treeMaxY: 125, flowerMaxY: 120 },
+    'Mountains':    { treeChance: 0.003, redFlowerChance: 0.002, yellowFlowerChance: 0.002, grassChance: 0.12, treeMaxY: 110, flowerMaxY: 115 },
+    'Beach':        { treeChance: 0.001, redFlowerChance: 0.001, yellowFlowerChance: 0.001, grassChance: 0.05, treeMaxY: 125, flowerMaxY: 120 },
+    'Tundra':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.08, treeMaxY: 125, flowerMaxY: 120 },
+    'Desert':       { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.02, treeMaxY: 125, flowerMaxY: 120 },
+    'Badlands':     { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.02, treeMaxY: 125, flowerMaxY: 120 },
+    'Frozen Peaks': { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.03, treeMaxY: 125, flowerMaxY: 120 },
+    'Ocean':        { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    'Deep Ocean':   { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.00, treeMaxY: 125, flowerMaxY: 120 }
   };
 
   // ── Ore definitions ────────────────────────────────────────────────
@@ -325,6 +328,23 @@
     'Ocean':        [],
     'Deep Ocean':   []
   };
+
+  // Grass-only view of GROUND_COVER — keeps the short/tall ratio each biome
+  // already declares, so the dedicated grass pass stays in sync with it.
+  var GRASS_COVER = (function () {
+    var out = {};
+    for (var name in GROUND_COVER) {
+      if (!Object.prototype.hasOwnProperty.call(GROUND_COVER, name)) continue;
+      var list = GROUND_COVER[name], grassOnly = [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].block === BLOCK.SHORT_GRASS || list[i].block === BLOCK.TALL_GRASS) {
+          grassOnly.push(list[i]);
+        }
+      }
+      out[name] = grassOnly;
+    }
+    return out;
+  })();
 
   // Helper: pick a tree type from weighted biome array using noise.
   function selectTreeType(treeTypes, noiseVal) {
@@ -667,6 +687,22 @@
           if (placedTrees[t].lx === lx && placedTrees[t].lz === lz) { treeHere = true; break; }
         }
         if (treeHere) continue;
+
+        // Nothing may be sitting on the column already (snow layer, tree part).
+        if (chunk[cidx(lx, surfY + 1, lz)] !== BLOCK.AIR) continue;
+
+        // Grass pass — rolled first and on its own rate so grass can be dense
+        // without dragging flower and mushroom counts up with it.
+        var grassTypes = GRASS_COVER[biomeName];
+        if (grassTypes && grassTypes.length > 0 && rng() < (rates.grassChance || 0)) {
+          var grassNoise = perlin.c1.noise2(wx / 6 + 41.7, wz / 6 + 41.7);
+          var grassBlock = selectGroundCover(grassTypes, grassNoise);
+          if (grassBlock) {
+            chunk[cidx(lx, surfY + 1, lz)] = grassBlock;
+            flowerCount++;
+            continue;
+          }
+        }
 
         // Combined ground cover chance: sum of flower rates + grass rate.
         var coverChance = (rates.redFlowerChance + rates.yellowFlowerChance) * 1.5;
