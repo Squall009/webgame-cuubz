@@ -35,29 +35,30 @@ export function createHotbar(state) {
     const h = canvasEl.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Try item atlas first (for named items)
-    if (typeof typeId === 'string' && itemAtlas.slotMap[typeId]) {
-      const src = itemAtlas.canvas;
-      const slot = itemAtlas.slotMap[typeId];
+    // The item atlas covers BOTH named items and blocks now, so string and number keys
+    // take the same path. They used to be two byte-identical branches with only the
+    // `typeof` differing, below a third branch that read the block atlas directly — and
+    // that third branch was unreachable for exactly the block ids the item atlas had a
+    // (wrong, flat-coloured) placeholder for. See the header of
+    // src/engine/renderer/ItemTextureAtlas.js.
+    const slot = itemAtlas.slotMap[typeId];
+    if (slot) {
       const srcCell = itemAtlas.tileSize + itemAtlas._gap;
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
-    } else if (typeof typeId === 'number' && itemAtlas.slotMap[typeId]) {
-      // Block item registered in item atlas
-      const src = itemAtlas.canvas;
-      const slot = itemAtlas.slotMap[typeId];
-      const srcCell = itemAtlas.tileSize + itemAtlas._gap;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(src, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
-    } else if (typeof typeId === 'number' && textureAtlas.tileMap[typeId]) {
-      // Fall back to block atlas — draw the top face texture
+      ctx.drawImage(itemAtlas.canvas, itemAtlas._gap + slot.col * srcCell, itemAtlas._gap + slot.row * srcCell, itemAtlas.tileSize, itemAtlas.tileSize, 0, 0, w, h);
+      return;
+    }
+
+    // Kept as a real fallback, not a dead one: `ItemTextureAtlas` degrades to named items
+    // only if it is constructed without a block atlas, and this is what still draws
+    // blocks in that case.
+    if (typeof typeId === 'number' && textureAtlas.tileMap[typeId]) {
       const blockEntry = textureAtlas.tileMap[typeId];
-      const tile = blockEntry.tiles.top || blockEntry.tiles.side || blockEntry.tiles.all;
+      const tile = blockEntry.tiles.all || blockEntry.tiles.side || blockEntry.tiles.top;
       if (tile) {
-        const src = textureAtlas.diffuseCanvas;
         const srcCell = textureAtlas.tileSize + textureAtlas._gap;
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(src, textureAtlas._gap + tile.col * srcCell, textureAtlas._gap + tile.row * srcCell, textureAtlas.tileSize, textureAtlas.tileSize, 0, 0, w, h);
+        ctx.drawImage(textureAtlas.diffuseCanvas, textureAtlas._gap + tile.col * srcCell, textureAtlas._gap + tile.row * srcCell, textureAtlas.tileSize, textureAtlas.tileSize, 0, 0, w, h);
       }
     }
   }

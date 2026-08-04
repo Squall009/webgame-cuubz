@@ -304,7 +304,17 @@ remote "set -e
 # script re-uploaded them every single time. They are their own artifact now: skipped
 # by default, uploaded on --textures, and uploaded automatically if the host does not
 # have them yet (a first deploy, or a restore onto a clean box).
-if [ "$WITH_TEXTURES" -eq 1 ] || ! remote "test -f ${REMOTE_DIR}/textures/blocks/manifest.json" 2>/dev/null; then
+#
+# The probe asks for BOTH manifests. It used to ask only for blocks/, which was complete
+# when blocks/ was the only manifest — the item atlas built its list from a hardcoded
+# array in the client bundle, so items needed nothing on disk. That stopped being true
+# when items/manifest.json became a build artifact: a host provisioned before it existed
+# passes a blocks-only probe, skips the upload, and then 404s the item manifest, at which
+# point every named item in the inventory renders as a "?" placeholder while every block
+# renders fine. Probing for the newer of the two artifacts is what makes the first deploy
+# after this change self-correcting instead of needing someone to remember --textures.
+if [ "$WITH_TEXTURES" -eq 1 ] \
+   || ! remote "test -f ${REMOTE_DIR}/textures/blocks/manifest.json && test -f ${REMOTE_DIR}/textures/items/manifest.json" 2>/dev/null; then
   say "Uploading textures (118 MB — this is the slow part)"
   TEX_ARCHIVE="$(mktemp -t cuubz-tex-XXXXXX).tar.gz"
   tar czf "$TEX_ARCHIVE" -C "$SOURCE_DIR" textures
@@ -412,6 +422,7 @@ remote "set -e
   # ../shared/protocol.js. Without this the deploy reports success and the unit crash-loops.
   test -d server/node_modules/ws || { echo '  ! server/node_modules/ws missing — the relay cannot boot (D-94)' >&2; exit 1; }
   test -f textures/blocks/manifest.json || echo '  ! textures/blocks/manifest.json missing — run ./sync.sh --textures' >&2
+  test -f textures/items/manifest.json || echo '  ! textures/items/manifest.json missing — every named item will render as a \"?\" placeholder; run ./sync.sh --textures' >&2
   test -f server/index.js || echo '  ! server/index.js missing' >&2
   test -f shared/protocol.js || echo '  ! shared/protocol.js missing — server/ imports it as ../shared/protocol.js and the relay will not boot without it (PR 33)' >&2
   test -f shared/package.json || echo '  ! shared/package.json missing — without its \"type\": \"module\" Node warns on every relay boot' >&2

@@ -1,21 +1,54 @@
 /**
  * Cuubz — Item Texture Atlas (2D UI Atlas for Hotbar/Inventory)
- * 
- * Loads item textures from textures/items/ folder and builds a single
- * diffuse atlas canvas for rendering item icons in the hotbar and inventory UI.
- * 
- * Each item gets one atlas slot. The atlas uses nearest-neighbor filtering
- * for a crisp pixel-art look in the UI.
- * 
- * Tile size: 64×64 px (items are displayed at 48×48 in hotbar, 64 gives headroom)
- * Grid: auto-sized square grid to fit all items
+ *
+ * Builds one diffuse atlas canvas holding an icon for every inventory item — both
+ * named items (`'coal'`, `'wooden_sword'`) and every placeable block, keyed by id.
+ * `Hotbar.renderItemIcon`, `InventoryScreen` and `FirstPersonHand` all read it.
+ *
+ * The atlas uses nearest-neighbour filtering for a crisp pixel-art look in the UI.
+ * Tile size: 64×64 px (items display at 48×48 in the hotbar; 64 gives headroom).
+ * Grid: auto-sized square grid to fit all items.
+ *
+ * ── Why this file was rewritten ───────────────────────────────────────
+ *
+ * Both halves of the registry used to be hand-maintained arrays living in this file,
+ * and both had drifted from the data they were copies of:
+ *
+ *   Named items — 92 entries against 104 in `NAMED_ITEMS`. The missing 14 (every ingot,
+ *   `diamond`, `apple`, `leather`, `corrupt_crystal`, …) got no slot, so `renderItemIcon`
+ *   fell through all three of its branches and left the canvas blank.
+ *
+ *   Block items — 29 hardcoded ids, each painted as a FLAT COLOURED SQUARE with the
+ *   block's initial on it, because the comment claimed "the actual block texture will be
+ *   drawn from the block atlas at render time". Nothing did that. Worse, the ids were
+ *   stale: they predate the current 193-entry `BLOCK_REGISTRY`, so id 4 was labelled
+ *   "Grass Block" but is `andesite`, id 32 "Wood Log" but is `deepslate_gold_ore`, id 45
+ *   "Glowstone" but is `raw_iron_block`. And because `renderItemIcon` checks this atlas
+ *   FIRST, those 29 ids were exactly the ones that could never reach the block-atlas
+ *   fallback that would have drawn them correctly. That is the coloured-box bug: the
+ *   blocks with a placeholder here rendered wrong, and the 163 without one rendered fine.
+ *
+ * So neither list is hand-maintained any more. Named items come from
+ * textures/items/manifest.json (generated from `NAMED_ITEMS` by
+ * scripts/generate-manifest.js) and block items come from the block atlas's own
+ * `tileMap`, with the real block pixels blitted into the slot. There is no longer any
+ * code path that invents a colour for a block.
  */
 
 import * as THREE from 'three';
+import { BLOCK_BY_ID } from '../world/BlockRegistry.js';
 
 export class ItemTextureAtlas {
+  /**
+   * @param {object} options
+   * @param {number} [options.tileSize=64] Atlas cell size in px.
+   * @param {import('./TextureAtlas.js').PBRTextureAtlas} [options.blockAtlas] The block
+   *   atlas, already built. Block icons are blitted out of its diffuse canvas, so
+   *   without it the atlas holds named items only.
+   */
   constructor(options = {}) {
     this.tileSize = options.tileSize || 64;
+    this.blockAtlas = options.blockAtlas || null;
     this.canvas = null;
     this.texture = null; // THREE.CanvasTexture
     this.loaded = false;
@@ -26,6 +59,10 @@ export class ItemTextureAtlas {
 
     // itemKey → item metadata { name, displayName }
     this.itemRegistry = {};
+
+    // Item keys that fell back to the "?" placeholder — asserted empty by
+    // test/unit/meta/textureCoverage.test.js, and worth logging when it is not.
+    this.missingTextures = [];
 
     // Grid dimensions
     this.gridW = 0;
@@ -38,8 +75,8 @@ export class ItemTextureAtlas {
    * Returns a promise that resolves when all textures are loaded.
    */
   async buildAtlas() {
-    // 1. Build item registry from manifest + inline defaults
-    const items = this._buildItemRegistry();
+    // 1. Build item registry from the item manifest + the block atlas
+    const items = await this._buildItemRegistry();
     this.itemRegistry = items;
 
     const totalItems = Object.keys(items).length;
@@ -86,188 +123,86 @@ export class ItemTextureAtlas {
 
     this.loaded = true;
     console.log(`[ItemTextureAtlas] Atlas built: ${totalItems} items, ${Object.keys(this.slotMap).length} slots`);
+    if (this.missingTextures.length > 0) {
+      console.error(
+        `[ItemTextureAtlas] ${this.missingTextures.length} item(s) drew a placeholder: ${this.missingTextures.join(', ')}`,
+      );
+    }
     return this;
   }
 
   /**
-   * Build the item registry — maps item keys to texture source info.
-   * Combines inline definitions with any manifest data.
+   * Build the item registry — maps item keys to how their icon is sourced.
+   *
+   * Two sources, no hand-maintained copy of either:
+   *   - textures/items/manifest.json, generated from `NAMED_ITEMS`, for named items.
+   *   - the block atlas's `tileMap`, for every block that made it into the block atlas.
    */
-  _buildItemRegistry() {
+  async _buildItemRegistry() {
     const items = {};
 
-    // ── Named items (non-block inventory items) ──
-    // These use textures from textures/items/ folder
-    // Only items with textures that actually exist are mapped
-    const namedItems = [
-      // Resources
-      { key: 'coal', name: 'Coal', texture: 'coal' },
-      { key: 'stick', name: 'Stick', texture: 'stick' },
-      { key: 'redstone', name: 'Redstone', texture: 'redstone' },
-      { key: 'gunpowder', name: 'Gunpowder', texture: 'gunpowder' },
-      { key: 'glowstone_dust', name: 'Glowstone Dust', texture: 'glowstone_dust' },
-      { key: 'sugar', name: 'Sugar', texture: 'sugar' },
-      // Food
-      { key: 'cookie', name: 'Cookie', texture: 'cookie' },
-      { key: 'egg', name: 'Egg', texture: 'egg' },
-      { key: 'blue_egg', name: 'Blue Egg', texture: 'blue_egg' },
-      { key: 'brown_egg', name: 'Brown Egg', texture: 'brown_egg' },
-      { key: 'snowball', name: 'Snowball', texture: 'snowball' },
-      // Quest items
-      { key: 'ender_pearl', name: 'Ender Pearl', texture: 'ender_pearl' },
-      { key: 'ender_eye', name: 'Eye of Ender', texture: 'ender_eye' },
-      { key: 'quest_key', name: 'Quest Key', texture: 'disc_fragment_5' },
-      // Tools — Wooden tier
-      { key: 'wooden_sword', name: 'Wooden Sword', texture: 'wooden_sword' },
-      { key: 'wooden_pickaxe', name: 'Wooden Pickaxe', texture: 'wooden_pickaxe' },
-      { key: 'wooden_axe', name: 'Wooden Axe', texture: 'wooden_axe' },
-      { key: 'wooden_shovel', name: 'Wooden Shovel', texture: 'wooden_shovel' },
-      { key: 'wooden_hoe', name: 'Wooden Hoe', texture: 'wooden_hoe' },
-      { key: 'wooden_spear', name: 'Wooden Spear', texture: 'wooden_spear' },
-      // Tools — Stone tier
-      { key: 'stone_sword', name: 'Stone Sword', texture: 'stone_sword' },
-      { key: 'stone_pickaxe', name: 'Stone Pickaxe', texture: 'stone_pickaxe' },
-      { key: 'stone_axe', name: 'Stone Axe', texture: 'stone_axe' },
-      { key: 'stone_shovel', name: 'Stone Shovel', texture: 'stone_shovel' },
-      { key: 'stone_hoe', name: 'Stone Hoe', texture: 'stone_hoe' },
-      { key: 'stone_spear', name: 'Stone Spear', texture: 'stone_spear' },
-      // Tools — Iron tier
-      { key: 'iron_sword', name: 'Iron Sword', texture: 'iron_sword' },
-      { key: 'iron_pickaxe', name: 'Iron Pickaxe', texture: 'iron_pickaxe' },
-      { key: 'iron_axe', name: 'Iron Axe', texture: 'iron_axe' },
-      { key: 'iron_shovel', name: 'Iron Shovel', texture: 'iron_shovel' },
-      { key: 'iron_hoe', name: 'Iron Hoe', texture: 'iron_hoe' },
-      { key: 'iron_spear', name: 'Iron Spear', texture: 'iron_spear' },
-      // Tools — Copper tier
-      { key: 'copper_sword', name: 'Copper Sword', texture: 'copper_sword' },
-      { key: 'copper_pickaxe', name: 'Copper Pickaxe', texture: 'copper_pickaxe' },
-      { key: 'copper_axe', name: 'Copper Axe', texture: 'copper_axe' },
-      { key: 'copper_shovel', name: 'Copper Shovel', texture: 'copper_shovel' },
-      { key: 'copper_hoe', name: 'Copper Hoe', texture: 'copper_hoe' },
-      { key: 'copper_spear', name: 'Copper Spear', texture: 'copper_spear' },
-      // Tools — Gold tier
-      { key: 'golden_sword', name: 'Golden Sword', texture: 'golden_sword' },
-      { key: 'golden_pickaxe', name: 'Golden Pickaxe', texture: 'golden_pickaxe' },
-      { key: 'golden_axe', name: 'Golden Axe', texture: 'golden_axe' },
-      { key: 'golden_shovel', name: 'Golden Shovel', texture: 'golden_shovel' },
-      { key: 'golden_hoe', name: 'Golden Hoe', texture: 'golden_hoe' },
-      { key: 'golden_spear', name: 'Golden Spear', texture: 'golden_spear' },
-      // Tools — Diamond tier
-      { key: 'diamond_sword', name: 'Diamond Sword', texture: 'diamond_sword' },
-      { key: 'diamond_pickaxe', name: 'Diamond Pickaxe', texture: 'diamond_pickaxe' },
-      { key: 'diamond_axe', name: 'Diamond Axe', texture: 'diamond_axe' },
-      { key: 'diamond_shovel', name: 'Diamond Shovel', texture: 'diamond_shovel' },
-      { key: 'diamond_hoe', name: 'Diamond Hoe', texture: 'diamond_hoe' },
-      { key: 'diamond_spear', name: 'Diamond Spear', texture: 'diamond_spear' },
-      // Tools — Netherite tier
-      { key: 'netherite_sword', name: 'Netherite Sword', texture: 'netherite_sword' },
-      { key: 'netherite_pickaxe', name: 'Netherite Pickaxe', texture: 'netherite_pickaxe' },
-      { key: 'netherite_axe', name: 'Netherite Axe', texture: 'netherite_axe' },
-      { key: 'netherite_shovel', name: 'Netherite Shovel', texture: 'netherite_shovel' },
-      { key: 'netherite_hoe', name: 'Netherite Hoe', texture: 'netherite_hoe' },
-      { key: 'netherite_spear', name: 'Netherite Spear', texture: 'netherite_spear' },
-      // Armor — Wooden
-      { key: 'wooden_helmet', name: 'Wooden Helmet', texture: 'wooden_helmet' },
-      { key: 'wooden_chestplate', name: 'Wooden Chestplate', texture: 'wooden_chestplate' },
-      { key: 'wooden_leggings', name: 'Wooden Leggings', texture: 'wooden_leggings' },
-      { key: 'wooden_boots', name: 'Wooden Boots', texture: 'wooden_boots' },
-      // Armor — Leather
-      { key: 'leather_helmet', name: 'Leather Helmet', texture: 'leather_helmet' },
-      { key: 'leather_chestplate', name: 'Leather Chestplate', texture: 'leather_chestplate' },
-      { key: 'leather_leggings', name: 'Leather Leggings', texture: 'leather_leggings' },
-      { key: 'leather_boots', name: 'Leather Boots', texture: 'leather_boots' },
-      // Armor — Chainmail
-      { key: 'chainmail_helmet', name: 'Chainmail Helmet', texture: 'chainmail_helmet' },
-      { key: 'chainmail_chestplate', name: 'Chainmail Chestplate', texture: 'chainmail_chestplate' },
-      { key: 'chainmail_leggings', name: 'Chainmail Leggings', texture: 'chainmail_leggings' },
-      { key: 'chainmail_boots', name: 'Chainmail Boots', texture: 'chainmail_boots' },
-      // Armor — Iron
-      { key: 'iron_helmet', name: 'Iron Helmet', texture: 'iron_helmet' },
-      { key: 'iron_chestplate', name: 'Iron Chestplate', texture: 'iron_chestplate' },
-      { key: 'iron_leggings', name: 'Iron Leggings', texture: 'iron_leggings' },
-      { key: 'iron_boots', name: 'Iron Boots', texture: 'iron_boots' },
-      // Armor — Gold
-      { key: 'golden_helmet', name: 'Golden Helmet', texture: 'golden_helmet' },
-      { key: 'golden_chestplate', name: 'Golden Chestplate', texture: 'golden_chestplate' },
-      { key: 'golden_leggings', name: 'Golden Leggings', texture: 'golden_leggings' },
-      { key: 'golden_boots', name: 'Golden Boots', texture: 'golden_boots' },
-      // Armor — Diamond
-      { key: 'diamond_helmet', name: 'Diamond Helmet', texture: 'diamond_helmet' },
-      { key: 'diamond_chestplate', name: 'Diamond Chestplate', texture: 'diamond_chestplate' },
-      { key: 'diamond_leggings', name: 'Diamond Leggings', texture: 'diamond_leggings' },
-      { key: 'diamond_boots', name: 'Diamond Boots', texture: 'diamond_boots' },
-      // Armor — Netherite
-      { key: 'netherite_helmet', name: 'Netherite Helmet', texture: 'netherite_helmet' },
-      { key: 'netherite_chestplate', name: 'Netherite Chestplate', texture: 'netherite_chestplate' },
-      { key: 'netherite_leggings', name: 'Netherite Leggings', texture: 'netherite_leggings' },
-      { key: 'netherite_boots', name: 'Netherite Boots', texture: 'netherite_boots' },
-      // Mob Drops
-      { key: 'rotten_flesh', name: 'Rotten Flesh', texture: 'rotten_flesh' },
-      { key: 'bone', name: 'Bone', texture: 'bone' },
-      { key: 'rabbit_hide', name: 'Rabbit Hide', texture: 'rabbit_hide' },
-      { key: 'rabbit_meat', name: 'Raw Rabbit', texture: 'rabbit_meat' },
-      { key: 'raw_venison', name: 'Raw Venison', texture: 'raw_venison' },
-      { key: 'corrupt_fang', name: 'Corrupt Fang', texture: 'corrupt_fang' },
-      // Misc
-      { key: 'compass', name: 'Compass', texture: 'compass_00' },
-      { key: 'firework_rocket', name: 'Firework Rocket', texture: 'firework_rocket' },
-    ];
-
-    for (const item of namedItems) {
-      items[item.key] = {
-        name: item.name,
-        displayName: item.name,
-        textureName: item.texture,
-        texturePath: `/textures/items/${item.texture}.png`,
+    // -- Named items (non-block inventory items) --
+    const manifest = await this._loadItemManifest();
+    for (const entry of manifest) {
+      items[entry.key] = {
+        name: entry.name,
+        displayName: entry.name,
+        textureName: entry.texture,
+        texturePath: `/textures/items/${entry.texture}.png`,
         isBlock: false,
       };
     }
 
-    // ── Block items (numeric IDs) ──
-    // For blocks, use the block's top face texture from the blocks atlas
-    // We register common block IDs so they can be looked up by number
-    const blockItems = [
-      { id: 1, name: 'Bedrock' },
-      { id: 2, name: 'Stone' },
-      { id: 3, name: 'Dirt' },
-      { id: 4, name: 'Grass Block' },
-      { id: 5, name: 'Sand' },
-      { id: 6, name: 'Gravel' },
-      { id: 8, name: 'Coal Ore' },
-      { id: 9, name: 'Iron Ore' },
-      { id: 10, name: 'Gold Ore' },
-      { id: 11, name: 'Diamond Ore' },
-      { id: 13, name: 'Snow' },
-      { id: 14, name: 'Snow Stone' },
-      { id: 16, name: 'Terracotta' },
-      { id: 17, name: 'Red Sand' },
-      { id: 18, name: 'Ice' },
-      { id: 19, name: 'Clay' },
-      { id: 32, name: 'Wood Log' },
-      { id: 33, name: 'Leaves' },
-      { id: 34, name: 'Planks' },
-      { id: 35, name: 'Obsidian' },
-      { id: 36, name: 'Blackstone' },
-      { id: 38, name: 'Corrupt Crystal' },
-      { id: 39, name: 'Bed' },
-      { id: 40, name: 'Apple' }, // block form of apple
-      { id: 41, name: 'Quest Key' },
-      { id: 42, name: 'Red Flower' },
-      { id: 43, name: 'Yellow Flower' },
-      { id: 44, name: 'Cave Torch' },
-      { id: 45, name: 'Glowstone' },
-    ];
-
-    for (const block of blockItems) {
-      items[block.id] = {
-        name: block.name,
-        displayName: block.name,
-        blockId: block.id,
-        isBlock: true,
-      };
+    // -- Block items (numeric IDs) --
+    // Every block the block atlas resolved tiles for, so the two atlases cannot
+    // disagree about which blocks exist. `air` has no tiles and drops out on its own.
+    if (this.blockAtlas && this.blockAtlas.tileMap) {
+      for (const [idStr, entry] of Object.entries(this.blockAtlas.tileMap)) {
+        const tile = this._pickIconTile(entry.tiles);
+        if (!tile) continue;
+        const id = Number(idStr);
+        const block = BLOCK_BY_ID[id];
+        const name = block ? block.name : `Block ${id}`;
+        items[id] = { name, displayName: name, blockId: id, tile, isBlock: true };
+      }
+    } else {
+      console.warn('[ItemTextureAtlas] No block atlas supplied - block icons will be absent');
     }
 
     return items;
+  }
+
+  /**
+   * Fetch textures/items/manifest.json.
+   *
+   * An empty result is survivable (blocks still get icons) but never expected, so it
+   * warns rather than failing quietly - the manifest is a build artefact of
+   * `npm run generate-manifest` and its absence means the deploy dropped it.
+   */
+  async _loadItemManifest() {
+    try {
+      const resp = await fetch('/textures/items/manifest.json');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const manifest = await resp.json();
+      if (!Array.isArray(manifest)) throw new Error('manifest is not an array');
+      return manifest;
+    } catch (e) {
+      console.warn('[ItemTextureAtlas] Could not load items/manifest.json:', e.message);
+      return [];
+    }
+  }
+
+  /**
+   * Choose which face of a block to show as its inventory icon.
+   *
+   * `side` before `top` because it is the face that reads as the block for the shapes
+   * where the two differ most - logs show bark rather than end rings, grass_block shows
+   * the grass-fringed dirt rather than a flat green square.
+   */
+  _pickIconTile(tiles) {
+    if (!tiles) return null;
+    return tiles.all || tiles.side || tiles.top || tiles.front || tiles.bottom
+      || Object.values(tiles)[0] || null;
   }
 
   /**
@@ -279,52 +214,52 @@ export class ItemTextureAtlas {
     const ctx = this.canvas.getContext('2d');
 
     if (itemData.isBlock) {
-      // For blocks, draw a placeholder using block color
-      // The actual block texture will be drawn from the block atlas at render time
-      this._drawBlockPlaceholder(ctx, x, y, itemData);
+      this._blitBlockTile(ctx, x, y, itemKey, itemData);
       return;
     }
 
     // For named items, load from textures/items/
     if (itemData.texturePath) {
-      await this._loadImage(itemData.texturePath, ctx, x, y);
+      await this._loadImage(itemData.texturePath, ctx, x, y, itemKey);
     } else {
-      // Fallback: draw a colored placeholder
-      this._drawPlaceholder(ctx, x, y, itemData.name);
+      this._drawPlaceholder(ctx, x, y, itemKey);
     }
   }
 
   /**
-   * Draw a colored placeholder for block items.
-   * The actual texture comes from the block atlas at render time.
+   * Copy a block's real pixels out of the block atlas into this atlas's slot.
+   *
+   * Nothing is fetched — the block atlas is already built and awaited by the time this
+   * runs (see the ordering note in src/core/init/initScene.js step 4), so this is a
+   * canvas-to-canvas blit. That also means colour multipliers and grass-style overlays
+   * are already baked into the source pixels and the icon matches the placed block.
    */
-  _drawBlockPlaceholder(ctx, x, y, itemData) {
-    const colors = {
-      1: '#333333', 2: '#808080', 3: '#8B4513', 4: '#4a8c3f',
-      5: '#F4A460', 6: '#808080', 8: '#2c2c2c', 9: '#CD853F',
-      10: '#FFD700', 11: '#00CED1', 13: '#FFFFFF', 14: '#DCDCDC',
-      16: '#B22222', 17: '#FF6347', 18: '#87CEEB', 19: '#B0C4DE',
-      32: '#8B4513', 33: '#228B22', 34: '#DEB887', 35: '#1a0a2e',
-      36: '#36454F', 38: '#9400D3', 39: '#8B0000', 40: '#FF0000',
-      41: '#FFD700', 42: '#FF69B4', 43: '#FFD700', 44: '#FFA500',
-      45: '#FFFF00',
-    };
-    const color = colors[itemData.blockId] || '#888888';
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, this.tileSize, this.tileSize);
+  _blitBlockTile(ctx, x, y, itemKey, itemData) {
+    const atlas = this.blockAtlas;
+    const srcCell = atlas.tileSize + atlas._gap;
+    const sx = atlas._gap + itemData.tile.col * srcCell;
+    const sy = atlas._gap + itemData.tile.row * srcCell;
 
-    // Draw block name initial
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.font = `bold ${this.tileSize / 2}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(itemData.name.charAt(0), x + this.tileSize / 2, y + this.tileSize / 2);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      atlas.diffuseCanvas,
+      sx, sy, atlas.tileSize, atlas.tileSize,
+      x, y, this.tileSize, this.tileSize,
+    );
   }
 
   /**
-   * Draw a generic placeholder for missing textures.
+   * Draw a generic placeholder for a texture that failed to load, and record the key.
+   *
+   * The "?" is deliberate. The old 404 path painted a flat grey square and said nothing,
+   * which is indistinguishable from a dark item texture — a missing icon could sit in the
+   * hotbar for months without anyone calling it a bug. A "?" plus a console warning plus
+   * an entry in `missingTextures` makes it look like the failure it is.
    */
-  _drawPlaceholder(ctx, x, y, name) {
+  _drawPlaceholder(ctx, x, y, itemKey) {
+    this.missingTextures.push(itemKey);
+    console.warn(`[ItemTextureAtlas] No texture for '${itemKey}' — drawing placeholder`);
+
     ctx.fillStyle = '#555555';
     ctx.fillRect(x, y, this.tileSize, this.tileSize);
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
@@ -337,7 +272,7 @@ export class ItemTextureAtlas {
   /**
    * Load a single image and draw it onto the canvas.
    */
-  _loadImage(url, ctx, x, y) {
+  _loadImage(url, ctx, x, y, itemKey) {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -346,9 +281,7 @@ export class ItemTextureAtlas {
         resolve();
       };
       img.onerror = () => {
-        // Fallback placeholder
-        ctx.fillStyle = '#555555';
-        ctx.fillRect(x, y, this.tileSize, this.tileSize);
+        this._drawPlaceholder(ctx, x, y, itemKey);
         resolve();
       };
       img.src = url;

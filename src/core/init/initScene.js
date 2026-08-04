@@ -106,8 +106,10 @@ export async function initScene(game) {
   // Dropped-item cubes take their colour from this atlas's tiles (D-51).
   registerBlockColorAtlas(textureAtlas);
 
-  // Build item texture atlas for hotbar/inventory UI
-  const itemAtlas = state.itemAtlas = new ItemTextureAtlas({ tileSize: 64 });
+  // Build item texture atlas for hotbar/inventory UI. It takes the block atlas because
+  // block icons are blitted straight out of it — which is why this call has to stay
+  // below the `await textureAtlas.buildAtlas()` above, not merely after it in the file.
+  const itemAtlas = state.itemAtlas = new ItemTextureAtlas({ tileSize: 64, blockAtlas: textureAtlas });
   await itemAtlas.buildAtlas();
 
   // ══ Step 5 — PBR + shadows ════════════════════════════════════════════════════════════
