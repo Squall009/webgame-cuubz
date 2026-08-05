@@ -35,6 +35,9 @@
 
 import { MESSAGE_TYPES } from '../shared/protocol.js';
 
+/** Most chunks one `CHUNK_REQUEST` may ask for — a client's render area plus slack. */
+const MAX_CHUNK_REQUEST = 512;
+
 class SessionManager {
   /**
    * @param {object} config
@@ -248,6 +251,10 @@ class SessionManager {
 
       case MESSAGE_TYPES.CHUNK_DATA:
         this._handleChunkData(playerId, msg);
+        break;
+
+      case MESSAGE_TYPES.CHUNK_REQUEST:
+        this._handleChunkRequest(playerId, msg);
         break;
 
       case MESSAGE_TYPES.QUEST_UPDATE:
@@ -506,6 +513,32 @@ class SessionManager {
       // Broadcast to all non-host players
       this._broadcast(playerId, chunkMsg);
     }
+  }
+
+  /**
+   * Handle a client asking the host for chunks it is missing (D-116).
+   *
+   * The relay holds no terrain, so this is pure forwarding — the one thing it adds is the
+   * asking `playerId`, which the host needs to know who to send the chunks back to and
+   * which the client cannot be trusted to supply.
+   */
+  _handleChunkRequest(playerId, msg) {
+    if (!playerId) return;
+    if (playerId === this.hostId) return; // The host serves itself from memory.
+    if (!Array.isArray(msg.chunks) || msg.chunks.length === 0) return;
+
+    const host = this.players.get(this.hostId);
+    if (!host) return; // No host connected — nothing can serve chunks.
+
+    // Cap what one request can ask for. A client's render area is ~289 chunks; anything
+    // beyond that is a malformed or hostile request, not a resync.
+    const chunks = msg.chunks.slice(0, MAX_CHUNK_REQUEST);
+
+    this._send(host.ws, {
+      type: MESSAGE_TYPES.CHUNK_REQUEST,
+      playerId,
+      chunks,
+    });
   }
 
   /**

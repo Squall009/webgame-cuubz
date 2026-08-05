@@ -115,6 +115,11 @@ export class GameState {
     this.playerSync = null;
     this.playerListHUD = null;
     this.chunkStreamer = null;
+    // D-116 — the client half of chunk streaming: what it is still missing, and the
+    // `setInterval` that asks the host for it. Declared here for the same reason
+    // `inventorySync` is: a teardown has to be able to find the timer.
+    this.chunkResync = null;
+    this.chunkResyncTimerId = null;
     // PR 17 — was a `startGame()` local. Nothing outside step 13 reads it today; it is
     // declared here rather than left on the `Game` instance because it owns a live
     // `setInterval` (`startPeriodicSync`) that a teardown will have to find. See D-50.

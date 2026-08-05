@@ -14,6 +14,9 @@
  * - A chunk stays loaded as long as ANY player is within load radius
  * - Unloading only happens when NO players are within unload radius
  * - Dirty chunks (with block changes) are always re-streamed on demand
+ * - A chunk with no block data is never sent, and never recorded as sent (D-116)
+ * - `streamedTo` is an assumption, not an acknowledgement: `requestChunks()` is how a
+ *   client that did not get a chunk — or lost it — gets it back (D-116)
  *
  * Testable in Node.js (no browser dependencies).
  */
@@ -31,7 +34,7 @@ export const DEFAULT_STREAM_CONFIG = {
   streamInterval: 500,  // How often to check streaming needs (ms)
   maxChunksPerTick: 32, // Max chunks to stream per update cycle
   compressData: true,   // Whether to compress chunk data for transmission
-  loadingTimeout: 8000  // Max ms a chunk can stay in LOADING before forced to LOADED (even without data)
+  loadingTimeout: 8000  // Max ms a chunk may sit in LOADING before its generation is retried
 };
 
 // Chunk states
@@ -131,7 +134,13 @@ export class ChunkStreamEntry {
     this.dirty = false;         // Has unstreamed block changes
     this.playerRefs = new Set(); // Player IDs that need this chunk
     this.streamedTo = new Set(); // Player IDs that have already received this chunk
+    this.requestedBy = new Set(); // Player IDs that asked for this chunk again (CHUNK_REQUEST)
     this.loadTime = 0;          // When the chunk was loaded
+  }
+
+  /** True when this entry has block data worth transmitting. */
+  hasData() {
+    return !!(this.compressedData || (this.data && this.data.length > 0));
   }
 
   /**
@@ -311,7 +320,67 @@ export class ChunkStreamer {
     // Also remove player refs from all chunks
     for (const [, entry] of this._chunks) {
       entry.playerRefs.delete(playerId);
+      entry.requestedBy.delete(playerId);
+      entry.streamedTo.delete(playerId);
     }
+  }
+
+  /**
+   * A client says it is missing these chunks — send them again (D-116).
+   *
+   * `streamedTo` is the host's *assumption* that a chunk arrived: it is written when the
+   * payload is queued, not when the client acknowledges it. Anything that loses a payload
+   * in between — a socket that was not connected when `onChunkStreamed` fired, a client
+   * still initialising, a chunk the client later evicted from `memoryCache` to bound
+   * memory — used to leave that client permanently short of a chunk nobody would ever
+   * re-send. This is the only path back.
+   *
+   * A request also overrides the load radius: the client's render distance (8) is wider
+   * than the host's stream radius (6), so a chunk it can legitimately need may sit outside
+   * every player's `playerRefs`.
+   *
+   * @param {string} playerId — the asking player
+   * @param {string[]|Array<{cx: number, cz: number}>} chunks — keys `"cx,cz"` or coord pairs
+   * @returns {number} how many requests were accepted
+   */
+  requestChunks(playerId, chunks) {
+    if (!playerId || !Array.isArray(chunks)) return 0;
+
+    let accepted = 0;
+    for (const item of chunks) {
+      let cx, cz;
+      if (typeof item === 'string') {
+        const parts = item.split(',');
+        cx = Number(parts[0]);
+        cz = Number(parts[1]);
+      } else if (item && typeof item === 'object') {
+        cx = Number(item.cx);
+        cz = Number(item.cz);
+      } else {
+        continue;
+      }
+      if (!Number.isFinite(cx) || !Number.isFinite(cz)) continue;
+
+      const key = `${cx},${cz}`;
+      let entry = this._chunks.get(key);
+      if (!entry) {
+        entry = new ChunkStreamEntry(cx, cz);
+        this._chunks.set(key, entry);
+      }
+      entry.requestedBy.add(playerId);
+      entry.streamedTo.delete(playerId);
+      accepted++;
+    }
+    return accepted;
+  }
+
+  /** Keys with an outstanding client request. */
+  _requestedKeys() {
+    const keys = new Set();
+    for (const [, entry] of this._chunks) {
+      if (entry.requestedBy.size > 0) keys.add(entry.key);
+    }
+    return keys;
   }
 
   /**
@@ -333,7 +402,9 @@ export class ChunkStreamer {
    * Returns { toLoad: Set<string>, toUnload: Set<string> }
    */
   calculateChunkNeeds() {
-    const neededChunks = new Set();
+    // A chunk a client has explicitly asked for is needed regardless of where anybody
+    // stands — it must be loaded, and it must not be an unload candidate (D-116).
+    const neededChunks = this._requestedKeys();
     const unloadCandidates = new Map(); // key → max distance from nearest player
 
     if (this._playerPositions.size === 0) {
@@ -343,7 +414,9 @@ export class ChunkStreamer {
           unloadCandidates.set(entry.key, Infinity);
         }
       }
-      return { toLoad: neededChunks, toUnload: new Set(unloadCandidates.keys()) };
+      // Nobody to serve, so nothing to load — including anything requested by a player
+      // who has since gone.
+      return { toLoad: new Set(), toUnload: new Set(unloadCandidates.keys()) };
     }
 
     // For each player, find chunks within load radius
@@ -560,6 +633,15 @@ export class ChunkStreamer {
         }
       }
     }
+
+    // An explicit request is a player ref of its own — it is how a chunk outside the
+    // stream radius, or one a client lost, reaches the queue below (D-116).
+    for (const [, entry] of this._chunks) {
+      if (entry.state === CHUNK_STATE.UNLOADED) continue;
+      for (const pid of entry.requestedBy) {
+        if (this._playerPositions.has(pid)) entry.playerRefs.add(pid);
+      }
+    }
   }
 
   /**
@@ -644,13 +726,22 @@ export class ChunkStreamer {
             // Silently skip — chunk still not ready
           }
         }
-        // Timeout: force transition to LOADED even without data
-        // This prevents chunks from being stuck in LOADING forever and blocking the stream queue
+        // Timeout: the generator has had `loadingTimeout` to produce this chunk and has
+        // not. Drop the entry back to UNLOADED so the next tick re-runs `loadChunk` and
+        // with it the `_ensureChunkInMemory` that queues generation again.
+        //
+        // D-116: this used to force the entry to LOADED *with `data` still null*. That put
+        // a chunk with nothing in it at the head of the stream queue, sent a `CHUNK_DATA`
+        // the client drops on its `if (!data.data) return`, and then marked the chunk
+        // delivered to every player in `playerRefs`. The real blocks, once generated, were
+        // never sent — the entry was permanently "streamed". A client whose spawn area
+        // needed generating therefore stood in a void that only ended where it walked into
+        // chunks the host had not yet poisoned. Retrying is what the comment above always
+        // claimed this did; forcing LOADED is what it actually did.
         if (now - entry.loadTime > loadingTimeout) {
-          console.log(`[CHUNK_STREAM] Timeout: chunk ${entry.key} stuck in LOADING for ${Math.round((now - entry.loadTime)/1000)}s, forcing to LOADED`);
-          entry.state = CHUNK_STATE.LOADED;
-          entry.lastStreamed = 0;
-          this._totalLoaded++;
+          console.log(`[CHUNK_STREAM] Timeout: chunk ${entry.key} not generated within ${Math.round((now - entry.loadTime)/1000)}s — retrying`);
+          entry.state = CHUNK_STATE.UNLOADED;
+          entry.loadTime = 0;
         }
       }
     }
@@ -666,11 +757,16 @@ export class ChunkStreamer {
       if (streamedThisTick >= this._options.maxChunksPerTick) break;
       if (entry.playerRefs.size === 0) continue;
 
+      // An entry with no blocks has nothing a client can render, and sending it would
+      // mark it delivered below. Leave it queued — D-116.
+      if (!entry.hasData()) continue;
+
       const payload = entry.getPayload();
       payload.players = Array.from(entry.playerRefs);
       payloads.push(payload);
 
       entry.markClean(Array.from(entry.playerRefs));
+      entry.requestedBy.clear();
       this._totalStreamed++;
       streamedThisTick++;
 
