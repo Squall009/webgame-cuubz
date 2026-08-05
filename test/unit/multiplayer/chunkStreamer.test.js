@@ -405,7 +405,17 @@ assertTrue(needs3.toUnload.size > 0, 'Chunks need unloading after player leaves'
 
 console.log('\n--- Test Group 11: Full tick cycle ---');
 
-const ts = new ChunkStreamer({ options: { loadRadius: 2, unloadRadius: 4, maxChunksPerTick: 8 } });
+// D-116: this group used to run with no `chunkGrid`, which took `loadChunk`'s
+// "no generator — mark as loaded without data (relay will provide)" branch and streamed
+// payloads with no blocks in them. `tick()` no longer sends those: a data-less CHUNK_DATA
+// is dropped by the client on `if (!data.data) return` and would still be recorded as
+// delivered, which is exactly the void a joining client used to stand in. The grid below
+// is the smallest thing that makes this group's subject — the tick cycle — testable; no
+// production path constructs a `ChunkStreamer` without one.
+const ts = new ChunkStreamer({
+  chunkGrid: { getChunkData: () => ({ blocks: new Uint8Array(16 * 16 * 256).fill(1) }) },
+  options: { loadRadius: 2, unloadRadius: 4, maxChunksPerTick: 8 },
+});
 ts.updatePlayerPosition('host', { x: 32, y: 20, z: 32 }); // chunk (2, 2)
 
 let streamedPayloads = [];

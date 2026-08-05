@@ -12,6 +12,7 @@
  */
 
 import { ChunkCompressor, ChunkStreamer } from '../../multiplayer/ChunkStreamer.js';
+import { ChunkResyncRequester } from '../../multiplayer/ChunkResync.js';
 import { ChunkManager } from '../../engine/world/ChunkManager.js';
 import { computeHumidityMap } from '../../engine/world/BiomeSystem.js';
 import { Chunk } from '../../engine/world/ChunkData.js';
@@ -122,6 +123,19 @@ export function initChunkStreaming(game) {
       log(`[ChunkStreamer] Chunk loaded: ${info.key}`);
     };
 
+    // ─── A client asking for chunks it never got (D-116) ───
+    //
+    // The host records a chunk as delivered when it *queues* the payload, so anything lost
+    // between there and the client's `memoryCache` was lost for good. This is the reply
+    // path: clear the delivered mark and let the ordinary queue re-send on the next tick.
+    sm.client.onGame('CHUNK_REQUEST', (data) => {
+      if (!data || !data.playerId || !Array.isArray(data.chunks)) return;
+      const accepted = chunkStreamer.requestChunks(data.playerId, data.chunks);
+      if (accepted > 0) {
+        console.log(`[CHUNK_STREAM] Re-send requested by ${data.playerId.substring(0, 8)}: ${accepted} chunk(s)`);
+      }
+    });
+
     chunkStreamer.start();
     log('[Cuubz] ChunkStreamer initialized for host-side proactive chunk streaming');
   }
@@ -214,6 +228,31 @@ export function initChunkStreaming(game) {
       }
     });
     log('[Cuubz] CHUNK_DATA handler registered for receiving streamed chunks');
+
+    // ─── Ask the host for the chunks we can see and do not have (D-116) ───
+    //
+    // Without this the client's world is whatever survived the host's one-shot send. See
+    // `ChunkResync.js` for the four ways a chunk goes missing and never comes back.
+    const resync = state.chunkResync = new ChunkResyncRequester();
+    state.chunkResyncTimerId = setInterval(() => {
+      try {
+        if (!sm.client || !sm.client.isGameSessionConnected) return;
+        if (!state.player || !chunkManager) return;
+
+        const keys = resync.collect(
+          state.player.position,
+          chunkManager.renderDistance,
+          chunkManager.memoryCache
+        );
+        if (keys.length === 0) return;
+
+        sm.client._gameSessionConn?.send({ type: 'CHUNK_REQUEST', chunks: keys });
+        log(`[Cuubz] Requested ${keys.length} missing chunk(s) from host`);
+      } catch (err) {
+        console.error('[Cuubz] Chunk resync error:', err.message);
+      }
+    }, resync.options.interval);
+    log('[Cuubz] Chunk resync requester started');
   }
 
   // ─── Client-side TIME_SYNC handling (receive time-of-day from host) ───

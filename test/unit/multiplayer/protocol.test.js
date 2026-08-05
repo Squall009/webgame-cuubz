@@ -158,10 +158,11 @@ scannerSelfCheck();
 // ═══════════════════════════════════════════════════════════════════
 
 const KEYS = Object.keys(MESSAGE_TYPES);
-assertEquals(KEYS.length, 27,
-  'shared/protocol.js exports 27 message types — 9 that both former tables had, 15 the ' +
-  'client had alone, HEARTBEAT_ACK the server had alone, and TIME_SYNC + HOST_REJECTED, ' +
-  'which lived only as string literals and which no table could therefore have agreed on');
+assertEquals(KEYS.length, 28,
+  'shared/protocol.js exports 28 message types — 9 that both former tables had, 15 the ' +
+  'client had alone, HEARTBEAT_ACK the server had alone, TIME_SYNC + HOST_REJECTED, ' +
+  'which lived only as string literals and which no table could therefore have agreed on, ' +
+  'and CHUNK_REQUEST, the client→host re-send ask added by D-116');
 
 for (const k of KEYS) {
   assertEquals(MESSAGE_TYPES[k], k, `MESSAGE_TYPES.${k} is its own name — the symbol IS the wire string`);
@@ -234,11 +235,11 @@ for (const rel of PROTOCOL_FILES) {
   }
 }
 
-// Nothing in the table is dead: every one of the 27 is named by at least one of the
+// Nothing in the table is dead: every one of the 28 is named by at least one of the
 // three. A key added here and used nowhere is the same drift in the other direction.
 const allRefs = new Set(PROTOCOL_FILES.flatMap((f) => refsByFile[f]));
 assertSetEquals([...allRefs], KEYS,
-  'The union of what the three files name is exactly the 27 keys — no dead symbol in the ' +
+  'The union of what the three files name is exactly the 28 keys — no dead symbol in the ' +
   'table, no type named that is not in it');
 
 // ═══════════════════════════════════════════════════════════════════

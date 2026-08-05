@@ -100,6 +100,10 @@ export const MESSAGE_TYPES = Object.freeze({
 
   // ── Game session, host → everyone (relayed unchanged) ─────────────────────
   CHUNK_DATA: 'CHUNK_DATA',
+  // Client → host, relayed with the asking `playerId` attached. The client asks for the
+  // chunks it is missing; without it a `CHUNK_DATA` that never arrived was never re-sent,
+  // because the host records a chunk as delivered the moment it queues one (D-116).
+  CHUNK_REQUEST: 'CHUNK_REQUEST',
   // Was a bare literal in all five of its call sites and in neither symbol table.
   TIME_SYNC: 'TIME_SYNC',
 

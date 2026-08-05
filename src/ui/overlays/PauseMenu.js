@@ -230,6 +230,13 @@ export function setupPauseMenu(state, deps) {
       state.chunkStreamer = null;
     }
 
+    // ── Clean up the client's chunk resync timer (D-116) ──
+    if (state.chunkResyncTimerId) {
+      clearInterval(state.chunkResyncTimerId);
+      state.chunkResyncTimerId = null;
+    }
+    state.chunkResync = null;
+
     // ── Clean up player sync ──
     // clearAll() disposes every remote-player mesh and clears the map
     // (playerSync.js:523-531) — that is the whole teardown. There was a
