@@ -12,27 +12,40 @@ disagree about what quest state even is, nothing routes the wire message, mobs a
 networked at all, and the player has no health. This plan is honest about that: roughly
 60% of the work below is prerequisites, not quests.
 
+**Decisions taken (2026-08-08).** The Corrupt and Lava biomes are being **built**, not
+faked with structures, and they carry environmental damage — the world currently has no
+hazardous biome at all and that is the point of adding them (§3, S4). Objectives are
+**pooled**: every player's work counts toward one party-wide total (§4.5). The storyline
+extends to **28 quests** across seven acts (§3.4). Branch is `feat/quest-system`.
+
 ---
 
 ## 1. What already exists
 
-Verified against the tree at `ea8b2db` (branch `fix/item-texture-audit`).
+Verified against the tree at `ea8b2db`.
 
 | Thing | Where | State |
 |---|---|---|
 | Quest HUD markup | `src/ui/templates/hud.js:78-84` — `#quest-tracker`, `#quest-name`, `#quest-objective`, `#quest-progress` | Mounted, permanently `hidden`, **zero writers** |
 | Quest HUD styling | `src/ui/css/hud/quest-tracker.css`, imported at `src/ui/css/index.css:45` | Complete |
+| **Corrupt + Lava fog/sky** | `src/engine/renderer/BiomeEffects.js:54-55` | **Already written for biomes that do not exist.** Free. |
+| **Corrupt mobs** | `mobDefinitions.js:201` `corrupt_wolf`, `:366` `corrupt_wisp` | **Already written.** Rehomed to `badlands` by D-68 because `corrupt` was not producible. |
 | `quest_key` item | `src/game/data/ItemDefinitions.js:109` (`maxStack: 1`) | Defined, never obtainable |
 | `corrupt_crystal` item | `src/game/data/ItemDefinitions.js:106` (`maxStack: 1`) | Defined, never obtainable |
-| Quest block ids | `src/engine/world/BlockRegistry.js:466-469` — `TOXIC_SLIME`, `CORRUPT_CRYSTAL`, `APPLE`, `QUEST_KEY` | Defined, never placed by worldgen |
+| Quest block ids | `src/engine/world/BlockRegistry.js:466-469` — `TOXIC_SLIME`(188), `CORRUPT_CRYSTAL`(189), `APPLE`, `QUEST_KEY` | Defined, never placed by worldgen |
+| Lava-biome blocks | `netherrack`(147), `basalt`(148), `soul_sand`(150), `soul_soil`(151), `magma`(155, emissive), `blackstone`, `crying_obsidian`, `lava`(47), `soul_lantern`(174) | **All present.** No new blocks needed for Lava. |
 | Single-stack rules | `src/game/systems/InventoryItemTypes.js:57`, `src/multiplayer/InventorySync.js:78` | Correct and consistent |
-| Creative palette | `src/core/BlockPalette.js:48-50` — quest items force-added | Works |
+| Creative palette | `src/core/BlockPalette.js:48-50` | Works |
 | `QUEST_UPDATE` wire type | `shared/protocol.js` | Defined |
 | Relay forwarding | `server/session.js:260-263` | Works |
-| Host-side validator | `src/multiplayer/Host.js:256` `validateQuestUpdate()` | Works |
-| Host-side handler | `src/multiplayer/Host.js:989` `handleQuestUpdate()` | **Never called** — see §2.1 |
-| World-scoped quest slot | `src/game/entities/WorldManager.js:226`, `:360-398`; `src/engine/world/Persistence.js:176` | Persisted, never written by gameplay |
+| Host-side validator | `src/multiplayer/Host.js:256` `validateQuestUpdate()` | Works, but **wrong semantics** for pooled — §4.5 |
+| Host-side handler | `src/multiplayer/Host.js:989` `handleQuestUpdate()` | **Never called** — §2.1 |
+| World-scoped quest slot | `WorldManager.js:226, 360-398`; `Persistence.js:176` | Persisted, never written by gameplay |
 | Mob framework | `src/game/mobs/*` — definitions, AI, movement, procedural geometry, animation, renderer | Works, single-player only |
+
+The three rows in bold are the pleasant surprise of this audit: someone already wrote the
+Corrupt and Lava *presentation* layer and two Corrupt *mobs*, and D-68 disabled the mobs
+because the biomes were never built. S4 turns all of it on.
 
 ### What was deleted, and why it matters
 
@@ -42,161 +55,212 @@ PR 34 deleted five gameplay modules outright (`src/index.js:48-81`):
 |---|---|---|
 | `game/systems/QuestSystem.js` | 262 | No quest state machine. Rewrite. |
 | `game/entities/QuestMarker.js` | 605 | No world markers/waypoints. Rewrite (smaller). |
-| `game/entities/Boss.js` | 1,135 | No boss entity. It had **no renderer at all** — no `THREE` import, no mesh. |
-| `game/systems/SurvivalSystem.js` | 1,159 | **No player health.** See §2.2. |
-| `game/systems/DamageSystem.js` | 627 | No environmental damage. |
+| `game/entities/Boss.js` | 1,135 | No boss entity. It had **no renderer at all**. |
+| `game/systems/SurvivalSystem.js` | 1,159 | **No player health.** §2.2 |
+| `game/systems/DamageSystem.js` | 627 | **No environmental damage.** §2.2, and see the D-64 warning in S4. |
 
-They are recoverable from git and the pushed `pre-refactor-baseline` tag. **This plan does
-not recommend restoring any of them.** PR 34's reasons still hold: `Boss.js` was unkillable
+Recoverable from git and the `pre-refactor-baseline` tag. **This plan does not recommend
+restoring any of them.** PR 34's reasons hold: `Boss.js` was unkillable
 (`phaseTransitionTimer` never initialised, NaN-frozen), `DamageSystem` had pre-renumbering
-block ids, and `SurvivalSystem` emitted a competing `#survival-hud` overlay. What is worth
-salvaging is *shape*, read as reference, not code.
+block ids, `SurvivalSystem` emitted a competing `#survival-hud`. Salvage *shape*, not code.
 
 ---
 
-## 2. The five blockers
-
-These are not "nice to have first". Each one makes some part of the storyline literally
-unrunnable, and each is sized here because the schedule in §8 depends on them.
+## 2. The blockers
 
 ### 2.1 Quest state has three incompatible shapes and no live path
 
 Named in `src/index.js:67` and still true:
 
 ```
-WorldManager.questProgress   →  { [questId]: { stage, completed, lastUpdated } }   (WorldManager.js:385-396)
-Host._worldState.questProgress →  { [questId]: number }                             (Host.js:1001-1003)
-SessionRejoin / AutoRejoin    →  {}                                                 (SessionRejoin.js:89, AutoRejoin.js:88)
-Persistence.saveWorld         →  passes through whatever it is given                (Persistence.js:176)
+WorldManager.questProgress      →  { [questId]: { stage, completed, lastUpdated } }   (WorldManager.js:385-396)
+Host._worldState.questProgress  →  { [questId]: number }                              (Host.js:1001-1003)
+SessionRejoin / AutoRejoin      →  {}                                                 (SessionRejoin.js:89, AutoRejoin.js:88)
 ```
 
-And the wire path is **broken in two places**:
+The wire path is **broken at both ends**:
 
-1. `HostManager._setupGameHandlers()` (`Host.js:618-660`) registers handlers for `WELCOME`,
+1. `HostManager._setupGameHandlers()` (`Host.js:618-655`) registers `WELCOME`,
    `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_MOVE`, `BLOCK_BREAK`, `BLOCK_PLACE`,
    `INVENTORY_SYNC` — and **not** `QUEST_UPDATE`. `handleQuestUpdate()` has no caller
    anywhere in `src/`.
-2. `MultiplayerClient._setupGameSessionHandlers()` (`Client.js:1016-1021`) lists the game
-   events it forwards to game handlers. `QUEST_UPDATE` is **not** in that list, so even the
-   host's broadcast is dropped by every client including the sender.
+2. `MultiplayerClient._setupGameSessionHandlers()` (`Client.js:1016-1021`) omits
+   `QUEST_UPDATE` from its forwarded events, so even the host's broadcast is dropped by
+   every client including the sender.
 
-`WorldManager.advanceQuest()` also hard-codes `completed = nextStage >= 5` with the comment
-"simplified — actual quest system will define stages" (`WorldManager.js:390`). That is a
-placeholder, not a contract.
+`WorldManager.advanceQuest()` hard-codes `completed = nextStage >= 5` under the comment
+"simplified — actual quest system will define stages" (`WorldManager.js:390`). Placeholder,
+not contract.
 
-**Fix:** one schema (§4), one owner (the host), one persistence path (§5). This is Stage 0
-and it should land before any quest content is written, because three shapes is exactly how
-this got shelved the first time.
-
-### 2.2 The player has no health
+### 2.2 The player has no health, and nothing can hurt them
 
 `src/game/entities/Player.js` has `respawn(spawnPoint)` and **no `health`, no
-`takeDamage`, no death**. `MobIntegration.init()` only installs the `onMobAttack` callback
-`if (survivalSystem)` (`mobIntegration.js:68`), and `initMobs.js:35` passes
-`survivalSystem: null`.
+`takeDamage`, no death**. `MobIntegration.init()` installs `onMobAttack` only
+`if (survivalSystem)` (`mobIntegration.js:68`), and `initMobs.js:35` passes `null`.
 
-So today: **mobs cannot damage the player, and the player cannot die.** A boss is a punching
-bag. Every "Boss Mechanics" line in `questStoryline.md` — poison spores, lava pools, ice
-breath, dark nova — describes damage that has no receiver.
+So today: **mobs cannot damage the player, the player cannot die, and no block is
+hazardous.** Every "Boss Mechanics" line in `questStoryline.md` describes damage with no
+receiver — and so does the entire premise of a dangerous Lava biome.
 
-The five `.meter-fill` bars in `hud.js:39-60` are hard-coded to `width: 100%` in
-`src/ui/css/hud/meters.css` and nothing writes them.
+The five `.meter-fill` bars in `hud.js:39-60` are hard-coded `width: 100%` in
+`src/ui/css/hud/meters.css` with no writer.
 
-**Recommendation: build a minimal `PlayerVitals` — health only.** Not hunger/thirst/sleep/
-stamina, not the 1,159-line `SurvivalSystem`. Health, damage with an armour reduction (the
-formula already exists at `mobIntegration.js:74-79`), death, respawn at
+**Recommendation: a minimal `PlayerVitals` — health only.** Not hunger/thirst/sleep/
+stamina, not the 1,159-line `SurvivalSystem`. Health, damage with the armour reduction that
+already exists at `mobIntegration.js:74-79`, death, respawn at
 `character.spawnPoints[worldId]` (already written by `savePlayerState.js:45-50`), and a
 writer for `#health-meter .meter-fill`. The other four bars stay at 100% and stay honest.
-Full survival mechanics are a separate product decision, out of scope here.
+
+This is a hard prerequisite for **both** S4 (hazardous biomes) and S6 (bosses).
 
 ### 2.3 Mobs are entirely client-local and non-deterministic
 
 `shared/protocol.js` has **no mob message type of any kind**. Each client runs its own
-`MobManager`, seeded per world but driven by `Math.random()` at:
+`MobManager`, seeded per world but driven by `Math.random()` at `mob.js:37, 43, 85, 117,
+211, 213`; `mobManager.js:160, 259, 260, 291`; `mobDefinitions.js:485`.
 
-- `mob.js:37` (initial yaw), `:43` (idle timer), `:85` (mob id), `:117` (wander timer),
-  `:211`/`:213` (drop rolls)
-- `mobManager.js:160` (spawn shuffle), `:259`/`:260` (spawn x/z), `:291` (hover height)
-- `mobDefinitions.js:485` (`selectMobForBiome` weighted roll)
+Two players in the same chunk see **completely different mobs**. A shared boss fight
+requires a host-authoritative networked entity layer that does not exist. §6 designs it;
+it is the largest single item in the plan.
 
-Two players standing in the same chunk see **completely different mobs**. There is no
-shared entity concept to build on.
+### 2.4 The biome classifier is duplicated verbatim
 
-**This is the largest single piece of work in the plan.** A shared boss fight requires a
-host-authoritative networked entity layer that does not exist. §6 designs it.
+**This is the constraint that shapes all of S4.** `selectBiome` exists twice:
 
-### 2.4 The storyline's two key biomes do not exist
+- `src/engine/world/BiomeSystem.js:126-161` — ESM, exported, used by the main thread
+  (`BiomeEffects`, mob spawning, `WorldStep.js:98`).
+- `src/engine/world/workerGeneration.js:473-500` — a **classic script** with its own
+  `var BIOME` table at `:71-160`, no imports, loaded `?url` into the worker pool and
+  assigning `window._voxelgenGenerateChunk` for the main-thread fallback
+  (`ChunkGenerator.js:22-30, 51-53`).
 
-`BIOME_DEFS` (`src/engine/world/BiomeSystem.js:18-97`) defines exactly ten biomes:
-Deep Ocean, Ocean, Beach, Plains, Forest, Badlands, Tundra, Desert, Mountains, Frozen Peaks.
-`workerGeneration.js:187-196` carries the matching feature table.
-
-There is **no Corrupt biome and no Lava biome**. `questStoryline.md` puts three of its four
-dungeons in them.
-
-The *blocks* exist (`lava`, `blackstone`, `crying_obsidian` aliased as `OBSIDIAN` at
-`BlockRegistry.js:474`, `toxic_slime`, `corrupt_crystal`, all the ice variants). Only the
-biomes are missing. §3 resolves this.
+The two are byte-equivalent today. **Any biome added to one must be added to the other,
+identically**, or the terrain the worker builds will disagree with the biome the main
+thread thinks the player is standing in — wrong fog, wrong mob spawns, wrong hazard
+checks, and no test failure. Add a test that asserts the two tables agree (see S4).
 
 ### 2.5 Missing content the storyline assumes
 
 | Storyline needs | Reality |
 |---|---|
 | Q06: craft a `bed` | **No `bed` block, no `bed` recipe.** Not in `BlockRegistry.js`, not in `CraftingSystem.RECIPES`. |
-| Q19: 3 `bread` | `bread` is a defined item (`ItemDefinitions.js:116`) with **no recipe** and no source. |
-| `quest_key` icon | `textures/items/` has `corrupt_crystal.png` and `apple.png` but **no `quest_key.png`.** Needs an asset or a `scripts/generate-item-textures.js` entry. |
-| 5 dungeons × `1 quest_key` | `quest_key` is `maxStack: 1`. Carrying two seal keys at once is impossible. Needs five distinct key items (§4.3). |
-| "boss_kill" requirement type | No such concept. New objective type (§4.2). |
-| Titles | No title system anywhere. Small addition (§4.4). |
+| Q19: 3 `bread` | `bread` is a defined item (`ItemDefinitions.js:116`) with **no recipe and no source**. |
+| `quest_key` icon | `textures/items/` has `corrupt_crystal.png` and `apple.png` but **no `quest_key.png`**. |
+| 5 dungeons × `1 quest_key` | `quest_key` is `maxStack: 1`. Two seal keys cannot be carried. Needs five distinct key items (§4.3). |
+| `boss_kill` requirement | No such concept. New objective kind (§4.2). |
+| Titles | No title system anywhere (§4.4). |
+| Corrupt ground blocks | Lava has every block it needs; **Corrupt does not**. Needs blighted grass/dirt/stone variants — new blocks + textures, or reuse `soul_soil`/`moss_block`/`deepslate`. See S4. |
 
 ---
 
-## 3. Reconciling the storyline with the world — five seals, five biomes
+## 3. World design
 
-**The ask:** a boss at each of five seals, plus one super boss once all five are broken.
-`questStoryline.md` has four seal bosses (Forest Warden, Lava Titan, Frost Serpent,
-Corruption Overlord) and treats the Final Seal itself as the fifth fight. That is four seals
-and two finale fights, not five and one.
+### 3.1 Decision D-Q1 — build the biomes (RESOLVED: build them)
 
-### Decision D-Q1 — the seal-to-biome mapping
+Corrupt and Lava become **real entries in `BIOME_DEFS`**, not structures. Rationale from
+the user: the world has no environmentally dangerous biome at all today, and that is the
+gap worth closing — a hazard that only exists inside a boss arena is not a hazard, it is a
+cutscene.
 
-**Recommendation: map five seals onto five biomes that already generate, and promote the
-Corruption Overlord + Final Seal into one three-phase super boss.** No new biomes.
+**The cost, stated plainly.** `workerGeneration.js` derives terrain from `(cx, cz, seed)`.
+Adding biomes changes what *newly generated* chunks look like while already-saved chunks
+keep the old terrain (chunks live in IndexedDB keyed `${worldId}:${cx},${cz}` —
+`Persistence.js:130-133`). An existing world that has already explored outward will show a
+**visible seam** where old chunks meet new.
 
-| # | Seal | Biome (exists today) | Boss | Origin |
+**Mitigation: `worldgenVersion` on the world config.** New worlds get `2` and the new
+biomes; existing worlds stay at `1` and generate exactly as they do today. Threaded to the
+worker through `genParams`, which `ChunkGenerator.generateChunk` already passes
+(`:44-51`). A v1 world can be opted in from the world screen with a "this will seam your
+terrain" confirmation. This keeps every existing save byte-identical and makes the upgrade
+the player's choice.
+
+### 3.2 How the two biomes are placed
+
+Corrupt and Lava are **not climate-driven** — there is no temperature/humidity combination
+that means "cursed". Bolting them into the `cont`/`eros`/`temp`/`hum` waterfall at
+`selectBiome` would displace existing biomes and change terrain everywhere.
+
+Instead: a **separate low-frequency mask noise**, sampled independently, that *overrides*
+the climate result where it exceeds a threshold. Rare, patchy, biome-sized blobs dropped on
+top of an otherwise unchanged world.
+
+```
+selectBiome(cont, eros, temp, hum, blight, scorch)
+  if (scorch > 0.62 && cont > 0.02)  return BIOME.LAVA      // not in oceans
+  if (blight > 0.60 && cont > 0.02)  return BIOME.CORRUPT
+  … existing waterfall, untouched …
+```
+
+Two properties this buys:
+
+- **Existing terrain is untouched wherever the masks are below threshold**, which is most
+  of the world. A v1→v2 upgrade seams only inside blight/scorch patches.
+- **Tunable rarity by one number each.** Target roughly 2–4% of land area per biome.
+
+Both masks are new Perlin channels seeded off the world seed, added to the params object at
+`BiomeSystem.js` and `workerGeneration.js:462-463` — **in both copies** (§2.4).
+
+### 3.3 What the two biomes are made of
+
+| | Corrupt | Lava |
+|---|---|---|
+| Surface | blighted grass / `soul_soil` | `netherrack`, `basalt` |
+| Subsurface | `deepslate`, blighted stone | `netherrack`, `blackstone` |
+| Fluid | `toxic_slime` pools | `lava` lakes (id 47) |
+| Decoration | `corrupt_crystal` clusters, dead trees | `magma` (emissive), `crying_obsidian`, `soul_lantern` |
+| Fog / sky | **already defined** — `BiomeEffects.js:55` | **already defined** — `BiomeEffects.js:54` |
+| Mobs | **`corrupt_wolf`, `corrupt_wisp` already written** — restore `biomes: ['corrupt']` | new, or reuse hostiles |
+| Trees / flowers | none — needs a `BIOME_FEATURES` row (`workerGeneration.js:187-196`) | none — same |
+| Hazard | `toxic_slime` contact → poison DoT | `lava` contact → heavy DoT; `magma` → light DoT on stand |
+
+**Lava needs no new blocks.** Corrupt needs blighted grass/dirt/stone variants — either
+three new `BlockRegistry` entries with textures, or reuse `soul_soil` + `moss_block` +
+`deepslate` and accept a less distinct look. Recommend three new blocks; the texture
+pipeline (`scripts/generate-item-textures.js`, `npm run generate-manifest`) already exists
+and `textures/blocks/` is the established home.
+
+### 3.4 Decision D-Q6 — 28 quests, seven acts (RESOLVED)
+
+Acts 1–4 keep `questStoryline.md`'s existing 21 quests **unchanged and un-renumbered**.
+Seven quests are added or restructured.
+
+| Act | Quests | Seal | Biome | Boss | Source |
+|---|---|---|---|---|---|
+| 1 Awakening | Q01–Q06 (6) | — | Plains, Forest, Mountains | — | unchanged |
+| 2 The First Seal | Q07–Q12 (6) | **Verdant** | **Corrupt** | Forest Warden | unchanged |
+| 3 Fire and Ash | Q13–Q17 (5) | **Ember** | **Lava** | Lava Titan | unchanged |
+| 4 Frozen Truth | Q18–Q21 (4) | **Frozen** | Tundra | Frost Serpent | unchanged |
+| 5 Sea of Sand | Q22–Q24 (3) | **Sunken** | Desert | **Dune Colossus** | **new** |
+| 6 The Hollow Depths | Q25–Q26 (2) | **Deepstone** | Mountains (Y < 30) | **Hollow King** | **new** |
+| 7 The World Remade | Q27–Q28 (2) | **The Final Seal** | Corrupt (deep) — Corruption Spire | **Corruption Overlord**, 3 phases | merged |
+
+**= 28.** With Corrupt and Lava now real, Acts 2 and 3 land in the biomes the storyline
+always wanted them in — no rehoming needed.
+
+The finale merges the old Q24 (Corruption Overlord) and Q25 (Final Seal) into **one
+three-phase super boss**, which is what "one super boss once all five have been broken"
+asks for. The old Q22 "The Final Corruption" folds into Q27.
+
+**Not yet written: the narrative text for Q22–Q28.** `questStoryline.md` still describes 25
+quests in five acts. Extending it is a documentation task that should land with S1, and it
+is not done in this plan. Seven quest entries, in the existing format.
+
+### 3.5 The five seals
+
+| # | Seal | Biome | Boss | Key item |
 |---|---|---|---|---|
-| 1 | **Verdant Seal** | Forest | Forest Warden | storyline, unchanged |
-| 2 | **Ember Seal** | Badlands (deep cave / lava layer) | Lava Titan | storyline, rehomed |
-| 3 | **Frozen Seal** | Frozen Peaks | Frost Serpent | storyline, unchanged |
-| 4 | **Sunken Seal** | Desert | Dune Colossus | **new** |
-| 5 | **Deepstone Seal** | Mountains (Y < 30, deepslate layer) | Hollow King | **new** |
-| ★ | **The Final Seal** | Corruption Spire — a placed structure, not a biome | Corruption Overlord *(3 phases)* | storyline, merged |
+| 1 | Verdant Seal | Corrupt | Forest Warden | `seal_key_verdant` |
+| 2 | Ember Seal | Lava | Lava Titan | `seal_key_ember` |
+| 3 | Frozen Seal | Tundra | Frost Serpent | `seal_key_frozen` |
+| 4 | Sunken Seal | Desert | Dune Colossus | `seal_key_sunken` |
+| 5 | Deepstone Seal | Mountains, Y < 30 | Hollow King | `seal_key_deepstone` |
+| ★ | The Final Seal | Corrupt (deep) | Corruption Overlord (3 phases) | all five spent |
 
-Rationale for not adding biomes: `workerGeneration.js` derives terrain from
-`(cx, cz, seed)`. Adding two biomes changes what *newly generated* chunks look like while
-already-saved chunks keep the old terrain, producing visible seams in every existing world
-and no clean migration (chunks live in IndexedDB keyed `${worldId}:${cx},${cz}` —
-`Persistence.js:130-133`). Corruption becomes a *structure* — a localised, hand-authored
-zone of `toxic_slime` / `corrupt_crystal` / dead trees placed around each seal site — which
-is additive, cheap, and does not perturb terrain.
-
-**Alternative if the user prefers biome fidelity:** add `CORRUPT` and `LAVA` to `BIOME_DEFS`
-and the feature table, accept the seams, and gate them behind a world-config
-`worldgenVersion` so only new worlds get them. Costs roughly one extra stage. This is
-question Q1 in §10.
-
-### The corruption spire
-
-The super boss arena is placed deterministically at a mid-range distance from world origin
-(see §7) and is **inert until all five seals are broken**. Physically present from world
-generation — players can find it, walk up to it, and read a "five seals hold this shut"
-prompt — which is better foreshadowing than a structure that pops into existence.
-
-### Quest count
-
-`questStoryline.md`'s 25 quests cover four acts. A fifth seal needs a short act. Proposal:
-**28 quests**, five acts of seal content plus the finale, rather than re-numbering. Exact
-quest text is a follow-up to this plan; the *system* does not care how many there are.
+The Corruption Spire is placed deterministically and is **physically present from world
+generation, inert until all five seals are broken** — players can find it, walk to it, and
+read a "five seals hold this shut" prompt. Better foreshadowing than a structure that pops
+into existence.
 
 ---
 
@@ -210,82 +274,73 @@ Replaces all three shapes in §2.1. Lives on the world object, saved to
 ```js
 // src/game/data/QuestState.js — shape, defaults, migration
 {
-  v: 1,                              // schema version; anything else is migrated or reset
-  activeQuestId: 'q07',              // what the HUD tracker shows
+  v: 1,
+  activeQuestId: 'q07',
   quests: {
+    // ACTIVE quest — carries the per-contributor high-water marks (§4.5)
     q07: {
       stage: 7,
       completed: false,
-      objectives: { corrupt_crystal: 3 },   // objectiveKey → count observed
-      completedAt: null,                    // epoch ms
-      completedBy: null,                    // playerId of whoever closed it
+      objectives: {
+        corrupt_crystal: { n: 14, target: 20, hw: { charA: 9, charB: 5 } },
+      },
     },
+    // COMPLETED quest — collapsed, `hw` dropped to stay inside the storage budget
+    q06: { stage: 6, completed: true, completedAt: 1754640000000 },
   },
   seals: {
     verdant: {
-      state: 'dormant',              // dormant | keyed | primed | contested | broken
-      site: { x: 812, z: -344 },     // resolved once, then frozen — see §7
+      state: 'dormant',            // dormant | keyed | primed | contested | broken
+      site: { x: 812, z: -344 },   // resolved once, then frozen — §7.1
       brokenAt: null,
-      brokenBy: [],                  // every playerId that dealt damage to the boss
+      brokenBy: [],                // character ids that dealt damage; capped at 4
     },
     // ember, frozen, sunken, deepstone — same shape
   },
-  finale: {
-    state: 'sealed',                 // sealed | open | contested | defeated
-    site: { x: -1180, z: 260 },
-    defeatedAt: null,
-  },
-  titles: ['survivor', 'seeker'],    // earned, world-scoped
+  finale: { state: 'sealed', site: { x: -1180, z: 260 }, defeatedAt: null },
+  titles: ['survivor', 'seeker'],
 }
 ```
 
 Constraints that shaped this:
 
-- **It lives in `localStorage`**, alongside two other world configs plus the character
-  array. Budget it at **≤ 8 KB serialized**. That rules out per-player progress ledgers,
-  event logs, and anything unbounded. `brokenBy` is capped at `MAX_PLAYERS_LIMIT` (4) by
-  construction.
-- **Monotonic where possible.** `Host.handleQuestUpdate` already refuses to move progress
-  backwards (`Host.js:1001-1003`). Keeping that property makes late joins, packet
-  reordering and rejoin-after-crash all resolve to "take the higher value" instead of
-  needing conflict resolution.
-- **`site` is written once and never recomputed.** If the site-selection algorithm ever
-  changes, existing worlds keep their seals where the players found them.
+- **It lives in `localStorage`**, beside two other world configs and the character array.
+  Budget **≤ 8 KB serialized**. That is why `hw` maps exist only on active quests and are
+  dropped on completion, and why `brokenBy` is bounded by `MAX_PLAYERS_LIMIT` (4).
+- **Monotonic throughout.** Pools only rise; high-water marks only rise; seal states only
+  advance. Late joins, reordered packets and rejoin-after-crash all resolve to "take the
+  higher value" with no conflict resolution.
+- **`site` is written once and never recomputed.** If site selection ever changes, existing
+  worlds keep their seals where the players found them.
 
 ### 4.2 Quest definitions
 
-`src/game/data/QuestDefinitions.js` — pure data, no imports beyond item/block id tables,
-in the style of `MOB_DEFINITIONS`.
+`src/game/data/QuestDefinitions.js` — pure data, no imports beyond item/block id tables, in
+the style of `MOB_DEFINITIONS`.
 
 ```js
 {
   id: 'q12',
   title: 'The Forest Warden',
-  act: 2,
-  stage: 12,
-  type: 'BOSS',                    // COLLECT | CRAFT | EXPLORE | DELIVER | BOSS
+  act: 2, stage: 12,
+  type: 'BOSS',                                  // COLLECT | CRAFT | EXPLORE | DELIVER | BOSS
   narrative: '…',
-  objectives: [
-    { kind: 'boss_kill', boss: 'forest_warden', count: 1 },
-  ],
-  rewards: [
-    { kind: 'unlock', questId: 'q13' },
-    { kind: 'title',  id: 'warden_slayer' },
-  ],
-  marker: { seal: 'verdant', offset: [0, 0, 0] },
-  requires: ['q11'],               // prerequisite quest ids
+  objectives: [{ kind: 'boss_kill', boss: 'forest_warden', count: 1 }],
+  rewards: [{ kind: 'unlock', questId: 'q13' }, { kind: 'title', id: 'warden_slayer' }],
+  marker: { seal: 'verdant' },
+  requires: ['q11'],
 }
 ```
 
-Five objective kinds, each with a defined evaluator:
+Five objective kinds:
 
-| kind | Evaluated by | Notes |
+| kind | Evaluated by | Pooled? |
 |---|---|---|
-| `have_item` | polling `Inventory.countItem` | covers COLLECT and CRAFT identically — see §4.5 |
-| `visit` | player position vs. a radius | covers EXPLORE |
-| `deliver` | altar interaction consumes items | covers DELIVER; host-validated in MP |
-| `boss_kill` | `BOSS_DEFEATED` from the host | never client-asserted |
-| `seal_state` | seal state machine | e.g. "all five broken" for the finale |
+| `contribute_item` | per-contributor high-water delta (§4.5) | **yes** — sum across party |
+| `visit` | player position vs. radius | shared — any player arriving satisfies it |
+| `deliver` | altar consumes items, host-validated | **yes** — sum of deliveries |
+| `boss_kill` | `BOSS_DEFEATED` from the host | shared |
+| `seal_state` | seal state machine | shared |
 
 ### 4.3 Seal definitions
 
@@ -295,41 +350,80 @@ Five objective kinds, each with a defined evaluator:
 {
   id: 'verdant',
   name: 'Verdant Seal',
-  biome: 'forest',
-  keyItem: 'seal_key_verdant',        // NEW item, maxStack 1, one per seal
+  biome: 'corrupt',
+  keyItem: 'seal_key_verdant',
   offering: [{ item: 'corrupt_crystal', count: 5 }],
   boss: 'forest_warden',
-  arena: { radius: 24, height: 20 },  // leash + build volume
-  siteRing: { min: 640, max: 1600 },  // distance band from origin
+  arena: { radius: 24, height: 20 },
+  siteRing: { min: 640, max: 1600 },
 }
 ```
 
-**Five distinct key items** replaces the single `quest_key`, because `maxStack: 1` makes
+**Five distinct key items** replace the single `quest_key`, because `maxStack: 1` makes
 carrying two impossible. `quest_key` stays defined (creative palette, back-compat) but is no
-longer a quest requirement. Each new key needs: an `ItemDefinitions` entry, an icon under
-`textures/items/`, an entry in `InventoryItemTypes.getMaxStack` (`:56-57`) and in
+longer a quest requirement. Each new key needs an `ItemDefinitions` entry, an icon under
+`textures/items/`, a line in `InventoryItemTypes.getMaxStack` (`:56-57`) and one in
 `InventorySync.SINGLE_STACK_BLOCKS` (`:78`).
 
 ### 4.4 Titles
 
-`titles: string[]` on the quest state, a `TITLE_DEFS` table, and a line in the quest log.
-No gameplay effect. Nine titles from `questStoryline.md` + two for the new seals.
+`titles: string[]`, a `TITLE_DEFS` table, a line in the quest log. No gameplay effect.
+Nine from `questStoryline.md` plus two for the new seals.
 
-### 4.5 Progress tracking: poll, don't hook
+### 4.5 Decision D-Q2 — pooled objectives (RESOLVED: pooled)
 
-`CraftingSystem` has no completion callback. `Inventory` exposes only `onSelectionChange`
-(`InventorySystem.js:121`). `BlockInteraction` has no break/place callback. Adding three new
-event channels to feed one consumer is the wrong shape.
+> *"The objectives are shared and work done by players count for everyone."*
 
-**Recommendation: poll the inventory.** One `QuestTracker.evaluate(state)` call every
-30 frames (~0.5 s, using the existing `state.frameCount % N` idiom from `NetworkStep.js:29`)
-recomputes every active `have_item` objective from the live inventory. It is uniform across
-mining, crafting, looting and trading; it has no ordering hazards; and it costs one pass
-over 36 slots twice a second.
+So an objective is a **party-wide total**: `{ kind: 'contribute_item', item: 'obsidian',
+count: 20 }` means the party collectively needs 20, and A mining 12 while B mines 8
+finishes it.
 
-The one thing polling cannot see is a *transient* — "you crafted 10 planks then used them".
-Objectives are therefore **latched**: once an objective's count is met it stays met, stored
-in `quests[id].objectives`. That matches player expectation and matches the monotonic rule.
+**The mechanism: credit positive deltas against a per-contributor high-water mark.**
+
+`CraftingSystem` has no completion callback, `Inventory` exposes only `onSelectionChange`
+(`InventorySystem.js:121`), and `BlockInteraction` has no break/place callback. Adding three
+event channels to feed one consumer is the wrong shape, so **poll** — one
+`QuestTracker.evaluate()` every 30 frames (~0.5 s, the existing `state.frameCount % N` idiom
+from `NetworkStep.js:29`), one pass over 36 slots twice a second. It is uniform across
+mining, crafting, looting and trading, and has no ordering hazards.
+
+Polling alone gives "player currently holds N", which regresses when they drop items, die or
+disconnect. So the pool is not a sum of holdings — it is a sum of **high-water marks**:
+
+```
+observe(contributorId, item) → count
+if count > hw[contributorId]:
+    pool.n   += count - hw[contributorId]
+    hw[contributorId] = count
+# never decrease. Dropping, dying and disconnecting cannot take progress away.
+```
+
+Properties:
+
+- **Monotonic**, so it inherits every safety property in §4.1.
+- **Work genuinely counts for everyone** — the pool is one number the whole party moves.
+- **Leaving does not revoke your contribution.** Your high-water mark stays in `hw` until
+  the quest completes and the map is dropped.
+
+**The known, accepted exploit:** A hands B five obsidian; A's high-water mark stays, B's
+rises, and the five count twice. This is a co-op game, not a competitive one — do not
+engineer against it. Where it actually matters, use `deliver` objectives instead: items are
+**consumed at the altar and validated host-side**, which is exploit-proof. Every
+seal-critical step (the `DELIVER` quests, Q11 and Q16) is already a delivery in the
+storyline.
+
+**Contributor identity must be stable across reconnects.** `playerId` is assigned by the
+relay per connection, so a reconnecting player would get a fresh high-water mark of 0 and be
+credited twice for items they still hold. Key `hw` on the **character id** instead — it is
+device-persistent, and the `character` object already travels on join
+(`Host.js:409, 677, 690`). *Verification item for S0: confirm `character.id` is present on
+the wire and not stripped.*
+
+**This changes the existing host code, it does not reuse it.** `Host.handleQuestUpdate`
+(`Host.js:1001-1003`) currently stores a monotonic **max** of a single number. Pooled
+contribution needs **accumulate-a-delta**, and `validateQuestUpdate` (`Host.js:256-274`)
+validates `{questId, progress:number}`, not `{questId, objectiveKey, delta, contributorId}`.
+Both get reshaped in S0.
 
 ---
 
@@ -340,47 +434,44 @@ in `quests[id].objectives`. That matches player expectation and matches the mono
 Quest state lives on the world object; `PersistenceManager.saveWorld()` already writes a
 `questProgress` field (`Persistence.js:176`). Two changes:
 
-1. Rename to `questState` **with a migration**: on load, an object with no `v` is treated as
-   the legacy `{}` and replaced with defaults. Old worlds have empty quest progress anyway
-   (nothing ever wrote it), so the migration is cosmetic — but it must exist, or the first
-   real schema change has no precedent to follow.
-2. **Add a save trigger.** Today the world config is written only by `createWorld`,
-   `updateWorld` and `selectWorld` (`WorldManager.js:233, 274, 337`) — nothing saves during
-   play. Quest progress would be lost on every crash.
+1. **Rename to `questState` with a migration.** On load, an object with no `v` is treated as
+   the legacy `{}` and replaced with defaults. Old worlds have empty quest progress anyway,
+   so the migration is cosmetic — but it must exist, or the first real schema change has no
+   precedent to follow.
+2. **Add a save trigger.** The world config is written only by `createWorld`, `updateWorld`
+   and `selectWorld` (`WorldManager.js:233, 274, 337`) — nothing saves during play, so quest
+   progress would be lost on every crash.
 
-   **Recommendation:** piggyback on the existing 30-second character save. `savePlayerState`
+   **Recommendation:** piggyback the existing 30-second character save. `savePlayerState`
    (`src/core/savePlayerState.js`) is called from three places — the interval, the Escape
    handler, and `Game.stop()` (`DEPLOY.md` §7). Add a sibling `saveWorldState(state, deps)`
-   in a new file and call it from the same three sites. Do **not** fold it into
-   `savePlayerState`: that function's contract is "the selected character", and quest state
-   is the world's.
+   and call it from the same three sites. Do **not** fold it into `savePlayerState`: that
+   function's contract is "the selected character", and quest state is the world's.
 
    Additionally save **immediately** on the three events that are expensive to lose: quest
-   completed, seal state changed, boss defeated. These are rare enough to be free.
+   completed, seal state changed, boss defeated. Rare enough to be free.
 
 ### 5.2 Multiplayer — the host owns it
 
-`HostManager` is the authority (it already is for blocks and inventory). Its
-`_worldState.questProgress` becomes `_worldState.questState` in the §4.1 shape and is
-**seeded from the host's own world config on session start** and **written back to it** by
-the same `saveWorldState` calls.
+`HostManager` is already the authority for blocks and inventory. Its
+`_worldState.questProgress` becomes `_worldState.questState` in the §4.1 shape, **seeded
+from the host's world config on session start** and **written back** by the same
+`saveWorldState` calls.
 
 Consequences, stated plainly:
 
-- **Progress is saved on the host's device, in the host's world slot.** A world hosted by
-  player A and joined by B advances A's copy. If B later hosts their own world, it has its
-  own seals at its own sites.
+- **Progress saves on the host's device, in the host's world slot.** A world hosted by A and
+  joined by B advances A's copy.
 - **Joining clients hold a view, not a copy.** `SessionRejoin.js:83-93` and
-  `AutoRejoin.js:82-92` construct a *temporary* world object pushed onto
-  `worldManager.worlds` without going through `createWorld` — it is never persisted and
-  never gets a slot. That is correct and should stay: a guest's device must not accumulate
-  half-finished copies of other people's worlds. Their `questState` is whatever the host
-  last sent, and it is discarded on disconnect.
-- **Late joiners need the full state.** The host must send it. See §6.1.
-
-This satisfies "quests live and are saved to each world, shared among anyone currently
-playing in that world" exactly. Question Q3 in §10 asks whether a guest should get to keep
-anything.
+  `AutoRejoin.js:82-92` build a *temporary* world object pushed onto `worldManager.worlds`
+  without going through `createWorld` — never persisted, never given a slot. That is correct
+  and should stay: a guest's device must not accumulate half-finished copies of other
+  people's worlds. Their `questState` is whatever the host last sent, discarded on
+  disconnect.
+- **A guest's contributions live in the host's `hw` map**, keyed by their character id, so
+  they persist in the host's world across the guest's disconnect and rejoin. That is what
+  makes "work done counts for everyone" hold across a dropped connection.
+- **Late joiners need the full state** — the host sends `QUEST_SYNC` (§6.1).
 
 ---
 
@@ -395,58 +486,59 @@ real key.
 
 | Type | Direction | Payload | Rate |
 |---|---|---|---|
-| `QUEST_SYNC` | host → client | full `questState` object | on join, on rejoin |
-| `QUEST_UPDATE` | client → host → all | `{ questId, objectiveKey, progress }` | on change (already exists) |
+| `QUEST_SYNC` | host → client | full `questState` | on join, on rejoin |
+| `QUEST_UPDATE` | host → all | `{ questId, objectiveKey, n, target }` — authoritative pool | on change *(exists, reshaped)* |
+| `QUEST_CONTRIBUTE` | client → host | `{ questId, objectiveKey, delta, contributorId }` | on delta |
 | `SEAL_UPDATE` | host → all | `{ sealId, state, brokenBy? }` | on transition |
 | `BOSS_SPAWN` | host → all | `{ bossId, type, sealId, position, maxHp, arena }` | once per encounter |
 | `BOSS_STATE` | host → all | `{ bossId, x, y, z, yaw, hp, phase, aiState }` | **10 Hz** while contested |
-| `BOSS_HIT` | client → host | `{ bossId, damage, origin, direction }` | on player attack |
+| `BOSS_HIT` | client → host | `{ bossId, damage, origin, direction }` | on attack |
 | `BOSS_DEFEATED` | host → all | `{ bossId, sealId, contributors, loot }` | once |
 | `BOSS_DESPAWN` | host → all | `{ bossId, reason }` | on wipe/reset |
 
 `server/session.js` relays them (its `switch` at `:250-270` is explicit, so each needs a
-case). `Client.js:1016-1021` must add **all of the above plus `QUEST_UPDATE`**, which is
-missing today (§2.1).
-
-`Host._setupGameHandlers()` (`Host.js:621-655`) must register `QUEST_UPDATE` → the existing
-`handleQuestUpdate()`, and `BOSS_HIT` → a new `handleBossHit()`.
+case). `Client.js:1016-1021` must add **all of the above plus `QUEST_UPDATE`**, missing
+today (§2.1). `Host._setupGameHandlers()` (`Host.js:621-655`) must register
+`QUEST_CONTRIBUTE` and `BOSS_HIT`.
 
 ### 6.2 Bandwidth
 
 `BOSS_STATE` at 10 Hz is ~120 bytes/tick/client → **~1.2 KB/s per client, ~5 KB/s for a
-full 4-player session**, and only while a boss is alive. For comparison, `PLAYER_MOVE`
-already runs at ~20 Hz per player (`PlayerStep`). Acceptable. If it is not, drop to 8 Hz —
-the client interpolates either way.
+full 4-player session**, and only while a boss is alive. `PLAYER_MOVE` already runs at
+~20 Hz per player (`PlayerStep`). Acceptable. If not, drop to 8 Hz — the client
+interpolates either way.
 
-### 6.3 Damage validation
+### 6.3 Validation
 
-`BOSS_HIT` is untrusted input. The host validates, mirroring the pattern
-`validateQuestUpdate` and `RateLimiter` already establish in `Host.js`:
+Both client→host messages are untrusted, and both are validated on the pattern
+`validateQuestUpdate` and `RateLimiter` already establish in `Host.js`.
 
-1. Sender is a connected player in this session.
-2. Sender's last-known position (the host tracks it — `_handlePlayerMove`) is inside the
-   arena radius, plus slack for latency.
-3. `damage` is within the maximum any item in `NAMED_ITEMS` can produce (currently
-   `netherite_spear`-class; compute the ceiling from the table, do not hard-code it).
-4. Rate-limited per player to the fastest legal attack speed (`4.0 + def.attackSpeed`, the
-   same formula `CombatStep.js:42-49` uses) with a tolerance factor.
+`QUEST_CONTRIBUTE`: sender is connected; `delta > 0`; `delta` bounded by the largest
+plausible single-tick gain (a stack, 64); `contributorId` matches the sender's own
+character. Reject-and-warn, exactly as `Host.js:996` does.
 
-Reject-and-warn on failure, exactly like `handleQuestUpdate` does at `Host.js:996`. Never
-kick — a laggy client is not a cheater.
+`BOSS_HIT`: sender connected; sender's last-known position (the host tracks it in
+`_handlePlayerMove`) inside the arena radius plus latency slack; `damage` within the ceiling
+computed from `NAMED_ITEMS` (**compute it, do not hard-code it**); rate-limited per player to
+the fastest legal attack speed using the same `4.0 + def.attackSpeed` formula
+`CombatStep.js:42-49` uses, with tolerance.
+
+Never kick. A laggy client is not a cheater.
 
 ### 6.4 The host is also a player
 
-`HostManager` runs in the host's browser alongside their own `MobManager` and `Inventory`.
-The host's own attacks must go through the **same** `BOSS_HIT` path — via a local transport
-that calls `handleBossHit` directly rather than over the socket. One code path, or the host
-and the guests diverge. This is the single most important design rule in this document; the
-repo's history is a list of what happens when two paths exist for one thing.
+`HostManager` runs in the host's browser beside their own `MobManager` and `Inventory`. The
+host's own attacks and contributions must go through the **same** `BOSS_HIT` /
+`QUEST_CONTRIBUTE` path — via a local transport that calls the handler directly rather than
+over the socket. **One code path, or the host and the guests diverge.** This is the single
+most important design rule in this document; the repo's history is a list of what happens
+when two paths exist for one thing.
 
 ### 6.5 Single-player uses the same code
 
-Single-player instantiates the host-side encounter runner with a null transport. The boss
-simulation, the damage validation and the state machine are byte-identical between
-single-player and hosted multiplayer. Only the broadcast is a no-op.
+Single-player instantiates the host-side runner with a null transport. The boss simulation,
+the validation and the state machines are identical between single-player and hosted
+multiplayer. Only the broadcast is a no-op.
 
 ---
 
@@ -454,108 +546,102 @@ single-player and hosted multiplayer. Only the broadcast is a no-op.
 
 ### 7.1 Site selection is deterministic and frozen
 
-`src/engine/world/structures/SealSites.js` (new, pure, testable in node):
+`src/engine/world/structures/SealSites.js` (new, pure, node-testable):
 
 ```
-sealSites(worldSeed) → { verdant: {x,z}, ember: {x,z}, … , finale: {x,z} }
+sealSites(worldSeed) → { verdant: {x,z}, ember: {x,z}, …, finale: {x,z} }
 ```
 
-Algorithm: for each seal, hash `(worldSeed, sealId)` into an angle and a radius inside the
-seal's `siteRing`, then walk outward in a bounded spiral (cap it — 256 candidate columns)
-sampling `BiomeSystem.getBiomeAtWorldPos(wx, wz, seed)` until the biome matches. If no match
-is found within the cap, **fall back to the unfiltered position and log it** — a seal in the
-wrong biome is a cosmetic disappointment; a world that hangs during generation is not.
+Hash `(worldSeed, sealId)` into an angle and a radius inside the seal's `siteRing`, then
+walk outward in a **bounded** spiral (cap it — 256 candidate columns) sampling
+`BiomeSystem.getBiomeAtWorldPos(wx, wz, seed)` until the biome matches. If no match is found
+within the cap, **fall back to the unfiltered position and log it** — a seal in the wrong
+biome is a cosmetic disappointment; a world that hangs during generation is not.
 
-The result is written into `questState.seals[id].site` on first world entry and **never
-recomputed** (§4.1).
+This matters more now that Corrupt and Lava are rare mask-driven patches (§3.2): the Verdant
+and Ember sites *must* find one, so the spiral cap and the fallback are load-bearing, not
+defensive padding. Tune the mask thresholds so at least one patch of each is reliably within
+the `siteRing` band, and assert it in a seed-sweep test (S5).
+
+Result is written to `questState.seals[id].site` on first world entry and never recomputed.
 
 ### 7.2 Structures go inside `workerGeneration.js`
 
-**Constraint that shapes this whole section:** `src/engine/world/workerGeneration.js` is a
-1,100-line **classic script**, loaded `?url` into the worker pool and assigning
-`window._voxelgenGenerateChunk` for the main-thread fallback (`ChunkGenerator.js:22-30`,
-`:51-53`). It has **no imports** and cannot have any. Its style is `var`, IIFE-scoped
-helpers, and inline tables (`BIOME_FEATURES` at `:186-197`, `SHALLOW_ORES` at `:201-208`).
-
-Altar and arena placement must therefore be written **in that file, in that style**, and fed
-its inputs through `genParams` (which `ChunkGenerator.generateChunk` already threads through
-to the worker at `:44-51`). Pass the resolved seal sites in `genParams.sealSites`.
-
-Per-chunk work: if a chunk intersects a seal site's footprint, carve/stamp the arena and
+Same constraint as §2.4: that file is a classic script with no imports, `var` style, inline
+tables. Altar and arena placement must be written **in it, in its style**, fed through
+`genParams.sealSites`. Per-chunk: if a chunk intersects a site footprint, stamp the arena and
 altar from a small hand-authored template. Keep it to a handful of block writes per affected
-chunk — this runs on the generation hot path.
+chunk — this is the generation hot path.
 
 ### 7.3 What gets placed
 
 | Element | Blocks | Purpose |
 |---|---|---|
-| Altar | `chiseled_stone_bricks`, `crying_obsidian`, a `quest_key`-marked centre block | Interaction target; `primed` transition |
+| Altar | `chiseled_stone_bricks`, `crying_obsidian`, marked centre block | Interaction target; `primed` transition |
 | Arena floor | flattened `stone_bricks` / `deepslate_tiles`, radius per `SealDefinitions.arena` | Boss needs walkable ground; `mobMovement` uses `isSolidBlock` |
-| Corruption zone | `toxic_slime` pools, `corrupt_crystal` clusters, dead trees | Replaces the missing Corrupt biome (§3); source of `corrupt_crystal` |
-| Key cache | `quest_key` block variant placed once per seal | Source of `seal_key_*` |
-| Spire | tall `blackstone` / `crying_obsidian` column at the finale site | Foreshadowing; inert until 5 broken |
+| Key cache | one per seal | Source of `seal_key_*` |
+| Spire | tall `blackstone` / `crying_obsidian` column at the finale site | Foreshadowing; inert until five broken |
+
+Biome-native decoration (`toxic_slime`, `corrupt_crystal`, `magma`, lava lakes) comes from
+the biome itself now, not from the structure — that is the payoff of building the biomes.
 
 ### 7.4 Multiplayer chunk flow makes this easy
 
-In a session, the **host generates and the clients receive** — `ChunkManager` runs in
-`clientMode` and chunks arrive as `CHUNK_DATA` (`src/multiplayer/ChunkStreamer.js`,
-`ChunkResync.js`). Clients never generate terrain, so structures need to be
-deterministic only for *single-player and the host*, not across peers.
-
-Block edits inside an arena stay host-validated by the existing `BLOCK_BREAK`/`BLOCK_PLACE`
-path. Whether players may mine the altar is question Q4 in §10.
+In a session the **host generates and clients receive** — `ChunkManager` runs in
+`clientMode` and chunks arrive as `CHUNK_DATA` (`ChunkStreamer.js`, `ChunkResync.js`).
+Clients never generate terrain, so structures need to be deterministic only for
+single-player and the host, not across peers.
 
 ---
 
-## 8. Boss entity design
+## 8. Boss design
 
 ### 8.1 Reuse the mob renderer — do not write a new one
 
 `Boss.js` was deleted partly because it had no rendering. **Do not repeat that.** Define
 bosses in the existing `MOB_DEFINITIONS` format so `mobModelBuilder`, `mobAnimator` and
 `mobRenderer` draw them with zero new rendering code. The builder supports `box`, `sphere`,
-`cylinder` and `cone` (`mobModelBuilder.js:83-104`) — enough for a root-and-thorn warden or
-a molten titan at 4–8× scale.
+`cylinder` and `cone` (`mobModelBuilder.js:83-104`) — enough for a root-and-thorn warden or a
+molten titan at 4–8× scale.
 
-Required changes to the mob layer:
+Required mob-layer changes:
 
 - Add `MOB_CATEGORIES.BOSS` (`mobDefinitions.js:14-17`).
 - Boss defs carry **`biomes: []`**. Both `getMobTypesForBiome` and `selectMobForBiome`
   iterate `def.biomes.includes(biome)` (`:461-489`), so an empty array excludes bosses from
-  natural spawning for free — and a *missing* `biomes` would throw. This must be asserted in
-  a test.
-- `MobManager` must exempt bosses from `mobCap` / `hostileCap` (`mobManager.js:28-31`), from
-  the `despawnDistance` check (`:120-125`) and from the `minHostileSpawnDistance` rule. A
-  boss that despawns because a player kited it 128 blocks is a bug report.
-- Spawn via the existing `spawnMobAt(mobType, position)` (`mobManager.js:426`), which already
-  bypasses the spawn tick.
+  natural spawning for free — and a *missing* `biomes` would throw. Assert this in a test.
+- `MobManager` must exempt bosses from `mobCap`/`hostileCap` (`:28-31`), from the
+  `despawnDistance` check (`:120-125`), and from `minHostileSpawnDistance`. A boss that
+  despawns because a player kited it 128 blocks is a bug report.
+- Spawn via the existing `spawnMobAt(mobType, position)` (`:426`), which bypasses the spawn
+  tick.
 
 ### 8.2 Phases
 
 Boss definitions get a `phases` array — HP thresholds, per-phase ability sets, per-phase
-animation overrides. The Corruption Overlord has three (`questStoryline.md` Q25); the five
-seal bosses have two each (enrage below 40%).
+animation overrides. The Corruption Overlord has three; the five seal bosses have two each
+(enrage below 40%).
 
 **Explicitly initialise every phase timer at construction.** The deleted `Boss.js` left
-`phaseTransitionTimer` undefined, so a deserialized boss was NaN-frozen and unkillable and
-no test caught it (`src/index.js:73-75`). Add a test that constructs each boss, advances it
-through every phase threshold, and asserts it dies.
+`phaseTransitionTimer` undefined, so a deserialized boss was NaN-frozen and unkillable and no
+test caught it (`src/index.js:73-75`). Add a test that constructs each boss, advances it
+through every threshold, and asserts it dies.
 
 ### 8.3 Abilities
 
-Start with what the existing systems can already express, and stage the rest:
-
 | Ability | Feasible with today's code? |
 |---|---|
-| Melee (vine lash, tail swipe) | **Yes** — `onMobAttack` + §2.2 player health |
+| Melee (vine lash, tail swipe) | **Yes** — `onMobAttack` + §2.2 |
 | Charge / leap | **Yes** — `applyMovement` + `applyKnockback` |
-| Summon adds | **Yes** — `spawnMobAt` with existing hostile types |
+| Summon adds | **Yes** — `spawnMobAt` with existing hostiles |
+| AoE ground effect (lava pools, poison spores) | **Yes after S4** — the hazard-block DoT built for the biomes is exactly this mechanic, reused |
 | Ranged projectile (magma, corruption beam) | **No** — no projectile system. New. |
-| AoE ground effect (lava pools, poison spores) | **Partly** — block writes are cheap, damage-over-time needs §2.2 |
 | Ice walls / terrain modification | **Yes** but expensive — block writes must go through the host's validated path or clients desync |
 
-**Recommendation:** first boss ships with melee + charge + summon only. Projectiles and DoT
-zones are their own stage. Do not let a projectile system block the first working seal.
+Building the hazardous biomes first (S4) means the AoE ground effects come almost free at
+S6: a lava pool a boss creates is the same block with the same damage tick as a lava pool
+the world generated. **First boss ships with melee + charge + summon + hazard-pool only.**
+Projectiles are their own stage; do not let them block the first working seal.
 
 ### 8.4 Encounter lifecycle
 
@@ -571,14 +657,15 @@ primed  ──[any player interacts with altar]──▶  contested
 ```
 
 On reset the boss despawns and HP restores — no partial credit. On defeat: `SEAL_UPDATE`,
-loot to every contributor in `brokenBy` (not just the killer), title grant, immediate save,
-and a check for "all five broken" → `finale.state = 'open'`.
+loot to **every contributor in `brokenBy`**, not just the killer (consistent with §4.5 —
+work counts for everyone), title grant, immediate save, and a check for "all five broken" →
+`finale.state = 'open'`.
 
 ### 8.5 Loot determinism
 
-`rollDrops` uses bare `Math.random()` (`mobDropTable.js:16-19`). For a shared boss, **the
-host rolls once** and ships the result in `BOSS_DEFEATED`. Clients apply what they are told;
-they do not roll. Same rule as `BOSS_HIT`: one authority.
+`rollDrops` uses bare `Math.random()` (`mobDropTable.js:16-19`). For a shared boss the
+**host rolls once** and ships the result in `BOSS_DEFEATED`. Clients apply what they are
+told; they do not roll. Same rule as everything else: one authority.
 
 ---
 
@@ -588,77 +675,86 @@ they do not roll. Same rule as `BOSS_HIT`: one authority.
 
 | File | Purpose | Rough size |
 |---|---|---|
-| `src/game/data/QuestDefinitions.js` | 28 quests, pure data | ~600 |
+| `src/game/data/QuestDefinitions.js` | 28 quests, pure data | ~650 |
 | `src/game/data/SealDefinitions.js` | 5 seals + finale | ~120 |
-| `src/game/data/QuestState.js` | Schema, defaults, migration | ~120 |
+| `src/game/data/QuestState.js` | Schema, defaults, migration | ~150 |
 | `src/game/data/TitleDefinitions.js` | Title table | ~40 |
 | `src/game/systems/QuestSystem.js` | State machine — no DOM, no network | ~300 |
-| `src/game/systems/QuestTracker.js` | Objective evaluation (§4.5 polling) | ~200 |
+| `src/game/systems/QuestTracker.js` | Pooled objective evaluation (§4.5) | ~250 |
 | `src/game/systems/SealSystem.js` | Seal state machine + altar interaction | ~250 |
+| `src/game/systems/HazardSystem.js` | **Environmental damage** — lava, magma, toxic slime | ~200 |
+| `src/game/entities/PlayerVitals.js` | §2.2 minimal health | ~200 |
 | `src/game/entities/BossEntity.js` | Boss instance, phases, ability timers | ~350 |
 | `src/game/systems/BossEncounter.js` | Host-side runner: spawn, arena, leash, reset, loot | ~350 |
 | `src/game/mobs/bossDefinitions.js` | 6 boss defs in `MOB_DEFINITIONS` format | ~700 |
-| `src/multiplayer/QuestSync.js` | Mirrors `InventorySync.js` | ~180 |
+| `src/multiplayer/QuestSync.js` | Mirrors `InventorySync.js` | ~200 |
 | `src/multiplayer/BossSync.js` | Mirrors `PlayerSync.js` — host broadcast, client interp | ~280 |
 | `src/engine/world/structures/SealSites.js` | Deterministic site selection | ~150 |
-| `src/ui/hud/QuestTracker.js` | Writes the existing `#quest-tracker` DOM | ~120 |
+| `src/ui/hud/QuestTracker.js` | Writes the existing `#quest-tracker` DOM | ~130 |
 | `src/ui/hud/BossBar.js` | New HUD element | ~120 |
 | `src/ui/overlays/QuestLog.js` | Full quest list (key `J`) | ~250 |
 | `src/ui/css/hud/boss-bar.css` | Boss bar styling | ~60 |
 | `src/ui/css/overlays/quest-log.css` | Quest log styling | ~100 |
 | `src/core/init/initQuests.js` | `Game.init()` step 15 | ~120 |
 | `src/core/saveWorldState.js` | Sibling to `savePlayerState.js` | ~50 |
-| `src/game/entities/PlayerVitals.js` | §2.2 minimal health | ~200 |
 
 ### Changed
 
 | File | Change |
 |---|---|
-| `shared/protocol.js` | +8 message types (§6.1) |
-| `server/session.js` | Relay cases for the new types |
-| `src/multiplayer/Client.js:1016-1021` | Add `QUEST_UPDATE` (**missing today**) + 7 new types to `gameEvents` |
-| `src/multiplayer/Host.js:618-655` | Register `QUEST_UPDATE` → `handleQuestUpdate`; add `handleBossHit` |
-| `src/multiplayer/Host.js:451-454, 989-1035` | `_worldState.questProgress` → `questState` (§4.1); seed from world config; send `QUEST_SYNC` on join |
-| `src/game/entities/WorldManager.js:226, 360-398` | Replace the three ad-hoc helpers; delete the `nextStage >= 5` placeholder |
-| `src/engine/world/Persistence.js:176` | `questProgress` → `questState` + migration |
-| `src/core/GameState.js` | Declare `questSystem`, `sealSystem`, `bossEncounter`, `bossSync`, `questSync`, `playerVitals`, `bossBar` — *declared, not grown*, per that file's header |
-| `src/core/Game.js:194-202` | `initQuests(this)` as step 15; teardown |
-| `src/core/savePlayerState.js` call sites | Add `saveWorldState` alongside (3 sites) |
-| `src/engine/loop/SystemRunner.js` | Quest/boss step (or extend `WorldStep`) |
-| `src/engine/loop/steps/CombatStep.js:56` | Boss hits → `BOSS_HIT`, not local `takeDamage` |
+| **`src/engine/world/BiomeSystem.js:18-97, 126-161`** | **`CORRUPT` + `LAVA` in `BIOME_DEFS`; blight/scorch mask override in `selectBiome`** |
+| **`src/engine/world/workerGeneration.js:71-160, 187-197, 462-463, 473-500`** | **The same two biomes, the same override, in the duplicated classic-script copy (§2.4); `BIOME_FEATURES` rows; two new noise channels; terrain/decoration passes; altar + arena stamping** |
+| `src/engine/world/BlockRegistry.js` | 3 blighted Corrupt blocks (Lava needs none) |
+| `src/engine/renderer/BiomeEffects.js:54-55` | **Nothing** — `lava` and `corrupt` configs already exist |
+| `src/game/mobs/mobDefinitions.js:211, 376` | Restore `biomes: ['corrupt']` on `corrupt_wolf` / `corrupt_wisp` (reverts D-68's workaround) |
 | `src/game/mobs/mobDefinitions.js:14-17` | `MOB_CATEGORIES.BOSS` |
 | `src/game/mobs/mobManager.js:28-31, 120-125` | Boss exemptions from cap and despawn |
 | `src/game/mobs/mobIntegration.js:68-83` | Wire `onMobAttack` to `PlayerVitals` |
 | `src/core/init/initMobs.js:35` | Pass real vitals instead of `null` |
-| `src/engine/world/workerGeneration.js` | Altar/arena/corruption placement, **in-file, classic-script style** (§7.2) |
+| `src/game/entities/WorldManager.js` | `worldgenVersion` on new worlds; replace the three ad-hoc quest helpers; delete the `nextStage >= 5` placeholder (`:390`) |
+| `src/engine/world/ChunkGenerator.js:44-51` | Thread `worldgenVersion` + `sealSites` through `genParams` |
+| `shared/protocol.js` | +8 message types (§6.1) |
+| `server/session.js:250-270` | Relay cases for the new types |
+| `src/multiplayer/Client.js:1016-1021` | Add `QUEST_UPDATE` (**missing today**) + 8 new types |
+| `src/multiplayer/Host.js:451-454, 256-274, 618-655, 989-1035` | `questState`; reshape validator + handler for pooled deltas; register `QUEST_CONTRIBUTE` and `BOSS_HIT`; `QUEST_SYNC` on join |
+| `src/engine/world/Persistence.js:176` | `questProgress` → `questState` + migration |
+| `src/core/GameState.js` | Declare `questSystem`, `sealSystem`, `bossEncounter`, `bossSync`, `questSync`, `playerVitals`, `hazardSystem`, `bossBar` — *declared, not grown*, per that file's header |
+| `src/core/Game.js:194-202` | `initQuests(this)` as step 15; teardown |
+| `savePlayerState` call sites (3) | Add `saveWorldState` alongside |
+| `src/engine/loop/SystemRunner.js` | Quest/hazard/boss step (or extend `WorldStep`) |
+| `src/engine/loop/steps/CombatStep.js:56` | Boss hits → `BOSS_HIT`, not local `takeDamage` |
+| `src/game/data/ItemDefinitions.js` | 5 `seal_key_*` items |
+| `src/game/systems/InventoryItemTypes.js:56-57`, `src/multiplayer/InventorySync.js:78` | Single-stack for the new keys |
 | `src/ui/templates/hud.js:78-84` | Un-hide `#quest-tracker`; add boss bar markup |
 | `src/ui/css/index.css:45` | Two `@import`s — **order is load-bearing (D-52)** |
-| `src/game/data/ItemDefinitions.js` | 5 `seal_key_*` items |
-| `src/game/systems/InventoryItemTypes.js:56-57` | Single-stack for the new keys |
-| `src/multiplayer/InventorySync.js:78` | Same |
-| `textures/items/` | Icons for 5 keys + `quest_key` (**missing today**) |
+| `textures/blocks/`, `textures/items/` | 3 Corrupt blocks; 5 key icons; `quest_key` (**missing today**) |
+| `questStoryline.md` | **Narrative for Q22–Q28** (§3.4) — not written yet |
 
 ---
 
 ## 10. Stages
 
-Each stage is a shippable PR that leaves the tree green. Every defect found along the way
-gets a `BUGS.md` row with an owner at the time it is found — that is the repo's rule and it
-is not optional.
+Each stage is a shippable PR that leaves the tree green. Every defect found gets a `BUGS.md`
+row with an owner **at the time it is found** — that is the repo's rule and it is not
+optional.
 
-| Stage | Scope | Depends on | Blockers cleared |
+| Stage | Scope | Depends on | Clears |
 |---|---|---|---|
-| **S0** | **Unify quest state.** One schema, migration, persistence hook, `saveWorldState`, fix the two broken wire routes. No gameplay, no UI. | — | §2.1 |
-| **S1** | **Quests, single-player.** `QuestDefinitions` (Act 1 only, 6 quests), `QuestSystem`, `QuestTracker` polling, HUD tracker, quest log. `COLLECT`/`CRAFT`/`EXPLORE`. | S0 | — |
-| **S2** | **Quest sync.** `QUEST_SYNC` on join, host authority, guest-view semantics, rejoin. | S0, S1 | §2.1 |
+| **S0** | **Unify quest state.** One schema, migration, `saveWorldState`, fix the two broken wire routes, reshape the host validator/handler for pooled deltas. No gameplay, no UI. | — | §2.1 |
+| **S1** | **Quests, single-player.** Definitions (Act 1, 6 quests), `QuestSystem`, `QuestTracker` polling, HUD tracker, quest log. `COLLECT`/`CRAFT`/`EXPLORE`. Narrative for Q22–Q28 into `questStoryline.md`. | S0 | — |
+| **S2** | **Quest sync.** `QUEST_SYNC` on join, `QUEST_CONTRIBUTE`, pooled totals across 4 players, rejoin, guest-view semantics. | S0, S1 | §2.1 |
 | **S3** | **Player health.** `PlayerVitals`, damage, armour, death, respawn, `#health-meter` writer, `onMobAttack` wired. | — *(parallel with S1/S2)* | §2.2 |
-| **S4** | **Seal sites + altars.** `SealSites`, worldgen structures, corruption zones, `SealSystem` up to `primed`, 5 key items + icons, world markers. | S1 | §2.4, §2.5 |
-| **S5** | **First boss, end to end.** `BossEntity`, `BossEncounter`, `BossSync`, boss bar, host authority, `Forest Warden` with melee + charge + summon. Single-player and 4-player both. | S2, S3, S4 | §2.3 |
-| **S6** | **Four more seal bosses.** Lava Titan, Frost Serpent, Dune Colossus, Hollow King. Projectiles and DoT zones if S5 proved the shape. | S5 | — |
-| **S7** | **Super boss + completion.** Spire unseal on 5 broken, 3-phase Corruption Overlord, titles, end state. | S6 | — |
+| **S4** | **Corrupt + Lava biomes, and environmental danger.** Both `selectBiome` copies, blight/scorch masks, `worldgenVersion` gating, terrain/decoration passes, `BIOME_FEATURES` rows, 3 Corrupt blocks, restore the two corrupt mobs, `HazardSystem` (lava / magma / toxic-slime DoT). | S3 | §2.4, §2.5, and the "no dangerous biome" gap |
+| **S5** | **Seal sites + altars.** `SealSites` with the biome-reachability sweep, worldgen structures, `SealSystem` to `primed`, 5 key items + icons, world markers. | S1, S4 | — |
+| **S6** | **First boss, end to end.** `BossEntity`, `BossEncounter`, `BossSync`, boss bar, host authority. Forest Warden: melee + charge + summon + hazard pool. Single-player and 4-player both. | S2, S3, S5 | §2.3 |
+| **S7** | **Four more seal bosses.** Lava Titan, Frost Serpent, Dune Colossus, Hollow King. Projectiles if S6 proved the shape. | S6 | — |
+| **S8** | **Super boss + completion.** Spire unseal on five broken, 3-phase Corruption Overlord, titles, end state. | S7 | — |
 
-S3 has no dependency on S0–S2 and can run concurrently. S5 is the long pole and is where the
-schedule risk lives; keep it to one boss.
+S3 has no dependency on S0–S2 and can run concurrently. **S4 is newly on the critical path**
+— S5 cannot place the Verdant and Ember seals until their biomes exist. S6 remains the long
+pole; keep it to one boss.
+
+**Nothing starts until the outstanding multiplayer bug is fixed.**
 
 ---
 
@@ -671,17 +767,17 @@ screenshots.
 
 | Stage | Unit | Integration |
 |---|---|---|
-| S0 | Schema defaults; migration from `{}`, from `undefined`, from a v0 blob; monotonic merge | Save → reload → state survives; host↔client shape agreement |
-| S1 | Objective evaluators for all five kinds; prerequisite gating; latching; reward application | Full Act 1 run against a mock inventory |
-| S2 | `QUEST_SYNC` serialization; `QUEST_UPDATE` validation rejects garbage | 2-client session: A completes, B sees it; B joins late and gets full state; B rejoins after disconnect |
-| S3 | Damage/armour arithmetic; death at 0; respawn position from `spawnPoints` | Mob attack → health drops → death → respawn |
-| S4 | `sealSites` determinism (same seed → same sites) and biome matching; spiral cap terminates; site frozen across recompute | Generate a world, assert 5 altars exist at the recorded sites |
-| S5 | **Every boss constructs with all timers initialised and dies when damaged past every phase threshold** (the deleted `Boss.js`'s exact defect); `BOSS_HIT` validation rejects out-of-arena, over-damage, over-rate | 4-client encounter: all four deal damage, HP agrees within one tick, all four get loot, `brokenBy` has four entries |
-| S6 | Per-boss phase tables | Each seal reachable and completable |
-| S7 | 5-broken detection; finale gating | Full run |
+| S0 | Schema defaults; migration from `{}`, `undefined`, a v0 blob; pooled accumulate; high-water credit never decreases; `character.id` present on the wire | Save → reload → survives; host↔client shape agreement |
+| S1 | Objective evaluators, all five kinds; prerequisite gating; reward application | Full Act 1 run against a mock inventory |
+| S2 | `QUEST_SYNC` serialization; `QUEST_CONTRIBUTE` rejects `delta ≤ 0`, oversized deltas, spoofed contributor ids | **4 clients each contribute a share of one objective; pool reaches target exactly once; a client disconnects mid-objective and its contribution is retained; it rejoins and is not double-credited** |
+| S3 | Damage/armour arithmetic; death at 0; respawn from `spawnPoints` | Mob attack → health drops → death → respawn |
+| S4 | **`BiomeSystem.selectBiome` and `workerGeneration.selectBiome` return the same biome for a swept grid of `(cont, eros, temp, hum, blight, scorch)` — the §2.4 duplication guard**; `BIOME_IDS` contains `corrupt` and `lava`; `mobBiomes.test.js` passes with the mobs restored; **hazard ids are `lava`=47, `toxic_slime`=188 read from `BLOCK_TYPES`, not literals (the exact D-64 defect that shipped in the deleted `DamageSystem`)**; a v1 world generates byte-identical chunks to today | Enter lava → health drops → death; leave → damage stops |
+| S5 | `sealSites` determinism (same seed → same sites); **seed sweep: every seal finds its biome inside `siteRing` for ≥95% of seeds, and the fallback fires cleanly for the rest**; spiral cap terminates; site frozen across recompute | Generate a world, assert five altars exist at the recorded sites |
+| S6 | **Every boss constructs with all timers initialised and dies when damaged past every phase threshold** (the deleted `Boss.js`'s exact defect); `BOSS_HIT` rejects out-of-arena, over-damage, over-rate | 4-client encounter: all four deal damage, HP agrees within one tick, **all four receive loot**, `brokenBy` has four entries |
+| S7 | Per-boss phase tables | Each seal reachable and completable |
+| S8 | Five-broken detection; finale gating | Full run |
 
-Two assertions worth naming specifically, because they guard the failures this codebase has
-already had:
+Two assertions worth naming, because they guard failures this codebase has already had:
 
 - **`test/unit/multiplayer/protocol.test.js`** must keep passing — every new message type is
   a `MESSAGE_TYPES` key before it is a string anywhere.
@@ -692,37 +788,31 @@ already had:
 
 ## 12. Open questions
 
-Answers to Q1–Q3 change the shape of the work, not just its details.
-
-**Q1 — Corrupt and Lava biomes: structures or real biomes?**
-The plan assumes **structures** (§3): five seals mapped onto biomes that already generate,
-with localised corruption zones stamped around each altar. Real biomes are more faithful to
-`questStoryline.md` but change terrain generation, seam existing worlds, and add a stage.
-
-**Q2 — Shared objectives: does one player's work count for everyone?**
-The plan assumes **"any player completing an objective completes it for the party"** —
-monotonic, matches the existing host validator, no conflict resolution. The alternative is
-**pooled contributions** ("the party collectively needs 20 obsidian"), which is a better
-co-op feel but needs a per-player ledger in a state budget of 8 KB and regresses when someone
-drops items or leaves.
+Q1 (biomes), Q2 (pooled objectives) and Q6 (28 quests) are **resolved** — see §3.1, §4.5,
+§3.4. What remains:
 
 **Q3 — Should a guest keep anything?**
 The plan assumes **no**: a guest's view of the host's quest state is discarded on disconnect
-(§5.2). Titles could reasonably be character-scoped and permanent instead — that would be a
-small addition to `CharacterManager` and would mean a guest who helps kill the Forest Warden
-keeps "Warden Slayer" forever.
+(§5.2). Their *contributions* persist in the host's world, but they carry nothing home.
+Titles could reasonably be character-scoped and permanent instead — a small addition to
+`CharacterManager`, and a guest who helps kill the Forest Warden keeps "Warden Slayer".
 
 **Q4 — Are seal arenas protected?**
-Can a player mine the altar, or wall the boss in, or dig out the arena floor? A protected
-volume is a new concept for `BlockInteraction` and the host's block validator. Cheapest
-answer is "unprotected, and the encounter resets if the boss falls out of the arena".
+Can a player mine the altar, wall the boss in, or dig out the arena floor? A protected volume
+is a new concept for `BlockInteraction` and the host's block validator. Cheapest answer:
+unprotected, and the encounter resets if the boss leaves the arena.
 
 **Q5 — Difficulty, and what a wipe costs.**
 The plan assumes a wipe resets the boss to full and costs nothing but time. Boss HP scaling
-by player count (2× for 4 players?) is unspecified. Neither is answerable without §2.2
-landing first, so this can wait until S3.
+by player count (2× for four players?) is unspecified. Not answerable until S3 lands.
 
-**Q6 — The 28th quest.**
-Five seals need a fifth act. Does the storyline get extended (three new quests for the Sunken
-and Deepstone seals), or do the two new seals get folded into the existing 25 as optional
-side content?
+**Q7 — How punishing should the new biomes be?**
+Lava contact should plainly kill. But: does Corrupt apply a lingering poison that follows you
+out of the biome? Is there any protection (armour, a potion, a blessed item), or is
+avoidance the only counter? This decides whether Corrupt is a place you *fight through* or a
+place you *route around*, and it is a S4 decision, not a S6 one.
+
+**Q8 — Should existing worlds be offered the biome upgrade?**
+§3.1 gates the new biomes behind `worldgenVersion`, so existing saves are untouched. Offering
+an opt-in upgrade means a "this will seam your terrain" confirmation in the world screen.
+The alternative — new worlds only, no upgrade path — is simpler and needs no UI.
