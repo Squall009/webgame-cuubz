@@ -16,7 +16,7 @@ networked at all, and the player has no health. This plan is honest about that: 
 faked with structures, and they carry environmental damage — the world currently has no
 hazardous biome at all and that is the point of adding them (§3, S4). Objectives are
 **pooled**: every player's work counts toward one party-wide total (§4.5). The storyline
-extends to **28 quests** across seven acts (§3.4). Branch is `feat/quest-system`.
+extends to **28 quests** across seven acts (§3.6). Branch is `feat/quest-system`.
 
 ---
 
@@ -34,6 +34,7 @@ Verified against the tree at `ea8b2db`.
 | `corrupt_crystal` item | `src/game/data/ItemDefinitions.js:106` (`maxStack: 1`) | Defined, never obtainable |
 | Quest block ids | `src/engine/world/BlockRegistry.js:466-469` — `TOXIC_SLIME`(188), `CORRUPT_CRYSTAL`(189), `APPLE`, `QUEST_KEY` | Defined, never placed by worldgen |
 | Lava-biome blocks | `netherrack`(147), `basalt`(148), `soul_sand`(150), `soul_soil`(151), `magma`(155, emissive), `blackstone`, `crying_obsidian`, `lava`(47), `soul_lantern`(174) | **All present.** No new blocks needed for Lava. |
+| **Corrupt-biome textures** | `textures/blocks/` — `sculk`, `sculk_vein`, `sculk_catalyst_*`, `warped_nylium` + `_side`, `crimson_nylium` + `_side`, `warped_wart_block`, `twisting_vines`, `weeping_vines`, `pale_moss_block`, `mycelium_top`/`_side`, `shroomlight` | **All present. Zero new art needed** — §3.4 |
 | Single-stack rules | `src/game/systems/InventoryItemTypes.js:57`, `src/multiplayer/InventorySync.js:78` | Correct and consistent |
 | Creative palette | `src/core/BlockPalette.js:48-50` | Works |
 | `QUEST_UPDATE` wire type | `shared/protocol.js` | Defined |
@@ -149,7 +150,7 @@ checks, and no test failure. Add a test that asserts the two tables agree (see S
 | 5 dungeons × `1 quest_key` | `quest_key` is `maxStack: 1`. Two seal keys cannot be carried. Needs five distinct key items (§4.3). |
 | `boss_kill` requirement | No such concept. New objective kind (§4.2). |
 | Titles | No title system anywhere (§4.4). |
-| Corrupt ground blocks | Lava has every block it needs; **Corrupt does not**. Needs blighted grass/dirt/stone variants — new blocks + textures, or reuse `soul_soil`/`moss_block`/`deepslate`. See S4. |
+| Corrupt ground blocks | Lava has every block it needs; Corrupt needs three new **registry entries** — but **no new textures**, see §3.4. |
 
 ---
 
@@ -205,22 +206,89 @@ Both masks are new Perlin channels seeded off the world seed, added to the param
 
 | | Corrupt | Lava |
 |---|---|---|
-| Surface | blighted grass / `soul_soil` | `netherrack`, `basalt` |
-| Subsurface | `deepslate`, blighted stone | `netherrack`, `blackstone` |
+| Surface | `corrupt_grass` *(new id)* scattered through ordinary grass/dirt | `netherrack`, `basalt` |
+| Subsurface | `corrupt_stone` *(new id)*, `deepslate` | `netherrack`, `blackstone` |
 | Fluid | `toxic_slime` pools | `lava` lakes (id 47) |
-| Decoration | `corrupt_crystal` clusters, dead trees | `magma` (emissive), `crying_obsidian`, `soul_lantern` |
+| Decoration | `corrupt_crystal` clusters, `corrupt_vein` *(new id)*, dead trees | `magma` (emissive), `crying_obsidian`, `soul_lantern` |
 | Fog / sky | **already defined** — `BiomeEffects.js:55` | **already defined** — `BiomeEffects.js:54` |
 | Mobs | **`corrupt_wolf`, `corrupt_wisp` already written** — restore `biomes: ['corrupt']` | new, or reuse hostiles |
 | Trees / flowers | none — needs a `BIOME_FEATURES` row (`workerGeneration.js:187-196`) | none — same |
-| Hazard | `toxic_slime` contact → poison DoT | `lava` contact → heavy DoT; `magma` → light DoT on stand |
+| Hazard | standing on a corrupt block → **very slow** health drain, stops on step-off | `lava` → heavy DoT; `magma` → light DoT on stand |
 
-**Lava needs no new blocks.** Corrupt needs blighted grass/dirt/stone variants — either
-three new `BlockRegistry` entries with textures, or reuse `soul_soil` + `moss_block` +
-`deepslate` and accept a less distinct look. Recommend three new blocks; the texture
-pipeline (`scripts/generate-item-textures.js`, `npm run generate-manifest`) already exists
-and `textures/blocks/` is the established home.
+### 3.4 Textures — nothing new needs drawing
 
-### 3.4 Decision D-Q6 — 28 quests, seven acts (RESOLVED)
+**Checked `textures/blocks/` (898 base diffuse PNGs). Every texture the Corrupt biome needs
+is already there**, unreferenced by `BlockRegistry` and therefore currently unused:
+
+| New block | id | Texture (existing PNG) | Notes |
+|---|---|---|---|
+| `corrupt_grass` | 193 | `side: 'warped_nylium', top: 'warped_nylium_side', bottom: 'dirt'` | Nylium already ships the grass-block-style top/side split |
+| `corrupt_stone` | 194 | `all: 'sculk'` | Dark, veined, reads as infected stone |
+| `corrupt_vein` | 195 | `all: 'sculk_vein'` | `cutout` overlay decoration, hardness 0 |
+
+Ids **193–195 are free** — the registry currently tops out at 192
+(`yellow_poplar_leaves`).
+
+Also available and unused if the biome wants more character later: `sculk_catalyst_*`
+(including `_bloom` variants — a natural corrupt-altar block), `sculk_shrieker_*`,
+`sculk_sensor_*`, `crimson_nylium`, `warped_wart_block`, `nether_wart_block`,
+`twisting_vines`, `weeping_vines`, `warped_roots`, `crimson_roots`, `pale_moss_block`,
+`pale_hanging_moss`, `mycelium_top`/`_side`, `shroomlight`, and the whole `dead_*_coral`
+family.
+
+**One required step, easy to forget:** `textures/blocks/manifest.json` is *generated* —
+`scripts/generate-manifest.js` cross-references the PNGs on disk against `BLOCK_REGISTRY`
+and emits only what the registry actually references. `sculk` and `sculk_vein` are on disk
+but **not in the manifest today**, precisely because nothing references them. Adding the
+three blocks means running `npm run generate-manifest`, and the atlas will not contain the
+new textures until that runs. `test/unit/meta/textureCoverage.test.js` is where a miss shows
+up.
+
+### 3.5 The hazard model — slow, local, and not everywhere
+
+Three properties, all deliberate:
+
+**1. Corruption is scattered, not total.** The Corrupt biome *raises the probability* that a
+given surface block is corrupted; it does not replace the biome wholesale. Target roughly
+**25–40% of surface blocks** corrupted, driven by a high-frequency noise channel so the
+corruption comes in organic patches rather than salt-and-pepper. Ordinary grass, dirt and
+stone still generate throughout. This is what makes the biome traversable: there is always a
+route through, and finding it is the gameplay.
+
+**2. The drain is very slow.** Standing on a corrupt block costs on the order of **0.5 HP
+every 2 seconds** — call it 1 HP per 4 s, tunable from one constant. Crossing a patch costs
+a sliver of health. Standing in the middle of one and mining for a minute is a real problem.
+Lava, by contrast, should kill in a couple of seconds; the two hazards are not on the same
+scale and should not feel like it.
+
+**3. It does not follow you.** No lingering debuff, no poison timer, no effect that
+survives leaving the block. The check is *"is the block I am standing on corrupt, right
+now"* — evaluated per tick against the player's supporting block, and the moment the answer
+is no, the drain stops. Nothing to cure, nothing to wait out, nothing to carry home.
+
+This makes `HazardSystem` genuinely simple: a per-tick lookup of the block under the player,
+a table of `blockId → damage-per-second`, and an accumulator. **No status-effect system, no
+timers, no per-player debuff state to serialize or sync.** That is worth protecting — the
+moment a hazard lingers, it becomes player state that has to survive death, disconnect and
+rejoin, and it stops being a one-table system.
+
+```js
+// src/game/systems/HazardSystem.js — the whole idea
+const HAZARD_DPS = {
+  [BLOCK_TYPES.LAVA]:           8.0,   // lethal in ~2.5 s from full
+  [BLOCK_TYPES.MAGMA]:          1.0,   // unpleasant underfoot
+  [BLOCK_TYPES.CORRUPT_GRASS]:  0.25,  // ~1 HP per 4 s
+  [BLOCK_TYPES.CORRUPT_STONE]:  0.25,
+  [BLOCK_TYPES.TOXIC_SLIME]:    1.5,
+};
+```
+
+**Read the ids from `BLOCK_TYPES`, never as literals.** The deleted `DamageSystem.js`
+hard-coded `LAVA_ID = 15` and `TOXIC_SLIME_ID = 17` against a registry where lava is 47 and
+toxic slime 188 — and its test asserted the wrong mapping, so it passed (D-64,
+`src/index.js:71-73`). That is the single most likely way to reintroduce a shipped bug here.
+
+### 3.6 Decision D-Q6 — 28 quests, seven acts (RESOLVED)
 
 Acts 1–4 keep `questStoryline.md`'s existing 21 quests **unchanged and un-renumbered**.
 Seven quests are added or restructured.
@@ -246,7 +314,7 @@ asks for. The old Q22 "The Final Corruption" folds into Q27.
 quests in five acts. Extending it is a documentation task that should land with S1, and it
 is not done in this plan. Seven quest entries, in the existing format.
 
-### 3.5 The five seals
+### 3.7 The five seals
 
 | # | Seal | Biome | Boss | Key item |
 |---|---|---|---|---|
@@ -704,7 +772,8 @@ told; they do not roll. Same rule as everything else: one authority.
 |---|---|
 | **`src/engine/world/BiomeSystem.js:18-97, 126-161`** | **`CORRUPT` + `LAVA` in `BIOME_DEFS`; blight/scorch mask override in `selectBiome`** |
 | **`src/engine/world/workerGeneration.js:71-160, 187-197, 462-463, 473-500`** | **The same two biomes, the same override, in the duplicated classic-script copy (§2.4); `BIOME_FEATURES` rows; two new noise channels; terrain/decoration passes; altar + arena stamping** |
-| `src/engine/world/BlockRegistry.js` | 3 blighted Corrupt blocks (Lava needs none) |
+| `src/engine/world/BlockRegistry.js` | 3 Corrupt blocks at free ids **193–195**, all pointing at existing textures (§3.4). Lava needs none. |
+| `textures/blocks/manifest.json` | **Regenerate** — `npm run generate-manifest`. Nothing is drawn; the new blocks' textures are on disk but unreferenced today, so they are absent from the manifest and the atlas until this runs. |
 | `src/engine/renderer/BiomeEffects.js:54-55` | **Nothing** — `lava` and `corrupt` configs already exist |
 | `src/game/mobs/mobDefinitions.js:211, 376` | Restore `biomes: ['corrupt']` on `corrupt_wolf` / `corrupt_wisp` (reverts D-68's workaround) |
 | `src/game/mobs/mobDefinitions.js:14-17` | `MOB_CATEGORIES.BOSS` |
@@ -727,8 +796,8 @@ told; they do not roll. Same rule as everything else: one authority.
 | `src/game/systems/InventoryItemTypes.js:56-57`, `src/multiplayer/InventorySync.js:78` | Single-stack for the new keys |
 | `src/ui/templates/hud.js:78-84` | Un-hide `#quest-tracker`; add boss bar markup |
 | `src/ui/css/index.css:45` | Two `@import`s — **order is load-bearing (D-52)** |
-| `textures/blocks/`, `textures/items/` | 3 Corrupt blocks; 5 key icons; `quest_key` (**missing today**) |
-| `questStoryline.md` | **Narrative for Q22–Q28** (§3.4) — not written yet |
+| `textures/items/` | 5 `seal_key_*` icons; `quest_key` (**missing today** — the block uses an `iron_bars` placeholder, but the *item* has no icon). **`textures/blocks/` needs nothing new.** |
+| `questStoryline.md` | **Done** — Q22–Q28 written, act table, seal summary, title progression and hazard section updated |
 
 ---
 
@@ -744,7 +813,7 @@ optional.
 | **S1** | **Quests, single-player.** Definitions (Act 1, 6 quests), `QuestSystem`, `QuestTracker` polling, HUD tracker, quest log. `COLLECT`/`CRAFT`/`EXPLORE`. Narrative for Q22–Q28 into `questStoryline.md`. | S0 | — |
 | **S2** | **Quest sync.** `QUEST_SYNC` on join, `QUEST_CONTRIBUTE`, pooled totals across 4 players, rejoin, guest-view semantics. | S0, S1 | §2.1 |
 | **S3** | **Player health.** `PlayerVitals`, damage, armour, death, respawn, `#health-meter` writer, `onMobAttack` wired. | — *(parallel with S1/S2)* | §2.2 |
-| **S4** | **Corrupt + Lava biomes, and environmental danger.** Both `selectBiome` copies, blight/scorch masks, `worldgenVersion` gating, terrain/decoration passes, `BIOME_FEATURES` rows, 3 Corrupt blocks, restore the two corrupt mobs, `HazardSystem` (lava / magma / toxic-slime DoT). | S3 | §2.4, §2.5, and the "no dangerous biome" gap |
+| **S4** | **Corrupt + Lava biomes, and environmental danger.** Both `selectBiome` copies, blight/scorch masks, `worldgenVersion` gating, terrain/decoration passes, `BIOME_FEATURES` rows, 3 Corrupt blocks at ids 193–195 + manifest regen, scattered-corruption density pass (§3.5), restore the two corrupt mobs, `HazardSystem` (§3.5 — no lingering effects). | S3 | §2.4, §2.5, and the "no dangerous biome" gap |
 | **S5** | **Seal sites + altars.** `SealSites` with the biome-reachability sweep, worldgen structures, `SealSystem` to `primed`, 5 key items + icons, world markers. | S1, S4 | — |
 | **S6** | **First boss, end to end.** `BossEntity`, `BossEncounter`, `BossSync`, boss bar, host authority. Forest Warden: melee + charge + summon + hazard pool. Single-player and 4-player both. | S2, S3, S5 | §2.3 |
 | **S7** | **Four more seal bosses.** Lava Titan, Frost Serpent, Dune Colossus, Hollow King. Projectiles if S6 proved the shape. | S6 | — |
@@ -771,7 +840,7 @@ screenshots.
 | S1 | Objective evaluators, all five kinds; prerequisite gating; reward application | Full Act 1 run against a mock inventory |
 | S2 | `QUEST_SYNC` serialization; `QUEST_CONTRIBUTE` rejects `delta ≤ 0`, oversized deltas, spoofed contributor ids | **4 clients each contribute a share of one objective; pool reaches target exactly once; a client disconnects mid-objective and its contribution is retained; it rejoins and is not double-credited** |
 | S3 | Damage/armour arithmetic; death at 0; respawn from `spawnPoints` | Mob attack → health drops → death → respawn |
-| S4 | **`BiomeSystem.selectBiome` and `workerGeneration.selectBiome` return the same biome for a swept grid of `(cont, eros, temp, hum, blight, scorch)` — the §2.4 duplication guard**; `BIOME_IDS` contains `corrupt` and `lava`; `mobBiomes.test.js` passes with the mobs restored; **hazard ids are `lava`=47, `toxic_slime`=188 read from `BLOCK_TYPES`, not literals (the exact D-64 defect that shipped in the deleted `DamageSystem`)**; a v1 world generates byte-identical chunks to today | Enter lava → health drops → death; leave → damage stops |
+| S4 | **`BiomeSystem.selectBiome` and `workerGeneration.selectBiome` return the same biome for a swept grid of `(cont, eros, temp, hum, blight, scorch)` — the §2.4 duplication guard**; `BIOME_IDS` contains `corrupt` and `lava`; `mobBiomes.test.js` passes with the mobs restored; **hazard ids read from `BLOCK_TYPES`, never literals (the exact D-64 defect that shipped in the deleted `DamageSystem`)**; **corrupted surface fraction in a Corrupt chunk lands in 25–40%, i.e. neither 0% nor 100%**; `textureCoverage.test.js` passes after manifest regen; a v1 world generates byte-identical chunks to today | Enter lava → health drops → death. **Stand on corrupt → slow drain; step off → drain stops in the same tick and no damage is dealt thereafter** (the no-lingering guarantee, asserted directly). Walk a straight line across a Corrupt chunk and survive it. |
 | S5 | `sealSites` determinism (same seed → same sites); **seed sweep: every seal finds its biome inside `siteRing` for ≥95% of seeds, and the fallback fires cleanly for the rest**; spiral cap terminates; site frozen across recompute | Generate a world, assert five altars exist at the recorded sites |
 | S6 | **Every boss constructs with all timers initialised and dies when damaged past every phase threshold** (the deleted `Boss.js`'s exact defect); `BOSS_HIT` rejects out-of-arena, over-damage, over-rate | 4-client encounter: all four deal damage, HP agrees within one tick, **all four receive loot**, `brokenBy` has four entries |
 | S7 | Per-boss phase tables | Each seal reachable and completable |
@@ -788,8 +857,8 @@ Two assertions worth naming, because they guard failures this codebase has alrea
 
 ## 12. Open questions
 
-Q1 (biomes), Q2 (pooled objectives) and Q6 (28 quests) are **resolved** — see §3.1, §4.5,
-§3.4. What remains:
+Q1 (biomes), Q2 (pooled objectives), Q6 (28 quests) and Q7 (hazard model) are **resolved** —
+see §3.1, §4.5, §3.6 and §3.5. What remains:
 
 **Q3 — Should a guest keep anything?**
 The plan assumes **no**: a guest's view of the host's quest state is discarded on disconnect
@@ -805,12 +874,6 @@ unprotected, and the encounter resets if the boss leaves the arena.
 **Q5 — Difficulty, and what a wipe costs.**
 The plan assumes a wipe resets the boss to full and costs nothing but time. Boss HP scaling
 by player count (2× for four players?) is unspecified. Not answerable until S3 lands.
-
-**Q7 — How punishing should the new biomes be?**
-Lava contact should plainly kill. But: does Corrupt apply a lingering poison that follows you
-out of the biome? Is there any protection (armour, a potion, a blessed item), or is
-avoidance the only counter? This decides whether Corrupt is a place you *fight through* or a
-place you *route around*, and it is a S4 decision, not a S6 one.
 
 **Q8 — Should existing worlds be offered the biome upgrade?**
 §3.1 gates the new biomes behind `worldgenVersion`, so existing saves are untouched. Offering

@@ -1,6 +1,8 @@
-# Cuubz — 25-Quest Storyline Design Document
+# Cuubz — 28-Quest Storyline Design Document
 
-> **Theme:** The world of Cuubz was once protected by five ancient elemental seals. The seals are failing, and corruption is spreading from a dark source deep beneath the world. As the last Seal Bearer, you must restore balance by defeating corrupted guardians across four dungeons and ultimately sealing the corruption forever.
+> **Theme:** The world of Cuubz was once protected by five ancient elemental seals. The seals are failing, and corruption is spreading from a dark source deep beneath the world. As the last Seal Bearer, you must break the corruption's hold on all five seals and then confront the source itself.
+
+> **Engineering companion: `quest_implementation.md`.** That document owns the *how* — state schema, multiplayer authority, worldgen, staging, and the nine build stages. This one owns the *what*. Where the two disagree, the implementation plan is newer.
 
 ## World Lore Summary
 
@@ -8,13 +10,17 @@ Long ago, the Five Seals were placed at key points in the world to keep an ancie
 
 ## Act Structure
 
-| Act | Quests | Theme | Dungeon/Boss | Biomes Explored |
-|-----|--------|-------|-------------|-----------------|
-| **Act 1: Awakening** | Q01–Q06 | Survival & Preparation | None | Plains, Forest, Mountains |
-| **Act 2: The First Seal** | Q07–Q12 | Discovery & Corruption | Forest Warden | Corrupt, Mountains |
-| **Act 3: Fire and Ash** | Q13–Q17 | Descent into Danger | Lava Titan | Lava |
-| **Act 4: Frozen Truth** | Q18–Q21 | Revelation & Resolve | Frost Serpent | Tundra |
-| **Act 5: The Final Seal** | Q22–Q25 | Confrontation & Resolution | Corruption Overlord + Final Seal | Corrupt (deep) |
+| Act | Quests | Theme | Seal | Boss | Biomes Explored |
+|-----|--------|-------|------|------|-----------------|
+| **Act 1: Awakening** | Q01–Q06 | Survival & Preparation | — | — | Plains, Forest, Mountains |
+| **Act 2: The First Seal** | Q07–Q12 | Discovery & Corruption | Verdant | Forest Warden | Corrupt, Mountains |
+| **Act 3: Fire and Ash** | Q13–Q17 | Descent into Danger | Ember | Lava Titan | Lava |
+| **Act 4: Frozen Truth** | Q18–Q21 | Revelation & Resolve | Frozen | Frost Serpent | Tundra |
+| **Act 5: Sea of Sand** | Q22–Q24 | Endurance & Patience | Sunken | Dune Colossus | Desert |
+| **Act 6: The Hollow Depths** | Q25–Q26 | Isolation & Descent | Deepstone | Hollow King | Mountains (below Y 30) |
+| **Act 7: The World Remade** | Q27–Q28 | Confrontation & Resolution | The Final Seal | Corruption Overlord *(3 phases)* | Corrupt (deep) |
+
+**Five seals, five guardians, one source.** Acts 5 and 6 are newer than Acts 1–4 and were added when the seal count was fixed at five; Act 7 merges what were previously two separate finale fights into one three-phase confrontation, so that "all five broken" has exactly one thing waiting behind it.
 
 ---
 
@@ -109,7 +115,7 @@ Long ago, the Five Seals were placed at key points in the world to keep an ancie
 - **Type:** BOSS | **Stage:** 12 | **Boss:** forest_warden
 - **Requirements:** 1 boss_kill
 - **Reward:** Unlock Q13 + TITLE ("Warden Slayer")
-- **Narrative:** The Forest Warden awakens — a massive creature of corrupted roots and thorns, once the guardian of the First Seal. It attacks with sweeping vine lashes and spores of poison. Defeat it to cleanse the first seal. *"The corruption retreats from this land. But three more seals await."*
+- **Narrative:** The Forest Warden awakens — a massive creature of corrupted roots and thorns, once the guardian of the First Seal. It attacks with sweeping vine lashes and spores of poison. Defeat it to cleanse the first seal. *"The corruption retreats from this land. But four more seals await."*
 - **Boss Mechanics:** Vine lash (melee), poison spores (AoE DoT), root entangle (stun)
 - **Marker Location:** Corrupt biome (dungeon center)
 
@@ -151,7 +157,7 @@ Long ago, the Five Seals were placed at key points in the world to keep an ancie
 - **Type:** BOSS | **Stage:** 17 | **Boss:** lava_titan
 - **Requirements:** 1 boss_kill
 - **Reward:** Unlock Q18 + TITLE ("Titan Bane")
-- **Narrative:** The ground cracks open and the Lava Titan erupts — a towering being of molten rock. It smashes the terrain, creates lava pools that spread fire across the battlefield, and fires streams of molten debris. *"The Second Seal is cleansed. Two remain."*
+- **Narrative:** The ground cracks open and the Lava Titan erupts — a towering being of molten rock. It smashes the terrain, creates lava pools that spread fire across the battlefield, and fires streams of molten debris. *"The second seal is broken. Three remain."*
 - **Boss Mechanics:** Ground slam (AoE), lava pool creation (environmental damage), magma projectile (ranged)
 - **Marker Location:** Lava biome (dungeon center)
 
@@ -186,69 +192,118 @@ Long ago, the Five Seals were placed at key points in the world to keep an ancie
 - **Type:** BOSS | **Stage:** 21 | **Boss:** frost_serpent
 - **Requirements:** 1 boss_kill
 - **Reward:** Unlock Q22 + TITLE ("Serpent Slayer")
-- **Narrative:** The glacier cracks as the Frost Serpent uncoils — a massive serpent of living ice, its scales sharp as blades. It breathes freezing mist that slows movement, strikes with its body like a whip, and creates ice walls to block your path. *"Three seals restored. The final corruption approaches."*
+- **Narrative:** The glacier cracks as the Frost Serpent uncoils — a massive serpent of living ice, its scales sharp as blades. It breathes freezing mist that slows movement, strikes with its body like a whip, and creates ice walls to block your path. *"Three broken. Two remain — and the voice has begun to sound eager."*
 - **Boss Mechanics:** Ice breath (slows movement), tail swipe (melee), ice wall creation (blocks line of sight)
 - **Marker Location:** Tundra biome (dungeon center)
 
 ---
 
-## Act 5: The Final Seal — Corruption Overlord + Final Seal (Quests 22–25)
+## Act 5: Sea of Sand — Dune Colossus (Quests 22–24)
 
-> *Three seals are restored. But the source of all corruption remains — a dark entity that has consumed everything in its path. The final dungeon lies at the heart of the corrupt zone, where the Corruption Overlord awaits.*
+> *Three seals broken. The voice grows fainter, and for the first time it sounds uncertain. The fourth seal was never guarded by a spirit at all — it was buried, deliberately, under an ocean of sand, by people who hoped it would simply be forgotten.*
 
-### Quest 22: "The Final Corruption"
+### Quest 22: "Sea of Sand"
 - **Type:** EXPLORE | **Stage:** 22
-- **Requirements:** 10 corrupt_crystal
+- **Requirements:** 15 sandstone
 - **Reward:** Unlock Q23
-- **Narrative:** The deepest part of the corrupt zone is a nightmare landscape — twisted reality, toxic pools everywhere, and a dark spire that pulses with malevolent energy. *"The Corruption Overlord sits at the center of all darkness. Gather crystals to weaken its shield."* Each crystal you collect chips away at the barrier protecting the final enemy.
-- **Marker Location:** Corrupt biome (deep zone)
+- **Narrative:** The desert does not announce itself. One morning the grass thins, the trees stop, and by afternoon there is nothing in any direction but heat and dunes. Somewhere beneath them is the Sunken Seal. *"They did not set a guardian here. They set a grave, and hoped the sand would keep it."* Cut into the sandstone shelves that break the dunes — the ruins of whoever did the burying are still down there.
+- **Marker Location:** Desert biome
 
-### Quest 23: "Keys of Power"
+### Quest 23: "The Sunken Key"
 - **Type:** COLLECT | **Stage:** 23
-- **Requirements:** 1 quest_key, 10 diamond
-- **Reward:** Unlock Q24 + TITLE ("Seal Master")
-- **Narrative:** The final key — forged from pure light, it's the only thing that can pierce the Corruption Overlord's defenses. Accompany it with diamonds, the rarest and strongest material in the world. *"With these, you will have what you need to face the source of all corruption."*
-- **Marker Location:** Corrupt biome (final zone)
+- **Requirements:** 1 seal_key_sunken
+- **Reward:** Unlock Q24 + TITLE ("Sandborn")
+- **Narrative:** The buried hall is intact — sandstone pillars, a floor swept clean by nothing, and at the far end a key of pale stone resting where someone left it in a hurry. It is warm, and the warmth has nothing to do with the desert. *"The ones who buried this seal did not lock it. They could not. They only hid it, and hoped."*
+- **Marker Location:** Desert biome (buried hall)
 
-### Quest 24: "The Corruption Overlord" ⚔️ BOSS
-- **Type:** BOSS | **Stage:** 24 | **Boss:** corruption_overlord
+### Quest 24: "The Dune Colossus" ⚔️ BOSS
+- **Type:** BOSS | **Stage:** 24 | **Boss:** dune_colossus
 - **Requirements:** 1 boss_kill
-- **Reward:** Unlock Q25
-- **Narrative:** The Corruption Overlord rises — a swirling mass of dark energy, corrupt crystals, and twisted matter. It summons minions from the corruption itself, creates shields of dark energy, and fires beams of pure corruption. *"The Overlord falls! But its death reveals something worse..."* As the Overlord dissolves, the true source of corruption is revealed — the Final Seal itself, corrupted beyond recognition.
-- **Boss Mechanics:** Summon minions (adds enemies), crystal shield (damage reduction), corruption beam (ranged), dark nova (AoE)
-- **Marker Location:** Corrupt biome (spire base)
+- **Reward:** Unlock Q25 + TITLE ("Colossus Breaker")
+- **Narrative:** The floor of the hall is not a floor. It stands, and the ceiling goes with it — a figure of compacted sandstone and swallowed ruin, wearing the buried hall like armour. This one was never a guardian corrupted. It is what the corruption made *out of* the grave they dug. It fights patiently, the way a desert does. *"Four seals broken. One left, and then the thing that broke them."*
+- **Boss Mechanics:** Stone fist slam (heavy melee), sand shroud (obscures vision, slows), burrow and surface (repositions underground, unavoidable AoE on emergence)
+- **Marker Location:** Desert biome (buried hall, centre)
 
-### Quest 25: "The World Remade" ⚔️ FINAL BOSS
-- **Type:** BOSS | **Stage:** 25 | **Boss:** final_seal
+---
+
+## Act 6: The Hollow Depths — Hollow King (Quests 25–26)
+
+> *Four broken. The fifth seal is not hidden and not buried — it is simply deep, in the oldest stone in the world, and everything that ever went down to guard it is still there.*
+
+### Quest 25: "The Hollow Depths"
+- **Type:** COLLECT | **Stage:** 25
+- **Requirements:** 20 deepslate, 1 seal_key_deepstone
+- **Reward:** Unlock Q26 + TITLE ("Deepwalker")
+- **Narrative:** Below thirty, the stone changes. It goes dark and dense and old, and the caves stop feeling like caves and start feeling like rooms. The Deepstone Seal is down here, and so is its key, and so is everything that has been walking these halls since long before you woke up. *"The guardians of the fifth seal did not fall to the corruption. They stayed, and they hollowed, and they kept walking."* Bring back deepslate — you will need to shore up what you break through.
+- **Marker Location:** Mountains biome, below Y 30
+
+### Quest 26: "The Hollow King" ⚔️ BOSS
+- **Type:** BOSS | **Stage:** 26 | **Boss:** hollow_king
+- **Requirements:** 1 boss_kill
+- **Reward:** Unlock Q27 + TITLE ("Kingsbane")
+- **Narrative:** The deepest hall opens and the Hollow King is already standing, and has been for a very long time. It is a stone golem the way a mountain is a rock. It does not roar. It calls, once, and every golem in the depths turns toward the sound and starts walking. *"The fifth seal is broken. The Final Seal has nothing left holding it shut."*
+- **Boss Mechanics:** Echo call (summons stone golems from the surrounding depths), tremor (radial ground AoE, telegraphed by dust), collapsing reach (long-range grab and slam)
+- **Marker Location:** Mountains biome, deepest hall
+
+---
+
+## Act 7: The World Remade — Corruption Overlord (Quests 27–28)
+
+> *All five seals are broken and the world has not been saved by it. Every seal you opened let a little more of the thing beneath through, and now the spire in the deep corruption — the one that has been standing there since the day you woke up, that you have walked past five times — is open.*
+
+### Quest 27: "Keys of Power"
+- **Type:** COLLECT | **Stage:** 27
+- **Requirements:** 10 corrupt_crystal, 10 diamond
+- **Reward:** Unlock Q28 + TITLE ("Seal Master")
+- **Narrative:** The deepest corruption is a nightmare of twisted ground and toxic pools, and at the centre of it the spire finally answers to something. Crystals to pierce its shield; diamond because nothing softer survives contact with what is inside. *"You were never restoring the seals. You were opening them. It needed all five, and it needed someone who would not stop."* The voice does not apologise. It has not been the same voice for some time.
+- **Marker Location:** Corrupt biome (deep zone, spire base)
+
+### Quest 28: "The World Remade" ⚔️ FINAL BOSS
+- **Type:** BOSS | **Stage:** 28 | **Boss:** corruption_overlord
 - **Requirements:** 1 boss_kill
 - **Reward:** TITLE ("World Saver") + GAME COMPLETE
-- **Narrative:** The Final Seal — once the source of all elemental power — has been completely consumed by corruption. It transforms through three phases: first as a corrupted guardian (elemental attacks), then as pure darkness (summoning and AoE), and finally in its true form — a being of raw creation and destruction combined. Defeat it to restore balance to the world. *"The seals are restored. The world is saved. You are the Seal Bearer who remade Cuubz."*
-- **Phase 1:** Elemental guardian — attacks with fire, ice, and poison (echoes of previous bosses)
-- **Phase 2:** Pure darkness — summons minions, creates AoE zones, shields
-- **Phase 3:** True form — combines all attack patterns, fastest and most aggressive
+- **Narrative:** The Corruption Overlord is what is left when five guardians are broken and their power goes somewhere. It comes apart and reassembles three times before it is finished. Defeat it and the seals close on nothing, because there is nothing left to seal. *"The seals are quiet. The world is yours again. You are the Seal Bearer who remade Cuubz."*
+- **Phase 1 — Guardian:** Wears the broken guardians. Vine lash, ice breath and magma bursts in sequence, each an echo of a boss you have already beaten.
+- **Phase 2 — Darkness:** Sheds the borrowed shapes. Summons corrupt minions continuously, seeds spreading corruption pools across the arena floor, raises a crystal shield that must be broken to resume damage.
+- **Phase 3 — True Form:** Everything at once, faster, with no shield and no pause. The arena is mostly corruption by now, which is the point.
 - **Marker Location:** Corrupt biome (spire summit)
 
 ---
 
-## Dungeon Map Summary
+## Seal and Dungeon Summary
 
-| Dungeon | Biome | Entrance Quest | Boss Quest | Key Items Needed |
-|---------|-------|---------------|------------|-----------------|
-| Forest Warden's Dungeon | Corrupt | Q09 | Q12 | 1 quest_key, 5 corrupt_crystal |
-| Lava Titan's Lair | Lava | Q15 | Q17 | 1 quest_key, 10 obsidian |
-| Frost Serpent's Glacier | Tundra | Q20 | Q21 | 1 quest_key |
-| Corruption Spire | Corrupt (deep) | Q23 | Q24+Q25 | 1 quest_key, 10 diamond |
+| # | Seal | Dungeon | Biome | Key Quest | Boss Quest | Boss | Offering |
+|---|------|---------|-------|-----------|------------|------|----------|
+| 1 | Verdant | Forest Warden's Dungeon | Corrupt | Q09 | Q12 | Forest Warden | seal_key_verdant, 5 corrupt_crystal |
+| 2 | Ember | Lava Titan's Lair | Lava | Q15 | Q17 | Lava Titan | seal_key_ember, 10 obsidian |
+| 3 | Frozen | Frost Serpent's Glacier | Tundra | Q20 | Q21 | Frost Serpent | seal_key_frozen |
+| 4 | Sunken | The Buried Hall | Desert | Q23 | Q24 | Dune Colossus | seal_key_sunken |
+| 5 | Deepstone | The Hollow Depths | Mountains (below Y 30) | Q25 | Q26 | Hollow King | seal_key_deepstone |
+| ★ | The Final Seal | Corruption Spire | Corrupt (deep) | Q27 | Q28 | Corruption Overlord *(3 phases)* | all five seals broken, 10 diamond |
+
+**Each seal has its own key item.** `quest_key` is a single-stack item, so one shared key across five dungeons could never be carried — the five `seal_key_*` items exist for that reason. See `quest_implementation.md` §4.3.
+
+## Biomes and Environmental Hazard
+
+Two biomes are added for this storyline: **Corrupt** and **Lava**. They are the world's first environmentally dangerous places, and that is as much the point of adding them as the seals are.
+
+- **Corrupt** — corrupted ground is *scattered*, not total. The biome raises the chance of a corrupted block; it does not replace everything. Standing on corrupted ground drains health very slowly, and **the drain stops the moment you step off**. There is no lingering effect and nothing follows you out of the biome. It is a place you pick your way across, not a place you flee.
+- **Lava** — lava kills, quickly and obviously. Magma is a mild hazard underfoot. Nothing subtle.
+
+The Corrupt biome is where `corrupt_crystal` comes from, and it is home to the `corrupt_wolf` and `corrupt_wisp`, which have existed in the mob registry since before the biome did.
 
 ## Item Placement in World Generation
 
-Quest items should be placed at deterministic locations during world generation:
+Quest items are placed at deterministic locations during world generation:
 
-- **quest_key:** One per dungeon zone, placed on altars/altarpieces
-- **corrupt_crystal:** Scattered in corrupt biome chunks (higher density near dungeons)
+- **seal_key_\*:** One per seal, in that seal's dungeon, on or near the altar
+- **corrupt_crystal:** Scattered in Corrupt biome chunks, denser near the seal sites
 - **coal_ore / iron_ore / gold_ore / diamond_ore:** Depth-based ore veins (standard world gen)
-- **obsidian / blackstone:** Lava biome surface and caves
+- **obsidian / blackstone / magma:** Lava biome surface and caves
+- **sandstone:** Desert biome shelves and the buried hall
+- **deepslate:** Below Y 40 everywhere; the Hollow Depths are built from it
 - **ice:** Tundra biome surface
-- **apple:** On trees in plains/forest biomes (via featurePlacer)
+- **apple:** On trees in plains/forest biomes
 
 ## Title Progression
 
@@ -256,10 +311,23 @@ Quest items should be placed at deterministic locations during world generation:
 |-------|-------------|--------------|
 | Q06 | "Survivor" | Established a foothold |
 | Q08 | "Seeker" | Found rare materials |
-| Q12 | "Warden Slayer" | First boss defeated |
-| Q14 | "Firewalker" | Survived the lava biome |
-| Q17 | "Titan Bane" | Second boss defeated |
+| Q12 | "Warden Slayer" | First seal broken |
+| Q14 | "Firewalker" | Survived the Lava biome |
+| Q17 | "Titan Bane" | Second seal broken |
 | Q19 | "Icebound" | Survived the tundra |
-| Q21 | "Serpent Slayer" | Third boss defeated |
-| Q23 | "Seal Master" | Prepared for the final battle |
-| Q25 | "World Saver" | Game complete — restored all seals |
+| Q21 | "Serpent Slayer" | Third seal broken |
+| Q23 | "Sandborn" | Found what the desert buried |
+| Q24 | "Colossus Breaker" | Fourth seal broken |
+| Q25 | "Deepwalker" | Reached the oldest stone |
+| Q26 | "Kingsbane" | Fifth seal broken |
+| Q27 | "Seal Master" | Prepared for the source |
+| Q28 | "World Saver" | Game complete |
+
+## Known Gaps Against the Current Build
+
+Two quests in Act 1 and one in Act 4 ask for things the game does not have. Listed here so the numbers are not mistaken for a plan:
+
+- **Q06** requires crafting a `bed`. There is no `bed` block and no `bed` recipe.
+- **Q19** requires 3 `bread`. `bread` is a defined item with no recipe and no source.
+
+Both need content added or the quest re-specified. `quest_implementation.md` §2.5 tracks them.
