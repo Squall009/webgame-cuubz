@@ -1,0 +1,626 @@
+[
+  {
+    "key": "coal",
+    "name": "Coal",
+    "texture": "coal",
+    "exists": true
+  },
+  {
+    "key": "stick",
+    "name": "Stick",
+    "texture": "stick",
+    "exists": true
+  },
+  {
+    "key": "iron_ore",
+    "name": "Iron Ore",
+    "texture": "iron_ore",
+    "exists": true
+  },
+  {
+    "key": "gold_ore",
+    "name": "Gold Ore",
+    "texture": "gold_ore",
+    "exists": true
+  },
+  {
+    "key": "diamond",
+    "name": "Diamond",
+    "texture": "diamond",
+    "exists": true
+  },
+  {
+    "key": "copper_ingot",
+    "name": "Copper Ingot",
+    "texture": "copper_ingot",
+    "exists": true
+  },
+  {
+    "key": "iron_ingot",
+    "name": "Iron Ingot",
+    "texture": "iron_ingot",
+    "exists": true
+  },
+  {
+    "key": "gold_ingot",
+    "name": "Gold Ingot",
+    "texture": "gold_ingot",
+    "exists": true
+  },
+  {
+    "key": "netherite_ingot",
+    "name": "Netherite Ingot",
+    "texture": "netherite_ingot",
+    "exists": true
+  },
+  {
+    "key": "redstone",
+    "name": "Redstone",
+    "texture": "redstone",
+    "exists": true
+  },
+  {
+    "key": "gunpowder",
+    "name": "Gunpowder",
+    "texture": "gunpowder",
+    "exists": true
+  },
+  {
+    "key": "leather",
+    "name": "Leather",
+    "texture": "leather",
+    "exists": true
+  },
+  {
+    "key": "glowstone_dust",
+    "name": "Glowstone Dust",
+    "texture": "glowstone_dust",
+    "exists": true
+  },
+  {
+    "key": "sugar",
+    "name": "Sugar",
+    "texture": "sugar",
+    "exists": true
+  },
+  {
+    "key": "corrupt_crystal",
+    "name": "Corrupt Crystal",
+    "texture": "corrupt_crystal",
+    "exists": true
+  },
+  {
+    "key": "ender_pearl",
+    "name": "Ender Pearl",
+    "texture": "ender_pearl",
+    "exists": true
+  },
+  {
+    "key": "ender_eye",
+    "name": "Eye of Ender",
+    "texture": "ender_eye",
+    "exists": true
+  },
+  {
+    "key": "quest_key",
+    "name": "Quest Key",
+    "texture": "disc_fragment_5",
+    "exists": true
+  },
+  {
+    "key": "compass",
+    "name": "Compass",
+    "texture": "compass_00",
+    "exists": true
+  },
+  {
+    "key": "firework_rocket",
+    "name": "Firework Rocket",
+    "texture": "firework_rocket",
+    "exists": true
+  },
+  {
+    "key": "apple",
+    "name": "Apple",
+    "texture": "apple",
+    "exists": true
+  },
+  {
+    "key": "cooked_meat",
+    "name": "Cooked Meat",
+    "texture": "cooked_meat",
+    "exists": true
+  },
+  {
+    "key": "berry",
+    "name": "Berry",
+    "texture": "berry",
+    "exists": true
+  },
+  {
+    "key": "bread",
+    "name": "Bread",
+    "texture": "bread",
+    "exists": true
+  },
+  {
+    "key": "golden_apple",
+    "name": "Golden Apple",
+    "texture": "golden_apple",
+    "exists": true
+  },
+  {
+    "key": "cookie",
+    "name": "Cookie",
+    "texture": "cookie",
+    "exists": true
+  },
+  {
+    "key": "egg",
+    "name": "Egg",
+    "texture": "egg",
+    "exists": true
+  },
+  {
+    "key": "snowball",
+    "name": "Snowball",
+    "texture": "snowball",
+    "exists": true
+  },
+  {
+    "key": "wooden_sword",
+    "name": "Wooden Sword",
+    "texture": "wooden_sword",
+    "exists": true
+  },
+  {
+    "key": "wooden_pickaxe",
+    "name": "Wooden Pickaxe",
+    "texture": "wooden_pickaxe",
+    "exists": true
+  },
+  {
+    "key": "wooden_axe",
+    "name": "Wooden Axe",
+    "texture": "wooden_axe",
+    "exists": true
+  },
+  {
+    "key": "wooden_shovel",
+    "name": "Wooden Shovel",
+    "texture": "wooden_shovel",
+    "exists": true
+  },
+  {
+    "key": "wooden_hoe",
+    "name": "Wooden Hoe",
+    "texture": "wooden_hoe",
+    "exists": true
+  },
+  {
+    "key": "wooden_spear",
+    "name": "Wooden Spear",
+    "texture": "wooden_spear",
+    "exists": true
+  },
+  {
+    "key": "wooden_helmet",
+    "name": "Wooden Helmet",
+    "texture": "wooden_helmet",
+    "exists": true
+  },
+  {
+    "key": "wooden_chestplate",
+    "name": "Wooden Chestplate",
+    "texture": "wooden_chestplate",
+    "exists": true
+  },
+  {
+    "key": "wooden_leggings",
+    "name": "Wooden Leggings",
+    "texture": "wooden_leggings",
+    "exists": true
+  },
+  {
+    "key": "wooden_boots",
+    "name": "Wooden Boots",
+    "texture": "wooden_boots",
+    "exists": true
+  },
+  {
+    "key": "stone_sword",
+    "name": "Stone Sword",
+    "texture": "stone_sword",
+    "exists": true
+  },
+  {
+    "key": "stone_pickaxe",
+    "name": "Stone Pickaxe",
+    "texture": "stone_pickaxe",
+    "exists": true
+  },
+  {
+    "key": "stone_axe",
+    "name": "Stone Axe",
+    "texture": "stone_axe",
+    "exists": true
+  },
+  {
+    "key": "stone_shovel",
+    "name": "Stone Shovel",
+    "texture": "stone_shovel",
+    "exists": true
+  },
+  {
+    "key": "stone_hoe",
+    "name": "Stone Hoe",
+    "texture": "stone_hoe",
+    "exists": true
+  },
+  {
+    "key": "stone_spear",
+    "name": "Stone Spear",
+    "texture": "stone_spear",
+    "exists": true
+  },
+  {
+    "key": "copper_sword",
+    "name": "Copper Sword",
+    "texture": "copper_sword",
+    "exists": true
+  },
+  {
+    "key": "copper_pickaxe",
+    "name": "Copper Pickaxe",
+    "texture": "copper_pickaxe",
+    "exists": true
+  },
+  {
+    "key": "copper_axe",
+    "name": "Copper Axe",
+    "texture": "copper_axe",
+    "exists": true
+  },
+  {
+    "key": "copper_shovel",
+    "name": "Copper Shovel",
+    "texture": "copper_shovel",
+    "exists": true
+  },
+  {
+    "key": "copper_hoe",
+    "name": "Copper Hoe",
+    "texture": "copper_hoe",
+    "exists": true
+  },
+  {
+    "key": "copper_spear",
+    "name": "Copper Spear",
+    "texture": "copper_spear",
+    "exists": true
+  },
+  {
+    "key": "iron_sword",
+    "name": "Iron Sword",
+    "texture": "iron_sword",
+    "exists": true
+  },
+  {
+    "key": "iron_pickaxe",
+    "name": "Iron Pickaxe",
+    "texture": "iron_pickaxe",
+    "exists": true
+  },
+  {
+    "key": "iron_axe",
+    "name": "Iron Axe",
+    "texture": "iron_axe",
+    "exists": true
+  },
+  {
+    "key": "iron_shovel",
+    "name": "Iron Shovel",
+    "texture": "iron_shovel",
+    "exists": true
+  },
+  {
+    "key": "iron_hoe",
+    "name": "Iron Hoe",
+    "texture": "iron_hoe",
+    "exists": true
+  },
+  {
+    "key": "iron_spear",
+    "name": "Iron Spear",
+    "texture": "iron_spear",
+    "exists": true
+  },
+  {
+    "key": "golden_sword",
+    "name": "Golden Sword",
+    "texture": "golden_sword",
+    "exists": true
+  },
+  {
+    "key": "golden_pickaxe",
+    "name": "Golden Pickaxe",
+    "texture": "golden_pickaxe",
+    "exists": true
+  },
+  {
+    "key": "golden_axe",
+    "name": "Golden Axe",
+    "texture": "golden_axe",
+    "exists": true
+  },
+  {
+    "key": "golden_shovel",
+    "name": "Golden Shovel",
+    "texture": "golden_shovel",
+    "exists": true
+  },
+  {
+    "key": "golden_hoe",
+    "name": "Golden Hoe",
+    "texture": "golden_hoe",
+    "exists": true
+  },
+  {
+    "key": "golden_spear",
+    "name": "Golden Spear",
+    "texture": "golden_spear",
+    "exists": true
+  },
+  {
+    "key": "diamond_sword",
+    "name": "Diamond Sword",
+    "texture": "diamond_sword",
+    "exists": true
+  },
+  {
+    "key": "diamond_pickaxe",
+    "name": "Diamond Pickaxe",
+    "texture": "diamond_pickaxe",
+    "exists": true
+  },
+  {
+    "key": "diamond_axe",
+    "name": "Diamond Axe",
+    "texture": "diamond_axe",
+    "exists": true
+  },
+  {
+    "key": "diamond_shovel",
+    "name": "Diamond Shovel",
+    "texture": "diamond_shovel",
+    "exists": true
+  },
+  {
+    "key": "diamond_hoe",
+    "name": "Diamond Hoe",
+    "texture": "diamond_hoe",
+    "exists": true
+  },
+  {
+    "key": "diamond_spear",
+    "name": "Diamond Spear",
+    "texture": "diamond_spear",
+    "exists": true
+  },
+  {
+    "key": "netherite_sword",
+    "name": "Netherite Sword",
+    "texture": "netherite_sword",
+    "exists": true
+  },
+  {
+    "key": "netherite_pickaxe",
+    "name": "Netherite Pickaxe",
+    "texture": "netherite_pickaxe",
+    "exists": true
+  },
+  {
+    "key": "netherite_axe",
+    "name": "Netherite Axe",
+    "texture": "netherite_axe",
+    "exists": true
+  },
+  {
+    "key": "netherite_shovel",
+    "name": "Netherite Shovel",
+    "texture": "netherite_shovel",
+    "exists": true
+  },
+  {
+    "key": "netherite_hoe",
+    "name": "Netherite Hoe",
+    "texture": "netherite_hoe",
+    "exists": true
+  },
+  {
+    "key": "netherite_spear",
+    "name": "Netherite Spear",
+    "texture": "netherite_spear",
+    "exists": true
+  },
+  {
+    "key": "leather_helmet",
+    "name": "Leather Cap",
+    "texture": "leather_helmet",
+    "exists": true
+  },
+  {
+    "key": "leather_chestplate",
+    "name": "Leather Tunic",
+    "texture": "leather_chestplate",
+    "exists": true
+  },
+  {
+    "key": "leather_leggings",
+    "name": "Leather Pants",
+    "texture": "leather_leggings",
+    "exists": true
+  },
+  {
+    "key": "leather_boots",
+    "name": "Leather Boots",
+    "texture": "leather_boots",
+    "exists": true
+  },
+  {
+    "key": "chainmail_helmet",
+    "name": "Chainmail Helmet",
+    "texture": "chainmail_helmet",
+    "exists": true
+  },
+  {
+    "key": "chainmail_chestplate",
+    "name": "Chainmail Chestplate",
+    "texture": "chainmail_chestplate",
+    "exists": true
+  },
+  {
+    "key": "chainmail_leggings",
+    "name": "Chainmail Leggings",
+    "texture": "chainmail_leggings",
+    "exists": true
+  },
+  {
+    "key": "chainmail_boots",
+    "name": "Chainmail Boots",
+    "texture": "chainmail_boots",
+    "exists": true
+  },
+  {
+    "key": "iron_helmet",
+    "name": "Iron Helmet",
+    "texture": "iron_helmet",
+    "exists": true
+  },
+  {
+    "key": "iron_chestplate",
+    "name": "Iron Chestplate",
+    "texture": "iron_chestplate",
+    "exists": true
+  },
+  {
+    "key": "iron_leggings",
+    "name": "Iron Leggings",
+    "texture": "iron_leggings",
+    "exists": true
+  },
+  {
+    "key": "iron_boots",
+    "name": "Iron Boots",
+    "texture": "iron_boots",
+    "exists": true
+  },
+  {
+    "key": "golden_helmet",
+    "name": "Golden Helmet",
+    "texture": "golden_helmet",
+    "exists": true
+  },
+  {
+    "key": "golden_chestplate",
+    "name": "Golden Chestplate",
+    "texture": "golden_chestplate",
+    "exists": true
+  },
+  {
+    "key": "golden_leggings",
+    "name": "Golden Leggings",
+    "texture": "golden_leggings",
+    "exists": true
+  },
+  {
+    "key": "golden_boots",
+    "name": "Golden Boots",
+    "texture": "golden_boots",
+    "exists": true
+  },
+  {
+    "key": "diamond_helmet",
+    "name": "Diamond Helmet",
+    "texture": "diamond_helmet",
+    "exists": true
+  },
+  {
+    "key": "diamond_chestplate",
+    "name": "Diamond Chestplate",
+    "texture": "diamond_chestplate",
+    "exists": true
+  },
+  {
+    "key": "diamond_leggings",
+    "name": "Diamond Leggings",
+    "texture": "diamond_leggings",
+    "exists": true
+  },
+  {
+    "key": "diamond_boots",
+    "name": "Diamond Boots",
+    "texture": "diamond_boots",
+    "exists": true
+  },
+  {
+    "key": "netherite_helmet",
+    "name": "Netherite Helmet",
+    "texture": "netherite_helmet",
+    "exists": true
+  },
+  {
+    "key": "netherite_chestplate",
+    "name": "Netherite Chestplate",
+    "texture": "netherite_chestplate",
+    "exists": true
+  },
+  {
+    "key": "netherite_leggings",
+    "name": "Netherite Leggings",
+    "texture": "netherite_leggings",
+    "exists": true
+  },
+  {
+    "key": "netherite_boots",
+    "name": "Netherite Boots",
+    "texture": "netherite_boots",
+    "exists": true
+  },
+  {
+    "key": "rotten_flesh",
+    "name": "Rotten Flesh",
+    "texture": "rotten_flesh",
+    "exists": true
+  },
+  {
+    "key": "bone",
+    "name": "Bone",
+    "texture": "bone",
+    "exists": true
+  },
+  {
+    "key": "rabbit_hide",
+    "name": "Rabbit Hide",
+    "texture": "rabbit_hide",
+    "exists": true
+  },
+  {
+    "key": "rabbit_meat",
+    "name": "Raw Rabbit",
+    "texture": "rabbit_meat",
+    "exists": true
+  },
+  {
+    "key": "raw_venison",
+    "name": "Raw Venison",
+    "texture": "raw_venison",
+    "exists": true
+  },
+  {
+    "key": "corrupt_fang",
+    "name": "Corrupt Fang",
+    "texture": "corrupt_fang",
+    "exists": true
+  }
+]

@@ -56,6 +56,11 @@ const ROOT = path.join(__dirname, '..');
 const SCRIPT_PATH = path.join(ROOT, 'scripts', 'generate-manifest.js');
 const MANIFEST_PATH = path.join(ROOT, 'textures', 'blocks', 'manifest.json');
 const REGISTRY_PATH = path.join(ROOT, 'src', 'engine', 'world', 'BlockRegistry.js');
+// The generator writes a second manifest now (items, derived from NAMED_ITEMS). This test
+// predates it and only knew to snapshot the block one, so running the suite would have
+// left textures/items/manifest.json rewritten in the working tree — the exact thing the
+// header above says must never happen. Both are snapshotted and restored below.
+const ITEMS_MANIFEST_PATH = path.join(ROOT, 'textures', 'items', 'manifest.json');
 
 console.log('Manifest Generator Smoke Test');
 console.log('=============================\n');
@@ -70,9 +75,11 @@ assert(fs.existsSync(SCRIPT_PATH), 'scripts/generate-manifest.js exists');
 // a reader sees when the assertion goes red.
 assert(fs.existsSync(REGISTRY_PATH), 'src/engine/world/BlockRegistry.js exists');
 
-// Snapshot the existing manifest so the run leaves no trace.
+// Snapshot the existing manifests so the run leaves no trace.
 const hadManifest = fs.existsSync(MANIFEST_PATH);
 const originalManifest = hadManifest ? fs.readFileSync(MANIFEST_PATH) : null;
+const hadItemsManifest = fs.existsSync(ITEMS_MANIFEST_PATH);
+const originalItemsManifest = hadItemsManifest ? fs.readFileSync(ITEMS_MANIFEST_PATH) : null;
 
 let exitOk = false;
 let stdout = '';
@@ -89,6 +96,10 @@ try {
 
   assert(/Manifest: \d+ block entries/.test(stdout), 'Reports how many block entries it wrote');
   assert(stdout.includes('Written:'), 'Reports the output path it wrote');
+  // The items half runs in a trailing async IIFE (it dynamic-imports an ES module from
+  // this CommonJS script). If that ever stops running, the block half still prints a
+  // clean success and the only symptom is a stale items manifest, so assert it ran.
+  assert(/Item manifest: \d+ item entries/.test(stdout), 'Reports how many item entries it wrote');
 
   // ── The manifest it produced ────────────────────────────────
   console.log('\n[Manifest output]');
@@ -179,6 +190,11 @@ try {
     fs.writeFileSync(MANIFEST_PATH, originalManifest);
   } else if (fs.existsSync(MANIFEST_PATH)) {
     fs.unlinkSync(MANIFEST_PATH);
+  }
+  if (hadItemsManifest) {
+    fs.writeFileSync(ITEMS_MANIFEST_PATH, originalItemsManifest);
+  } else if (fs.existsSync(ITEMS_MANIFEST_PATH)) {
+    fs.unlinkSync(ITEMS_MANIFEST_PATH);
   }
 }
 

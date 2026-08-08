@@ -21,7 +21,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "generate-manifest": "node scripts/generate-manifest.js"
+    "generate-manifest": "node scripts/generate-manifest.js",
+    "generate-item-textures": "node scripts/generate-item-textures.js"
   },
   "keywords": [],
   "author": "",
