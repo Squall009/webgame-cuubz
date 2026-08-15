@@ -95,7 +95,12 @@ export function worldStep(state) {
     const wz = Math.floor(state.player.position.z);
     let biomeData = null;
     try {
-      biomeData = BiomeSystem.getBiomeAtWorldPos(wx, wz, state.chunkManager.worldSeed);
+      // The world's generator version decides whether the Corrupt and Lava masks are
+      // sampled at all (§3.1). Passing it is what keeps the fog the player sees and the
+      // terrain the worker built in agreement — a v1 world must never report `corrupt`.
+      biomeData = BiomeSystem.getBiomeAtWorldPos(
+        wx, wz, state.chunkManager.worldSeed, state.chunkManager.genParams?.worldgenVersion
+      );
     } catch(e) { /* Fallback to default */ }
 
     if (biomeData) {
@@ -211,7 +216,9 @@ export function worldStep(state) {
       // Pass a biome lookup function so each chunk spawns its own biome's mobs
       const getBiomeFn = (wx, wz) => {
         try {
-          const bd = BiomeSystem.getBiomeAtWorldPos(wx, wz, state.chunkManager.worldSeed);
+          const bd = BiomeSystem.getBiomeAtWorldPos(
+            wx, wz, state.chunkManager.worldSeed, state.chunkManager.genParams?.worldgenVersion
+          );
           return bd ? bd.id : undefined;
         } catch(e) { return undefined; }
       };

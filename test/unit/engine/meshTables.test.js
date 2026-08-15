@@ -67,10 +67,11 @@ const workerSource = readSrc(WORKER_PATH);
 // ═══════════════════════════════════════════════════════════════════
 console.log('--- 0: registry facts ---');
 
-// 196: the 193 that existed, plus the three blocks S1 added for content the storyline
-// required and the registry lacked — `obsidian` (a real, mineable one; the old
-// `OBSIDIAN` was an alias for unbreakable `crying_obsidian`), `sandstone`, and `bed`.
-assertEquals(BLOCK_REGISTRY.length, 196, 'BLOCK_REGISTRY has 196 entries (not the 162 several docs claim)');
+// 199: the 193 that existed, plus S1's three (`obsidian` — a real, mineable one; the
+// old `OBSIDIAN` aliased unbreakable `crying_obsidian` — `sandstone` and `bed`), plus
+// S4's three for the Corrupt biome at ids 193-195. Every one of the six points at a
+// texture that was already on disk and unreferenced.
+assertEquals(BLOCK_REGISTRY.length, 199, 'BLOCK_REGISTRY has 199 entries (not the 162 several docs claim)');
 assertEquals(BLOCK_BY_NAME['white_concrete'].id, 115, 'id 115 is white_concrete');
 assertEquals(BLOCK_BY_NAME['white_concrete'].category, 'solid', 'white_concrete is category solid');
 assertEquals(BLOCK_BY_NAME['yellow_poplar_leaves'].id, 192, 'id 192 is yellow_poplar_leaves');

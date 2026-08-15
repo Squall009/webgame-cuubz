@@ -208,7 +208,7 @@ export const MOB_DEFINITIONS = {
     speed: 5.5,
     fleeSpeed: 0,
     hitbox: { width: 0.8, height: 0.9 },
-    biomes: ['badlands'], // D-68/decision 48: was ['corrupt'] — not a biome BiomeSystem can produce, so this mob had NEVER spawned
+    biomes: ['corrupt'], // D-68 closed by S4: `corrupt` is a real biome now, so this mob can finally spawn where it was always written to
     spawnWeight: 25,
     spawnInDark: true,
     spawnMinY: 0,
@@ -373,7 +373,7 @@ export const MOB_DEFINITIONS = {
     speed: 6.0,
     fleeSpeed: 0,
     hitbox: { width: 0.6, height: 0.6 },
-    biomes: ['badlands'], // D-68/decision 48: was ['corrupt'] — not a biome BiomeSystem can produce, so this mob had NEVER spawned
+    biomes: ['corrupt'], // D-68 closed by S4: `corrupt` is a real biome now, so this mob can finally spawn where it was always written to
     spawnWeight: 20,
     spawnInDark: true,
     spawnMinY: 0,

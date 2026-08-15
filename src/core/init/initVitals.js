@@ -20,6 +20,7 @@
  */
 
 import { PlayerVitals } from '../../game/entities/PlayerVitals.js';
+import { HazardSystem } from '../../game/systems/HazardSystem.js';
 import { HealthMeter } from '../../ui/hud/HealthMeter.js';
 import { DAMAGE_SOURCES } from '../../game/data/DamageSources.js';
 import { CuubzLogger } from '../../util/Logger.js';
@@ -91,8 +92,21 @@ export function initVitals(game) {
   const character = state.currentCharacter;
   if (character && character.vitals) vitals.restore(character.vitals);
 
+  // ─── Environmental damage (S4) ─────────────────────────────────
+  //
+  // `state.chunkWorld` — the `getBlockAtWorld` shim the collision code already uses — is
+  // not built until `_startRenderLoop` (step 16), so the world handle is set there
+  // rather than passed here. `questStep` null-guards the system either way.
+  const hazards = new HazardSystem({
+    vitals,
+    player: state.player,
+    world: state.chunkWorld,
+    isCreative,
+  });
+  state.hazardSystem = hazards;
+
   meter.render(vitals.health, vitals.maxHealth);
   state.addTeardown(() => meter.dispose());
 
-  log('[Cuubz] Player vitals ready');
+  log('[Cuubz] Player vitals and hazards ready');
 }

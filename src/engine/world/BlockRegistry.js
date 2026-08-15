@@ -280,6 +280,22 @@ export const BLOCK_REGISTRY = [
   { id: 191, name: 'quest_key',        texture: { all: 'iron_bars' },            category: 'cutout',  hardness: 0.1 },
 
   // ═══════════════════════════════════════════════════════════
+  // IDs 193–195 — The Corrupt biome (S4)
+  // ═══════════════════════════════════════════════════════════
+  //
+  // **Zero new art.** Every texture here is a PNG that has shipped in
+  // `textures/blocks/` all along and that no registry entry referenced, which is why
+  // none of them appear in `manifest.json` today — the generator emits only what the
+  // registry names. Adding these three means re-running `npm run generate-manifest`,
+  // and `test/unit/meta/textureCoverage.test.js` is where forgetting shows up.
+  //
+  // Lava needs nothing: `netherrack`, `basalt`, `blackstone`, `magma`, `soul_sand`,
+  // `soul_soil`, `crying_obsidian`, `soul_lantern` and `lava` are all already here.
+  { id: 193, name: 'corrupt_grass',    texture: { side: 'warped_nylium_side', top: 'warped_nylium', bottom: 'dirt' }, category: 'solid', hardness: 0.6, tool: 'shovel' },
+  { id: 194, name: 'corrupt_stone',    texture: { all: 'sculk' },                category: 'solid',   hardness: 3.0,  tool: 'pickaxe' },
+  { id: 195, name: 'corrupt_vein',     texture: { all: 'sculk_vein' },           category: 'cutout',  hardness: 0.0 },
+
+  // ═══════════════════════════════════════════════════════════
   // IDs 196–198 — Content the 28-quest storyline assumes and the registry lacked
   // ═══════════════════════════════════════════════════════════
   //
@@ -495,6 +511,9 @@ export const BLOCK_TYPES = {
   OBSIDIAN:        BLOCK_BY_NAME['obsidian'].id,
   SANDSTONE:       BLOCK_BY_NAME['sandstone'].id,
   BED:             BLOCK_BY_NAME['bed'].id,
+  CORRUPT_GRASS:   BLOCK_BY_NAME['corrupt_grass'].id,
+  CORRUPT_STONE:   BLOCK_BY_NAME['corrupt_stone'].id,
+  CORRUPT_VEIN:    BLOCK_BY_NAME['corrupt_vein'].id,
   // Legacy aliases (old code may reference these)
   WOOD_LOG:        BLOCK_BY_NAME['oak_log'].id,
   LEAVES:          BLOCK_BY_NAME['oak_leaves'].id,
@@ -527,6 +546,11 @@ export const BLOCK_DROP_OVERRIDES = {
   diamond_ore:     'item:diamond',
   corrupt_crystal: 'item:corrupt_crystal',
   apple:           'item:apple',
+  // Breaking corrupted ground gives you ordinary dirt, exactly as `grass_block` does.
+  // The corruption is a surface condition, not a material — which is also why the
+  // hazard is "the block I am standing on", not "a thing I am carrying" (§3.5).
+  corrupt_grass:   'dirt',
+  corrupt_vein:    null,
 };
 
 /**

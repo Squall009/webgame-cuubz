@@ -53,17 +53,23 @@ console.log('=== Mob / biome name tests (D-68) ===\n');
 // ═══════════════════════════════════════════════════════════════════
 console.log('--- 1: the valid biome ids ---');
 
-assertEquals(BIOME_IDS.length, 10, 'BiomeSystem produces exactly ten biome ids');
-assertEquals(BIOME_IDS.join(','), 'deep_ocean,ocean,beach,plains,forest,badlands,tundra,desert,mountains,frozen_peaks',
-  'the ten ids are unchanged by the derivation');
-assertEquals(Object.keys(BIOME_DEFS).length, 10, 'BIOME_DEFS has ten entries');
+// Twelve since S4. The Corrupt and Lava biomes are real entries in BIOME_DEFS now, so
+// the ids they always wanted to be are producible — which is what closes the mob half
+// of D-68 rather than working around it.
+assertEquals(BIOME_IDS.length, 12, 'BiomeSystem produces exactly twelve biome ids');
+assertEquals(BIOME_IDS.join(','), 'deep_ocean,ocean,beach,plains,forest,badlands,tundra,desert,mountains,frozen_peaks,corrupt,lava',
+  'the twelve ids are unchanged by the derivation');
+assertEquals(Object.keys(BIOME_DEFS).length, 12, 'BIOME_DEFS has twelve entries');
 assertTrue(
   Object.values(BIOME_DEFS).every((d) => BIOME_IDS.includes(BIOME_NAME_TO_ID[d.name])),
   'every BIOME_DEFS entry maps to one of the ten ids'
 );
-assertFalse(BIOME_IDS.includes('corrupt'), '`corrupt` is NOT a biome BiomeSystem can produce');
-assertFalse(BIOME_IDS.includes('deepslate_caves'), '`deepslate_caves` is NOT a biome BiomeSystem can produce');
-assertFalse(BIOME_IDS.includes('lava'), '`lava` is NOT a biome either (the quest half of D-68, PR 34\'s)');
+// D-68's two halves, both now the other way round. `corrupt` and `lava` were the ids
+// two mob definitions and twelve quests named and `BiomeSystem` could not produce; PR 23
+// worked around it by rehoming the mobs to `badlands`. S4 built the biomes instead.
+assertTrue(BIOME_IDS.includes('corrupt'), '`corrupt` IS a biome BiomeSystem can produce (S4)');
+assertTrue(BIOME_IDS.includes('lava'), '`lava` IS a biome BiomeSystem can produce (S4)');
+assertFalse(BIOME_IDS.includes('deepslate_caves'), '`deepslate_caves` is still NOT a biome BiomeSystem can produce');
 
 // And the ids the live sampler actually hands to selectMobForBiome are from that set —
 // this is what ties the derived list to the runtime rather than to a second table.
@@ -102,10 +108,12 @@ for (const [key, def] of Object.entries(MOB_DEFINITIONS)) {
 // NON-VACUITY: the same check, run against a definition table with a bogus biome, must
 // find it. If the loop above ever stopped looking, this goes red with it.
 {
-  const bogus = { ...MOB_DEFINITIONS, test_only: { biomes: ['corrupt'], spawnWeight: 1 } };
+  // The bogus name was `corrupt` until S4 made it real. `deepslate_caves` is the
+  // remaining id that no biome produces, which is what this guard needs.
+  const bogus = { ...MOB_DEFINITIONS, test_only: { biomes: ['deepslate_caves'], spawnWeight: 1 } };
   const found = Object.entries(bogus).flatMap(([k, d]) => d.biomes.filter((b) => !BIOME_IDS.includes(b)).map((b) => `${k} → '${b}'`));
   assertEquals(found.length, 1, 'NON-VACUITY: the guard detects a bogus biome name when one is present');
-  assertEquals(found[0], "test_only → 'corrupt'", 'NON-VACUITY: and names the offender');
+  assertEquals(found[0], "test_only → 'deepslate_caves'", 'NON-VACUITY: and names the offender');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -123,10 +131,15 @@ const drawsIn = (biome, n = 500) => {
   return out;
 };
 
+// S4 put them back where they were written to live. PR 23 rehomed them to `badlands` as
+// a workaround for an id the biome system could not produce; the id is producible now,
+// so the workaround is gone and the two corrupt mobs are in the Corrupt biome.
+const corruptMobs = drawsIn('corrupt');
+assertTrue(corruptMobs.has('corrupt_wolf'), 'corrupt_wolf spawns in the Corrupt biome — where its definition always said');
+assertTrue(corruptMobs.has('corrupt_wisp'), 'corrupt_wisp spawns in the Corrupt biome');
 const badlandsMobs = drawsIn('badlands');
-assertTrue(badlandsMobs.has('corrupt_wolf'), 'corrupt_wolf CAN now spawn (in badlands) — it never could before');
-assertTrue(badlandsMobs.has('corrupt_wisp'), 'corrupt_wisp CAN now spawn (in badlands) — it never could before');
-assertEquals(selectMobForBiome('corrupt'), null, "no mob answers to 'corrupt' any more — the id does not exist");
+assertFalse(badlandsMobs.has('corrupt_wolf'), 'corrupt_wolf no longer spawns in badlands — the PR 23 workaround is reverted');
+assertFalse(badlandsMobs.has('corrupt_wisp'), 'corrupt_wisp no longer spawns in badlands');
 assertEquals(selectMobForBiome('deepslate_caves'), null, "no mob answers to 'deepslate_caves'");
 
 // stone_golem: dropping `deepslate_caves` is a PURE removal. Its mountains entry is
@@ -153,9 +166,12 @@ console.log('--- 4: biomes with no mob (deferred to PR 34) ---');
 
 const covered = new Set(Object.values(MOB_DEFINITIONS).flatMap((d) => d.biomes));
 const empty = BIOME_IDS.filter((b) => !covered.has(b));
-assertEquals(empty.join(','), 'deep_ocean,ocean,beach,desert,frozen_peaks',
-  'five biomes still have no mob — DEFERRED to PR 34, not fixed here (badlands stopped being one)');
-assertFalse(empty.includes('badlands'), 'badlands now has mobs — it was one of the six before this PR');
+// S4 hands `badlands` back to the empty list — the two corrupt mobs were only ever
+// parked there — and adds `lava`, a brand-new biome with no mob of its own yet. The
+// Corrupt biome is populated because its two mobs were written for it years ago.
+assertEquals(empty.join(','), 'deep_ocean,ocean,beach,badlands,desert,frozen_peaks,lava',
+  'seven biomes have no mob — still deferred content, and this line is the ledger');
+assertFalse(empty.includes('corrupt'), 'the Corrupt biome has mobs — corrupt_wolf and corrupt_wisp, finally');
 
 // ═══════════════════════════════════════════════════════════════════
 console.log(`\n===================================`);

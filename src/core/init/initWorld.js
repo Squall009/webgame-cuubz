@@ -41,7 +41,11 @@ export async function initWorld(game) {
     renderer: state.renderer,
     worldName: worldName,
     worldSeed: currentWorld.seed,
-    genParams: {}, // Use defaults from ChunkManager
+    // §3.1 — the world's own generator version, threaded to the worker through
+    // `genParams` (`ChunkGenerator.js` already forwards this object verbatim). A world
+    // created before the Corrupt and Lava biomes has no such field, defaults to 1, and
+    // generates exactly the terrain it always did; only a v2 world samples the masks.
+    genParams: { worldgenVersion: currentWorld.worldgenVersion || 1 },
     renderDistance: renderDist,
     regionRadius: 16,   // 32×32 pre-generation range
     textureAtlas: state.textureAtlas,

@@ -2325,6 +2325,44 @@
     }
   },
   {
+    "id": 193,
+    "name": "corrupt_grass",
+    "textures": {
+      "top": {
+        "base": "warped_nylium",
+        "exists": true
+      },
+      "side": {
+        "base": "warped_nylium_side",
+        "exists": true
+      },
+      "bottom": {
+        "base": "dirt",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 194,
+    "name": "corrupt_stone",
+    "textures": {
+      "all": {
+        "base": "sculk",
+        "exists": true
+      }
+    }
+  },
+  {
+    "id": 195,
+    "name": "corrupt_vein",
+    "textures": {
+      "all": {
+        "base": "sculk_vein",
+        "exists": true
+      }
+    }
+  },
+  {
     "id": 196,
     "name": "obsidian",
     "textures": {
