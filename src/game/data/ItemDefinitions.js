@@ -106,7 +106,16 @@ export const NAMED_ITEMS = deepFreeze({
   corrupt_crystal: { name: 'Corrupt Crystal', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
   ender_pearl:     { name: 'Ender Pearl', category: ITEM_CATEGORIES.RESOURCE, maxStack: 16 },
   ender_eye:       { name: 'Eye of Ender', category: ITEM_CATEGORIES.RESOURCE, maxStack: 6 },
+  // Kept for the creative palette and for any world that already has one in a chest.
+  // No quest requires it any more: `maxStack: 1` means two seal keys could never be
+  // carried at once, so the five below replaced it (§4.3).
   quest_key:       { name: 'Quest Key', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
+  // ── Seal keys — one per seal, all single-stack ─────────────
+  seal_key_verdant:   { name: 'Verdant Seal Key', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
+  seal_key_ember:     { name: 'Ember Seal Key', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
+  seal_key_frozen:    { name: 'Frozen Seal Key', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
+  seal_key_sunken:    { name: 'Sunken Seal Key', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
+  seal_key_deepstone: { name: 'Deepstone Seal Key', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
   compass:         { name: 'Compass', category: ITEM_CATEGORIES.RESOURCE, maxStack: 1 },
   firework_rocket: { name: 'Firework Rocket', category: ITEM_CATEGORIES.RESOURCE, maxStack: 64 },
   // ── Food ───────────────────────────────────────────────────

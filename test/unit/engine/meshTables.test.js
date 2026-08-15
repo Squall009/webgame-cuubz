@@ -67,7 +67,10 @@ const workerSource = readSrc(WORKER_PATH);
 // ═══════════════════════════════════════════════════════════════════
 console.log('--- 0: registry facts ---');
 
-assertEquals(BLOCK_REGISTRY.length, 193, 'BLOCK_REGISTRY has 193 entries (not the 162 several docs claim)');
+// 196: the 193 that existed, plus the three blocks S1 added for content the storyline
+// required and the registry lacked — `obsidian` (a real, mineable one; the old
+// `OBSIDIAN` was an alias for unbreakable `crying_obsidian`), `sandstone`, and `bed`.
+assertEquals(BLOCK_REGISTRY.length, 196, 'BLOCK_REGISTRY has 196 entries (not the 162 several docs claim)');
 assertEquals(BLOCK_BY_NAME['white_concrete'].id, 115, 'id 115 is white_concrete');
 assertEquals(BLOCK_BY_NAME['white_concrete'].category, 'solid', 'white_concrete is category solid');
 assertEquals(BLOCK_BY_NAME['yellow_poplar_leaves'].id, 192, 'id 192 is yellow_poplar_leaves');

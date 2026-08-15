@@ -64,3 +64,10 @@
 @import './screens/crafting.css'; /* was style.css:1712-1967 */
 @import './screens/equipment.css'; /* was style.css:1968-2085 */
 @import './hud/armor.css'; /* was style.css:2086-2107 */
+
+/* ── S1: the quest log overlay ────────────────────────────────────────────
+   Appended, not inserted. D-52: this file's @import order is load-bearing —
+   later rules win at equal specificity, and the sheets above were ordered to
+   reproduce the single style.css they were split from. A new overlay goes at
+   the end, where it can only override, never be silently overridden. */
+@import './overlays/quest-log.css';

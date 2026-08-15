@@ -27,16 +27,18 @@
  * it on the class that now runs the real init is how a second rAF loop gets started by
  * accident — `PR16_HANDOFF.md` §4.4 flagged exactly that. `BUGS.md` **D-53**.
  *
- * ─── THE FIFTEEN STEPS ──────────────────────────────────────────────────────
+ * ─── THE STEPS ──────────────────────────────────────────────────────────────
  *
  * `init()` calls them in the order `main.js`'s banners had, which is the order the code
- * ran in and **is the authority** (`BUGS.md` D-36). Three couplings are load-bearing and
+ * ran in and **is the authority** (`BUGS.md` D-36). Four couplings are load-bearing and
  * each is restated in the file that owns it:
  *
  *   • the texture atlases (4) exist before anything draws an item icon;
  *   • the spawn search (8) reads `chunkManager.memoryCache`, so it cannot move above 7;
  *   • the mob system (9) is constructed before the inventory and handed it at 13 — the
- *     `inventory: null` in its deps is that, not an oversight.
+ *     `inventory: null` in its deps is that, not an oversight;
+ *   • quests (15) poll `state.inventory` and write the HUD template, so they come after
+ *     13 and 14. S1 added the step; the render loop is 16 now.
  *
  * ─── THE INIT-ONLY LOCALS ───────────────────────────────────────────────────
  *
@@ -64,6 +66,7 @@ import { initPlayerSync } from './init/initPlayerSync.js';         // step 11a
 import { initChunkStreaming } from './init/initChunkStreaming.js'; // step 11b
 import { initInventory } from './init/initInventory.js';           // steps 12–13
 import { initHud } from './init/initHud.js';                       // step 14
+import { initQuests } from './init/initQuests.js';                 // step 15
 
 // Debug logging — set CuubzLogger.DEBUG = true in console to enable
 // D-27: the `typeof CuubzLogger !== 'undefined'` test and its `else` branch are gone —
@@ -201,7 +204,8 @@ export class Game {
       initChunkStreaming(this);       // 11b
       initInventory(this);            // 12 block interaction   13 inventory + systems
       initHud(this);                  // 14
-      await this._startRenderLoop();  // 15
+      initQuests(this);               // 15 — quests, tracker, HUD, quest log
+      await this._startRenderLoop();  // 16
 
       log('[Cuubz] Game started successfully in ' + mode + ' mode');
     } catch (err) {
@@ -211,7 +215,7 @@ export class Game {
     }
   }
 
-  /** Step 15 — the collision shim, the second sleep, and the loop itself. */
+  /** Step 16 — the collision shim, the second sleep, and the loop itself. */
   async _startRenderLoop() {
     const state = this.state;
     const deps = this.deps;

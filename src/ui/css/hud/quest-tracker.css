@@ -38,3 +38,31 @@
   color: var(--color-text-muted);
   margin-top: var(--space-xs);
 }
+
+/* ── S1: the objective lines ──────────────────────────────────────────────
+   The template gives this panel one `#quest-objective` element and a quest can
+   have three — Q19 wants cooked meat, bread and ice. `QuestTrackerHUD` writes
+   one `.quest-objective-line` per objective inside it. */
+
+.quest-objective-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  line-height: 1.6;
+}
+
+.quest-objective-line.done {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.quest-objective-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+/* Cosmetic, and removed on a 1.2 s timer by `flashComplete()`. */
+#quest-tracker.quest-complete-flash {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 12px rgba(241, 196, 15, 0.5);
+}

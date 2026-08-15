@@ -67,10 +67,14 @@ export class BlockInteraction {
 
     // Block types that can be broken/placed
     this.unbreakableBlocks = new Set([
-      BLOCK_TYPES.BEDROCK,    // 1
-      BLOCK_TYPES.OBSIDIAN,   // 35
-      BLOCK_TYPES.WATER,      // 7 — fluid, can't be broken
-      BLOCK_TYPES.LAVA,       // 15 — fluid, can't be broken
+      BLOCK_TYPES.BEDROCK,
+      // Was `BLOCK_TYPES.OBSIDIAN`, which aliased `crying_obsidian`. `obsidian` is now a
+      // real, mineable block because three Act 3 quests ask the player to collect it;
+      // the *crying* variant keeps its hardness of -1 and stays on this list, which is
+      // what the entry always actually meant.
+      BLOCK_TYPES.CRYING_OBSIDIAN,
+      BLOCK_TYPES.WATER,      // fluid, can't be broken
+      BLOCK_TYPES.LAVA,       // fluid, can't be broken
     ]);
 
     // Selected block type for placing (from hotbar)

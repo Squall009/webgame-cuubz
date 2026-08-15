@@ -108,6 +108,36 @@
     "exists": true
   },
   {
+    "key": "seal_key_verdant",
+    "name": "Verdant Seal Key",
+    "texture": "seal_key_verdant",
+    "exists": true
+  },
+  {
+    "key": "seal_key_ember",
+    "name": "Ember Seal Key",
+    "texture": "seal_key_ember",
+    "exists": true
+  },
+  {
+    "key": "seal_key_frozen",
+    "name": "Frozen Seal Key",
+    "texture": "seal_key_frozen",
+    "exists": true
+  },
+  {
+    "key": "seal_key_sunken",
+    "name": "Sunken Seal Key",
+    "texture": "seal_key_sunken",
+    "exists": true
+  },
+  {
+    "key": "seal_key_deepstone",
+    "name": "Deepstone Seal Key",
+    "texture": "seal_key_deepstone",
+    "exists": true
+  },
+  {
     "key": "compass",
     "name": "Compass",
     "texture": "compass_00",

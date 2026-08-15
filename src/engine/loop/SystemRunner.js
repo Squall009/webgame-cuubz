@@ -13,6 +13,14 @@
  *   4. `combatStep`   521–575  mob raycast, then `mouse.update()` clears the clicks
  *   5. `networkStep`  577–650  playerSync, chunkStreamer, TIME_SYNC, block sends
  *   6. `worldStep`    652–833  drops → PBR → biome → **render()** → tooltip → mobs
+ *   7. `questStep`    (S1)      quest polling → hazards → vitals → seals → boss
+ *
+ * Step 7 is new and is last on purpose. Everything in it reads what the six above
+ * produced this frame — the inventory block-breaking just filled, the position physics
+ * just moved, the hits combat just registered — and running it earlier would make every
+ * one of those readings a frame stale. `worldStep` was not extended because the draw
+ * sits in its middle deliberately, and appending gameplay after `renderer.render()` puts
+ * it on the far side of the present.
  *
  * Four of these couplings are load-bearing and are restated in the file that owns them:
  * `sendMove` is inside step 2 rather than step 5 (it must see the pre-look rotation the
@@ -30,6 +38,7 @@ import { viewStep } from './steps/ViewStep.js';
 import { combatStep } from './steps/CombatStep.js';
 import { networkStep } from './steps/NetworkStep.js';
 import { worldStep } from './steps/WorldStep.js';
+import { questStep } from './steps/QuestStep.js';
 
 /**
  * Run one frame's systems, in the order `main.js` ran them.
@@ -42,4 +51,5 @@ export function runSystems(state) {
   combatStep(state);
   networkStep(state);
   worldStep(state);
+  questStep(state);
 }

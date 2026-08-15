@@ -384,6 +384,34 @@ export const RECIPES = {
     output: { typeId: 'netherite_boots', count: 1 },
     requiresTable: true, discoveryStage: 2,
   },
+
+  // ── The two §2.5 gaps: things quests asked for that could not be made ──────
+  //
+  // `bed` had no block and no recipe; `bread` was a defined item in `NAMED_ITEMS` with
+  // a texture on disk, no recipe and no other source in the game. Q06 ("A Safe Place to
+  // Rest") and Q19 ("Winter Supplies") required them, so both quests were unfinishable
+  // by construction rather than by difficulty.
+  bed: {
+    id: 'bed', name: 'Bed', description: 'A place to rest. Wool over planks.',
+    ingredients: [
+      { typeIds: [
+        BLOCK_TYPES.WHITE_WOOL, BLOCK_TYPES.RED_WOOL, BLOCK_TYPES.BLUE_WOOL,
+        BLOCK_TYPES.GREEN_WOOL, BLOCK_TYPES.YELLOW_WOOL, BLOCK_TYPES.BLACK_WOOL,
+        BLOCK_TYPES.BROWN_WOOL, BLOCK_TYPES.GRAY_WOOL,
+      ], count: 3 },
+      { typeId: BLOCK_TYPES.OAK_PLANKS, count: 3 },
+    ],
+    output: { typeId: BLOCK_TYPES.BED, count: 1 },
+    requiresTable: true, discoveryStage: 1,
+  },
+  // Hand-craftable and cheap on purpose. Q19 wants 3 of them in a tundra, which is not
+  // a place to be standing at a crafting table.
+  bread: {
+    id: 'bread', name: 'Bread', description: 'Travel rations, baked from hay.',
+    ingredients: [ { typeId: BLOCK_TYPES.HAY_BLOCK, count: 1 } ],
+    output: { typeId: 'bread', count: 3 },
+    requiresTable: false, discoveryStage: 1,
+  },
 };
 
 // ============================================================
