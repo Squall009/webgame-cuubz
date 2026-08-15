@@ -66,7 +66,8 @@ import { initPlayerSync } from './init/initPlayerSync.js';         // step 11a
 import { initChunkStreaming } from './init/initChunkStreaming.js'; // step 11b
 import { initInventory } from './init/initInventory.js';           // steps 12–13
 import { initHud } from './init/initHud.js';                       // step 14
-import { initQuests } from './init/initQuests.js';                 // step 15
+import { initVitals } from './init/initVitals.js';                 // step 15a
+import { initQuests } from './init/initQuests.js';                 // step 15b
 
 // Debug logging — set CuubzLogger.DEBUG = true in console to enable
 // D-27: the `typeof CuubzLogger !== 'undefined'` test and its `else` branch are gone —
@@ -204,7 +205,8 @@ export class Game {
       initChunkStreaming(this);       // 11b
       initInventory(this);            // 12 block interaction   13 inventory + systems
       initHud(this);                  // 14
-      initQuests(this);               // 15 — quests, tracker, HUD, quest log
+      initVitals(this);               // 15a — health, damage, death, respawn
+      initQuests(this);               // 15b — quests, tracker, HUD, quest log
       await this._startRenderLoop();  // 16
 
       log('[Cuubz] Game started successfully in ' + mode + ' mode');

@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mountTemplates } from '../../../src/ui/templates/index.js';
 import { QuestTrackerHUD } from '../../../src/ui/hud/QuestTracker.js';
 import { QuestLog } from '../../../src/ui/overlays/QuestLog.js';
+import { HealthMeter } from '../../../src/ui/hud/HealthMeter.js';
 import { QuestSystem } from '../../../src/game/systems/QuestSystem.js';
 import { createQuestState } from '../../../src/game/data/QuestState.js';
 import { QUEST_ORDER } from '../../../src/game/data/QuestDefinitions.js';
@@ -224,5 +225,67 @@ describe('the quest log overlay', () => {
     log.open();
     const html = document.getElementById('quest-log').innerHTML;
     expect(html).not.toContain('<script');
+  });
+});
+
+describe('the health meter (S3)', () => {
+  it('writes the one bar that has a system behind it, and leaves the other four alone', () => {
+    // `meters.css`'s own comment said "Nothing in src/ ever writes `.meter-fill`". This
+    // is the first writer, and it is deliberately only for health: there is no hunger,
+    // thirst, sleep or stamina system, and a bar that animates while nothing behind it
+    // exists is a worse lie than one that plainly does not move.
+    const meter = new HealthMeter(document);
+    expect(meter.isMounted).toBe(true);
+
+    meter.render(10, 20);
+    const fill = (id) => document.querySelector(`#${id} .meter-fill`);
+    // Parsed, not string-compared: jsdom normalises `50.0%` to `50%`.
+    expect(parseFloat(fill('health-meter').style.width)).toBeCloseTo(50, 5);
+    for (const id of ['hunger-meter', 'thirst-meter', 'sleep-meter', 'stamina-meter']) {
+      expect(fill(id).style.width, `${id} is untouched`).toBe('');
+    }
+  });
+
+  it('goes green → amber → red as the bar falls', () => {
+    const meter = new HealthMeter(document);
+    const fill = () => document.querySelector('#health-meter .meter-fill');
+
+    meter.render(20, 20);
+    const healthy = fill().style.backgroundColor;
+    meter.render(8, 20);
+    const hurt = fill().style.backgroundColor;
+    meter.render(3, 20);
+    const critical = fill().style.backgroundColor;
+
+    expect(healthy).not.toBe(hurt);
+    expect(hurt).not.toBe(critical);
+    expect(healthy).toBeTruthy();
+  });
+
+  it('clamps rather than overflowing the bar', () => {
+    const meter = new HealthMeter(document);
+    const width = () => parseFloat(document.querySelector('#health-meter .meter-fill').style.width);
+    meter.render(-5, 20);
+    expect(width()).toBe(0);
+    meter.render(999, 20);
+    expect(width()).toBe(100);
+  });
+
+  it('flashes the damage vignette, which also had no writer', () => {
+    const meter = new HealthMeter(document);
+    const flash = document.getElementById('damage-flash');
+    expect(flash.classList.contains('active')).toBe(false);
+    meter.flashDamage();
+    expect(flash.classList.contains('active')).toBe(true);
+    meter.dispose();
+    expect(flash.classList.contains('active')).toBe(false);
+  });
+
+  it('is a no-op without the template', () => {
+    document.body.innerHTML = '';
+    const meter = new HealthMeter(document);
+    expect(meter.isMounted).toBe(false);
+    expect(() => meter.render(5, 20)).not.toThrow();
+    expect(() => meter.flashDamage()).not.toThrow();
   });
 });

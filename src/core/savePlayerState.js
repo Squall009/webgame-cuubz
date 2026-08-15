@@ -41,6 +41,12 @@ export function savePlayerState(state, deps) {
   selected.inventory = serialized.slots;
   selected.equipment = serialized.equipment;
 
+  // Save health (S3). Per-character, not per-world — it is the player's body, and it
+  // travels with them between worlds the way their inventory does.
+  if (state.playerVitals) {
+    selected.vitals = state.playerVitals.serialize();
+  }
+
   // Save spawn point
   selected.spawnPoints = selected.spawnPoints || {};
   selected.spawnPoints[state.currentWorld.id] = {
