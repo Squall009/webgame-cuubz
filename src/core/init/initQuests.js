@@ -26,6 +26,10 @@ import { QuestTracker } from '../../game/systems/QuestTracker.js';
 import { QuestTrackerHUD } from '../../ui/hud/QuestTracker.js';
 import { QuestLog } from '../../ui/overlays/QuestLog.js';
 import { SealSystem } from '../../game/systems/SealSystem.js';
+import { BossEncounter } from '../../game/systems/BossEncounter.js';
+import { BossSync } from '../../multiplayer/BossSync.js';
+import { BossBar } from '../../ui/hud/BossBar.js';
+import { bossForSeal } from '../../game/mobs/bossDefinitions.js';
 import { QuestSync } from '../../multiplayer/QuestSync.js';
 import { BiomeSystem } from '../../engine/world/BiomeSystem.js';
 import { createQuestState } from '../../game/data/QuestState.js';
@@ -204,6 +208,88 @@ export function initQuests(game) {
     game.saveWorldState();
   };
 
+  // ─── Bosses (S6) ──────────────────────────────────────────────
+  //
+  // §6.5 — single-player builds the same runner with a **null transport**. The
+  // simulation, the validation and the state machine are identical; only the broadcast
+  // is a no-op. There is no `if (multiplayer)` in `BossEncounter` at all.
+  const host = sm && sm.client ? sm._hostManager : null;
+  const isHost = !!host;
+
+  const bossBar = new BossBar();
+  state.bossBar = bossBar;
+
+  // A guest runs no encounter: it mirrors the host's through `BossSync`.
+  const encounter = isGuest ? null : new BossEncounter({
+    questSystem,
+    sealSystem,
+    mobManager: state.mobIntegration ? state.mobIntegration.getManager() : null,
+    world: state.chunkWorld,
+    vitals: state.playerVitals,
+    player: state.player,
+    inventory: state.inventory,
+    localContributorId: contributorId,
+    broadcast: isHost ? (msg) => host._broadcast(msg) : null,
+    getPlayerPositions: isHost
+      ? () => host.getPlayerList()
+        .filter((p) => !p.isHost && p.position)
+        .map((p) => ({ id: p.character?.id || p.playerId, position: p.position }))
+      : null,
+  });
+  state.bossEncounter = encounter;
+
+  const bossSync = new BossSync({
+    client: sm ? sm.client : null,
+    mobManager: state.mobIntegration ? state.mobIntegration.getManager() : null,
+    isHost: !isGuest,
+    encounter,
+    inventory: state.inventory,
+    questSystem,
+    contributorId,
+  });
+  state.bossSync = bossSync;
+  if (sm && sm.client) bossSync.attach();
+
+  if (encounter) {
+    encounter.onBossSpawned = (boss) => {
+      log(`[Cuubz] ${boss.definition.name} awakens`);
+      bossBar.render(boss);
+    };
+    encounter.onBossChanged = (boss) => bossBar.render(boss);
+    encounter.onBossDefeated = (boss) => {
+      log(`[Cuubz] ${boss.definition.name} defeated — the ${boss.sealId} seal is broken`);
+      bossBar.hide();
+      // §5.1's third expensive-to-lose event. A boss kill is exactly the thing a player
+      // would quit over losing to a crash.
+      game.saveWorldState();
+    };
+    encounter.onBossDespawned = () => bossBar.hide();
+
+    // The host's own hits arrive here from `CombatStep`. §6.4 — one path.
+    if (host) host.onBossHit = (playerId, data) => {
+      const player = host.getRemotePlayer(playerId);
+      encounter.applyHit({
+        bossId: data.bossId,
+        damage: data.damage,
+        contributorId: player?.character?.id || null,
+        playerId,
+        position: data.origin || player?.position,
+      });
+    };
+  }
+
+  bossSync.onBossChanged = (boss) => bossBar.render(boss);
+  bossSync.onBossDefeated = () => bossBar.hide();
+  bossSync.onBossGone = () => bossBar.hide();
+
+  state.addTeardown(() => bossSync.dispose());
+  state.addTeardown(() => bossBar.dispose());
+
+  // Summoning is what a primed altar does when a player uses it again.
+  sealSystem.onSealPrimed = (sealId) => {
+    log(`[Cuubz] The ${sealId} seal is primed — use the altar again to summon`);
+  };
+
   // ─── The R key: make an offering at an altar ──────────────────
   //
   // `R` because everything else is taken: WASD, Space and Shift are movement, `E` is the
@@ -217,6 +303,16 @@ export function initQuests(game) {
     if (state.inventoryOpen || game.paused) return;
     const sealId = sealSystem.altarInRange;
     if (!sealId) return;
+
+    // A primed altar summons; anything else takes the offering. Two meanings for one
+    // key, decided by the seal's own state rather than by a second binding.
+    if (sealSystem.getSealState(sealId) === 'primed' && encounter && bossForSeal(sealId)) {
+      const summoned = encounter.summon(sealId, host ? host.playerCount : 1);
+      log(summoned
+        ? `[Cuubz] Summoning the guardian of the ${sealId} seal`
+        : `[Cuubz] The ${sealId} seal will not answer`);
+      return;
+    }
 
     const result = sealSystem.makeOffering(sealId);
     if (result.ok) {

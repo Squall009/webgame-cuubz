@@ -234,6 +234,9 @@ export class Game {
     // §3.5's check is "the block I am standing on, right now", so it reads through
     // exactly the handle the player's own collision does.
     if (state.hazardSystem) state.hazardSystem.setWorld(state.chunkWorld);
+    // The boss encounter needs it too — to find the arena floor when it spawns, and to
+    // write and revert hazard pools (§8.3).
+    if (state.bossEncounter) state.bossEncounter.setWorld(state.chunkWorld);
 
     // The 500 ms that lets the last of the init settle before the render loop starts
     // taking the frame budget. Behaviour, like the 200 ms above (PR 13).

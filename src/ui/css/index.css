@@ -71,3 +71,4 @@
    reproduce the single style.css they were split from. A new overlay goes at
    the end, where it can only override, never be silently overridden. */
 @import './overlays/quest-log.css';
+@import './hud/boss-bar.css';

@@ -14,6 +14,10 @@
 export const MOB_CATEGORIES = {
   PASSIVE: 'passive',
   HOSTILE: 'hostile',
+  // S6. A boss is a mob for rendering and animation purposes (§8.1 — the deleted
+  // `Boss.js` had no renderer at all), and not one for spawning, capping or despawning
+  // purposes. `MobManager` exempts this category from all three.
+  BOSS: 'boss',
 };
 
 export const MOB_BEHAVIORS = {
@@ -436,16 +440,46 @@ export const MOB_DEFINITIONS = {
 };
 
 /**
- * Get a mob definition by type key.
- * @param {string} mobType - Key in MOB_DEFINITIONS
+ * Definitions registered at runtime — the bosses (S6).
+ *
+ * ─── WHY A REGISTRY AND NOT A LINE IN `MOB_DEFINITIONS` ─────────────────────
+ *
+ * `bossDefinitions.js` imports `MOB_CATEGORIES`, `MOB_BEHAVIORS` and `ANIM_TYPES` from
+ * this file. Putting the bosses in the table above would need this file to import that
+ * one, and `src/` has no import cycles and must not gain one (**D-28**).
+ *
+ * The split is also the right shape on its own: `getMobDefinition` finds a boss, so
+ * `Mob`, `mobModelBuilder`, `mobAnimator` and `mobRenderer` all work on one unchanged —
+ * while `getAllMobTypes`, `getMobTypesForBiome` and `selectMobForBiome` read only
+ * `MOB_DEFINITIONS`, so **no spawn path can ever pick a boss**. `biomes: []` makes that
+ * true twice over, and the boss tests assert both.
+ */
+const REGISTERED = {};
+
+/**
+ * Add definitions to the lookup. Called once, at module load, by `bossDefinitions.js`.
+ * @param {Object<string, object>} defs
+ */
+export function registerMobDefinitions(defs) {
+  for (const [key, def] of Object.entries(defs || {})) {
+    REGISTERED[key] = def;
+  }
+}
+
+/**
+ * Get a mob definition by type key. Finds registered bosses as well as ordinary mobs.
+ * @param {string} mobType - Key in MOB_DEFINITIONS, or a registered boss
  * @returns {object|null}
  */
 export function getMobDefinition(mobType) {
-  return MOB_DEFINITIONS[mobType] || null;
+  return MOB_DEFINITIONS[mobType] || REGISTERED[mobType] || null;
 }
 
 /**
  * Get all mob type keys.
+ *
+ * **Spawnable mobs only** — the registered bosses are deliberately absent, which is what
+ * keeps a boss out of every natural spawn path without relying on `biomes: []` alone.
  * @returns {string[]}
  */
 export function getAllMobTypes() {

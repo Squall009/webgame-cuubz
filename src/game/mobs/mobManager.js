@@ -117,8 +117,10 @@ export class MobManager {
       // Update base mob state (cooldowns, timers)
       mob.update(deltaTime, blockAccess, playerPos, Array.from(this.mobs.values()));
 
-      // Check despawn
-      if (!mob.isDead && playerPos) {
+      // Check despawn — never for a boss (§8.1). A boss that vanished because a player
+      // kited it 128 blocks is a bug report, so the category is exempt outright rather
+      // than relying on its `despawnDistance` being large enough.
+      if (!mob.isDead && playerPos && mob.definition.category !== MOB_CATEGORIES.BOSS) {
         const dist = mob.distanceTo(playerPos);
         if (dist > mob.definition.despawnDistance) {
           this._removeMob(id);
@@ -139,7 +141,10 @@ export class MobManager {
   _spawnTick(blockAccess, playerPosition, renderDistance, getBiomeFn) {
     if (!blockAccess || !playerPosition) return;
 
-    const currentCount = this.mobs.size;
+    // Bosses do not count toward the cap: a boss plus its summoned adds must never be
+    // the reason the world stops spawning wildlife, and more importantly the cap must
+    // never be the reason a boss cannot summon (§8.1).
+    const currentCount = this.countSpawnableMobs();
     if (currentCount >= this.mobCap) return;
 
     // Try to spawn mobs in chunks around the player
@@ -169,7 +174,7 @@ export class MobManager {
     // it is in the middle of mutating.
     let hostileCount = this._countHostiles();
 
-    for (let i = 0; i < maxChecks && this.mobs.size < this.mobCap; i++) {
+    for (let i = 0; i < maxChecks && this.countSpawnableMobs() < this.mobCap; i++) {
       const { cx, cz } = allChunks[i];
 
       // Check mob density in this chunk
@@ -218,6 +223,22 @@ export class MobManager {
    * would suppress spawning for the length of a death animation.
    * @returns {number}
    */
+  /**
+   * Mobs that count against `mobCap` — i.e. everything except a boss and its adds are
+   * counted, and bosses are not (§8.1).
+   *
+   * A boss that could not be summoned because twenty-eight wolves were already loaded
+   * would be an encounter that silently does not happen, which is the worst possible
+   * failure for the thing an entire act builds toward.
+   */
+  countSpawnableMobs() {
+    let count = 0;
+    for (const [, mob] of this.mobs) {
+      if (mob.definition.category !== MOB_CATEGORIES.BOSS) count++;
+    }
+    return count;
+  }
+
   _countHostiles() {
     let count = 0;
     for (const [, mob] of this.mobs) {
