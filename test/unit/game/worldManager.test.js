@@ -5,7 +5,7 @@
 
 import { it } from 'vitest';
 import { legacy } from '../../helpers/legacy.js';
-import { WorldManager, MAX_WORLDS, MIN_WORLD_NAME_LENGTH, MAX_WORLD_NAME_LENGTH, DEFAULT_SEED, BIOME_NAMES } from '../../../src/game/entities/WorldManager.js';
+import { WorldManager, MAX_WORLDS, MIN_WORLD_NAME_LENGTH, MAX_WORLD_NAME_LENGTH, DEFAULT_SEED, BIOME_NAMES, CURRENT_WORLDGEN_VERSION, WORLDGEN_VERSION_LEGACY } from '../../../src/game/entities/WorldManager.js';
 
 it('worldManager', () => legacy(async () => {
 // ============================================================
@@ -215,13 +215,18 @@ assertEquals(mgr.getRemainingSlots(), 3, '3 remaining slots at start');
 let result = await mgr.createWorld('Plains World');
 assertTrue(result.success, 'First world creation succeeds');
 assertNotNull(result.world, 'Created world returned');
-assertObjectHasKeys(result.world, ['id', 'name', 'seed', 'biomeMap', 'questProgress', 
-  'chunkReferences', 'createdAt', 'lastPlayed'], 'World has all required fields');
+assertObjectHasKeys(result.world, ['id', 'name', 'seed', 'biomeMap', 'questState',
+  'worldgenVersion', 'chunkReferences', 'createdAt', 'lastPlayed'], 'World has all required fields');
 assertEquals(result.world.name, 'Plains World', 'Name stored correctly');
 assert(result.world.seed >= 0 && result.world.seed <= 0xFFFFFFFF, 'Seed is valid 32-bit number');
 assert(result.world.biomeMap !== undefined, 'biomeMap generated');
 assert(Array.isArray(result.world.biomeMap.dominantBiomes), 'dominantBiomes is array');
-assertEquals(Object.keys(result.world.questProgress).length, 0, 'questProgress starts empty');
+assertEquals(Object.keys(result.world.questState.quests).length, 0, 'questState starts with no quests');
+assertEquals(result.world.questState.v, 1, 'questState is at schema version 1');
+assertEquals(result.world.questState.activeQuestId, 'q01', 'A new world starts on Q01');
+// §3.1 — a world created now gets the Corrupt and Lava biomes; one created before this
+// field existed has no `worldgenVersion`, defaults to 1, and generates as it always did.
+assertEquals(result.world.worldgenVersion, 2, 'New worlds are created at worldgen version 2');
 assertEquals(result.world.chunkReferences.length, 0, 'chunkReferences starts empty');
 assert(result.world.createdAt > 0, 'createdAt is timestamp');
 assertEquals(result.world.lastPlayed, null, 'lastPlayed is null on creation');
@@ -358,51 +363,46 @@ assertEquals(mgr.getSelectedWorld().name, 'Beta World', 'Selection switched to B
 mgr.clearSelection();
 assertEquals(mgr.getSelectedWorld(), null, 'Selection cleared');
 
-// --- Test Suite 7: Quest Progress Helpers ---
-console.log('\n--- Quest Progress ---');
+// --- Test Suite 7: Quest State ---
+console.log('\n--- Quest State ---');
+//
+// `getQuestProgress` / `setQuestProgress` / `advanceQuest` are gone (S0). The last of
+// the three hard-coded `completed = nextStage >= 5` and this suite asserted that
+// constant back at it — five advances complete any quest, in a game whose quests were
+// never five stages long. `WorldManager` owns storage now, `QuestSystem` owns
+// advancement, and this suite asserts only the first of those.
 
 const questWorld = alpha;
 
-// Initial quest progress is empty
-const initialProgress = mgr.getQuestProgress(questWorld.id);
-assert(initialProgress !== null, 'getQuestProgress returns object');
-assertEquals(Object.keys(initialProgress).length, 0, 'Initial quest progress is empty');
+// A new world has a valid, empty v1 state
+const initialState = mgr.getQuestState(questWorld.id);
+assertNotNull(initialState, 'getQuestState returns a state');
+assertEquals(initialState.v, 1, 'New world is at schema v1');
+assertEquals(Object.keys(initialState.quests).length, 0, 'No quests have been started');
+assertEquals(Object.keys(initialState.seals).length, 5, 'All five seals are present');
+assertEquals(initialState.seals.verdant.state, 'dormant', 'Seals start dormant');
+assertEquals(initialState.seals.verdant.site, null,
+  'A seal has no site until worldgen resolves one — a default here would be a second ' +
+  'source of truth for where the altar is (§7.1)');
+assertEquals(initialState.finale.state, 'sealed', 'The finale starts sealed');
 
 // Non-existent world returns null
-assertEquals(mgr.getQuestProgress('nonexistent'), null, 'Non-existent world returns null');
+assertEquals(mgr.getQuestState('nonexistent'), null, 'Non-existent world returns null');
 
-// Set quest progress
-assertTrue(mgr.setQuestProgress(questWorld.id, 'quest_1', { stage: 2, completed: false }), 
-  'setQuestProgress succeeds');
-const progress = mgr.getQuestProgress(questWorld.id);
-assertNotNull(progress.quest_1, 'quest_1 progress set');
-assertEquals(progress.quest_1.stage, 2, 'Quest stage correct');
+// The state is held by reference: the live system mutates it between saves.
+initialState.activeQuestId = 'q07';
+assertEquals(mgr.getQuestState(questWorld.id).activeQuestId, 'q07',
+  'getQuestState hands back the live object, not a copy');
 
-// Non-existent world set returns false
-assertFalse(mgr.setQuestProgress('nonexistent', 'q1', {}), 
-  'setQuestProgress on non-existent fails');
+// setQuestState migrates whatever it is given
+assertTrue(mgr.setQuestState(questWorld.id, { garbage: true }), 'setQuestState succeeds');
+assertEquals(mgr.getQuestState(questWorld.id).v, 1, 'An unrecognised blob becomes a fresh v1 state');
+assertFalse(mgr.setQuestState('nonexistent', {}), 'setQuestState on non-existent fails');
 
-// Advance quest
-const freshWorld = mgr.getAllWorlds()[1]; // Beta World
-mgr.setQuestProgress(freshWorld.id, 'quest_1', { stage: 0, completed: false });
-assertTrue(mgr.advanceQuest(freshWorld.id, 'quest_1'), 'advanceQuest succeeds');
-const advanced = mgr.getQuestProgress(freshWorld.id);
-assertEquals(advanced.quest_1.stage, 1, 'Quest advanced from 0 to 1');
-
-// Advance multiple times
-for (let i = 0; i < 4; i++) {
-  mgr.advanceQuest(freshWorld.id, 'quest_1');
-}
-const fullyAdvanced = mgr.getQuestProgress(freshWorld.id);
-assertEquals(fullyAdvanced.quest_1.completed, true, 'Quest completed after 5 advances');
-
-// Already completed quest stays completed
-mgr.advanceQuest(freshWorld.id, 'quest_1');
-assert(mgr.getQuestProgress(freshWorld.id).quest_1.completed, 
-  'Already completed quest stays completed');
-
-// Non-existent world advance returns false
-assertFalse(mgr.advanceQuest('nonexistent', 'q1'), 'advanceQuest on non-existent fails');
+// Worldgen version (§3.1)
+assertEquals(mgr.getWorldgenVersion(questWorld.id), CURRENT_WORLDGEN_VERSION,
+  'A world created now is at the current worldgen version');
+assertEquals(mgr.getWorldgenVersion('nonexistent'), null, 'Non-existent world has no worldgen version');
 
 // --- Test Suite 8: Chunk Reference Helpers ---
 console.log('\n--- Chunk References ---');
@@ -435,8 +435,8 @@ console.log('\n--- Serialization ---');
 
 const data = mgr.serialize();
 assertEquals(data.length, 3, 'Serialized 3 worlds');
-assertObjectHasKeys(data[0], ['id', 'name', 'seed', 'biomeMap', 'questProgress', 
-  'chunkReferences', 'createdAt', 'lastPlayed'], 'Serialized data has all fields');
+assertObjectHasKeys(data[0], ['id', 'name', 'seed', 'biomeMap', 'questState',
+  'worldgenVersion', 'chunkReferences', 'createdAt', 'lastPlayed'], 'Serialized data has all fields');
 
 // Deserialize into new manager
 const storage2 = new MockStorage();
@@ -451,7 +451,11 @@ assertEquals(mgr2.getAllWorlds()[0].seed, data[0].seed, 'Seed survives round-tri
 const minimalData = [{ id: 'test1', name: 'Minimal' }];
 mgr2.deserialize(minimalData);
 assertEquals(mgr2.getAllWorlds()[0].seed, DEFAULT_SEED, 'Missing seed defaults to DEFAULT_SEED');
-assertEquals(Object.keys(mgr2.getAllWorlds()[0].questProgress).length, 0, 'Missing questProgress defaults to {}');
+assertEquals(mgr2.getAllWorlds()[0].questState.v, 1, 'Missing questState migrates to a fresh v1 state');
+// A world deserialized from data that predates the field is a v1 world: it generates
+// exactly the terrain it always did, and the new biomes are opt-in (§3.1).
+assertEquals(mgr2.getAllWorlds()[0].worldgenVersion, WORLDGEN_VERSION_LEGACY,
+  'Missing worldgenVersion defaults to 1 — existing saves stay byte-identical');
 assert(Array.isArray(mgr2.getAllWorlds()[0].chunkReferences), 
   'Missing chunkReferences defaults to []');
 

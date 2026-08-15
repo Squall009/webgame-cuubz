@@ -18,6 +18,14 @@
 
 import { MESSAGE_TYPES } from './Client.js';
 import { CuubzLogger } from '../util/Logger.js';
+import {
+  createQuestState,
+  migrateQuestState,
+  serializeQuestState,
+  applyPooledDelta,
+  setSealState,
+  addSealContributor,
+} from '../game/data/QuestState.js';
 
 // D-82: a `'use strict';` directive stood here, AFTER the imports. Two things were wrong
 // with it and both are silent. An ES module is strict mode already, so it could never
@@ -250,26 +258,72 @@ export function validateHostInventory(playerId, inventory) {
 }
 
 /**
- * Validate quest progress update.
- * Returns { valid, reason } object.
+ * Largest delta one `QUEST_CONTRIBUTE` may carry.
+ *
+ * A stack is 64 and the tracker polls twice a second, so a legitimate single message
+ * cannot exceed one stack's worth of newly-observed items by any normal route. This is a
+ * bound on absurdity, not an anti-cheat: a player who genuinely picked up two stacks
+ * between polls sends two messages and both are credited. §6.3 — never kick, and a
+ * laggy client is not a cheater.
  */
-export function validateQuestUpdate(playerId, questUpdate) {
-  if (!questUpdate || typeof questUpdate !== 'object') {
-    return { valid: false, reason: 'Invalid quest update format' };
+export const MAX_CONTRIBUTION_DELTA = 64;
+
+/**
+ * Validate a pooled quest contribution.
+ *
+ * ─── THIS REPLACED `validateQuestUpdate`, IT DID NOT EXTEND IT ──────────────
+ *
+ * The old function validated `{ questId, progress: number }` and the old handler stored
+ * a monotonic **max** of that number. Pooled objectives (D-Q2, §4.5) need
+ * accumulate-a-delta from an identified contributor, which is a different message with
+ * different arithmetic: `max` and `+=` disagree about everything the moment two players
+ * contribute. Reshaping in place would have left a function whose name said `progress`
+ * and whose body meant `delta`.
+ *
+ * Neither the old validator nor the old handler had a caller — `handleQuestUpdate()` was
+ * never registered on the host and `QUEST_UPDATE` was never forwarded by the client, so
+ * nothing on either side of the wire ever ran. Nothing depended on the old shape.
+ *
+ * @param {string} playerId — the sender, as the **relay** attached it (not from the body)
+ * @param {object} contribution — `{ questId, objectiveKey, delta, contributorId }`
+ * @param {string|null} [expectedContributorId] — the character id the host recorded for
+ *   this player on join. When supplied, a mismatch is rejected: a client may contribute
+ *   only as itself, or it could inflate another player's high-water mark and, worse,
+ *   suppress their real contributions afterwards.
+ * @returns {{valid: boolean, reason?: string}}
+ */
+export function validateQuestContribute(playerId, contribution, expectedContributorId = null) {
+  if (!contribution || typeof contribution !== 'object') {
+    return { valid: false, reason: 'Invalid contribution format' };
   }
 
-  // Must have questId and progress
-  if (!questUpdate.questId || typeof questUpdate.questId !== 'string') {
+  if (!contribution.questId || typeof contribution.questId !== 'string') {
     return { valid: false, reason: 'Missing or invalid questId' };
   }
 
-  if (questUpdate.progress === undefined) {
-    return { valid: false, reason: 'Missing progress value' };
+  if (!contribution.objectiveKey || typeof contribution.objectiveKey !== 'string') {
+    return { valid: false, reason: 'Missing or invalid objectiveKey' };
   }
 
-  // Progress must be non-negative number
-  if (typeof questUpdate.progress !== 'number' || questUpdate.progress < 0) {
-    return { valid: false, reason: 'Progress must be a non-negative number' };
+  const { delta } = contribution;
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) {
+    return { valid: false, reason: 'Delta must be a finite number' };
+  }
+  // Strictly positive: the pool is monotonic, so a zero carries no information and a
+  // negative one is the only thing that could ever take progress away.
+  if (delta <= 0) {
+    return { valid: false, reason: 'Delta must be greater than zero' };
+  }
+  if (delta > MAX_CONTRIBUTION_DELTA) {
+    return { valid: false, reason: `Delta exceeds ${MAX_CONTRIBUTION_DELTA}` };
+  }
+
+  if (!contribution.contributorId || typeof contribution.contributorId !== 'string') {
+    return { valid: false, reason: 'Missing or invalid contributorId' };
+  }
+
+  if (expectedContributorId && contribution.contributorId !== expectedContributorId) {
+    return { valid: false, reason: 'contributorId does not match the sender' };
   }
 
   return { valid: true };
@@ -449,8 +503,12 @@ export class HostManager {
 
     // World state (server-authoritative on host)
     this._worldState = {
-      blockChanges: [],       // Log of validated block changes
-      questProgress: {},      // questId → progress value
+      blockChanges: [],                    // Log of validated block changes
+      // The §4.1 schema, seeded from the host's world config by `seedQuestState()` at
+      // session start and written back by `saveWorldState`. Was `questProgress: {}`,
+      // a `questId → number` map that disagreed with both of the other two shapes the
+      // codebase had for the same idea (§2.1).
+      questState: createQuestState(),
     };
 
     // Rate limiting
@@ -466,6 +524,8 @@ export class HostManager {
     this.onBlockPlaceValidated = null;
     this.onInventorySynced = null;
     this.onQuestUpdated = null;
+    /** S6 — `(playerId, {bossId, damage, origin, direction})`. Set by `BossEncounter`. */
+    this.onBossHit = null;
     this.onError = null;
 
     // Internal message handlers for game session events
@@ -652,6 +712,28 @@ export class HostManager {
       INVENTORY_SYNC: (data) => {
         this._handleInventorySync(data);
       },
+
+      // §2.1 — the half of the broken wire path that lived on this side. The host's
+      // quest handler existed, was correct enough to call, and had **no caller
+      // anywhere in `src/`**: this table is the registration list, and quests were
+      // simply not in it. The other half was `Client._setupGameSessionHandlers`, which
+      // dropped the type before it could reach here.
+      QUEST_CONTRIBUTE: (data) => {
+        this.handleQuestContribute(data.playerId, data);
+      },
+
+      // S6 — a client reporting a landed attack. Registered here from S0 so the
+      // routing table has one shape and the boss work is a handler body, not a
+      // re-plumbing job.
+      BOSS_HIT: (data) => {
+        if (this.onBossHit) {
+          try {
+            this.onBossHit(data.playerId, data);
+          } catch (err) {
+            console.error('[HostManager] Error in onBossHit:', err.message);
+          }
+        }
+      },
     };
 
     for (const [eventType, handler] of Object.entries(handlers)) {
@@ -681,6 +763,11 @@ export class HostManager {
     this._players.set(playerId, playerState);
 
     _hostLog(`[HostManager] Player joined: ${playerId} (${data.character?.name || 'Unknown'})`);
+
+    // §5.2 — a joining client holds a *view* of the host's quest state, not a copy, and
+    // it has none of it until this arrives. Sent to the joiner alone: everyone else
+    // already has it.
+    this.broadcastQuestSync(playerId);
 
     // Callback
     if (this.onPlayerJoined) {
@@ -980,46 +1067,107 @@ export class HostManager {
     });
   }
 
-  // ── Quest Progress Handling ───────────────────────────────────
+  // ── Quest State (§4.1, §4.5) ──────────────────────────────────
 
   /**
-   * Handle quest progress update from a player.
-   * Validates and stores in world state (shared by all players).
+   * Seed the authoritative quest state from the host's world config at session start.
+   *
+   * §5.2: progress saves on the **host's** device, in the host's world slot. A world
+   * hosted by A and joined by B advances A's copy, and B's device never accumulates a
+   * half-finished copy of A's world. Anything unrecognised becomes a fresh state via the
+   * migration, so a corrupt blob cannot stop a session from starting.
    */
-  handleQuestUpdate(playerId, questUpdate) {
+  seedQuestState(raw) {
+    this._worldState.questState = migrateQuestState(raw);
+    return this._worldState.questState;
+  }
+
+  /** The live authoritative state. Mutable, host-owned — callers must not hand it out. */
+  getQuestState() {
+    return this._worldState.questState;
+  }
+
+  /** A deep copy, budget-collapsed, for storage and for the wire (§4.1). */
+  serializeQuestState() {
+    return serializeQuestState(this._worldState.questState);
+  }
+
+  /**
+   * Send the full quest state to one joining player, or to everyone.
+   *
+   * A late joiner needs the whole thing — pools, seal states, sites and titles — because
+   * every one of those affects what their HUD shows and where their markers point. It is
+   * a few hundred bytes, once, on join.
+   */
+  broadcastQuestSync(targetPlayerId = null) {
+    if (!this._client || !this._client.isGameSessionConnected) return;
+    const msg = {
+      type: MESSAGE_TYPES.QUEST_SYNC,
+      questState: this.serializeQuestState(),
+    };
+    if (targetPlayerId) msg.targetPlayers = [targetPlayerId];
+    this._broadcast(msg);
+  }
+
+  /**
+   * Apply one player's pooled contribution.
+   *
+   * The message carries a **delta**, already measured against that contributor's own
+   * high-water mark on the sending side (§4.5). The host adds it, clamps at the target,
+   * records the contributor's running total so a reconnecting client cannot be credited
+   * twice, and broadcasts the authoritative pool — `n` and `target`, not the delta,
+   * because a client that missed a packet has to be able to catch up from any single
+   * message.
+   *
+   * @param {string} playerId — as the relay attached it
+   * @param {object} contribution — `{ questId, objectiveKey, delta, contributorId }`
+   * @returns {boolean} whether it was applied
+   */
+  handleQuestContribute(playerId, contribution) {
     const player = this._players.get(playerId);
     if (!player || !player.connected) return false;
 
-    // Validate quest update
-    const valid = validateQuestUpdate(playerId, questUpdate);
+    // §6.3 — a client may contribute only as itself. `character.id` is what the player
+    // sent on join; if it is absent (an older client) the check is skipped rather than
+    // failing closed, because refusing every contribution from a client that predates
+    // this field is a worse outcome than the exploit it prevents in a co-op game.
+    const expected = player.character?.id || null;
+    const valid = validateQuestContribute(playerId, contribution, expected);
     if (!valid.valid) {
-      console.warn(`[HostManager] Invalid quest update from ${playerId}: ${valid.reason}`);
+      console.warn(`[HostManager] Rejected quest contribution from ${playerId}: ${valid.reason}`);
       return false;
     }
 
-    // Store in world state (quest progress lives with the world)
-    const current = this._worldState.questProgress[questUpdate.questId] || 0;
-    if (questUpdate.progress > current) {
-      this._worldState.questProgress[questUpdate.questId] = questUpdate.progress;
+    const rate = this._rateLimiter.check(playerId, 'quest');
+    if (!rate.allowed) {
+      console.warn(`[HostManager] Quest contribution rate limited: ${playerId}`);
+      return false;
     }
 
-    // Broadcast to all players
-    if (this._client && this._client.isGameSessionConnected) {
-      this._broadcast({
-        type: MESSAGE_TYPES.QUEST_UPDATE,
-        questId: questUpdate.questId,
-        progress: questUpdate.progress,
-        updatedBy: playerId,
-      });
-    }
+    const result = applyPooledDelta(
+      this._worldState.questState,
+      contribution.questId,
+      contribution.objectiveKey,
+      contribution.delta,
+      0,
+      contribution.contributorId
+    );
 
-    // Callback
+    if (result.credited <= 0) return false;
+
+    this.broadcastQuestUpdate(contribution.questId, contribution.objectiveKey, result);
+
     if (this.onQuestUpdated) {
       try {
         this.onQuestUpdated({
           playerId,
-          questId: questUpdate.questId,
-          progress: questUpdate.progress,
+          questId: contribution.questId,
+          objectiveKey: contribution.objectiveKey,
+          contributorId: contribution.contributorId,
+          credited: result.credited,
+          n: result.n,
+          target: result.target,
+          complete: result.complete,
         });
       } catch (err) {
         console.error('[HostManager] Error in onQuestUpdated:', err.message);
@@ -1029,9 +1177,49 @@ export class HostManager {
     return true;
   }
 
-  /** Get current quest progress for all quests */
-  getQuestProgress() {
-    return { ...this._worldState.questProgress };
+  /**
+   * Broadcast the authoritative total for one objective.
+   *
+   * `QUEST_UPDATE` existed before any of this and had never travelled: the host never
+   * registered a handler and the client never forwarded it (§2.1). This is its first
+   * real use, and it carries `{ n, target }` — the state, not the change.
+   */
+  broadcastQuestUpdate(questId, objectiveKey, result) {
+    if (!this._client || !this._client.isGameSessionConnected) return;
+    this._broadcast({
+      type: MESSAGE_TYPES.QUEST_UPDATE,
+      questId,
+      objectiveKey,
+      n: result.n,
+      target: result.target,
+      complete: result.complete,
+    });
+  }
+
+  /**
+   * Advance a seal and tell everyone. Host-only: `setSealState` refuses to move
+   * backwards, so a duplicate or reordered call is a no-op rather than a regression.
+   */
+  setSeal(sealId, state, contributors = null) {
+    const changed = setSealState(this._worldState.questState, sealId, state);
+    if (!changed) return false;
+
+    const seal = this._worldState.questState.seals[sealId];
+    if (Array.isArray(contributors)) {
+      for (const id of contributors) addSealContributor(this._worldState.questState, sealId, id);
+    }
+    if (state === 'broken' && !seal.brokenAt) seal.brokenAt = Date.now();
+
+    if (this._client && this._client.isGameSessionConnected) {
+      this._broadcast({
+        type: MESSAGE_TYPES.SEAL_UPDATE,
+        sealId,
+        state,
+        brokenBy: [...seal.brokenBy],
+        brokenAt: seal.brokenAt,
+      });
+    }
+    return true;
   }
 
   // ── Broadcasting ──────────────────────────────────────────────
@@ -1078,7 +1266,7 @@ export class HostManager {
       maxPlayers: this.maxPlayers,
       players: Array.from(this._players.values()).map((p) => p.getStateSummary()),
       blockChangesLog: this._worldState.blockChanges.length,
-      questProgress: this.getQuestProgress(),
+      questState: this.serializeQuestState(),
     };
   }
 

@@ -155,8 +155,21 @@ export async function initPlayer(game) {
   if (sm && sm.client) {
     const charData = deps.characterManager ? deps.characterManager.getSelectedCharacter() : null;
     const spawnPos = { x: player.position.x, y: player.position.y, z: player.position.z };
+    // `id` travels with the character, and that is S0's verification item from
+    // `quest_implementation.md` §4.5 — it was **not** here, and the omission would have
+    // been a silent double-credit bug rather than a crash.
+    //
+    // Pooled quest objectives key their per-contributor high-water marks on the
+    // *character* id, because `playerId` is assigned by the relay per connection: a
+    // player who dropped and reconnected would arrive with a fresh playerId, a
+    // high-water mark of 0, and be credited a second time for the 20 obsidian still in
+    // their inventory. The character id is device-persistent, so their mark is found
+    // again and the re-observation credits nothing. Without this line every reconnect
+    // would have re-donated the reconnecting player's entire inventory to the pool.
     sm.client.joinGame(
-      charData ? { name: charData.name, color: charData.color } : { name: 'Player', color: '#ffffff' },
+      charData
+        ? { id: charData.id, name: charData.name, color: charData.color }
+        : { name: 'Player', color: '#ffffff' },
       spawnPos,
       { yaw: 0, pitch: 0 }
     );

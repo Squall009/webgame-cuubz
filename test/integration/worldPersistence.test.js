@@ -9,6 +9,10 @@ import { it } from 'vitest';
 import { legacy } from '../helpers/legacy.js';
 import { WorldManager, MAX_WORLDS, DEFAULT_SEED, BIOME_NAMES } from '../../src/game/entities/WorldManager.js';
 import { CharacterManager, MAX_CHARACTERS } from '../../src/game/entities/CharacterManager.js';
+import {
+  migrateQuestState, ensureObjective, creditObservation, completeQuest,
+  setSealState, setSealSite, grantTitle, estimateSize, QUEST_STATE_BUDGET_BYTES,
+} from '../../src/game/data/QuestState.js';
 
 it('worldPersistence', () => legacy(async () => {
 // ============================================================
@@ -208,27 +212,40 @@ const loadedChunk_10 = await chunkStorage.loadChunk(testWorld.id, 1, 0);
 assertNotNull(loadedChunk_10, 'Chunk (1,0) loads from storage');
 assertEquals(loadedChunk_10.blocks[256], 7, 'Wood log at position preserved in chunk data');
 
-// --- Test 2: Quest Progress Preserved After Reload ---
-console.log('\n--- Test 2: Quest Progress Preserved ---');
+// --- Test 2: Quest State Preserved After Reload ---
+console.log('\n--- Test 2: Quest State Preserved ---');
+//
+// This test used to drive `setQuestProgress` / `advanceQuest` / `getQuestProgress`, and
+// its central assertion was "Q04 not yet completed (stage 4 < 5)" — which was asserting
+// `WorldManager.advanceQuest`'s hard-coded `completed = nextStage >= 5` back at itself,
+// under a comment in the shipped code that read *"simplified — actual quest system will
+// define stages"*. The placeholder and the test that pinned it are both gone (S0).
+//
+// What is asserted now is what the storage layer actually owes the quest system: a v1
+// state round-trips through save/reload with its pools, high-water marks, seal states
+// and titles intact, and a completed quest comes back collapsed.
 
 const questStorage = new MockPersistenceStorage();
 const questMgr = new WorldManager(questStorage);
 await questMgr.init();
 
 const questWorld = (await questMgr.createWorld('QuestWorld', 99999)).world;
+const qs = questMgr.getQuestState(questWorld.id);
+assertNotNull(qs, 'A new world has a quest state');
+assertEquals(qs.v, 1, 'Quest state is schema v1');
 
-// Simulate quest progression — player completes several quests
-assertTrue(questMgr.setQuestProgress(questWorld.id, 'Q01', { stage: 5, completed: true, lastUpdated: Date.now() }), 'Set Q01 complete');
-assertTrue(questMgr.setQuestProgress(questWorld.id, 'Q02', { stage: 3, completed: false, lastUpdated: Date.now() }), 'Set Q02 in progress');
-assertTrue(questMgr.setQuestProgress(questWorld.id, 'Q03', { stage: 5, completed: true, lastUpdated: Date.now() }), 'Set Q03 complete');
+// Two players contribute to one pooled objective, and one quest is completed outright.
+ensureObjective(qs, 'q01', 'wood_log', 20);
+creditObservation(qs, 'q01', 'wood_log', 'char_a', 12, 20);
+creditObservation(qs, 'q01', 'wood_log', 'char_b', 8, 20);
+assertEquals(qs.quests.q01.objectives.wood_log.n, 20, 'Pool reaches 20 from two contributors');
 
-// Advance quest Q04 through stages
-for (let i = 0; i < 4; i++) {
-  assertTrue(questMgr.advanceQuest(questWorld.id, 'Q04'), `Advance Q04 stage ${i+1}`);
-}
-assertEquals(questMgr.getQuestProgress(questWorld.id).Q04.stage, 4, 'Q04 at stage 4 after 4 advances');
+completeQuest(qs, 'q02');
+setSealState(qs, 'verdant', 'keyed');
+setSealSite(qs, 'verdant', { x: 812, z: -344 });
+grantTitle(qs, 'survivor');
+qs.activeQuestId = 'q03';
 
-// Save world with quest progress to storage
 await questStorage.saveWorld(questWorld);
 
 // Simulate page reload
@@ -238,19 +255,44 @@ await reloadedQuestMgr.init();
 const reloadedQuestWorld = reloadedQuestMgr.getWorld(questWorld.id);
 assertNotNull(reloadedQuestWorld, 'Quest world found after reload');
 
-// Verify quest progress survived the reload cycle
-const qProgress = reloadedQuestWorld.questProgress;
-assertTrue(qProgress.Q01.completed, 'Q01 still completed after reload');
-assertEquals(qProgress.Q01.stage, 5, 'Q01 stage preserved as 5');
-assertFalse(qProgress.Q02.completed, 'Q02 still in progress after reload');
-assertEquals(qProgress.Q02.stage, 3, 'Q02 stage preserved as 3');
-assertTrue(qProgress.Q03.completed, 'Q03 still completed after reload');
-assertEquals(qProgress.Q04.stage, 4, 'Q04 stage preserved as 4 after reload');
-assertFalse(qProgress.Q04.completed, 'Q04 not yet completed (stage 4 < 5)');
+const rq = reloadedQuestMgr.getQuestState(questWorld.id);
+assertEquals(rq.v, 1, 'Reloaded state is still v1');
+assertEquals(rq.activeQuestId, 'q03', 'Active quest survives the reload');
+assertEquals(rq.quests.q01.objectives.wood_log.n, 20, 'Pool total survives the reload');
 
-// Advance Q04 one more time to complete it
-assertTrue(reloadedQuestMgr.advanceQuest(questWorld.id, 'Q04'), 'Complete Q04 on reloaded world');
-assertEquals(reloadedQuestMgr.getQuestProgress(questWorld.id).Q04.completed, true, 'Q04 now completed');
+// The high-water marks are the reason a disconnected guest keeps their contribution
+// (§4.5), so they have to survive storage too — not just the total.
+assertEquals(rq.quests.q01.objectives.wood_log.hw.char_a, 12, "char_a's high-water mark survives");
+assertEquals(rq.quests.q01.objectives.wood_log.hw.char_b, 8, "char_b's high-water mark survives");
+
+assertTrue(rq.quests.q02.completed, 'q02 still completed after reload');
+assertEquals(rq.quests.q02.objectives, undefined,
+  'A completed quest is collapsed — its objectives and high-water maps are dropped, ' +
+  'which is most of the 8 KB localStorage budget (§4.1)');
+
+assertEquals(rq.seals.verdant.state, 'keyed', 'Seal state survives the reload');
+assertEquals(rq.seals.verdant.site.x, 812, 'Frozen seal site survives the reload');
+assertTrue(rq.titles.includes('survivor'), 'Titles survive the reload');
+
+// The whole point of the collapse: this has to stay small.
+assertTrue(estimateSize(rq) <= QUEST_STATE_BUDGET_BYTES,
+  `Serialized quest state is within the ${QUEST_STATE_BUDGET_BYTES}-byte budget (was ${estimateSize(rq)})`);
+
+// A world written before S0 carries `questProgress` in one of the three legacy shapes
+// and no `questState` at all. Every one of them migrates to a valid v1 state rather
+// than throwing or leaving a half-shape behind.
+for (const legacyShape of [
+  undefined,
+  {},
+  { Q01: { stage: 5, completed: true, lastUpdated: 1 } },  // WorldManager's shape
+  { Q01: 7 },                                              // Host's shape
+  'not an object',
+]) {
+  const migrated = migrateQuestState(legacyShape);
+  assertEquals(migrated.v, 1, `Legacy shape ${JSON.stringify(legacyShape)} migrates to v1`);
+  assertEquals(migrated.activeQuestId, 'q01', '...and starts on the first quest');
+  assertEquals(Object.keys(migrated.seals).length, 5, '...with all five seals present');
+}
 
 // --- Test 3: Spawn Points Restored Per Player (via CharacterManager) ---
 console.log('\n--- Test 3: Spawn Points Restored Per Player ---');
@@ -317,7 +359,7 @@ assertEquals(crudMgr.getAllWorlds().length, 1, 'CREATE: 1 world exists');
 
 // Add data to world
 crudMgr.addChunkReference(w1.id, 0, 0);
-crudMgr.setQuestProgress(w1.id, 'Q01', { stage: 2, completed: false });
+crudMgr.getQuestState(w1.id).activeQuestId = 'q02';
 
 // Save to storage
 await crudStorage.saveWorld(w1);
@@ -416,7 +458,7 @@ await serMgr.init();
 const sw1 = (await serMgr.createWorld('SerWorld', 88888)).world;
 serMgr.addChunkReference(sw1.id, 0, 0);
 serMgr.addChunkReference(sw1.id, 5, -3);
-serMgr.setQuestProgress(sw1.id, 'Q10', { stage: 4, completed: false });
+ensureObjective(serMgr.getQuestState(sw1.id), 'q10', 'iron_ore', 8);
 
 // Serialize
 const serData = serMgr.serialize();
@@ -424,7 +466,7 @@ assertEquals(serData.length, 1, 'Serialized 1 world');
 assertEquals(serData[0].name, 'SerWorld', 'Name in serialization');
 assertEquals(serData[0].seed, 88888, 'Seed in serialization');
 assertArrayLength(serData[0].chunkReferences, 2, 'Chunk refs serialized (2)');
-assertTrue(serData[0].questProgress.Q10 !== undefined, 'Quest progress in serialization');
+assertTrue(serData[0].questState.quests.q10 !== undefined, 'Quest state in serialization');
 
 // Deserialize into fresh manager
 const deserMgr = new WorldManager(new MockPersistenceStorage());
@@ -435,7 +477,7 @@ const deserW = deserMgr.getAllWorlds()[0];
 assertEquals(deserW.name, 'SerWorld', 'Name after deserialization');
 assertEquals(deserW.seed, 88888, 'Seed after deserialization');
 assertArrayLength(deserW.chunkReferences, 2, 'Chunk refs after deserialization');
-assertTrue(deserW.questProgress.Q10 !== undefined, 'Quest progress after deserialization');
+assertTrue(deserW.questState.quests.q10 !== undefined, 'Quest state after deserialization');
 
 // --- Test 8: World Preview Generation ---
 console.log('\n--- Test 8: World Preview Generation ---');
@@ -469,7 +511,7 @@ assertFalse(overMax.success, '33-char world name rejected (one over max)');
 
 // Non-existent operations
 assertEquals(edgeMgr.getWorld('nonexistent'), null, 'getWorld returns null for unknown ID');
-assertEquals(edgeMgr.getQuestProgress('nonexistent'), null, 'getQuestProgress returns null');
+assertEquals(edgeMgr.getQuestState('nonexistent'), null, 'getQuestState returns null');
 assertEquals(edgeMgr.getChunkReferences('nonexistent').length, 0, 'getChunkReferences returns empty array');
 
 // Duplicate name prevention

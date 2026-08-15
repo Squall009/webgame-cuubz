@@ -34,6 +34,7 @@
 
 import { WorldManager } from '../../game/entities/WorldManager.js';
 import { escapeHtml } from '../../util/HTMLUtils.js';
+import { createQuestState } from '../../game/data/QuestState.js';
 import { initBrowseCreateChar, initHostForm } from './LobbyForms.js';
 
 export class LobbyScreen {
@@ -268,7 +269,7 @@ export class LobbyScreen {
         name: session.name || 'Remote World',
         seed: sessionSeed,
         biomeMap: { dominantBiomes: ['Plains'], seed: sessionSeed },
-        questProgress: {},
+        questState: createQuestState(),
         chunkReferences: [],
       };
       wm.worlds.push(tempWorld);

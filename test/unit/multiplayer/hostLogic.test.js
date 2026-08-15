@@ -21,7 +21,8 @@ import {
   validateBlockPlace,
   validateMove,
   validateHostInventory,
-  validateQuestUpdate,
+  validateQuestContribute,
+  MAX_CONTRIBUTION_DELTA,
   RateLimiter,
   HostRemotePlayer,
   HostManager,
@@ -329,40 +330,67 @@ assertFalse(result.valid, 'Rejects count > 9999');
 result = validateHostInventory('p1', [{ type: 'stone', count: 9999 }]);
 assertTrue(result.valid, 'Accepts count of 9999');
 
-// ─── Test Group 7: validateQuestUpdate ─────────────────────
+// ─── Test Group 7: validateQuestContribute ─────────────────
 
-console.log('\n--- Test Group 7: validateQuestUpdate ---');
+console.log('\n--- Test Group 7: validateQuestContribute ---');
 
-// Valid quest update
-result = validateQuestUpdate('p1', { questId: 'Q01', progress: 5 });
-assertTrue(result.valid, 'Valid quest update');
+// The shape changed with the semantics: pooled objectives (§4.5) need
+// accumulate-a-delta from an identified contributor, not a monotonic max of one number.
+const goodContribution = () => ({
+  questId: 'q01', objectiveKey: 'wood_log', delta: 5, contributorId: 'char_a',
+});
 
-// Invalid: missing questId
-result = validateQuestUpdate('p1', { progress: 5 });
-assertFalse(result.valid, 'Rejects update without questId');
+result = validateQuestContribute('p1', goodContribution());
+assertTrue(result.valid, 'Valid contribution');
 
-// Invalid: non-string questId
-result = validateQuestUpdate('p1', { questId: 123, progress: 5 });
+result = validateQuestContribute('p1', { ...goodContribution(), questId: undefined });
+assertFalse(result.valid, 'Rejects contribution without questId');
+
+result = validateQuestContribute('p1', { ...goodContribution(), questId: 123 });
 assertFalse(result.valid, 'Rejects numeric questId');
 
-// Invalid: missing progress
-result = validateQuestUpdate('p1', { questId: 'Q01' });
-assertFalse(result.valid, 'Rejects update without progress');
+result = validateQuestContribute('p1', { ...goodContribution(), objectiveKey: undefined });
+assertFalse(result.valid, 'Rejects contribution without objectiveKey');
 
-// Invalid: negative progress
-result = validateQuestUpdate('p1', { questId: 'Q01', progress: -1 });
-assertFalse(result.valid, 'Rejects negative progress');
+result = validateQuestContribute('p1', { ...goodContribution(), delta: undefined });
+assertFalse(result.valid, 'Rejects contribution without delta');
 
-// Valid: zero progress
-result = validateQuestUpdate('p1', { questId: 'Q01', progress: 0 });
-assertTrue(result.valid, 'Accepts zero progress');
+result = validateQuestContribute('p1', { ...goodContribution(), delta: -1 });
+assertFalse(result.valid, 'Rejects negative delta');
 
-// Invalid: non-object
-result = validateQuestUpdate('p1', 'not-an-object');
-assertFalse(result.valid, 'Rejects string as quest update');
+// The pool is monotonic, so a zero delta carries no information — and unlike the old
+// `progress: 0`, which was accepted, it is now rejected outright. This is the assertion
+// that pins the semantic change: `progress` described a state and could legitimately be
+// zero; `delta` describes a change and cannot.
+result = validateQuestContribute('p1', { ...goodContribution(), delta: 0 });
+assertFalse(result.valid, 'Rejects zero delta — a delta of nothing is not a contribution');
 
-result = validateQuestUpdate('p1', null);
-assertFalse(result.valid, 'Rejects null quest update');
+result = validateQuestContribute('p1', { ...goodContribution(), delta: MAX_CONTRIBUTION_DELTA });
+assertTrue(result.valid, 'Accepts a delta of exactly one stack');
+
+result = validateQuestContribute('p1', { ...goodContribution(), delta: MAX_CONTRIBUTION_DELTA + 1 });
+assertFalse(result.valid, 'Rejects a delta larger than one stack');
+
+result = validateQuestContribute('p1', { ...goodContribution(), delta: NaN });
+assertFalse(result.valid, 'Rejects NaN delta');
+
+result = validateQuestContribute('p1', { ...goodContribution(), contributorId: undefined });
+assertFalse(result.valid, 'Rejects contribution without contributorId');
+
+// §6.3 — a client may contribute only as itself. Without this a client could inflate
+// another player's high-water mark and thereby SUPPRESS that player's real
+// contributions, which is worse than the double-credit exploit §4.5 accepts.
+result = validateQuestContribute('p1', goodContribution(), 'char_a');
+assertTrue(result.valid, 'Accepts a contribution whose contributorId matches the sender');
+
+result = validateQuestContribute('p1', goodContribution(), 'char_b');
+assertFalse(result.valid, 'Rejects a contribution claiming to be another character');
+
+result = validateQuestContribute('p1', 'not-an-object');
+assertFalse(result.valid, 'Rejects string as contribution');
+
+result = validateQuestContribute('p1', null);
+assertFalse(result.valid, 'Rejects null contribution');
 
 // ─── Test Group 8: RateLimiter ──────────────────────────────
 
@@ -722,9 +750,11 @@ const questHost = new HostManager({
 });
 questHost.startSession('Quest World', 42);
 
+// `id` on the character is §4.5's contributor identity — device-persistent, unlike the
+// relay-assigned `playerId` — and the host checks contributions against it.
 const questPlayer = new HostRemotePlayer(
   'quest_p1',
-  { name: 'QuestPlayer', color: '#88ff00' },
+  { id: 'char_quest_p1', name: 'QuestPlayer', color: '#88ff00' },
   { x: 10, y: 20, z: 10 }
 );
 questHost._players.set('quest_p1', questPlayer);
@@ -732,38 +762,60 @@ questHost._players.set('quest_p1', questPlayer);
 let questCalled = false;
 questHost.onQuestUpdated = (data) => {
   questCalled = true;
-  assertEqual(data.questId, 'Q01', 'Quest update for Q01');
+  assertEqual(data.questId, 'q01', 'Quest update for q01');
 };
 
-// Valid quest update
-const questResult = questHost.handleQuestUpdate('quest_p1', { questId: 'Q01', progress: 5 });
-assertTrue(questResult, 'handleQuestUpdate returns true for valid update');
+// The pool needs a target before it can be clamped against one, and in the live game
+// that comes from the quest definition via `QuestSystem`. Here it is set directly.
+questHost.getQuestState().quests.q01 = {
+  stage: 1, completed: false,
+  objectives: { wood_log: { n: 0, target: 20, hw: {} } },
+};
+
+const contribute = (playerId, delta, contributorId = 'char_quest_p1') =>
+  questHost.handleQuestContribute(playerId, {
+    questId: 'q01', objectiveKey: 'wood_log', delta, contributorId,
+  });
+
+assertTrue(contribute('quest_p1', 5), 'handleQuestContribute returns true for a valid delta');
 assertTrue(questCalled, 'onQuestUpdated callback fired');
 
-// Check world state
-const progress = questHost.getQuestProgress();
-assertEqual(progress.Q01, 5, 'Quest Q01 progress stored as 5');
+const objective = () => questHost.getQuestState().quests.q01.objectives.wood_log;
+assertEqual(objective().n, 5, 'Pool is 5 after a delta of 5');
 
-// Update with higher progress
-questHost.handleQuestUpdate('quest_p1', { questId: 'Q01', progress: 10 });
-assertEqual(questHost.getQuestProgress().Q01, 10, 'Quest progress updated to 10');
+// ACCUMULATE, not max — this is the arithmetic that changed. The old handler stored a
+// monotonic maximum of one number, so a second contribution of 5 would have left the
+// total at 5. Pooled objectives are a party-wide sum and two players each gathering 5
+// must reach 10, or "work done by players counts for everyone" is not true.
+assertTrue(contribute('quest_p1', 5), 'Second contribution accepted');
+assertEqual(objective().n, 10, 'Pool ACCUMULATES to 10 — it does not take the max');
 
-// Update with lower progress — should NOT decrease
-questHost.handleQuestUpdate('quest_p1', { questId: 'Q01', progress: 3 });
-assertEqual(questHost.getQuestProgress().Q01, 10, 'Quest progress not decreased from invalid update');
+// Clamped at the target rather than overshooting: the HUD reads `n/target` straight out.
+assertTrue(contribute('quest_p1', 40), 'Large contribution accepted');
+assertEqual(objective().n, 20, 'Pool clamps at the target of 20');
 
-// Invalid quest update
-const invResult = questHost.handleQuestUpdate('quest_p1', { questId: 123, progress: 5 });
-assertFalse(invResult, 'handleQuestUpdate returns false for invalid questId');
+// Rejections. Each returns false and leaves the pool exactly where it was.
+assertFalse(contribute('quest_p1', -3), 'Negative delta rejected');
+assertFalse(contribute('quest_p1', 0), 'Zero delta rejected');
+assertEqual(objective().n, 20, 'A rejected contribution cannot move the pool');
 
-// Non-existent player quest update
-const neResult = questHost.handleQuestUpdate('nonexistent', { questId: 'Q01', progress: 5 });
-assertFalse(neResult, 'handleQuestUpdate returns false for nonexistent player');
+assertFalse(
+  questHost.handleQuestContribute('quest_p1', { questId: 123, objectiveKey: 'wood_log', delta: 1, contributorId: 'char_quest_p1' }),
+  'handleQuestContribute returns false for invalid questId'
+);
 
-// Disconnected player quest update
+// Spoofed identity, through the handler this time: the host knows this player's
+// character id from the join and refuses a contribution claiming to be anyone else.
+assertFalse(
+  contribute('quest_p1', 5, 'char_someone_else'),
+  'handleQuestContribute rejects a contribution claiming another character id'
+);
+assertEqual(objective().n, 20, 'A spoofed contribution cannot move the pool');
+
+assertFalse(contribute('nonexistent', 5), 'handleQuestContribute returns false for nonexistent player');
+
 questPlayer.connected = false;
-const discResult = questHost.handleQuestUpdate('quest_p1', { questId: 'Q02', progress: 1 });
-assertFalse(discResult, 'handleQuestUpdate returns false for disconnected player');
+assertFalse(contribute('quest_p1', 1), 'handleQuestContribute returns false for disconnected player');
 
 questHost.endSession();
 

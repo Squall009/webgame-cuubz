@@ -53,6 +53,7 @@ import { GameState } from './GameState.js';
 import { BlockPalette } from './BlockPalette.js';
 import { CuubzLogger } from '../util/Logger.js';
 import { savePlayerState as _savePlayerState } from './savePlayerState.js'; // split for the ceiling
+import { saveWorldState as _saveWorldState } from './saveWorldState.js'; // §5.1 sibling
 
 import { initScene } from './init/initScene.js';                   // steps 1–5
 import { initSkybox } from './init/initSkybox.js';                 // step 6
@@ -265,6 +266,14 @@ export class Game {
     _savePlayerState(this.state, this.deps);
   }
 
+  /**
+   * Persist the world's quest state — the same three call sites, the same `deps`
+   * discipline, a different object. §5.1 and `src/core/saveWorldState.js`.
+   */
+  saveWorldState() {
+    _saveWorldState(this.state, this.deps);
+  }
+
   // ============================================================
   // Lifecycle — unchanged from the Phase-0 class
   // ============================================================
@@ -301,6 +310,11 @@ export class Game {
     // silently reinstate both of the bugs this method exists to close, behind one warning.
     try {
       if (state.inventory && state.player) this.savePlayerState();
+      // Quest state is world-scoped and has no `inventory`/`player` precondition — a
+      // session that got far enough to advance a quest but died before the player
+      // existed is not a case, but a session that ends on the world screen is, and the
+      // guard above would skip it.
+      if (state.currentWorld) this.saveWorldState();
       if (state.droppedItems) state.droppedItems.clear();
     } catch (e) {
       console.warn('[Game] stop(): save/clear failed, continuing teardown:', e && e.message);

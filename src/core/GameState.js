@@ -125,6 +125,38 @@ export class GameState {
     // `setInterval` (`startPeriodicSync`) that a teardown will have to find. See D-50.
     this.inventorySync = null;
 
+    // ── Quests, seals, bosses and the things that can hurt you ────────────
+    //
+    // Declared, not grown — the header's rule, and these are the fields most likely to
+    // be reached for from a step that has no business owning them. Every one is `null`
+    // until `initQuests` (step 15) builds it, and every one stays `null` on a client
+    // that joined a session hosted elsewhere *except* `questSystem`, which holds the
+    // guest's read-only view of the host's state (§5.2).
+    //
+    // `questSystem` is the state machine (no DOM, no network); `questTracker` is the
+    // twice-a-second poll that turns "what the party is holding" into pooled
+    // contributions (§4.5); `questSync` is the multiplayer mirror of `InventorySync`.
+    this.questSystem = null;
+    this.questTracker = null;
+    this.questSync = null;
+    this.sealSystem = null;
+    // Host-side encounter runner and its wire mirror. In single-player the runner is
+    // constructed with a null transport and the broadcast is a no-op — §6.5, one code
+    // path for both, which is the rule the repo's history is a list of violations of.
+    this.bossEncounter = null;
+    this.bossSync = null;
+    // §2.2 — the player had no health at all, so nothing in the game could hurt them and
+    // every "Boss Mechanics" line in the storyline described damage with no receiver.
+    this.playerVitals = null;
+    // §3.5 — a per-tick lookup of the block under the player against a `blockId → dps`
+    // table. No status effects, no timers, no per-player debuff state to serialize.
+    this.hazardSystem = null;
+    // HUD writers. The quest tracker markup has been mounted and permanently `hidden`
+    // with zero writers since it was written; this is the writer.
+    this.questTrackerHUD = null;
+    this.bossBar = null;
+    this.questLog = null;
+
     // ── UI state and the two UI callbacks the render loop drives ──────────
     //
     // `inventoryOpen` is the D-31 variable. It was a `let` inside `startGame`'s closure,

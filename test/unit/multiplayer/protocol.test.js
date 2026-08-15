@@ -158,11 +158,13 @@ scannerSelfCheck();
 // ═══════════════════════════════════════════════════════════════════
 
 const KEYS = Object.keys(MESSAGE_TYPES);
-assertEquals(KEYS.length, 28,
-  'shared/protocol.js exports 28 message types — 9 that both former tables had, 15 the ' +
+assertEquals(KEYS.length, 36,
+  'shared/protocol.js exports 36 message types — 9 that both former tables had, 15 the ' +
   'client had alone, HEARTBEAT_ACK the server had alone, TIME_SYNC + HOST_REJECTED, ' +
   'which lived only as string literals and which no table could therefore have agreed on, ' +
-  'and CHUNK_REQUEST, the client→host re-send ask added by D-116');
+  'CHUNK_REQUEST, the client→host re-send ask added by D-116, and the 8 quest/seal/boss ' +
+  'types added by S0 (QUEST_SYNC, QUEST_CONTRIBUTE, SEAL_UPDATE, BOSS_SPAWN, BOSS_STATE, ' +
+  'BOSS_HIT, BOSS_DEFEATED, BOSS_DESPAWN)');
 
 for (const k of KEYS) {
   assertEquals(MESSAGE_TYPES[k], k, `MESSAGE_TYPES.${k} is its own name — the symbol IS the wire string`);

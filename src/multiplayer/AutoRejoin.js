@@ -31,6 +31,7 @@ import { createSessionManager } from './SessionManager.js';
 import { attachHostManager } from './SessionHosting.js';
 import { getRelayUrl } from './RelayUrl.js';
 import { readLastSession } from '../util/StorageHelper.js';
+import { createQuestState } from '../game/data/QuestState.js';
 
 /**
  * Try to resume the session this page was in before it was refreshed.
@@ -85,7 +86,7 @@ export async function attemptAutoRejoin(deps, adoptSessionManager) {
             name: lastSession.name || 'Remote World',
             seed: lastSession.seed,
             biomeMap: { dominantBiomes: ['Plains'], seed: lastSession.seed },
-            questProgress: {},
+            questState: createQuestState(),
             chunkReferences: [],
           };
           worldManager.worlds.push(tempWorld);

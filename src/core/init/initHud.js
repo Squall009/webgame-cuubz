@@ -61,9 +61,14 @@ export function initHud(game) {
   // The teardown registration went with the listener. See `src/engine/loop/steps/WorldStep.js`.
 
   // ─── Periodic Save (every 30 seconds) ──────────
+  //
+  // Quest state rides the same timer (§5.1). It is a *separate* call rather than a line
+  // inside `savePlayerState` because the two write different objects to different keys
+  // with different owners — see `src/core/saveWorldState.js`.
   state.saveIntervalId = setInterval(() => {
     if (!game.paused && game.running) {
       game.savePlayerState();
+      game.saveWorldState();
     }
   }, 30000);
 
@@ -71,6 +76,7 @@ export function initHud(game) {
   const saveOnPause = function(e) {
     if (e.key === 'Escape' && !game.paused) {
       game.savePlayerState();
+      game.saveWorldState();
     }
   };
   document.addEventListener('keydown', saveOnPause);
