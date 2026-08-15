@@ -205,6 +205,11 @@ export class QuestSystem {
    * the host's `QUEST_UPDATE` arriving at a guest.
    */
   applyDelta(questId, objectiveKey, delta, contributorId = null) {
+    // The same gate `observe` applies, and for the same reason — but this is the path a
+    // *remote* delta takes, so it is also the only thing standing between a client and
+    // any quest in the game. Without it a guest could send 15 sandstone at Q22 in Act 1
+    // and complete it, unlocking Q23, Q24 and the seal behind them.
+    if (!this.isAvailable(questId)) return { credited: 0 };
     const objective = this._findObjective(questId, objectiveKey);
     if (!objective) return { credited: 0 };
     const result = applyPooledDelta(

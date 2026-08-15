@@ -25,6 +25,7 @@ import { QuestSystem } from '../../game/systems/QuestSystem.js';
 import { QuestTracker } from '../../game/systems/QuestTracker.js';
 import { QuestTrackerHUD } from '../../ui/hud/QuestTracker.js';
 import { QuestLog } from '../../ui/overlays/QuestLog.js';
+import { QuestSync } from '../../multiplayer/QuestSync.js';
 import { createQuestState } from '../../game/data/QuestState.js';
 import { CuubzLogger } from '../../util/Logger.js';
 
@@ -64,8 +65,8 @@ export function initQuests(game) {
     questSystem,
     inventory: state.inventory,
     contributorId,
-    // Single-player has no transport, so the tracker applies its own deltas. S2 sets
-    // this on a guest. One code path, two destinations (§6.4).
+    // Single-player has no transport, so the tracker applies its own deltas directly.
+    // In a session `questSync.getTransport()` replaces this — see below.
     sendContribution: null,
   });
   state.questTracker = tracker;
@@ -75,6 +76,45 @@ export function initQuests(game) {
 
   const questLog = new QuestLog({ questSystem });
   state.questLog = questLog;
+
+  // ─── Multiplayer (S2) ─────────────────────────────────────────
+  //
+  // `sm && sm.client` is the same guard every other sync path uses; single-player has
+  // no session and skips all of it.
+  const sm = deps.sessionManager;
+  if (sm && sm.client) {
+    // `SessionManager` keeps its `HostManager` at `_hostManager` (`SessionHosting.js`
+    // creates it), and null on a guest — which is exactly the branch this needs.
+    const host = sm._hostManager || null;
+
+    const questSync = new QuestSync({
+      questSystem,
+      client: sm.client,
+      host,
+      contributorId,
+    });
+    state.questSync = questSync;
+    questSync.attach();
+
+    // §6.4 — the host's own gathering goes through the host's handler, not straight
+    // into `QuestSystem`. `getTransport()` picks the right end; the tracker cannot tell
+    // the difference and does not need to.
+    tracker.setTransport(questSync.getTransport());
+
+    // One quest state on a host, not two. Without this the host's pooling would write
+    // `HostManager._worldState.questState` while the host player's own quest log read
+    // the world's — §2.1's original defect, re-created.
+    if (host && typeof host.setQuestSystem === 'function') {
+      host.setQuestSystem(questSystem);
+    }
+
+    questSync.onStateChanged = () => {
+      hud.render(questSystem.getTrackerView());
+      if (questLog.isOpen) questLog.render();
+    };
+
+    state.addTeardown(() => questSync.dispose());
+  }
 
   // ─── Callbacks: HUD, saves, and the end of the game ───────────
   //

@@ -511,6 +511,10 @@ export class HostManager {
       questState: createQuestState(),
     };
 
+    // S2 — the live `QuestSystem`, when there is one. `setQuestSystem` explains why
+    // there must not be two quest states on a host.
+    this._questSystem = null;
+
     // Rate limiting
     this._rateLimiter = new RateLimiter(
       this._options.moveRateLimit,
@@ -719,6 +723,7 @@ export class HostManager {
       // simply not in it. The other half was `Client._setupGameSessionHandlers`, which
       // dropped the type before it could reach here.
       QUEST_CONTRIBUTE: (data) => {
+        this._noteActivity(data.playerId);
         this.handleQuestContribute(data.playerId, data);
       },
 
@@ -726,6 +731,7 @@ export class HostManager {
       // routing table has one shape and the boss work is a handler body, not a
       // re-plumbing job.
       BOSS_HIT: (data) => {
+        this._noteActivity(data.playerId);
         if (this.onBossHit) {
           try {
             this.onBossHit(data.playerId, data);
@@ -782,6 +788,47 @@ export class HostManager {
         console.error('[HostManager] Error in onPlayerJoined callback:', err.message);
       }
     }
+  }
+
+  /**
+   * A message arrived from this player, so they are connected — whatever this class
+   * last believed. **D-120.**
+   *
+   * `_handlePlayerLeft` sets `connected = false`, and every host-side handler guards on
+   * that flag. Nothing ever set it back: the relay's `_handleJoin` treats a returning
+   * `playerId` as a *reconnection* and deliberately does **not** re-broadcast
+   * `PLAYER_JOINED` (it replies `WELCOME` to the reconnector alone, so the other clients
+   * do not re-add an avatar they already have). So the host had no signal at all that a
+   * dropped player was back, and silently discarded everything they sent for the rest of
+   * the session.
+   *
+   * The relay only forwards from live sockets, so an inbound message *is* the proof:
+   * there is no way for one to arrive from a player who is not connected. Flipping the
+   * flag here is not a weakened guard — it is the guard finally being given the
+   * information it was always missing.
+   */
+  _noteActivity(playerId) {
+    if (!playerId) return;
+    const player = this._players.get(playerId);
+    if (!player || player.connected) return;
+    player.connected = true;
+    _hostLog(`[HostManager] Player ${playerId} is active again (reconnected)`);
+    if (this.onPlayerJoined) {
+      try {
+        this.onPlayerJoined({
+          playerId,
+          character: player.character,
+          position: player.position,
+          playerCount: this.playerCount,
+          reconnected: true,
+        });
+      } catch (err) {
+        console.error('[HostManager] Error in onPlayerJoined callback:', err.message);
+      }
+    }
+    // Their view of the world is whatever they had when the connection dropped, and the
+    // quest state may have moved on without them.
+    this.broadcastQuestSync(playerId);
   }
 
   /** Handle a player leaving the session */
@@ -1110,14 +1157,32 @@ export class HostManager {
   }
 
   /**
-   * Apply one player's pooled contribution.
+   * Attach the live `QuestSystem` (S2).
+   *
+   * ─── THERE IS ONE QUEST STATE, NOT TWO ────────────────────────────────────
+   *
+   * `HostManager` has `_worldState.questState` and `initQuests` builds a `QuestSystem`
+   * over the world's. On a host those are the *same* fact, and keeping two objects for
+   * it would mean the host's pooling and the host player's quest log disagreeing the
+   * first time either changed — which is §2.1's original defect wearing a new hat.
+   *
+   * So the system is the authority and this class defers to it: `_applyContribution`
+   * routes through `questSystem.applyDelta`, which is also what runs completion,
+   * rewards and the next quest. `_worldState.questState` remains only as the fallback
+   * for a `HostManager` constructed without one (the unit tests), and is kept pointing
+   * at the same object so `serializeQuestState` works either way.
+   */
+  setQuestSystem(questSystem) {
+    this._questSystem = questSystem || null;
+    if (questSystem) this._worldState.questState = questSystem.getState();
+  }
+
+  /**
+   * Apply one player's pooled contribution, from the relay.
    *
    * The message carries a **delta**, already measured against that contributor's own
-   * high-water mark on the sending side (§4.5). The host adds it, clamps at the target,
-   * records the contributor's running total so a reconnecting client cannot be credited
-   * twice, and broadcasts the authoritative pool — `n` and `target`, not the delta,
-   * because a client that missed a packet has to be able to catch up from any single
-   * message.
+   * high-water mark on the sending side (§4.5). Everything untrusted is checked here;
+   * the arithmetic is `_applyContribution`, which the host's own gathering also uses.
    *
    * @param {string} playerId — as the relay attached it
    * @param {object} contribution — `{ questId, objectiveKey, delta, contributorId }`
@@ -1144,16 +1209,55 @@ export class HostManager {
       return false;
     }
 
-    const result = applyPooledDelta(
-      this._worldState.questState,
-      contribution.questId,
-      contribution.objectiveKey,
-      contribution.delta,
-      0,
-      contribution.contributorId
-    );
+    return this._applyContribution(playerId, contribution);
+  }
 
-    if (result.credited <= 0) return false;
+  /**
+   * The host's own contribution, arriving by function call instead of by socket.
+   *
+   * **§6.4, and it is the most important rule in the plan.** The host runs in a browser
+   * beside its own inventory and its own tracker, and its gathering has to reach the
+   * pool by the same route a guest's does. Not "an equivalent route" — the same one, so
+   * that a change to pooling cannot land on one and miss the other. The only thing this
+   * skips is the part that is meaningless locally: a connection check on a player who is
+   * not in `_players`, an identity check against a socket, and a rate limit on a
+   * function call the host makes to itself.
+   *
+   * The repo's history is a list of what happens when two paths exist for one thing.
+   */
+  handleLocalQuestContribute(contribution) {
+    const valid = validateQuestContribute(this._hostPlayerId, contribution, null);
+    if (!valid.valid) {
+      console.warn(`[HostManager] Rejected host's own contribution: ${valid.reason}`);
+      return false;
+    }
+    return this._applyContribution(this._hostPlayerId, contribution);
+  }
+
+  /**
+   * The pooling itself, shared by both entry points.
+   *
+   * Broadcasts the authoritative pool — `n` and `target`, not the delta — because a
+   * client that missed a packet has to be able to catch up from any single message.
+   */
+  _applyContribution(playerId, contribution) {
+    const result = this._questSystem
+      ? this._questSystem.applyDelta(
+        contribution.questId,
+        contribution.objectiveKey,
+        contribution.delta,
+        contribution.contributorId
+      )
+      : applyPooledDelta(
+        this._worldState.questState,
+        contribution.questId,
+        contribution.objectiveKey,
+        contribution.delta,
+        0,
+        contribution.contributorId
+      );
+
+    if (!result || result.credited <= 0) return false;
 
     this.broadcastQuestUpdate(contribution.questId, contribution.objectiveKey, result);
 
@@ -1201,7 +1305,13 @@ export class HostManager {
    * backwards, so a duplicate or reordered call is a no-op rather than a regression.
    */
   setSeal(sealId, state, contributors = null) {
-    const changed = setSealState(this._worldState.questState, sealId, state);
+    // Through the system when there is one: `QuestSystem.setSeal` also satisfies any
+    // `seal_state` objective waiting on the transition and opens the finale on the
+    // fifth break. Doing it against the raw state here would advance the seal and
+    // silently skip both.
+    const changed = this._questSystem
+      ? this._questSystem.setSeal(sealId, state)
+      : setSealState(this._worldState.questState, sealId, state);
     if (!changed) return false;
 
     const seal = this._worldState.questState.seals[sealId];
