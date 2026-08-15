@@ -52,10 +52,22 @@ export function questStep(state) {
     }
   }
 
-  // ─── Seal proximity and altar interaction (S5) ─────────────
+  // ─── Seal proximity, altar interaction, and the HUD marker (S5) ──
   if (state.sealSystem) {
     try {
-      state.sealSystem.update(state.game.delta, state.player ? state.player.position : null);
+      const position = state.player ? state.player.position : null;
+      state.sealSystem.update(state.game.delta, position);
+
+      // The marker is repainted on the tracker's own cadence, not every frame: the HUD
+      // writer fingerprints what it drew and drops an identical redraw, and the
+      // fingerprint rounds distance to 8 m so walking does not rebuild the panel
+      // sixty times a second.
+      if (state.questTrackerHUD && state.questSystem && state.frameCount % 15 === 0) {
+        state.questTrackerHUD.render(
+          state.questSystem.getTrackerView(),
+          state.sealSystem.getMarker(position)
+        );
+      }
     } catch (e) {
       if (state.frameCount < 10) console.warn('[Cuubz] Seal system error:', e.message);
     }

@@ -25,11 +25,23 @@ import { QuestSystem } from '../../game/systems/QuestSystem.js';
 import { QuestTracker } from '../../game/systems/QuestTracker.js';
 import { QuestTrackerHUD } from '../../ui/hud/QuestTracker.js';
 import { QuestLog } from '../../ui/overlays/QuestLog.js';
+import { SealSystem } from '../../game/systems/SealSystem.js';
 import { QuestSync } from '../../multiplayer/QuestSync.js';
+import { BiomeSystem } from '../../engine/world/BiomeSystem.js';
 import { createQuestState } from '../../game/data/QuestState.js';
 import { CuubzLogger } from '../../util/Logger.js';
 
 const _gameLog = CuubzLogger.log;
+
+/** The `{ sealId: {x,z,y?} }` map worldgen stamps from. Frozen sites only. */
+function collectSites(questState) {
+  const out = {};
+  for (const [id, seal] of Object.entries(questState.seals)) {
+    if (seal.site) out[id] = seal.site;
+  }
+  if (questState.finale.site) out.finale = questState.finale.site;
+  return out;
+}
 
 /**
  * @param {import('../Game.js').Game} game
@@ -116,6 +128,51 @@ export function initQuests(game) {
     state.addTeardown(() => questSync.dispose());
   }
 
+  // ─── Seals (S5) ───────────────────────────────────────────────
+  //
+  // Sites are resolved from the world seed on first entry and then frozen (§7.1). A
+  // guest resolves nothing: the host's sites arrive in `QUEST_SYNC`, and two devices
+  // computing "the same" site from "the same" seed is exactly the kind of agreement
+  // that holds until one of them updates.
+  const sealSystem = new SealSystem({
+    questSystem,
+    inventory: state.inventory,
+    authoritative: !isGuest,
+    host: state.questSync ? state.questSync._host : null,
+  });
+  state.sealSystem = sealSystem;
+
+  if (!isGuest && state.chunkManager) {
+    const seed = state.chunkManager.worldSeed;
+    const version = state.chunkManager.genParams?.worldgenVersion || 1;
+    if (version >= 2) {
+      const biomeAt = (wx, wz) => BiomeSystem.getBiomeAtWorldPos(wx, wz, seed, version).id;
+      const written = sealSystem.resolveSites(seed, biomeAt);
+      if (written > 0) {
+        log(`[Cuubz] Resolved ${written} seal site(s)`);
+        game.saveWorldState();
+      }
+      // Worldgen needs the sites to stamp altars and arenas. They go in `genParams`,
+      // which `ChunkGenerator` forwards to the worker verbatim — and they are set here
+      // rather than in `initWorld` because the sites do not exist until the quest state
+      // has been loaded, which is two steps later.
+      state.chunkManager.genParams.sealSites = collectSites(questSystem.getState());
+    } else {
+      // A v1 world has no Corrupt or Lava biome to put the first two seals in, so it
+      // gets no seal structures either. §3.1: existing saves are untouched, and the
+      // upgrade is the player's choice from the world screen.
+      log('[Cuubz] World is at worldgen version 1 — no seal sites');
+    }
+  }
+
+  sealSystem.onSealStateChanged = (sealId, sealState) => {
+    log(`[Cuubz] Seal ${sealId} → ${sealState}`);
+    // §5.1 — a seal transition is one of the three events expensive enough to lose that
+    // it earns an immediate write.
+    game.saveWorldState();
+    hud.render(questSystem.getTrackerView());
+  };
+
   // ─── Callbacks: HUD, saves, and the end of the game ───────────
   //
   // §5.1 names three events as expensive to lose and worth an immediate write: a quest
@@ -146,6 +203,30 @@ export function initQuests(game) {
     log('[Cuubz] The world is remade. Game complete.');
     game.saveWorldState();
   };
+
+  // ─── The R key: make an offering at an altar ──────────────────
+  //
+  // `R` because everything else is taken: WASD, Space and Shift are movement, `E` is the
+  // inventory, `F` is fly, `J` is the quest log, and the digits are the hotbar.
+  //
+  // The offering is the one player action in the whole seal system, and it is
+  // deliberately explicit rather than automatic — walking into an altar carrying the
+  // right items should not consume them.
+  const onAltarKey = (e) => {
+    if (e.key !== 'r' && e.key !== 'R') return;
+    if (state.inventoryOpen || game.paused) return;
+    const sealId = sealSystem.altarInRange;
+    if (!sealId) return;
+
+    const result = sealSystem.makeOffering(sealId);
+    if (result.ok) {
+      log(`[Cuubz] Offering made at the ${sealId} seal`);
+    } else {
+      log(`[Cuubz] ${result.reason}`);
+    }
+  };
+  document.addEventListener('keydown', onAltarKey);
+  state.addTeardown(() => document.removeEventListener('keydown', onAltarKey));
 
   // ─── The J key ────────────────────────────────────────────────
   const onQuestLogKey = (e) => {

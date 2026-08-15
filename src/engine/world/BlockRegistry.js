@@ -511,6 +511,15 @@ export const BLOCK_TYPES = {
   OBSIDIAN:        BLOCK_BY_NAME['obsidian'].id,
   SANDSTONE:       BLOCK_BY_NAME['sandstone'].id,
   BED:             BLOCK_BY_NAME['bed'].id,
+  // Seal-structure materials (S5). These four were in the registry array from the
+  // start and **not in this table**, so `BLOCK_TYPES.CHISELED_STONE_BRICKS` was
+  // `undefined` — which is not an error in JavaScript, just a comparison that never
+  // matches and a block placement that silently writes `undefined`. Found by the S5
+  // worldgen test, which counted altars and got zero while the altars were there.
+  STONE_BRICKS:         BLOCK_BY_NAME['stone_bricks'].id,
+  CHISELED_STONE_BRICKS: BLOCK_BY_NAME['chiseled_stone_bricks'].id,
+  DEEPSLATE_BRICKS:     BLOCK_BY_NAME['deepslate_bricks'].id,
+  DEEPSLATE_TILES:      BLOCK_BY_NAME['deepslate_tiles'].id,
   CORRUPT_GRASS:   BLOCK_BY_NAME['corrupt_grass'].id,
   CORRUPT_STONE:   BLOCK_BY_NAME['corrupt_stone'].id,
   CORRUPT_VEIN:    BLOCK_BY_NAME['corrupt_vein'].id,

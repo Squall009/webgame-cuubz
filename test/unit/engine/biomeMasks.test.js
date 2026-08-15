@@ -272,6 +272,33 @@ describe('the biomes are actually reachable — and rare', () => {
   });
 });
 
+describe('the worker\'s block table agrees with the registry', () => {
+  it('every id the worker names matches BLOCK_BY_ID', () => {
+    // The worker is a classic script and cannot import `BlockRegistry`, so its `BLOCK`
+    // table is a hand-maintained list of literals — the same standing duplication §2.4
+    // describes for `selectBiome`, in a place where a wrong number is a wrong block
+    // rather than a crash. Sweeping the whole table is cheap and catches a typo in the
+    // one direction that matters: an id that exists but is not the block intended.
+    const src = fs.readFileSync(path.join(REPO_ROOT, 'src/engine/world/workerGeneration.js'), 'utf8');
+    const table = src.slice(src.indexOf('var BLOCK = {'), src.indexOf('};', src.indexOf('var BLOCK = {')));
+
+    const mismatches = [];
+    for (const m of table.matchAll(/([A-Z_0-9]+):\s*(\d+)/g)) {
+      const [, name, idStr] = m;
+      const id = Number(idStr);
+      const block = BLOCK_BY_ID[id];
+      if (!block) { mismatches.push(`${name}: id ${id} is not in the registry`); continue; }
+      // The worker's names are not always the registry's (CAVE_AIR → air, WOOD_LOG →
+      // oak_log, and so on), so what is checked is that the id RESOLVES, and that any
+      // name which also exists in BLOCK_TYPES agrees with it.
+      if (BLOCK_TYPES[name] !== undefined && BLOCK_TYPES[name] !== id) {
+        mismatches.push(`${name}: worker says ${id}, BLOCK_TYPES says ${BLOCK_TYPES[name]}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+});
+
 describe('the ids the rest of the game matches on', () => {
   it('BIOME_IDS contains corrupt and lava', () => {
     expect(BIOME_IDS).toContain('corrupt');

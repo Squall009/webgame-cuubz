@@ -46,8 +46,12 @@ export class QuestTrackerHUD {
   /**
    * Draw one `QuestSystem.getTrackerView()` result.
    * @param {object|null} view — null hides the panel (the game is complete)
+   * @param {object|null} [marker] — `SealSystem.getMarker()`: a direction and a
+   *   distance to the seal this quest points at. A bearing and a compass letter rather
+   *   than coordinates, because a player should be able to act on it without writing
+   *   anything down.
    */
-  render(view) {
+  render(view, marker) {
     if (!this.isMounted) return;
 
     if (!view) {
@@ -55,7 +59,7 @@ export class QuestTrackerHUD {
       return;
     }
 
-    const fingerprint = QuestTrackerHUD.fingerprint(view);
+    const fingerprint = QuestTrackerHUD.fingerprint(view, marker);
     if (fingerprint === this._fingerprint && this._visible) return;
     this._fingerprint = fingerprint;
 
@@ -74,8 +78,11 @@ export class QuestTrackerHUD {
       .join('');
 
     const done = view.objectives.filter((o) => o.complete).length;
-    this._progressEl.textContent =
-      `Act ${view.act} · Quest ${view.stage}/28 · ${done}/${view.objectives.length} objectives`;
+    let progress = `Act ${view.act} · Quest ${view.stage}/28 · ${done}/${view.objectives.length} objectives`;
+    if (marker) {
+      progress += ` · ${escapeHtml(marker.name)} ${marker.compass} ${marker.distance}m`;
+    }
+    this._progressEl.textContent = progress;
 
     this.show();
   }
@@ -86,11 +93,14 @@ export class QuestTrackerHUD {
    * Includes the counts, not just the ids: a pool moving from 4/20 to 5/20 has to
    * redraw, and that is the only thing that changes most of the time.
    */
-  static fingerprint(view) {
+  static fingerprint(view, marker) {
     return [
       view.id,
       view.title,
       ...view.objectives.map((o) => `${o.key}:${o.n}/${o.target}:${o.complete ? 1 : 0}`),
+      // Rounded to 8 m so walking does not rebuild the panel every frame — the marker
+      // is a direction, not a rangefinder.
+      marker ? `${marker.sealId}:${marker.compass}:${Math.round(marker.distance / 8)}` : '',
     ].join('|');
   }
 
