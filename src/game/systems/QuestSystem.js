@@ -372,11 +372,19 @@ export class QuestSystem {
   setSeal(sealId, state) {
     if (!setSealState(this._state, sealId, state)) return false;
 
+    if (sealId === 'finale') {
+      // The finale's terminal state is `defeated`, and reaching it is the end of the
+      // game rather than the opening of anything.
+      if (state === 'defeated') this._quests_onFinaleDefeated();
+      return true;
+    }
+
     if (state === 'broken') {
       if (!this._state.seals[sealId].brokenAt) this._state.seals[sealId].brokenAt = Date.now();
-      if (allSealsBroken(this._state) && this._state.finale.state === 'sealed') {
-        this._state.finale.state = 'open';
-      }
+      // §3.7 — the spire has been standing there since world generation, inert, and
+      // this is the moment it answers to something. `setFinaleState` enforces the
+      // precondition again on its own, so a second caller cannot skip it.
+      if (allSealsBroken(this._state)) setSealState(this._state, 'finale', 'open');
     }
 
     const activeId = this._state.activeQuestId;
@@ -388,6 +396,14 @@ export class QuestSystem {
       if (objective) this.satisfyObjective(activeId, objective.key);
     }
     return true;
+  }
+
+  /**
+   * The Corruption Overlord is dead. Q28's own `complete` reward fires the end of the
+   * game; this only stamps the state that outlives it.
+   */
+  _quests_onFinaleDefeated() {
+    if (!this._state.finale.defeatedAt) this._state.finale.defeatedAt = Date.now();
   }
 
   /** A boss died. Satisfies the active quest's `boss_kill` objective for that boss. */

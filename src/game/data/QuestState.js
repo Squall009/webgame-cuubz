@@ -83,7 +83,7 @@ export function createQuestState() {
     activeQuestId: FIRST_QUEST_ID,
     quests: {},
     seals,
-    finale: { state: 'sealed', site: null, defeatedAt: null },
+    finale: { state: 'sealed', site: null, defeatedAt: null, brokenBy: [] },
     titles: [],
   };
 }
@@ -160,6 +160,9 @@ export function migrateQuestState(raw) {
       state: FINALE_STATES.includes(raw.finale.state) ? raw.finale.state : 'sealed',
       site: sanitizeSite(raw.finale.site),
       defeatedAt: Number.isFinite(raw.finale.defeatedAt) ? raw.finale.defeatedAt : null,
+      brokenBy: Array.isArray(raw.finale.brokenBy)
+        ? raw.finale.brokenBy.filter((c) => typeof c === 'string').slice(0, MAX_PLAYERS_LIMIT)
+        : [],
     };
   }
 
@@ -327,6 +330,10 @@ export function completeQuest(state, questId, at = Date.now()) {
  * @returns {boolean} whether the state changed
  */
 export function setSealState(state, sealId, next) {
+  // The finale has its own five-state vocabulary and its own ordering, so it dispatches
+  // rather than being special-cased inside the seal logic below.
+  if (sealId === 'finale') return setFinaleState(state, next);
+
   const seal = state.seals[sealId];
   if (!seal) return false;
   if (!SEAL_STATES.includes(next)) return false;
@@ -342,13 +349,40 @@ export function setSealState(state, sealId, next) {
 }
 
 /**
+ * Advance the finale. Monotonic along `FINALE_STATES`, with the same one legal retreat
+ * a seal has: `contested → primed` is an encounter reset (§8.4).
+ *
+ * @returns {boolean} whether the state changed
+ */
+export function setFinaleState(state, next) {
+  if (!FINALE_STATES.includes(next)) return false;
+  const current = state.finale.state;
+  if (current === next) return false;
+
+  const from = FINALE_STATES.indexOf(current);
+  const to = FINALE_STATES.indexOf(next);
+  const isReset = current === 'contested' && next === 'primed';
+  if (to < from && !isReset) return false;
+
+  // The spire cannot open until all five seals are broken — the whole of §3.7, in one
+  // guard, on the state machine rather than in a UI check that a second caller could
+  // skip.
+  if (to >= FINALE_STATES.indexOf('open') && !allSealsBroken(state)) return false;
+
+  state.finale.state = next;
+  if (next === 'defeated' && !state.finale.defeatedAt) state.finale.defeatedAt = Date.now();
+  return true;
+}
+
+/**
  * Record that a character contributed damage to a seal's boss. Capped at
  * `MAX_PLAYERS_LIMIT` — the list exists to hand out loot to everyone who fought (§8.4),
  * and a session cannot hold more than four.
  */
 export function addSealContributor(state, sealId, contributorId) {
-  const seal = state.seals[sealId];
+  const seal = sealId === 'finale' ? state.finale : state.seals[sealId];
   if (!seal || typeof contributorId !== 'string' || !contributorId) return false;
+  if (!Array.isArray(seal.brokenBy)) seal.brokenBy = [];
   if (seal.brokenBy.includes(contributorId)) return false;
   if (seal.brokenBy.length >= MAX_PLAYERS_LIMIT) return false;
   seal.brokenBy.push(contributorId);
@@ -428,6 +462,7 @@ export function serializeQuestState(state) {
       state: state.finale.state,
       site: state.finale.site ? { ...state.finale.site } : null,
       defeatedAt: state.finale.defeatedAt,
+      brokenBy: [...(state.finale.brokenBy || [])],
     },
     titles: [...state.titles],
   };

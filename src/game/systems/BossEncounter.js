@@ -466,10 +466,13 @@ export class BossEncounter {
     // independently would produce four different answers about what dropped.
     const loot = this._rollLoot(boss);
 
-    this._seals.setSeal(boss.sealId, 'broken');
+    // The finale's terminal state is `defeated`; a seal's is `broken`. Same call, and
+    // `setFinaleState` knows which vocabulary it is in.
+    this._seals.setSeal(boss.sealId, boss.sealId === 'finale' ? 'defeated' : 'broken');
     const state = this._quests.getState();
-    const seal = state.seals[boss.sealId];
+    const seal = boss.sealId === 'finale' ? state.finale : state.seals[boss.sealId];
     if (seal) {
+      if (!Array.isArray(seal.brokenBy)) seal.brokenBy = [];
       for (const id of contributors) {
         if (!seal.brokenBy.includes(id) && seal.brokenBy.length < 4) seal.brokenBy.push(id);
       }

@@ -1,9 +1,15 @@
 # Cuubz — Quest, Seal and Boss Implementation Plan
 
-> **Status: PLAN ONLY. Nothing here is implemented.**
+> **Status: IMPLEMENTED. S0–S8 all landed on `feat/quest-system`.**
 > Companion to `questStoryline.md`, which is the *narrative* design. This file is the
 > *engineering* design: what exists, what does not, what has to be built, in what order,
 > and which decisions are still open.
+>
+> **Read §13 first.** The plan below is preserved as written, because it is the record of
+> what was decided and why, and several of its judgements turned out to matter more than
+> they looked. §13 is what actually happened: which parts held, which numbers were wrong,
+> the five defects the work uncovered (D-117 through D-121), and the answers taken to the
+> four open questions §12 left.
 
 **The headline:** `questStoryline.md` describes a feature that this codebase has almost
 none of the machinery for. The quest *data* items exist (`quest_key`, `corrupt_crystal`),
@@ -879,3 +885,96 @@ by player count (2× for four players?) is unspecified. Not answerable until S3 
 §3.1 gates the new biomes behind `worldgenVersion`, so existing saves are untouched. Offering
 an opt-in upgrade means a "this will seam your terrain" confirmation in the world screen.
 The alternative — new worlds only, no upgrade path — is simpler and needs no UI.
+
+
+---
+
+## 13. What actually happened
+
+Nine stages, nine commits, `feat/quest-system`. **75 test files, 531 tests, lint clean.**
+
+### The stages, and what each one cost
+
+| Stage | Landed | Notes |
+|---|---|---|
+| **S0** | one schema, migration, `saveWorldState`, both broken wire routes | Found **D-117** |
+| **S1** | 28 quests, `QuestSystem`, polling tracker, HUD writer, quest log | Found **D-118**, **D-119** |
+| **S2** | `QuestSync`, pooled objectives across four players, real-relay test | Found **D-120** |
+| **S3** | `PlayerVitals`, armour, death, respawn, the health meter's first writer | — |
+| **S4** | Corrupt + Lava as real biomes, `worldgenVersion`, `HazardSystem` | The §2.4 guard now exists |
+| **S5** | `SealSites`, altars, arenas, the spire, `SealSystem` | Found **D-121**; spiral was 38.8% |
+| **S6** | `BossEntity`, `BossEncounter`, `BossSync`, boss bar, all six boss defs | Two bugs caught by their own tests |
+| **S7** | every seal reachable and completable, end to end | Projectiles deliberately skipped |
+| **S8** | the finale's own state machine, the spire gate, the full 28-quest run | — |
+
+### The plan's own judgements, scored
+
+**Right, and load-bearing:**
+
+- *"Roughly 60% of the work below is prerequisites, not quests."* Accurate. S0, S3 and S4
+  are all prerequisite and are three of the four hardest stages.
+- *§2.4, "the constraint that shapes all of S4".* The duplicated `selectBiome` was exactly
+  as dangerous as described, and the sweep that now guards it also found **D-121** in the
+  neighbouring hand-maintained table.
+- *§8.1, "reuse the mob renderer — do not write a new one".* This is why S6 is a state
+  machine and not a rendering project, and why six bosses cost roughly what one would
+  have.
+- *§8.2, initialise every phase timer.* The rule and the test it demanded are both here.
+- *"Building the hazardous biomes first means the AoE ground effects come almost free at
+  S6."* Free, in fact — a boss's lava pool is the same block with the same damage tick,
+  and `BossEncounter` contains no damage code for it at all.
+- *§4.5's verification item* — "confirm `character.id` is present on the wire and not
+  stripped". It was stripped. That is D-117.
+
+**Wrong, or incomplete:**
+
+- **§2.5's content audit missed two.** It listed `bed` and `bread`. Writing the quest
+  definitions found `obsidian` (D-118 — an alias for an unbreakable block, wanted by
+  three Act 3 quests) and `sandstone` (D-119 — no registry entry at all). All four are
+  closed, and a test now checks every objective in all 28 quests against the registry.
+- **§7.1's spiral parameters were far too small.** The plan asks for ≥95% and the first
+  implementation of its described algorithm scored **38.8%**. The problem was reach, not
+  density. 1200 probes at 150 blocks apart on a golden-angle sunflower: 98.8%, at a mean
+  of 156 probes.
+- **Q13 wants 5 obsidian, not 20.** A test written against the plan's own act table had
+  to be retargeted at Q14. Minor, but it is the kind of thing that only shows up when
+  something drives the definitions.
+
+### The four open questions, answered
+
+- **Q3 — should a guest keep anything?** *No*, as the plan assumed. A guest holds a view,
+  discarded on disconnect; their contributions persist in the host's world keyed on their
+  character id. Titles are world-scoped, not character-scoped. Revisit if anyone asks.
+- **Q4 — are seal arenas protected?** *No.* §7.3's cheapest answer, taken. The altar is a
+  **place**, not a block, so a player who mines it has made a hole rather than destroyed
+  their run, and the encounter resets if the arena empties for 60 s.
+- **Q5 — difficulty, and what a wipe costs.** A wipe costs time and nothing else: full HP,
+  no partial credit. HP scales ×1.2 per extra player (×1.6 at four), not the ×2 the plan
+  floated — a four-player fight should be longer, not a health-bar marathon. One formula,
+  one place, cheap to retune once anyone has played it.
+- **Q8 — should existing worlds be offered the biome upgrade?** Both. New worlds are
+  `worldgenVersion: 2`; existing ones stay at 1 and generate byte-identically.
+  `WorldManager.upgradeWorldgen(id)` exists for the opt-in — **the world-screen
+  confirmation UI is not built**, so today the upgrade has a mechanism and no button.
+
+### What is deliberately not built
+
+- **Projectiles.** §8.3 lists them as the one ability the engine cannot do, and S7's scope
+  makes them conditional. There is no projectile rendering path in this codebase, and a
+  projectile with no renderer repeats precisely the mistake §8.1 spends a section on. The
+  storyline's two ranged attacks are hazard fields instead: the Lava Titan's molten debris
+  is a magma pool that becomes lava below 40%, and the Frost Serpent's freezing breath is
+  a field of ice to be fought around. Same trade §8.3 made for the AoE effects.
+- **The v1→v2 world-screen upgrade button.** Mechanism yes, UI no. See Q8.
+- **Boss loot for offline contributors.** Loot goes to every contributor who is present at
+  the kill. A player who fought and disconnected before it died keeps their `brokenBy`
+  entry and gets nothing, because there is nowhere to put it.
+
+### Verification
+
+Browser e2e cannot run in this environment (§11), so every UI claim is a jsdom assertion
+against the real templates and the real writers — 23 of them across the quest tracker, the
+quest log and the health meter. The multiplayer claims run against the **shipped relay**
+over real WebSockets with a real `HostManager`. The two worldgen files are driven by
+evaluating the actual worker source in a `vm` context, because an import would be testing
+a different program than the one the worker loads.

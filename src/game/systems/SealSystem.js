@@ -200,14 +200,18 @@ export class SealSystem {
     if (!def) return { ok: false, reason: 'No such seal' };
 
     const state = this.getSealState(sealId);
-    if (state === 'broken') return { ok: false, reason: 'This seal is already broken' };
+    if (state === 'broken' || state === 'defeated') {
+      return { ok: false, reason: 'This seal is already broken' };
+    }
     if (state === 'primed' || state === 'contested') {
       return { ok: false, reason: 'The offering has already been made' };
     }
 
     if (sealId === 'finale') {
       // The spire has stood there since world generation and answers to nothing until
-      // all five are broken (§3.7).
+      // all five are broken (§3.7). Checked here so the player gets a count rather than
+      // a refusal, and enforced again in `setFinaleState` so a second caller cannot
+      // skip it.
       const broken = SEAL_IDS.filter((id) => this.getSealState(id) === 'broken').length;
       if (broken < FINALE_DEFINITION.requiresSealsBroken) {
         return { ok: false, reason: `Five seals hold this shut. ${broken} of 5 are broken.` };

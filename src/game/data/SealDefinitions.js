@@ -119,8 +119,22 @@ export const FINALE_DEFINITION = Object.freeze({
   requiresSealsBroken: SEAL_IDS.length,
 });
 
-/** Finale lifecycle. `sealed` until five are broken, then `open`, then `defeated`. */
-export const FINALE_STATES = Object.freeze(['sealed', 'open', 'contested', 'defeated']);
+/**
+ * Finale lifecycle. Its own vocabulary, because the finale is not a seal: it has no key,
+ * its precondition is the other five, and "sealed" means something a seal's `dormant`
+ * does not — the spire is standing there, visible, and refusing.
+ *
+ *   sealed    — generated and inert. Five seals hold it shut (§3.7).
+ *   open      — the fifth seal broke. The spire answers to something now.
+ *   primed    — the offering has been made at its base.
+ *   contested — the Corruption Overlord is up.
+ *   defeated  — the world is remade.
+ *
+ * `primed` sits between `open` and `contested` so the finale takes exactly the same
+ * offer-then-summon path a seal does, rather than needing a second flow in the UI for
+ * the one encounter that matters most.
+ */
+export const FINALE_STATES = Object.freeze(['sealed', 'open', 'primed', 'contested', 'defeated']);
 
 /** @param {string} id @returns {object|null} */
 export function getSealDefinition(id) {
