@@ -358,3 +358,30 @@ anyone reading the narrative above and expecting to see it move:
   hazard they can. Everything else in the Boss Mechanics lines is as written.
 - The **Corrupt biome's fog and sky** and the **corrupt_wolf** and **corrupt_wisp** were
   written years before the biome existed. They all work now, unchanged.
+
+### After the first pass — what changed in the world the storyline describes
+
+`quest_implementation.md` §14 is the engineering record. Four things in it change what a
+player actually experiences of the narrative above:
+
+- **Food is food now.** Q03's five berries, Q06's whole "prepare to survive" premise and
+  Q19's three loaves of bread all referred to items that did nothing at all: `foodRestore`
+  was a hunger number and hunger was deleted before any of this was written (`BUGS.md`
+  **D-123**). Right-click eats, one bite per 1.2 s. The Winter Supplies quest is now
+  supplies.
+- **The bosses can reach you.** Five of the six were slower than a walking player, so
+  every fight in the storyline could be won by holding the back key and clicking
+  (**D-124**). They are faster than a walk and slower than a sprint now — the Colossus and
+  the Serpent are no longer told apart by speed, but by how often and how hard they swing.
+- **The Lava biome is inhabited.** It had no mob of its own, which made the one place in
+  the game that can kill you also the emptiest, across four quests. The **ash crawler** is
+  a low, slow thing of cooled crust and molten seams — the Lava Titan's own look, small.
+  The shoreline got a **sand crab**, and hares now range into the desert, the badlands and
+  the frozen peaks.
+- **A world made before the Corrupt and Lava biomes existed can be opted in**, from a
+  badge on its slot in the world screen. Without it that save can never reach the Verdant
+  or Ember seal, and so can never reach the ending described above.
+
+Still true: the ranged attacks are hazard fields rather than projectiles, and no mob lives
+in the ocean — mobs cannot swim (**D-70**), and a fish that walks along the seabed is
+worse than no fish.
