@@ -970,9 +970,11 @@ Nine stages, nine commits, `feat/quest-system`. **75 test files, 531 tests, lint
 - ~~**The v1→v2 world-screen upgrade button.** Mechanism yes, UI no. See Q8.~~
   **Built in S9 — §14.** It was the largest of these: without it no world made before S4
   can reach the Verdant or Ember seal, and so cannot reach the finale at all.
-- **Boss loot for offline contributors.** Loot goes to every contributor who is present at
-  the kill. A player who fought and disconnected before it died keeps their `brokenBy`
-  entry and gets nothing, because there is nowhere to put it.
+- ~~**Boss loot for offline contributors.** Loot goes to every contributor who is present
+  at the kill. A player who fought and disconnected before it died keeps their `brokenBy`
+  entry and gets nothing, because there is nowhere to put it.~~
+  **Built in S12 — §14.** There is somewhere to put it: `questState.pendingLoot`, which is
+  the same place Q3 already decided everything else a guest earns lives.
 
 ### Verification
 
