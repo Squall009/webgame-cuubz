@@ -152,7 +152,10 @@ export const MOB_DEFINITIONS = {
     speed: 3.0,
     fleeSpeed: 6.0,
     hitbox: { width: 0.4, height: 0.5 },
-    biomes: ['plains', 'forest', 'tundra'],
+    // S13, D-68: + desert, badlands and frozen_peaks. A hare is the animal all three of
+    // those biomes actually have, and giving the existing mob three more homes is a
+    // better answer than three near-identical new definitions.
+    biomes: ['plains', 'forest', 'tundra', 'desert', 'badlands', 'frozen_peaks'],
     spawnWeight: 40,
     spawnInDark: false,
     spawnMinY: 62,
@@ -311,7 +314,11 @@ export const MOB_DEFINITIONS = {
     speed: 2.0,
     fleeSpeed: 0,
     hitbox: { width: 1.4, height: 2.8 },
-    biomes: ['mountains'], // D-68: dropped 'deepslate_caves' — BiomeSystem cannot produce it; zero behaviour change
+    // D-68: dropped 'deepslate_caves' — BiomeSystem cannot produce it; zero behaviour
+    // change. S13 adds `badlands`, where its own stone-and-ore silhouette belongs and
+    // which lost its only mobs when S4 sent the two corrupt ones back to the Corrupt
+    // biome they were written for.
+    biomes: ['mountains', 'badlands'],
     spawnWeight: 10,
     spawnInDark: true,
     spawnMinY: 0,
@@ -450,6 +457,194 @@ export const MOB_DEFINITIONS = {
       attack: { speed: 2.0, type: ANIM_TYPES.CUSTOM, functionName: 'chargeAttack', duration: 0.3 },
       hurt:   { speed: 1.0, type: ANIM_TYPES.CUSTOM, functionName: 'hurtReaction', duration: 0.2 },
       dead:   { speed: 1.0, type: ANIM_TYPES.CUSTOM, functionName: 'dissolveDeath', duration: 0.8 },
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ASH CRAWLER — Hostile, the Lava biome's own mob (S13, D-68)
+  // ═══════════════════════════════════════════════════════════════
+  //
+  // S4 built the Lava biome and gave it no inhabitant, which made the one place in the
+  // game that can kill you also the emptiest — and Act 3 sends the player there for four
+  // quests (Q13–Q16). Of the seven biomes on D-68's ledger this is the only one that is
+  // *this* work's fault rather than inherited, so it is the one that had to be built.
+  //
+  // Low and wide rather than tall, so it reads against a landscape of basalt columns,
+  // and slow enough to be escaped: the Lava biome's real threat is the floor, and a fast
+  // hostile there would mean players dying to a chase rather than to their own footing.
+  ash_crawler: {
+    name: 'Ash Crawler',
+    category: MOB_CATEGORIES.HOSTILE,
+    health: 24,
+    damage: 5,
+    attackSpeed: 0.9,
+    knockback: 1.0,
+    // Below the player's walk speed of 5, deliberately and unlike a boss (D-124): a mob
+    // you can walk away from is the right call when the ground between you and safety is
+    // the actual danger.
+    speed: 3.4,
+    fleeSpeed: 0,
+    hitbox: { width: 1.1, height: 0.6 },
+    biomes: ['lava'],
+    spawnWeight: 30,
+    // Not a night mob. The Lava biome is lit by its own floor and a hostile that only
+    // appeared after dark would leave Q13–Q16's daytime trips empty.
+    spawnInDark: false,
+    spawnMinY: 0,
+    spawnMaxY: 128,
+    despawnDistance: 112,
+    leashDistance: 28,
+    experience: 9,
+    behavior: MOB_BEHAVIORS.AGGRESSIVE,
+    ai: {
+      // D-110's ranges, scaled to a slow mob: short aggro, ~1.6x lose-interest so
+      // retreating works, and no pack aggro at all — the biome is already the hazard.
+      aggroRange: 9,
+      attackRange: 1.8,
+      attackCooldown: 1.4,
+      loseInterestRange: 15,
+      senseRange: 12,
+      packAggro: false,
+      packRadius: 0,
+      wanderInterval: [4, 9],
+      fleeRange: 0,
+    },
+    // Only items that already exist. Adding a "chitin" or "cinder" item means a texture,
+    // a `NAMED_ITEMS` entry, a manifest row and the whole D-112/D-114 coverage gauntlet,
+    // which is a lot of machinery for a drop name — and D-125, found writing this mob,
+    // is what happens when a drop names something the registry does not have.
+    drops: [
+      { item: 'coal', minCount: 1, maxCount: 3, weight: 90 },
+      { item: 'glowstone_dust', minCount: 0, maxCount: 2, weight: 40 },
+      { item: 'gunpowder', minCount: 0, maxCount: 1, weight: 25 },
+    ],
+    // ── 3D Geometry ──────────────────────────────────────────
+    // Cooled crust over a molten interior — the Lava Titan's own language (basalt-black
+    // with bright seams), at one twentieth the size, so the biome reads as one place.
+    geometry: {
+      material: { roughness: 0.85, metalness: 0.05 },
+      parts: [
+        // Segmented carapace, front to back
+        { type: 'box', id: 'seg_1', size: [0.7, 0.32, 0.42], position: [0, 0.34, 0.36], color: 0x2b1a12 },
+        { type: 'box', id: 'seg_2', size: [0.8, 0.36, 0.42], position: [0, 0.36, 0], color: 0x241610 },
+        { type: 'box', id: 'seg_3', size: [0.62, 0.3, 0.4], position: [0, 0.32, -0.38], color: 0x1d120c },
+        // Head, low and blunt
+        { type: 'box', id: 'head', size: [0.42, 0.24, 0.3], position: [0, 0.28, 0.68], color: 0x332014 },
+        { type: 'cone', id: 'mandible_L', radius: 0.05, height: 0.22, position: [-0.13, 0.22, 0.86], rotation: [1.4, 0, -0.2], color: 0x120a06 },
+        { type: 'cone', id: 'mandible_R', radius: 0.05, height: 0.22, position: [0.13, 0.22, 0.86], rotation: [1.4, 0, 0.2], color: 0x120a06 },
+        // The molten seams between the plates — the only bright thing on it
+        { type: 'box', id: 'seam_1', size: [0.72, 0.06, 0.08], position: [0, 0.36, 0.2], emissive: 0xff6a00, emissiveIntensity: 0.8, color: 0xff6a00 },
+        { type: 'box', id: 'seam_2', size: [0.66, 0.06, 0.08], position: [0, 0.34, -0.2], emissive: 0xff8c1a, emissiveIntensity: 0.7, color: 0xff8c1a },
+        { type: 'sphere', id: 'vent', radius: 0.11, position: [0, 0.52, -0.1], emissive: 0xffb300, emissiveIntensity: 0.6, color: 0xffb300 },
+        // Six legs, splayed
+        { type: 'cylinder', id: 'leg_FL', radiusTop: 0.04, radiusBottom: 0.05, height: 0.3, position: [-0.42, 0.15, 0.34], rotation: [0, 0, 0.5], color: 0x1d120c },
+        { type: 'cylinder', id: 'leg_FR', radiusTop: 0.04, radiusBottom: 0.05, height: 0.3, position: [0.42, 0.15, 0.34], rotation: [0, 0, -0.5], color: 0x1d120c },
+        { type: 'cylinder', id: 'leg_ML', radiusTop: 0.04, radiusBottom: 0.05, height: 0.32, position: [-0.46, 0.16, 0], rotation: [0, 0, 0.5], color: 0x1d120c },
+        { type: 'cylinder', id: 'leg_MR', radiusTop: 0.04, radiusBottom: 0.05, height: 0.32, position: [0.46, 0.16, 0], rotation: [0, 0, -0.5], color: 0x1d120c },
+        { type: 'cylinder', id: 'leg_BL', radiusTop: 0.04, radiusBottom: 0.05, height: 0.3, position: [-0.4, 0.15, -0.34], rotation: [0, 0, 0.5], color: 0x1d120c },
+        { type: 'cylinder', id: 'leg_BR', radiusTop: 0.04, radiusBottom: 0.05, height: 0.3, position: [0.4, 0.15, -0.34], rotation: [0, 0, -0.5], color: 0x1d120c },
+        // Tail spike
+        { type: 'cone', id: 'tail', radius: 0.08, height: 0.3, position: [0, 0.34, -0.68], rotation: [1.9, 0, 0], color: 0x120a06 },
+      ],
+      eyes: {
+        color: 0xffb300, size: 0.05,
+        positions: [[-0.13, 0.34, 0.8], [0.13, 0.34, 0.8]],
+      },
+    },
+    // ── Animations ──────────────────────────────────────────
+    animations: {
+      idle:   { speed: 0.5, type: ANIM_TYPES.BREATHING },
+      wander: { speed: 0.8, type: ANIM_TYPES.WALK, gait: 'trot' },
+      chase:  { speed: 1.2, type: ANIM_TYPES.WALK, gait: 'trot' },
+      attack: { speed: 1.4, type: ANIM_TYPES.CUSTOM, functionName: 'lungeAttack', duration: 0.4 },
+      hurt:   { speed: 1.0, type: ANIM_TYPES.CUSTOM, functionName: 'hurtReaction', duration: 0.25 },
+      dead:   { speed: 1.0, type: ANIM_TYPES.CUSTOM, functionName: 'crumbleDeath', duration: 1.2 },
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // SAND CRAB — Passive, the shoreline (S13, D-68)
+  // ═══════════════════════════════════════════════════════════════
+  //
+  // `beach` had no mob, and it is the biome every player walks along before they have a
+  // pickaxe. It is also the only one of D-68's remaining seven that a *land* animal can
+  // honestly fill — see the two ocean rows, which are declined rather than deferred.
+  //
+  // Passive, and the third one in the game: deer, rabbit and this. `MobManager`'s
+  // `hostileCap` (D-110) is separate from the overall cap, so ambience costs a hostile
+  // nothing.
+  sand_crab: {
+    name: 'Sand Crab',
+    category: MOB_CATEGORIES.PASSIVE,
+    health: 8,
+    damage: 0,
+    attackSpeed: 0,
+    knockback: 0.5,
+    speed: 1.6,
+    fleeSpeed: 4.5,
+    hitbox: { width: 0.6, height: 0.35 },
+    biomes: ['beach'],
+    spawnWeight: 40,
+    spawnInDark: false,
+    spawnMinY: 0,
+    spawnMaxY: 90,
+    despawnDistance: 96,
+    leashDistance: 20,
+    experience: 2,
+    behavior: MOB_BEHAVIORS.WANDER_FLEE,
+    ai: {
+      aggroRange: 0,
+      attackRange: 0,
+      attackCooldown: 0,
+      loseInterestRange: 0,
+      senseRange: 10,
+      packAggro: false,
+      packRadius: 0,
+      wanderInterval: [2, 6],
+      // Skittish and short-lived about it: it bolts early and gives up quickly, which is
+      // what makes a shoreline feel inhabited rather than hostile.
+      fleeRange: 7,
+    },
+    // There is no shell or chitin item and inventing one costs a texture, a manifest row
+    // and the D-112/D-114 gauntlet for a name. It drops the two generic animal materials
+    // that already exist, which is honest about what this is: ambience with a small
+    // payout, not a resource the player farms.
+    drops: [
+      { item: 'bone', minCount: 0, maxCount: 1, weight: 60 },
+      { item: 'leather', minCount: 0, maxCount: 1, weight: 30 },
+    ],
+    // ── 3D Geometry ──────────────────────────────────────────
+    geometry: {
+      material: { roughness: 0.55, metalness: 0.05 },
+      parts: [
+        { type: 'box', id: 'shell', size: [0.5, 0.18, 0.36], position: [0, 0.2, 0], color: 0xc2593a },
+        { type: 'box', id: 'shell_top', size: [0.36, 0.1, 0.26], position: [0, 0.31, 0], color: 0xd66b48 },
+        // Claws, one larger than the other
+        { type: 'box', id: 'claw_L', size: [0.16, 0.12, 0.2], position: [-0.32, 0.18, 0.2], rotation: [0, 0.3, 0], color: 0xe07a56 },
+        { type: 'box', id: 'claw_R', size: [0.12, 0.1, 0.16], position: [0.3, 0.16, 0.19], rotation: [0, -0.3, 0], color: 0xe07a56 },
+        // Eye stalks
+        { type: 'cylinder', id: 'stalk_L', radiusTop: 0.02, radiusBottom: 0.02, height: 0.12, position: [-0.09, 0.4, 0.1], color: 0xd66b48 },
+        { type: 'cylinder', id: 'stalk_R', radiusTop: 0.02, radiusBottom: 0.02, height: 0.12, position: [0.09, 0.4, 0.1], color: 0xd66b48 },
+        // Legs, three a side
+        { type: 'cylinder', id: 'leg_FL', radiusTop: 0.02, radiusBottom: 0.03, height: 0.18, position: [-0.26, 0.09, 0.12], rotation: [0, 0, 0.6], color: 0xa8482e },
+        { type: 'cylinder', id: 'leg_FR', radiusTop: 0.02, radiusBottom: 0.03, height: 0.18, position: [0.26, 0.09, 0.12], rotation: [0, 0, -0.6], color: 0xa8482e },
+        { type: 'cylinder', id: 'leg_ML', radiusTop: 0.02, radiusBottom: 0.03, height: 0.18, position: [-0.28, 0.09, 0], rotation: [0, 0, 0.6], color: 0xa8482e },
+        { type: 'cylinder', id: 'leg_MR', radiusTop: 0.02, radiusBottom: 0.03, height: 0.18, position: [0.28, 0.09, 0], rotation: [0, 0, -0.6], color: 0xa8482e },
+        { type: 'cylinder', id: 'leg_BL', radiusTop: 0.02, radiusBottom: 0.03, height: 0.18, position: [-0.26, 0.09, -0.12], rotation: [0, 0, 0.6], color: 0xa8482e },
+        { type: 'cylinder', id: 'leg_BR', radiusTop: 0.02, radiusBottom: 0.03, height: 0.18, position: [0.26, 0.09, -0.12], rotation: [0, 0, -0.6], color: 0xa8482e },
+      ],
+      eyes: {
+        color: 0x000000, size: 0.03,
+        positions: [[-0.09, 0.47, 0.11], [0.09, 0.47, 0.11]],
+      },
+    },
+    // ── Animations ──────────────────────────────────────────
+    animations: {
+      idle:   { speed: 0.6, type: ANIM_TYPES.TWITCH },
+      wander: { speed: 1.2, type: ANIM_TYPES.WALK, gait: 'trot' },
+      flee:   { speed: 2.2, type: ANIM_TYPES.WALK, gait: 'gallop' },
+      hurt:   { speed: 1.0, type: ANIM_TYPES.CUSTOM, functionName: 'hurtReaction', duration: 0.2 },
+      dead:   { speed: 1.0, type: ANIM_TYPES.CUSTOM, functionName: 'collapseDeath', duration: 0.6 },
     },
   },
 };

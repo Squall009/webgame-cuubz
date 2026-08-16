@@ -1146,3 +1146,42 @@ set that flag back up. Single-player passes no predicate and the default is alwa
 Verified through the shipped relay (`test/integration/questSync.test.js`): a guest drops,
 a boss they fought dies, they rejoin, and `BOSS_LOOT` arrives at them and at nobody else,
 with `targetPlayers` stripped by the relay. Confirmed red with the flush disabled.
+
+### S13 — the empty biomes, and D-125
+
+D-68's residue: seven biomes with no mob at all, pinned as a ledger line in
+`test/unit/game/mobBiomes.test.js`. Five are closed and two are declined.
+
+**`lava` is the one this branch owed.** S4 built the biome and gave it no inhabitant,
+which left the only place in the game that can kill you also the emptiest — and Acts 3's
+Q13–Q16 all send the player there. `ash_crawler` is a slow, low, six-legged hostile in
+the Lava Titan's own visual language (basalt-black plates over molten seams) so the biome
+reads as one place. Deliberately **slower than the player's walk**, which is the opposite
+of the call D-124 made for bosses and for the same reason stated in reverse: in the Lava
+biome the floor is the threat, and a hostile you cannot walk away from would mean dying
+to a chase instead of to your own footing.
+
+**`beach` got `sand_crab`**, the game's third passive and the only one of the remaining
+six a land animal can honestly fill.
+
+**`desert`, `badlands` and `frozen_peaks` were filled with mobs that already exist** —
+`rabbit` to all three, `stone_golem` to badlands. Three near-identical new definitions
+would have bought one ledger line each and 250 lines of hand-authored geometry that no
+renderer in this environment can check; a hare is what those three biomes actually have.
+`badlands` is a special case worth naming: it lost its only mobs when S4 sent the two
+corrupt ones back to the Corrupt biome they were written for, so it was empty by our doing.
+
+**`deep_ocean` and `ocean` are declined, and the reason is D-70.** Mobs have no buoyancy,
+no swim and no drown — `_findSpawnPosition` returns seabed+1 and `_resolveAxis` does not
+stop them at the waterline — so anything spawned in an ocean walks around on the bottom.
+An aquatic mob in a game with no swimming is half a mechanic with no way to see the other
+half working, which is §8.1's rule and the deleted `Boss.js`'s whole lesson. Those two
+rows belong to whoever closes D-70, and the ledger assertion now says so in the file.
+
+**D-125, found looking for something the Lava mob could legitimately drop.** `stone_golem`
+dropped the *string* `'cobblestone'`, which is not a `NAMED_ITEMS` key. `addItem` accepts
+any string, so it landed in the bar looking fine and then could not be placed, could not
+be crafted with, and would not stack with the cobblestone the player mined. Same family as
+D-118 and D-119, in the one dimension S1's guard did not cover. The fix is one constant;
+the deliverable is the guard that resolves **every** mob drop against the registry, which
+now sits next to the biome-name guard in the same file.

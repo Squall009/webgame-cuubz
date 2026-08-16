@@ -144,12 +144,16 @@ assertFalse(badlandsMobs.has('corrupt_wolf'), 'corrupt_wolf no longer spawns in 
 assertFalse(badlandsMobs.has('corrupt_wisp'), 'corrupt_wisp no longer spawns in badlands');
 assertEquals(selectMobForBiome('deepslate_caves'), null, "no mob answers to 'deepslate_caves'");
 
-// stone_golem: dropping `deepslate_caves` is a PURE removal. Its mountains entry is
-// untouched, and mountains is the only real biome it ever matched.
+// stone_golem: dropping `deepslate_caves` was a PURE removal — mountains was the only
+// real biome it ever matched, and mountains still selects nothing else. **S13 added
+// `badlands`**, which is not a removal and is why the list assertion below names two:
+// badlands lost its only mobs when S4 sent the two corrupt ones back to the Corrupt
+// biome they were written for, and a stone golem is what that landscape has.
 const mountainMobs = drawsIn('mountains');
 assertTrue(mountainMobs.has('stone_golem'), 'stone_golem still spawns in mountains');
 assertEquals(mountainMobs.size, 1, 'mountains still selects exactly stone_golem — zero behaviour change');
-assertEquals(MOB_DEFINITIONS.stone_golem.biomes.join(','), 'mountains', 'stone_golem now lists only mountains');
+assertEquals(MOB_DEFINITIONS.stone_golem.biomes.join(','), 'mountains,badlands',
+  'stone_golem lists mountains and, since S13, badlands');
 
 // The two biomes that were already working are unchanged.
 assertEquals([...drawsIn('plains')].sort().join(','), 'deer,rabbit', 'plains still selects deer and rabbit');
@@ -211,16 +215,39 @@ console.log('--- 3b: every mob drop resolves ---');
 // "Which biomes SHOULD have mobs" is a content decision and is PR 34's. This assertion
 // records the exact remaining list so that the day someone adds an ocean mob, this line
 // is what tells them to update the ledger — it is a statement of scope, not approval.
-console.log('--- 4: biomes with no mob (deferred to PR 34) ---');
+console.log('--- 4: biomes with no mob ---');
 
 const covered = new Set(Object.values(MOB_DEFINITIONS).flatMap((d) => d.biomes));
 const empty = BIOME_IDS.filter((b) => !covered.has(b));
-// S4 hands `badlands` back to the empty list — the two corrupt mobs were only ever
-// parked there — and adds `lava`, a brand-new biome with no mob of its own yet. The
-// Corrupt biome is populated because its two mobs were written for it years ago.
-assertEquals(empty.join(','), 'deep_ocean,ocean,beach,badlands,desert,frozen_peaks,lava',
-  'seven biomes have no mob — still deferred content, and this line is the ledger');
+
+// S13 took this list from seven to two. `lava` got `ash_crawler` — the one entry on the
+// list that S4 created rather than inherited, and the biome Act 3 sends the player to
+// for four quests. `beach` got `sand_crab`. `desert`, `badlands` and `frozen_peaks` were
+// filled by giving EXISTING mobs the homes they already fit — rabbit to all three,
+// stone_golem to badlands — rather than by writing three near-identical definitions.
+//
+// **The two that remain are declined, not deferred, and the reason is D-70.** Mobs have
+// no buoyancy, no swim and no drown: `_findSpawnPosition` returns seabed+1 and
+// `_resolveAxis` does not stop them at the waterline, so anything spawned in an ocean
+// walks around on the bottom. An "aquatic" mob in a game with no swimming is half a
+// mechanic with no way to see the other half working — §8.1's rule, and the deleted
+// `Boss.js` is what it costs. These two rows belong to whoever closes D-70, and this
+// assertion is the note that says so.
+assertEquals(empty.join(','), 'deep_ocean,ocean',
+  'only the two water biomes have no mob, and they are blocked on D-70 (no buoyancy, no swim, no drown)');
 assertFalse(empty.includes('corrupt'), 'the Corrupt biome has mobs — corrupt_wolf and corrupt_wisp, finally');
+assertFalse(empty.includes('lava'), 'the Lava biome has a mob of its own — ash_crawler (S13)');
+
+// And the new ones are actually selectable, not merely declared.
+assertTrue(drawsIn('lava').has('ash_crawler'), 'ash_crawler is drawn in the Lava biome');
+assertTrue(drawsIn('beach').has('sand_crab'), 'sand_crab is drawn on the beach');
+assertTrue(drawsIn('desert').has('rabbit'), 'the desert draws rabbit');
+assertTrue(drawsIn('frozen_peaks').has('rabbit'), 'frozen_peaks draws rabbit');
+assertTrue(drawsIn('badlands').size > 0, 'badlands is populated again');
+// The Lava biome's mob does not leak into anywhere else, which is the failure mode a
+// widened `biomes` array produces silently.
+assertFalse(drawsIn('plains').has('ash_crawler'), 'ash_crawler stays in the Lava biome');
+assertFalse(drawsIn('ocean').has('sand_crab'), 'sand_crab stays out of the water');
 
 // ═══════════════════════════════════════════════════════════════════
 console.log(`\n===================================`);
