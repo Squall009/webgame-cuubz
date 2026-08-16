@@ -38,6 +38,7 @@ import { BOSS_ABILITIES, getBossDefinition, bossForSeal } from '../mobs/bossDefi
 import { BLOCK_TYPES } from '../../engine/world/BlockRegistry.js';
 import { DAMAGE_SOURCES } from '../data/DamageSources.js';
 import { NAMED_ITEMS } from '../data/ItemDefinitions.js';
+import { addPendingLoot } from '../data/QuestState.js';
 
 /** How long an empty arena waits before the encounter resets. §8.4. */
 export const RESET_AFTER_EMPTY_SECONDS = 60;
@@ -72,6 +73,9 @@ export class BossEncounter {
    * @param {object} [config.inventory] — for loot
    * @param {function} [config.broadcast] — `(msg) => void`; **null in single-player**
    * @param {function} [config.getPlayerPositions] — `() => [{id, position}]`
+   * @param {function} [config.isContributorPresent] — `(characterId) => boolean`; S12,
+   *   whether that contributor is connected right now. Defaults to always-true, which is
+   *   correct in single-player and is the safe answer for a host with no roster.
    * @param {string} [config.localContributorId]
    */
   constructor(config) {
@@ -84,6 +88,7 @@ export class BossEncounter {
     this._inventory = config.inventory || null;
     this._broadcast = config.broadcast || null;
     this._getPlayerPositions = config.getPlayerPositions || null;
+    this._isContributorPresent = config.isContributorPresent || (() => true);
     this._localContributorId = config.localContributorId || null;
 
     /** The live boss, or null. One at a time — there is one party. */
@@ -477,6 +482,24 @@ export class BossEncounter {
         if (!seal.brokenBy.includes(id) && seal.brokenBy.length < 4) seal.brokenBy.push(id);
       }
       if (!seal.brokenAt) seal.brokenAt = Date.now();
+    }
+
+    // ── Loot for whoever was not here to take it (S12, §14) ─────
+    //
+    // §13 recorded this as deliberately-not-built: "a player who fought and disconnected
+    // before it died keeps their `brokenBy` entry and gets nothing, because there is
+    // nowhere to put it." There is somewhere now. A contributor who is not connected at
+    // this instant gets their share written into the world's quest state, and the host
+    // hands it over the next time they join — which is the same rule Q3 already settled
+    // for everything else a guest earns: **it lives in the host's world, not in them.**
+    //
+    // The presence test is injected rather than derived here, because "connected" is a
+    // `HostManager` fact and this class has no players, only positions. Default true:
+    // in single-player the one contributor is always present, and a host with no
+    // predicate should not start hoarding its own loot.
+    for (const id of contributors) {
+      if (this._isContributorPresent(id)) continue;
+      addPendingLoot(state, id, loot);
     }
 
     this._quests.recordBossDefeat(boss.type);

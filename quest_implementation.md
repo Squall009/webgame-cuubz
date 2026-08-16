@@ -1095,3 +1095,54 @@ player's but not far under; HP never goes backwards along `BOSS_ORDER`; the part
 formula's *implied duration ratio* stays in [0.75, 1.0]; the hazard table reads as three
 bands; a full regeneration fits inside the arena reset; and the invulnerability window
 stays below the shortest real cooldown. It was red on 15 of those before the change.
+
+### S12 — loot for contributors who were not there
+
+§13's third deliberate omission: *"a player who fought and disconnected before it died
+keeps their `brokenBy` entry and gets nothing, because there is nowhere to put it."*
+
+**Built, not declined**, and the argument for building it is that Q3 had already decided
+the shape. A guest holds a *view*; their contributions live in the host's world keyed on
+their character id; they carry nothing home. Pending loot is one more of those, so it
+goes where the rest of it goes — `questState.pendingLoot`, a map from contributor id to
+what they are owed — and the host hands it over on their next join. Nothing new was
+invented; an existing rule was applied to one more thing.
+
+**The version did not bump, deliberately.** `QuestState.js` says to bump when a field
+changes meaning, and `migrateQuestState` turns an unrecognised `v` into a **fresh state**
+— so bumping to 2 would erase the quest progress of every world written before this stage
+in order to add a map that is empty in all of them. `pendingLoot` is purely additive and
+its absence has exactly one correct reading, `{}`, so it is defaulted. A version bump is
+for a field whose old value has to be *translated*, and there is no old value here. The
+test asserts the no-bump path preserves progress, which is the property that matters.
+
+**The 8 KB budget is why it merges by item.** §4.1's serialized state lives in
+`localStorage` beside two other world configs. Counts are merged per item and the map is
+capped at `MAX_PLAYERS_LIMIT` contributors, exactly as `brokenBy` is — so a player who
+missed all six bosses holds one entry per *distinct drop across the whole game*, which is
+five, not eighteen. The budget test now includes four contributors each owed the maximum
+of all five and still passes.
+
+**At most once, and the window left open on purpose.** The entry is cleared on a
+successful send, not on an acknowledgement. An ack makes delivery at-*least*-once: a lost
+ack is a re-send and a re-send is duplicated diamonds. D-117 is this repo's standing
+lesson about crediting the same thing twice across a reconnect and the same argument
+applies to an item grant. So the residual loss is "the socket died between the host's
+write and the client's read" — milliseconds, against the original bug's window of an
+entire boss fight — and an unsent message leaves the entry exactly where it was.
+
+**`BOSS_LOOT` is a new message type rather than a reuse of `BOSS_DEFEATED`**, which is the
+37th. `handleDefeated` opens with `if (!this.boss || data.bossId !== this.boss.id) return`
+and every property that guard depends on is false at delivery time: there is no boss, no
+seal is contested, and it may be a different session on a different day. A message that
+arrives when the thing it is about is gone needs a handler that does not look for it.
+
+**Who counts as absent** is injected into `BossEncounter` rather than derived there —
+that class has positions, not players. `initQuests` supplies the predicate from
+`host.getPlayerList()`, which already excludes anyone whose `connected` flag is down; a
+player who blipped and came back counts as present, because D-120 taught the host how to
+set that flag back up. Single-player passes no predicate and the default is always-true.
+
+Verified through the shipped relay (`test/integration/questSync.test.js`): a guest drops,
+a boss they fought dies, they rejoin, and `BOSS_LOOT` arrives at them and at nobody else,
+with `targetPlayers` stripped by the relay. Confirmed red with the flush disabled.

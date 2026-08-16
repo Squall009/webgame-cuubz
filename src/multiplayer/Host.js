@@ -25,6 +25,8 @@ import {
   applyPooledDelta,
   setSealState,
   addSealContributor,
+  peekPendingLoot,
+  takePendingLoot,
 } from '../game/data/QuestState.js';
 
 // D-82: a `'use strict';` directive stood here, AFTER the imports. Two things were wrong
@@ -774,6 +776,8 @@ export class HostManager {
     // it has none of it until this arrives. Sent to the joiner alone: everyone else
     // already has it.
     this.broadcastQuestSync(playerId);
+    // S12 — a boss they fought may have died while they were away. See the method.
+    this.flushPendingLoot(playerId);
 
     // Callback
     if (this.onPlayerJoined) {
@@ -829,6 +833,7 @@ export class HostManager {
     // Their view of the world is whatever they had when the connection dropped, and the
     // quest state may have moved on without them.
     this.broadcastQuestSync(playerId);
+    this.flushPendingLoot(playerId);
   }
 
   /** Handle a player leaving the session */
@@ -1154,6 +1159,57 @@ export class HostManager {
     };
     if (targetPlayerId) msg.targetPlayers = [targetPlayerId];
     this._broadcast(msg);
+  }
+
+  /**
+   * Hand a joining player whatever a boss owed them while they were gone (S12, §14).
+   *
+   * ─── WHY THE HOST IS THE ONE HOLDING IT ─────────────────────────────────────
+   *
+   * §13 recorded the gap plainly: "a player who fought and disconnected before it died
+   * keeps their `brokenBy` entry and gets nothing, because there is nowhere to put it."
+   * `questState.pendingLoot` is the somewhere, and it is the host's world's, which is
+   * consistent with the ruling Q3 already made about everything else a guest earns — a
+   * guest holds a *view*, their contributions live in the host's world keyed on their
+   * character id, and they carry nothing home. Pending loot is one more of those.
+   *
+   * ─── AT MOST ONCE, AND THE WINDOW THAT IS DELIBERATELY LEFT OPEN ────────────
+   *
+   * The entry is cleared **on a successful send**, not on an acknowledgement. An ack
+   * would make delivery at-*least*-once instead: a lost ack means a re-send, and a
+   * re-send means duplicated diamonds every time a player's confirmation goes missing.
+   * D-117 is this repo's standing lesson about crediting the same thing twice across a
+   * reconnect, and the same argument applies to an item grant.
+   *
+   * So the residual loss window is "the socket died between this write and the client's
+   * read" — measured in milliseconds, against the original bug's window of an entire
+   * boss fight. And it is only reached at all when `_send` reported success, which is
+   * why an unsent message leaves the entry exactly where it was.
+   *
+   * @param {string} playerId — the relay's per-connection id
+   * @returns {boolean} whether anything was sent
+   */
+  flushPendingLoot(playerId) {
+    const player = this._players.get(playerId);
+    // Keyed on the **character** id, not the connection: a per-connection `playerId`
+    // changes on every reconnect, which is the whole reason D-117 exists.
+    const contributorId = player?.character?.id || null;
+    if (!contributorId) return false;
+
+    const state = this.getQuestState();
+    const owed = peekPendingLoot(state, contributorId);
+    if (owed.length === 0) return false;
+
+    if (!this._client || !this._client.isGameSessionConnected) return false;
+    this._broadcast({
+      type: MESSAGE_TYPES.BOSS_LOOT,
+      contributorId,
+      loot: owed,
+      targetPlayers: [playerId],
+    });
+    takePendingLoot(state, contributorId);
+    _hostLog(`[HostManager] Delivered ${owed.length} pending loot stacks to ${contributorId}`);
+    return true;
   }
 
   /**

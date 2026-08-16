@@ -33,6 +33,12 @@ import {
   countBrokenSeals,
   allSealsBroken,
   grantTitle,
+  addPendingLoot,
+  peekPendingLoot,
+  takePendingLoot,
+  sanitizePendingLoot,
+  MAX_PENDING_LOOT_ITEMS,
+  MAX_PENDING_LOOT_COUNT,
 } from '../../../src/game/data/QuestState.js';
 import { SEAL_IDS } from '../../../src/game/data/SealDefinitions.js';
 
@@ -420,8 +426,103 @@ describe('the storage budget (§4.1)', () => {
       'seal_master', 'world_saver',
     ]) grantTitle(s, t);
 
+    // S12 — and all four owed the worst case of pending loot: every distinct item the
+    // six boss tables between them drop, at three digits each. This is the field's whole
+    // size argument, and the budget is the reason it merges by item instead of appending
+    // a row per kill.
+    for (const c of ['char_a', 'char_b', 'char_c', 'char_d']) {
+      addPendingLoot(s, c, [
+        { item: 'corrupt_crystal', count: 999 }, { item: 'diamond', count: 999 },
+        { item: 'gold_ingot', count: 999 }, { item: 'netherite_ingot', count: 999 },
+        { item: 'iron_ingot', count: 999 },
+      ]);
+    }
+
     const size = estimateSize(s);
     expect(size).toBeLessThanOrEqual(QUEST_STATE_BUDGET_BYTES);
+  });
+});
+
+describe('pending loot (S12, §14)', () => {
+  it('starts empty, survives a serialize/migrate round trip, and defaults on old states', () => {
+    expect(createQuestState().pendingLoot).toEqual({});
+
+    const s = createQuestState();
+    addPendingLoot(s, 'char_gone', [{ item: 'diamond', count: 4 }]);
+    const round = migrateQuestState(JSON.parse(JSON.stringify(serializeQuestState(s))));
+    expect(peekPendingLoot(round, 'char_gone')).toEqual([{ item: 'diamond', count: 4 }]);
+
+    // **The version did NOT bump for this field.** Bumping would send every world
+    // written before S12 through `migrateQuestState`'s unknown-`v` branch, which returns
+    // a FRESH state — erasing a full playthrough's quest progress to add a map that is
+    // empty in all of them. Absence has exactly one correct reading and it is defaulted.
+    const old = serializeQuestState(createQuestState());
+    delete old.pendingLoot;
+    old.activeQuestId = 'q17';
+    const migrated = migrateQuestState(old);
+    expect(migrated.pendingLoot).toEqual({});
+    expect(migrated.activeQuestId, 'progress survived').toBe('q17');
+    expect(QUEST_STATE_VERSION).toBe(1);
+  });
+
+  it('merges by item, so six missed bosses are five rows and not eighteen', () => {
+    const s = createQuestState();
+    for (let i = 0; i < 6; i++) {
+      addPendingLoot(s, 'char_gone', [{ item: 'diamond', count: 3 }, { item: 'iron_ingot', count: 2 }]);
+    }
+    expect(peekPendingLoot(s, 'char_gone')).toEqual([
+      { item: 'diamond', count: 18 }, { item: 'iron_ingot', count: 12 },
+    ]);
+  });
+
+  it('is capped on contributors, distinct items and counts', () => {
+    const s = createQuestState();
+    for (let i = 0; i < 6; i++) addPendingLoot(s, `char_${i}`, [{ item: 'diamond', count: 1 }]);
+    // Same cap as `brokenBy`, and for the same reason (§4.1's 8 KB budget).
+    expect(Object.keys(s.pendingLoot)).toHaveLength(4);
+
+    // ...but a contributor already in the map is never refused by that cap: they are
+    // not a new one, and refusing them would lose loot they had already been promised.
+    addPendingLoot(s, 'char_0', [{ item: 'gold_ingot', count: 5 }]);
+    expect(peekPendingLoot(s, 'char_0')).toHaveLength(2);
+
+    const many = Array.from({ length: 20 }, (_, i) => ({ item: `item_${i}`, count: 1 }));
+    expect(addPendingLoot(createQuestState(), 'c', many)).toHaveLength(MAX_PENDING_LOOT_ITEMS);
+
+    const huge = createQuestState();
+    addPendingLoot(huge, 'c', [{ item: 'diamond', count: MAX_PENDING_LOOT_COUNT * 3 }]);
+    expect(peekPendingLoot(huge, 'c')[0].count).toBe(MAX_PENDING_LOOT_COUNT);
+  });
+
+  it('takes once and then has nothing left', () => {
+    const s = createQuestState();
+    addPendingLoot(s, 'char_gone', [{ item: 'diamond', count: 4 }]);
+    expect(takePendingLoot(s, 'char_gone')).toEqual([{ item: 'diamond', count: 4 }]);
+    expect(takePendingLoot(s, 'char_gone')).toEqual([]);
+    expect(peekPendingLoot(s, 'char_gone')).toEqual([]);
+  });
+
+  it('hands out copies, so a caller cannot edit the live state through them', () => {
+    const s = createQuestState();
+    addPendingLoot(s, 'char_gone', [{ item: 'diamond', count: 4 }]);
+    peekPendingLoot(s, 'char_gone')[0].count = 9999;
+    expect(peekPendingLoot(s, 'char_gone')[0].count).toBe(4);
+  });
+
+  it('discards garbage rather than storing it', () => {
+    expect(sanitizePendingLoot(null)).toEqual({});
+    expect(sanitizePendingLoot([1, 2])).toEqual({});
+    expect(sanitizePendingLoot({ c: 'nope' })).toEqual({});
+    expect(sanitizePendingLoot({ c: [] })).toEqual({});
+    expect(sanitizePendingLoot({ c: [{ item: 'x', count: 0 }] })).toEqual({});
+    expect(sanitizePendingLoot({ c: [{ item: '', count: 3 }] })).toEqual({});
+    expect(sanitizePendingLoot({ c: [{ count: 3 }] })).toEqual({});
+    expect(sanitizePendingLoot({ c: [{ item: 'x', count: -5 }, { item: 'y', count: 2 }] }))
+      .toEqual({ c: [{ item: 'y', count: 2 }] });
+
+    expect(addPendingLoot(null, 'c', [{ item: 'x', count: 1 }])).toEqual([]);
+    expect(addPendingLoot(createQuestState(), '', [{ item: 'x', count: 1 }])).toEqual([]);
+    expect(addPendingLoot(createQuestState(), 'c', [])).toEqual([]);
   });
 });
 

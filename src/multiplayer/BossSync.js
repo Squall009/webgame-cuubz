@@ -66,6 +66,8 @@ export class BossSync {
     this.onBossDefeated = null;
     /** `(boss) => void` */
     this.onBossGone = null;
+    /** `(loot) => void` — S12, loot that arrived for a fight the player was absent from. */
+    this.onPendingLoot = null;
 
     this._disposed = false;
   }
@@ -76,6 +78,7 @@ export class BossSync {
     this._client.onGame(MESSAGE_TYPES.BOSS_STATE, (d) => this.handleState(d));
     this._client.onGame(MESSAGE_TYPES.BOSS_DEFEATED, (d) => this.handleDefeated(d));
     this._client.onGame(MESSAGE_TYPES.BOSS_DESPAWN, (d) => this.handleDespawn(d));
+    this._client.onGame(MESSAGE_TYPES.BOSS_LOOT, (d) => this.handlePendingLoot(d));
   }
 
   // ── Guest side ────────────────────────────────────────────────
@@ -160,6 +163,33 @@ export class BossSync {
     boss.isDead = true;
     this._fire(this.onBossDefeated, boss, data.loot || []);
     this._clear();
+  }
+
+  /**
+   * Loot for a boss this player fought and was not present to see die (S12, §14).
+   *
+   * **Deliberately not folded into `handleDefeated`.** That handler opens with
+   * `if (!this.boss || data.bossId !== this.boss.id) return`, and every property that
+   * guard depends on is false here: there is no boss, there may be no seal contested,
+   * and this may be an entirely different session on a different day. A message that
+   * arrives when the thing it is about is gone needs a handler that does not look for it.
+   */
+  handlePendingLoot(data) {
+    if (this._disposed || !data) return;
+    // The host targets this at one connection, but a targeted send is a routing detail
+    // and the identity is the contract — the same check `handleDefeated` makes.
+    if (!this._contributorId || data.contributorId !== this._contributorId) return;
+
+    const loot = Array.isArray(data.loot) ? data.loot : [];
+    if (loot.length === 0) return;
+
+    if (this._inventory && typeof this._inventory.addItem === 'function') {
+      for (const drop of loot) {
+        try { this._inventory.addItem(drop.item, drop.count); } catch { /* inventory full */ }
+      }
+    }
+    _log(`[BossSync] Received ${loot.length} pending loot stacks from an earlier fight`);
+    this._fire(this.onPendingLoot, loot);
   }
 
   handleDespawn(data) {

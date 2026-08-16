@@ -30,7 +30,9 @@ import { WebSocketServer, WebSocket } from 'ws';
 import SessionManagerServer from '../../server/session.js';
 import { HostManager, HostRemotePlayer } from '../../src/multiplayer/Host.js';
 import { QuestSystem } from '../../src/game/systems/QuestSystem.js';
-import { createQuestState } from '../../src/game/data/QuestState.js';
+import {
+  createQuestState, addPendingLoot, peekPendingLoot, migrateQuestState,
+} from '../../src/game/data/QuestState.js';
 import { MESSAGE_TYPES } from '../../shared/protocol.js';
 
 const HOST_ID = 'host_player';
@@ -402,6 +404,85 @@ describe('the host rejects what it should', () => {
     contribute(guests[0], 15, 'q22', 'sandstone');
     await settle();
     expect(questSystem.getState().quests.q22).toBeUndefined();
+
+    hostSocket.close();
+    for (const g of guests) g.socket.close();
+  });
+});
+
+describe('loot for a contributor who was offline when the boss died (S12)', () => {
+  /**
+   * The routing fact this proves, and why it needs a real relay: `BOSS_LOOT` is
+   * host → **one** player, addressed with `targetPlayers`, and it has to arrive at the
+   * player who reconnected and at nobody else. `_relayFromHost` is what implements that
+   * and `_relayFromHost` is the thing this exercises. A method call would prove nothing
+   * about either.
+   */
+  it('is held in the quest state and delivered on rejoin, to that guest alone', async () => {
+    const { host, questSystem, guests, hostSocket } = await stand(2);
+    const [absent, present] = guests;
+
+    // The absent guest drops. `_handlePlayerLeft` is what the relay's PLAYER_LEFT would
+    // trigger; calling it directly is the same code path with the socket teardown left
+    // out, because the socket has to stay open to receive the delivery later.
+    host._handlePlayerLeft(absent.id);
+    expect(host.getRemotePlayer(absent.id).connected).toBe(false);
+
+    // A boss they fought dies while they are away. `BossEncounter` is not stood up here
+    // — this is the state-and-wire half, and `bossEncounter.test.js` owns the decision
+    // about *who* is owed. What is under test is that the host hands it over.
+    addPendingLoot(questSystem.getState(), absent.characterId,
+      [{ item: 'diamond', count: 4 }, { item: 'gold_ingot', count: 6 }]);
+
+    // Nothing is delivered while they are gone.
+    await settle();
+    expect(absent.socket.ofType(MESSAGE_TYPES.BOSS_LOOT)).toHaveLength(0);
+
+    // They come back. D-120's `_noteActivity` is what any inbound message triggers, and
+    // it is where the flush hangs.
+    absent.socket.send({
+      type: MESSAGE_TYPES.QUEST_CONTRIBUTE,
+      questId: 'q14', objectiveKey: 'blackstone', delta: 1,
+      contributorId: absent.characterId,
+    });
+    await settle();
+
+    const delivered = absent.socket.ofType(MESSAGE_TYPES.BOSS_LOOT);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].contributorId).toBe(absent.characterId);
+    expect(delivered[0].loot).toEqual([
+      { item: 'diamond', count: 4 }, { item: 'gold_ingot', count: 6 },
+    ]);
+    // `targetPlayers` is a routing field and the relay strips it rather than forwarding
+    // it — a client should not be told who else a message was addressed to.
+    expect(delivered[0].targetPlayers).toBeUndefined();
+
+    // And to nobody else. The other guest never left and is owed nothing.
+    expect(present.socket.ofType(MESSAGE_TYPES.BOSS_LOOT)).toHaveLength(0);
+
+    // Cleared, so a second reconnect does not pay twice — the D-117 shape, applied to
+    // an item grant instead of a contribution.
+    expect(peekPendingLoot(questSystem.getState(), absent.characterId)).toEqual([]);
+    host._handlePlayerLeft(absent.id);
+    absent.socket.send({
+      type: MESSAGE_TYPES.QUEST_CONTRIBUTE,
+      questId: 'q14', objectiveKey: 'blackstone', delta: 1,
+      contributorId: absent.characterId,
+    });
+    await settle();
+    expect(absent.socket.ofType(MESSAGE_TYPES.BOSS_LOOT)).toHaveLength(1);
+
+    hostSocket.close();
+    for (const g of guests) g.socket.close();
+  });
+
+  it('survives the host session save and load, because it lives in the quest state', async () => {
+    const { host, questSystem, guests, hostSocket } = await stand(1);
+    addPendingLoot(questSystem.getState(), guests[0].characterId, [{ item: 'diamond', count: 3 }]);
+
+    // The round trip a world save makes: serialize, store, migrate back.
+    const reloaded = migrateQuestState(JSON.parse(JSON.stringify(host.serializeQuestState())));
+    expect(peekPendingLoot(reloaded, guests[0].characterId)).toEqual([{ item: 'diamond', count: 3 }]);
 
     hostSocket.close();
     for (const g of guests) g.socket.close();

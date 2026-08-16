@@ -139,6 +139,11 @@ export const MESSAGE_TYPES = Object.freeze({
   BOSS_HIT: 'BOSS_HIT',
   BOSS_DEFEATED: 'BOSS_DEFEATED',
   BOSS_DESPAWN: 'BOSS_DESPAWN',
+  // S12 — loot for a contributor who was not connected when the boss died. Host → one
+  // player, on their next join, out of `questState.pendingLoot`. It is separate from
+  // `BOSS_DEFEATED` because that message is scoped to a live boss the receiver can see,
+  // and this one arrives when there is no boss and possibly a different session.
+  BOSS_LOOT: 'BOSS_LOOT',
 
   // ── Matchmaking, client → server ──────────────────────────────────────────
   HOST: 'HOST',

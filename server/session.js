@@ -264,6 +264,7 @@ class SessionManager {
       case MESSAGE_TYPES.BOSS_STATE:
       case MESSAGE_TYPES.BOSS_DEFEATED:
       case MESSAGE_TYPES.BOSS_DESPAWN:
+      case MESSAGE_TYPES.BOSS_LOOT:
         // Host → everyone. The relay holds no quest state and no boss: the host is the
         // authority for both, exactly as it is for chunks, so these are pure forwarding.
         // Anyone but the host sending one is ignored rather than relayed — a guest

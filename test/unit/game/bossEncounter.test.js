@@ -25,7 +25,10 @@ import {
 } from '../../../src/game/mobs/mobDefinitions.js';
 import { QuestSystem } from '../../../src/game/systems/QuestSystem.js';
 import { SealSystem } from '../../../src/game/systems/SealSystem.js';
-import { createQuestState, setSealSite } from '../../../src/game/data/QuestState.js';
+import {
+  createQuestState, setSealSite, peekPendingLoot, addPendingLoot,
+  MAX_PENDING_LOOT_ITEMS,
+} from '../../../src/game/data/QuestState.js';
 import { SEAL_IDS } from '../../../src/game/data/SealDefinitions.js';
 import { QUEST_ORDER } from '../../../src/game/data/QuestDefinitions.js';
 import { BIOME_IDS } from '../../../src/engine/world/BiomeSystem.js';
@@ -284,6 +287,56 @@ describe('shields', () => {
     boss.shieldRemaining = 3;
     boss.tick(4);
     expect(boss.isShielded).toBe(false);
+  });
+});
+
+describe('loot for a contributor who was not there for the kill (S12, §14)', () => {
+  /** Kill the boss outright, with `contributors` set to whoever we say fought. */
+  function killWith(h, contributors) {
+    const boss = h.encounter.summon('verdant');
+    for (const id of contributors) boss.takeDamage(1, id);
+    boss.takeDamage(boss.maxHp, contributors[0]);
+    h.encounter._defeat(boss);
+    return boss;
+  }
+
+  it('holds the share of anyone the presence check says is absent', () => {
+    // §13 recorded this as deliberately-not-built: "a player who fought and disconnected
+    // before it died keeps their `brokenBy` entry and gets nothing, because there is
+    // nowhere to put it."
+    const h = harness({ overrides: { isContributorPresent: (id) => id !== 'char_gone' } });
+    killWith(h, ['char_host', 'char_gone']);
+
+    const state = h.questSystem.getState();
+    const owed = peekPendingLoot(state, 'char_gone');
+    expect(owed.length).toBeGreaterThan(0);
+    // The same roll everyone else got — the host rolls once (§8.5), and this is a copy
+    // of that result, not a second roll.
+    expect(peekPendingLoot(state, 'char_host')).toEqual([]);
+    // And they still hold their credit for having fought.
+    expect(state.seals.verdant.brokenBy).toContain('char_gone');
+  });
+
+  it('holds nothing for anyone present, and nothing at all in single-player', () => {
+    // The default predicate is always-true: one player, always here, never owed.
+    const h = harness({ broadcast: null });
+    killWith(h, ['char_host']);
+    expect(h.questSystem.getState().pendingLoot).toEqual({});
+    // They were paid directly, into the one inventory this process owns.
+    expect(h.inventory.added.length).toBeGreaterThan(0);
+  });
+
+  it('merges across bosses by item rather than growing a row per kill', () => {
+    // The 8 KB budget (§4.1) is why. Six bosses between them drop five distinct items,
+    // so an absent player's entry is bounded by that and not by how many they missed.
+    const state = createQuestState();
+    for (let i = 0; i < 6; i++) {
+      addPendingLoot(state, 'char_gone', [{ item: 'diamond', count: 4 }, { item: 'gold_ingot', count: 2 }]);
+    }
+    const owed = peekPendingLoot(state, 'char_gone');
+    expect(owed).toHaveLength(2);
+    expect(owed.find((d) => d.item === 'diamond').count).toBe(24);
+    expect(owed.length).toBeLessThanOrEqual(MAX_PENDING_LOOT_ITEMS);
   });
 });
 

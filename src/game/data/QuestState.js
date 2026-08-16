@@ -85,6 +85,7 @@ export function createQuestState() {
     seals,
     finale: { state: 'sealed', site: null, defeatedAt: null, brokenBy: [] },
     titles: [],
+    pendingLoot: {},
   };
 }
 
@@ -114,6 +115,7 @@ export function migrateQuestState(raw) {
     seals: base.seals,
     finale: base.finale,
     titles: [],
+    pendingLoot: {},
   };
 
   if (raw.quests && typeof raw.quests === 'object') {
@@ -169,6 +171,10 @@ export function migrateQuestState(raw) {
   if (Array.isArray(raw.titles)) {
     out.titles = [...new Set(raw.titles.filter((t) => typeof t === 'string'))];
   }
+
+  // S12 — absent on every state written before this stage, and `{}` is the right answer
+  // for all of them. See the note on `pendingLoot` above `addPendingLoot`.
+  out.pendingLoot = sanitizePendingLoot(raw.pendingLoot);
 
   return out;
 }
@@ -465,7 +471,113 @@ export function serializeQuestState(state) {
       brokenBy: [...(state.finale.brokenBy || [])],
     },
     titles: [...state.titles],
+    pendingLoot: sanitizePendingLoot(state.pendingLoot),
   };
+}
+
+// ── Pending loot (S12, §8.5) ─────────────────────────────────────────────────
+//
+// **Why the schema version did NOT bump for this.** The rule above says bump when a
+// field changes meaning, and `migrateQuestState` turns an unrecognised `v` into a
+// *fresh state* — so bumping to 2 would erase the quest progress of every world written
+// before this stage in order to add a map that is empty in all of them. `pendingLoot` is
+// purely additive and its absence has exactly one correct reading, `{}`, so it is
+// defaulted rather than migrated. A version bump is for a field whose old value has to
+// be *translated*, and there is no old value here.
+//
+// **Why it is bounded, which the 8 KB budget requires.** At most `MAX_PLAYERS_LIMIT`
+// contributors, exactly as `brokenBy` is capped, and counts are **merged by item** — so
+// a player who missed all six bosses holds one entry per distinct drop across the whole
+// game, which is five (`corrupt_crystal`, `diamond`, `gold_ingot`, `netherite_ingot`,
+// `iron_ingot`), not eighteen. Four contributors × five entries is a few hundred bytes.
+
+/** Largest count a single pending entry may hold. Six bosses cannot legitimately exceed it. */
+export const MAX_PENDING_LOOT_COUNT = 999;
+
+/** Distinct items one contributor may have waiting. The boss tables between them name 5. */
+export const MAX_PENDING_LOOT_ITEMS = 8;
+
+/**
+ * Coerce a `pendingLoot` map from storage, the wire, or nothing at all.
+ * Never throws; anything unrecognised becomes `{}`, which is the empty case anyway.
+ */
+export function sanitizePendingLoot(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+
+  let contributors = 0;
+  for (const [id, drops] of Object.entries(raw)) {
+    if (typeof id !== 'string' || !id) continue;
+    if (!Array.isArray(drops) || drops.length === 0) continue;
+    if (contributors >= MAX_PLAYERS_LIMIT) break;
+
+    const merged = [];
+    for (const drop of drops) {
+      if (!drop || typeof drop !== 'object') continue;
+      if (typeof drop.item !== 'string' || !drop.item) continue;
+      const count = Math.floor(drop.count);
+      if (!Number.isFinite(count) || count <= 0) continue;
+
+      const existing = merged.find((m) => m.item === drop.item);
+      if (existing) {
+        existing.count = Math.min(MAX_PENDING_LOOT_COUNT, existing.count + count);
+      } else if (merged.length < MAX_PENDING_LOOT_ITEMS) {
+        merged.push({ item: drop.item, count: Math.min(MAX_PENDING_LOOT_COUNT, count) });
+      }
+    }
+    if (merged.length === 0) continue;
+    out[id] = merged;
+    contributors++;
+  }
+  return out;
+}
+
+/**
+ * Record loot a contributor earned and was not present to receive.
+ *
+ * Mutates `state` and returns what that contributor is now owed. Merged by item and
+ * clamped by `sanitizePendingLoot`, so calling it six times for six bosses grows the
+ * entry by counts and not by rows.
+ *
+ * @param {object} state — a live quest state
+ * @param {string} contributorId — a character id, the same identity `brokenBy` records
+ * @param {Array<{item: string, count: number}>} drops
+ * @returns {Array<{item: string, count: number}>}
+ */
+export function addPendingLoot(state, contributorId, drops) {
+  if (!state || typeof contributorId !== 'string' || !contributorId) return [];
+  if (!Array.isArray(drops) || drops.length === 0) return [];
+  if (!state.pendingLoot || typeof state.pendingLoot !== 'object') state.pendingLoot = {};
+
+  // A contributor who already has an entry is never refused by the cap — the cap is on
+  // how many *distinct* players are owed, and someone already in the map is not new.
+  const isNew = !state.pendingLoot[contributorId];
+  if (isNew && Object.keys(state.pendingLoot).length >= MAX_PLAYERS_LIMIT) return [];
+
+  const combined = [...(state.pendingLoot[contributorId] || []), ...drops];
+  const clean = sanitizePendingLoot({ [contributorId]: combined })[contributorId];
+  if (!clean) return [];
+  state.pendingLoot[contributorId] = clean;
+  return clean;
+}
+
+/** What a contributor is owed, without clearing it. Empty array if nothing. */
+export function peekPendingLoot(state, contributorId) {
+  if (!state || !state.pendingLoot) return [];
+  const drops = state.pendingLoot[contributorId];
+  return Array.isArray(drops) ? drops.map((d) => ({ ...d })) : [];
+}
+
+/**
+ * Hand over what a contributor is owed and forget it.
+ *
+ * **The caller clears only after the send succeeded** — see `HostManager.flushPendingLoot`
+ * for the at-most-once argument and the window it deliberately leaves open.
+ */
+export function takePendingLoot(state, contributorId) {
+  const drops = peekPendingLoot(state, contributorId);
+  if (state && state.pendingLoot) delete state.pendingLoot[contributorId];
+  return drops;
 }
 
 /** Serialized byte length, for the ≤ 8 KB budget assertion in the tests. */

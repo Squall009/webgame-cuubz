@@ -235,6 +235,15 @@ export function initQuests(game) {
         .filter((p) => !p.isHost && p.position)
         .map((p) => ({ id: p.character?.id || p.playerId, position: p.position }))
       : null,
+    // S12 — who is here to take their loot. The host player is always present (§6.4:
+    // the host is a player), and `getPlayerList` already excludes anyone whose
+    // `connected` flag is down — the flag D-120 taught the host how to set back up, so
+    // a player who blipped and returned counts as here. Absent in single-player, where
+    // the default of always-true is the right answer.
+    isContributorPresent: isHost
+      ? (id) => id === contributorId
+        || host.getPlayerList().some((p) => !p.isHost && (p.character?.id || p.playerId) === id)
+      : undefined,
   });
   state.bossEncounter = encounter;
 
