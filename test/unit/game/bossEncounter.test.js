@@ -216,10 +216,13 @@ describe('every timer is initialised — the bug that killed Boss.js', () => {
 describe('phases', () => {
   const warden = () => new BossEntity({ type: 'forest_warden', sealId: 'verdant', position: { x: 0, y: 64, z: 0 } });
 
-  it('enrages below 40%', () => {
+  // S11 moved the seal bosses' enrage from 0.4 to 0.5 — the threshold is where a boss's
+  // third ability appears, and at 40% half the fight's mechanics arrived for the last
+  // 40% of the bar. `bossBalance.test.js` owns the *value*; this owns the transition.
+  it('enrages at half health, not before', () => {
     const boss = warden();
     expect(boss.phase.id).toBe('opening');
-    boss.takeDamage(boss.maxHp * 0.5, 'char_a');
+    boss.takeDamage(boss.maxHp * 0.4, 'char_a');
     expect(boss.phase.id).toBe('opening');
     boss.takeDamage(boss.maxHp * 0.2, 'char_a');
     expect(boss.phase.id).toBe('enraged');
@@ -285,13 +288,19 @@ describe('shields', () => {
 });
 
 describe('HP scales with the party — Q5', () => {
-  it('a four-player fight is longer than a solo one, and not four times longer', () => {
+  it('a four-player fight has more HP than a solo one, and not four times more', () => {
+    // **S11 changed the bound from `< 2` to `< 4`, and the reason is the arithmetic this
+    // assertion originally encoded backwards.** `< 2` was pinning "not four times as
+    // long", but HP is not duration: four players deal roughly four times the damage, so
+    // ×1.6 HP was a fight 40% the length of the solo one. Holding duration roughly flat
+    // needs scaling close to linear. `bossBalance.test.js` states the property directly —
+    // implied duration ratio in [0.75, 1.0] — and this keeps the crude bounds.
     const def = BOSS_DEFINITIONS.forest_warden;
     const solo = BossEntity.scaledMaxHp(def, 1);
     const four = BossEntity.scaledMaxHp(def, 4);
     expect(solo).toBe(def.health);
     expect(four).toBeGreaterThan(solo);
-    expect(four / solo).toBeLessThan(2);
+    expect(four / solo).toBeLessThan(4);
   });
 
   it('clamps to a real session size', () => {

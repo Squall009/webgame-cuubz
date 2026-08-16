@@ -35,6 +35,19 @@
  * from full in about two and a half seconds. Corrupted ground costs 1 HP per four
  * seconds — crossing a patch is a sliver of health; standing in the middle of one mining
  * for a minute is a real problem.
+ *
+ * ─── S11: THERE ARE THREE BANDS, AND TWO OF THEM USED TO BE ONE ─────────────
+ *
+ * The table has to read as three categories, because that is what it is for: **lava is
+ * death**, **a boss's pool means get out now**, and **ambient corruption is attrition**.
+ * Magma at 1.0 and toxic slime at 1.5 both sat in the attrition band, which made a boss's
+ * ground slam cost less than one swing of its own melee — a Lava Titan's phase-one pool
+ * was 14 seconds of standing in 0.5 HP/s through iron armour. Nobody moves for that.
+ *
+ * 2.0 and 2.5 put them where they belong: through a full iron set (50%) a Titan pool is
+ * 1 HP/s and its whole 14 s duration is 14 HP, most of a health bar. Still nowhere near
+ * lava, which ignores armour entirely and is the only thing here that kills by surprise.
+ * `test/unit/game/bossBalance.test.js` holds the ordering and the three bands.
  */
 
 import { BLOCK_TYPES } from '../../engine/world/BlockRegistry.js';
@@ -48,10 +61,10 @@ import { DAMAGE_SOURCES } from '../data/DamageSources.js';
  */
 export const HAZARD_DPS = Object.freeze({
   [BLOCK_TYPES.LAVA]:          8.0,   // lethal in ~2.5 s from full
-  [BLOCK_TYPES.MAGMA]:         1.0,   // unpleasant underfoot
+  [BLOCK_TYPES.MAGMA]:         2.0,   // 10 s from full — get off it
   [BLOCK_TYPES.CORRUPT_GRASS]: 0.25,  // ~1 HP per 4 s
   [BLOCK_TYPES.CORRUPT_STONE]: 0.25,
-  [BLOCK_TYPES.TOXIC_SLIME]:   1.5,
+  [BLOCK_TYPES.TOXIC_SLIME]:   2.5,   // 8 s from full — the nastiest thing short of lava
 });
 
 /** Which `DAMAGE_SOURCES` value each hazard reports, for the death message. */

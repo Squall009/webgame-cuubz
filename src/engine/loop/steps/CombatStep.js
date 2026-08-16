@@ -18,6 +18,18 @@ import * as THREE from 'three';
 import { NAMED_ITEMS } from '../../../game/systems/InventorySystem.js';
 
 /**
+ * How far the player's swing reaches, in blocks. The same 7 as
+ * `BlockInteraction.breakRange` and `placeRange` — one arm's length for everything.
+ *
+ * **S11 — exported because it is the other half of every boss's melee range.** A boss
+ * whose melee range is below this can be hit from a distance at which it cannot hit back;
+ * a boss whose range is above it can never be safely approached. All six were well below
+ * it, so every boss in the game could be beaten by standing at six blocks and clicking.
+ * `test/unit/game/bossBalance.test.js` binds to this rather than transcribing a 7.
+ */
+export const PLAYER_ATTACK_REACH = 7;
+
+/**
  * @param {import('../../../core/GameState.js').GameState} state
  */
 export function combatStep(state) {
@@ -33,8 +45,7 @@ export function combatStep(state) {
         const origin = state.renderer.camera.position;
         const direction = new THREE.Vector3();
         state.renderer.camera.getWorldDirection(direction);
-        const maxDist = 7;
-        const hit = mobManager.raycastMobs(origin, direction, maxDist);
+        const hit = mobManager.raycastMobs(origin, direction, PLAYER_ATTACK_REACH);
         if (hit) {
           // Get attack damage
           const damage = state.inventory.getAttackDamage();

@@ -40,10 +40,27 @@ export const MAX_HEALTH = 20;
  *
  * Slow and unconditional. There is no hunger system to gate regeneration on, and a game
  * where the only way to heal is to quit to the menu is a game where every hazard is
- * permanent. 8 s and 0.5 HP/s means a full heal takes ~40 s of not being in trouble.
+ * permanent.
+ *
+ * ─── S11: THE DELAY IS THE GATE. THE RATE WAS JUST SLOW ─────────────────────
+ *
+ * These were 8 s and 0.5 HP/s, a full heal in ~48 s, and they were set (S3) when this
+ * was the player's *only* recovery — D-123 found that no food in the game did anything.
+ * With eating in place (S10) regen's job is the out-of-combat top-up, and its old rate
+ * failed at that specific job: the loop a boss arena forces is fight → run out → wait →
+ * come back, and `BossEncounter.RESET_AFTER_EMPTY_SECONDS` is **60**. A player who
+ * disengaged at 4 HP and regenerated correctly needed 8 + 32 = 40 s, leaving 20 s of
+ * margin before the boss reset to full and the whole attempt was discarded. Nobody chose
+ * that; it fell out of two constants set three stages apart.
+ *
+ * At 1.0 HP/s a full heal is 28 s and the loop is comfortably inside the reset. **Raising
+ * the rate does not weaken combat, because the delay is what keeps regen out of it:**
+ * every hazard in `HAZARD_DPS` lands a hit at least every 4 s, so `_timeSinceDamage`
+ * never reaches 8 while the player is standing in anything. `bossBalance.test.js` holds
+ * both halves — full heal under the reset, and the weakest hazard's tick under the delay.
  */
 export const REGEN_DELAY_SECONDS = 8;
-export const REGEN_PER_SECOND = 0.5;
+export const REGEN_PER_SECOND = 1.0;
 
 /**
  * Seconds of immunity after taking a hit.
@@ -52,6 +69,13 @@ export const REGEN_PER_SECOND = 0.5;
  * every frame at 60 fps; without this the player would take 60 separate hits per second
  * and the damage flash would strobe. The hazard system's per-second rates assume it.
  * Mob attacks have their own cooldown and are unaffected.
+ *
+ * **S11 examined it and left it at 0.4**, which is worth recording as a decision rather
+ * than as silence. The shortest attack cooldown anything in the game actually has is the
+ * Corruption Overlord's true-form melee at 0.8 s, so this window has never suppressed an
+ * intended hit and is doing exactly the one job its name claims. Growing it would start
+ * silently eating boss swings — a balance change disguised as a safety valve — so
+ * `bossBalance.test.js` asserts it stays below the shortest cooldown in `BOSS_DEFINITIONS`.
  */
 export const INVULNERABLE_SECONDS = 0.4;
 

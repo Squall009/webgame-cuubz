@@ -15,6 +15,21 @@ import { _moveAndCollide, _resolveAxis } from '../mobs/movement/mobMovement.js';
 import { BLOCK_PROPERTIES, BLOCK_TYPES } from '../../engine/world/BlockRegistry.js';
 import { MIN_Y, SEA_LEVEL } from '../../engine/world/ChunkData.js';
 
+/**
+ * How fast the player moves, exported rather than left as two instance literals.
+ *
+ * **S11 — these two numbers set the difficulty of every boss in the game**, and until the
+ * balance pass nothing outside this file could see them. A boss chases at
+ * `definition.speed × phase.speedMultiplier` (`BossEncounter._act`), so a boss slower
+ * than `PLAYER_WALK_SPEED` can never land a melee hit on a player who walks backwards,
+ * and a boss faster than `PLAYER_WALK_SPEED × PLAYER_SPRINT_MULTIPLIER` can never be
+ * disengaged from. Five of the six bosses were on the wrong side of the first of those
+ * and nobody noticed, because the speeds were chosen as flavour and the player's were a
+ * literal in a constructor. `test/unit/game/bossBalance.test.js` binds to these.
+ */
+export const PLAYER_WALK_SPEED = 5;
+export const PLAYER_SPRINT_MULTIPLIER = 1.6;
+
 export class Player {
   constructor() {
     // Position (world coordinates) — feet bottom center
@@ -34,8 +49,8 @@ export class Player {
     // Physics constants
     this.gravity = -25;       // blocks/s²
     this.jumpVelocity = 9;    // blocks/s
-    this.moveSpeed = 5;       // blocks/s (walking)
-    this.sprintMultiplier = 1.6;
+    this.moveSpeed = PLAYER_WALK_SPEED;       // blocks/s (walking)
+    this.sprintMultiplier = PLAYER_SPRINT_MULTIPLIER;
     this.maxFallSpeed = 40;   // Terminal velocity
 
     // Creative mode physics

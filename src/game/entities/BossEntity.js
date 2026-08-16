@@ -49,7 +49,9 @@ export class BossEntity {
     this.velocity = { x: 0, y: 0, z: 0 };
 
     this.arenaCentre = { ...(config.arenaCentre || { x: this.position.x, z: this.position.z }) };
-    this.arenaRadius = def.hitbox ? 24 : 24;
+    // Both branches of a `def.hitbox ? 24 : 24` were 24 — a leftover from an arena size
+    // that was going to scale with the boss and never did. One number, stated once.
+    this.arenaRadius = 24;
 
     this.playerCount = Math.max(1, Math.min(MAX_PLAYERS_LIMIT, config.playerCount || 1));
     this.maxHp = BossEntity.scaledMaxHp(def, this.playerCount);
@@ -81,16 +83,29 @@ export class BossEntity {
   /**
    * Boss HP by player count.
    *
-   * **Open question Q5 gets an answer here, and it is a conservative one.** The plan
-   * says scaling is unspecified and floats "2× for four players?". Linear-per-player
-   * makes a four-player fight four times as long, which is not four times as fun; the
-   * ×1.6 at four players below keeps a full party's fight meaningfully longer than a
-   * solo one without turning it into a health-bar marathon. It is one formula in one
-   * place precisely so it is cheap to retune once anyone has played it.
+   * **Open question Q5 was answered here at ×0.2 per extra player, and S11 changed it to
+   * ×0.75.** The original reasoning was that "linear-per-player makes a four-player fight
+   * four times as long, which is not four times as fun". That is the wrong arithmetic:
+   * four players deal roughly four times the damage, so linear scaling makes the fight
+   * the *same* length, not four times longer. At ×1.6 a full party's fight was **40% of
+   * the solo one** — the Forest Warden dead in about thirteen seconds.
+   *
+   * The asymmetry that settles it is that a party is not just more damage, it is less
+   * danger: `BossEncounter._nearestPlayer` picks exactly one target, so three of four
+   * players are never attacked at all. Scaling has to hold duration roughly flat and let
+   * the safety be the reward.
+   *
+   * ×0.75 per extra player puts a four-player fight at 3.25× HP against ~4× damage —
+   * about 80% of the solo duration, so a party is still faster, just not by a factor of
+   * two and a half. `test/unit/game/bossBalance.test.js` asserts the implied duration
+   * ratio stays in [0.75, 1.0] for two, three and four players, which is the property
+   * this formula is for rather than the constant itself.
    */
+  static HP_PER_EXTRA_PLAYER = 0.75;
+
   static scaledMaxHp(def, playerCount) {
     const n = Math.max(1, playerCount);
-    return Math.round(def.health * (1 + (n - 1) * 0.2));
+    return Math.round(def.health * (1 + (n - 1) * BossEntity.HP_PER_EXTRA_PLAYER));
   }
 
   _resetAbilityTimers() {

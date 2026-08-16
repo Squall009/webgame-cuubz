@@ -1036,3 +1036,62 @@ Fixed by rolling the cache back, restoring an absent key as absent.
 **Verification** is jsdom against the real templates and the real `WorldManager` over an
 in-memory store, per §11 — 12 assertions, one of them confirmed red against the pre-fix
 `upgradeWorldgen`.
+
+### S10 and S11 — the balance pass, and the hole it found first
+
+The brief was the six sets of constants nobody had played: boss HP and phase thresholds,
+`scaledMaxHp`'s per-player scaling, hazard DPS, the regeneration rate and the
+invulnerability window, and the biome mask thresholds. Reasoning about them needs a model
+of the player, so the model is stated first, because half the findings are relations
+between a boss number and a player number and neither side could previously see the other.
+
+**The player, as the code actually defines them.** 20 HP. Walks at 5 blocks/s, sprints at
+8. Swings 7 blocks (`CombatStep`'s `maxDist`, the same 7 as `BlockInteraction.breakRange`).
+Sustained damage is `weapon.damage × (4.0 + weapon.attackSpeed)` — stone sword 15.4/s, iron
+19.8, diamond 26.4, netherite 33.0. Armour reduces by `min(0.8, totalArmor/30)`: a full
+iron set is 50%, diamond 63%, netherite 67%.
+
+**The first finding was that the player had no way to heal at all**, which makes "how hard
+should a boss hit" unanswerable. That is **D-123** and S10: nine food items carried a
+`foodRestore` that nothing read, because it was a hunger number and hunger went with
+`SurvivalSystem` in PR 34. Q03 pays out berries, Q19 asks for bread, and both were stacks
+of nothing. Right-click now eats, at one bite per 1.2 s. Everything below assumes it.
+
+**D-124 — five of the six bosses could not reach a walking player.** Base speeds were 3.2,
+2.6, 5.0, 2.2, 2.8 and 3.6 against a walk speed of 5, and melee ranges were 3.4–5.2 against
+a reach of 7. The whole game was beatable by holding the back key and clicking. Speeds are
+5.2–5.8 now — above a walk, below a sprint in every phase, so a boss can catch you and you
+can still leave — and melee ranges are 5.0–6.4, still under the player's reach so a safe
+band exists, but a corridor rather than a room. `PLAYER_WALK_SPEED`,
+`PLAYER_SPRINT_MULTIPLIER` and `PLAYER_ATTACK_REACH` are exported for the first time,
+because a relation nothing can see is a relation nothing can check.
+
+**What that cost.** The speed range was [2.2, 5.0] and is now [5.2, 5.8]. "Slow, enormous"
+and "darting" are no longer carried by speed at all; they are carried by attack cooldown
+(the Colossus swings every 2.2 s, the Serpent every 1.1 s), by damage per hit, and by which
+closer each one gets. That is a real loss of texture and it is the price of the bosses
+being able to touch you.
+
+**The rest, one line each, with the reason rather than the number:**
+
+| What | From → to | Why |
+|---|---|---|
+| Boss HP | 400/520/**560**/620/680/1200 | Only the Frost Serpent moved. It had 480 against the Lava Titan's 520, so Act 4's boss was a shorter fight than Act 3's against a player who had since found diamonds — the one place the curve went backwards |
+| Seal-boss enrage | 0.4 → **0.5** | The enrage is where each boss's *third* ability appears. At 40%, half a fight's mechanical content arrived for the last 40% of the bar and then the fight ended |
+| `scaledMaxHp` | ×0.2 → **×0.75** per extra player | Q5's original reasoning was wrong arithmetic. Four players deal ~4× the damage, so ×1.6 made a full-party fight **40%** of the solo one, not longer. And a party is *less* dangerous per head — `_nearestPlayer` targets exactly one of them — so scaling has to hold duration flat and let the safety be the reward. ×3.25 at four players is ~80% of solo |
+| Magma DPS | 1.0 → **2.0** | The table has to read as three bands: lava is death, a boss pool means move, corruption is attrition. Magma and toxic slime were both in the attrition band, so a Lava Titan's ground slam cost 0.5 HP/s through iron armour and there was no reason to step out of it |
+| Toxic slime DPS | 1.5 → **2.5** | Same band, and it has to stay nastier than magma — it is the Warden's *enraged* pool and the Overlord's true-form floor |
+| Lava DPS | 8.0, unchanged | §3.5's load-bearing claim: ~2.5 s from full, ignoring armour and ignoring the invulnerability window. It is the only hazard that kills by surprise and that is the point |
+| Corruption DPS | 0.25, unchanged | §3.5's own description holds exactly: 3 s to cross costs under 1 HP, a minute of mining costs more than half the bar |
+| Regen rate | 0.5 → **1.0** HP/s | The loop a boss arena forces is fight → leave → wait → return, and the encounter resets after **60 s** of an empty arena. At 0.5 HP/s recovering from 4 HP took 8 + 32 = 40 s, leaving 20 s of margin before the attempt was discarded. Nobody chose that; it fell out of two constants set three stages apart. 28 s now. Raising the *rate* is safe because the **delay** is what keeps regen out of combat, and every hazard lands a hit at least every 4 s |
+| Regen delay | 8 s, unchanged | It is the actual gate. See above |
+| Invulnerability | 0.4 s, unchanged | Examined and left, which is a decision worth recording. It is a throughput guard, not a fairness window, and the shortest attack cooldown anything in the game has is 0.8 s — so it has never suppressed an intended hit. Growing it would silently start eating boss swings |
+| Mask thresholds | 0.44 / 0.46, unchanged | These were **measured** rather than guessed (§3.2, a 90,000-point percentile sweep for ~3% of land area each) and the quests that consume the biomes were checked against them: Q14 wants 20 blackstone, which is 20% of the Lava surface mix in a patch hundreds of blocks across at `MASK_SCALE` 1400, and S5's spiral finds a site 98.8% of the time. Nothing to fix |
+
+**What a balance test can honestly claim.** `test/unit/game/bossBalance.test.js` — 42
+assertions — cannot say whether a fight is fun. It holds the relations that decide whether
+a fight is a fight at all: a boss outpaces a walk and not a sprint; its reach is under the
+player's but not far under; HP never goes backwards along `BOSS_ORDER`; the party-scaling
+formula's *implied duration ratio* stays in [0.75, 1.0]; the hazard table reads as three
+bands; a full regeneration fits inside the arena reset; and the invulnerability window
+stays below the shortest real cooldown. It was red on 15 of those before the change.

@@ -25,7 +25,34 @@
  * each boss, drives it through every threshold, and asserts it dies.
  *
  * Phase thresholds are HP fractions, descending. The five seal bosses have two each
- * (an enrage below 40%); the Corruption Overlord has three.
+ * (an enrage at half health); the Corruption Overlord has three.
+ *
+ * ─── S11: THE SPEEDS AND RANGES ARE NOT FLAVOUR, THEY ARE THE DIFFICULTY ────
+ *
+ * Every number below was chosen by someone who had not fought these, and the balance
+ * pass found that two of them were not the aesthetic choices they read as. Both are
+ * relations to a *player* number that lived as a literal in a different file:
+ *
+ *   **`speed` against `PLAYER_WALK_SPEED` (5).** `BossEncounter._act` closes the gap at
+ *   `speed × phase.speedMultiplier`. Five of the six bosses were slower than a walking
+ *   player — 3.2, 2.6, 2.2, 2.8, 3.6 — so their melee could never land on anyone who
+ *   walked backwards, and the whole game was beatable by holding S and clicking. Every
+ *   base speed now sits above 5 and every phase's effective speed below the sprint speed
+ *   of 8, so a boss can catch you and you can still leave. **The cost is real and worth
+ *   naming**: the flavour range used to be [2.2, 5.0] and is now [5.2, 5.8], so "slow,
+ *   enormous" and "darting" are no longer carried by speed. They are carried by attack
+ *   cooldown (2.2 s for the Colossus against 1.1 s for the Serpent), damage per hit, and
+ *   which closer each one gets — the Colossus burrows, the Serpent charges.
+ *
+ *   **`range` against `PLAYER_ATTACK_REACH` (7).** The melee ranges were 3.4–5.2 against
+ *   a player who reaches 7, so even a boss fast enough to close had to close *3.4 blocks
+ *   further* than the player did. They are 5.0–6.4 now: still strictly under the player's
+ *   reach, so there is always a distance from which you can hit and it cannot, but the
+ *   band is a corridor rather than a room.
+ *
+ * `test/unit/game/bossBalance.test.js` holds both relations against the exported player
+ * constants rather than against transcribed numbers, and was red on 15 assertions before
+ * this change.
  */
 
 import { MOB_CATEGORIES, MOB_BEHAVIORS, ANIM_TYPES, registerMobDefinitions } from './mobDefinitions.js';
@@ -40,13 +67,19 @@ export const BOSS_ABILITIES = Object.freeze({
 });
 
 /**
- * Shared shape for a seal boss's two phases. `enrage` is below 40% and does the same
- * things faster — a difficulty curve inside one fight, without new mechanics to learn
- * at the moment the player is closest to winning.
+ * Shared shape for a seal boss's two phases. `enrage` does the same things faster — a
+ * difficulty curve inside one fight, without new mechanics to learn at the moment the
+ * player is closest to winning.
+ *
+ * **S11: the threshold moved from 0.4 to 0.5.** The enrage is where each boss's *third*
+ * ability appears — the Warden's spore pool, the Titan's lava, the Colossus's golems — so
+ * at 40% half of a fight's mechanical content was compressed into the last 40% of the HP
+ * bar and then the fight ended. Half and half is the honest reading of "a difficulty
+ * curve inside one fight".
  */
 const twoPhase = (opening, enraged) => ([
   { id: 'opening', from: 1.0, ...opening },
-  { id: 'enraged', from: 0.4, ...enraged },
+  { id: 'enraged', from: 0.5, ...enraged },
 ]);
 
 export const BOSS_DEFINITIONS = {
@@ -65,7 +98,7 @@ export const BOSS_DEFINITIONS = {
     damage: 9,
     attackSpeed: 0.8,
     knockback: 4.0,
-    speed: 3.2,
+    speed: 5.4,
     fleeSpeed: 0,
     hitbox: { width: 2.6, height: 4.4 },
     // Empty, never missing. See the header.
@@ -80,7 +113,7 @@ export const BOSS_DEFINITIONS = {
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
       aggroRange: 40,
-      attackRange: 3.6,
+      attackRange: 5.2,
       attackCooldown: 1.4,
       loseInterestRange: 64,
       senseRange: 48,
@@ -92,7 +125,7 @@ export const BOSS_DEFINITIONS = {
     phases: twoPhase(
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.4, damage: 9, range: 3.6 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.4, damage: 9, range: 5.2 },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 9, speed: 11, range: 20 },
           { kind: BOSS_ABILITIES.SUMMON, cooldown: 16, mob: 'corrupt_wolf', count: 2, max: 4 },
         ],
@@ -100,7 +133,7 @@ export const BOSS_DEFINITIONS = {
       },
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.0, damage: 12, range: 4.0 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.0, damage: 12, range: 5.6 },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 6, speed: 13, range: 24 },
           { kind: BOSS_ABILITIES.SUMMON, cooldown: 11, mob: 'corrupt_wolf', count: 3, max: 6 },
           // §8.3's payoff: a poison-spore pool is the same block with the same damage
@@ -158,7 +191,7 @@ export const BOSS_DEFINITIONS = {
     damage: 12,
     attackSpeed: 0.6,
     knockback: 6.0,
-    speed: 2.6,
+    speed: 5.2,
     fleeSpeed: 0,
     hitbox: { width: 3.0, height: 5.0 },
     biomes: [],
@@ -171,14 +204,14 @@ export const BOSS_DEFINITIONS = {
     experience: 700,
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
-      aggroRange: 44, attackRange: 4.2, attackCooldown: 1.8,
+      aggroRange: 44, attackRange: 5.6, attackCooldown: 1.8,
       loseInterestRange: 64, senseRange: 48, packAggro: false, packRadius: 0,
       wanderInterval: [4, 8], fleeRange: 0,
     },
     phases: twoPhase(
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.8, damage: 12, range: 4.2 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.8, damage: 12, range: 5.6 },
           // The ground slam is a hazard pool that lands where the player is standing.
           { kind: BOSS_ABILITIES.HAZARD_POOL, cooldown: 7, block: 'magma', radius: 4, duration: 14 },
         ],
@@ -186,7 +219,7 @@ export const BOSS_DEFINITIONS = {
       },
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.3, damage: 16, range: 4.6 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.3, damage: 16, range: 6.0 },
           // Below 40% it stops making the floor unpleasant and starts making it lethal.
           { kind: BOSS_ABILITIES.HAZARD_POOL, cooldown: 5, block: 'lava', radius: 3, duration: 10 },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 10, speed: 10, range: 22 },
@@ -236,11 +269,15 @@ export const BOSS_DEFINITIONS = {
     category: MOB_CATEGORIES.BOSS,
     boss: true,
     seal: 'frozen',
-    health: 480,
+    // S11: 480 → 560. It was the one step backwards in the curve — Act 4's boss with
+    // less HP than Act 3's (520) against a player who has since found diamonds. It is
+    // still the lowest-HP boss *relative to its act*, which is what makes it the fast
+    // squishy one; it is no longer a shorter fight than the one before it.
+    health: 560,
     damage: 10,
     attackSpeed: 1.0,
     knockback: 3.0,
-    speed: 5.0,
+    speed: 5.8,
     fleeSpeed: 0,
     hitbox: { width: 2.0, height: 2.6 },
     biomes: [],
@@ -253,14 +290,14 @@ export const BOSS_DEFINITIONS = {
     experience: 650,
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
-      aggroRange: 44, attackRange: 3.4, attackCooldown: 1.1,
+      aggroRange: 44, attackRange: 5.0, attackCooldown: 1.1,
       loseInterestRange: 64, senseRange: 48, packAggro: false, packRadius: 0,
       wanderInterval: [3, 6], fleeRange: 0,
     },
     phases: twoPhase(
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.1, damage: 10, range: 3.4 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.1, damage: 10, range: 5.0 },
           // "Ice breath that slows movement" becomes a hazard field of ice: the player
           // is slowed by having to path around it rather than by a status effect, which
           // §3.5 rules out on purpose.
@@ -271,7 +308,7 @@ export const BOSS_DEFINITIONS = {
       },
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 0.8, damage: 13, range: 3.8 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 0.8, damage: 13, range: 5.4 },
           { kind: BOSS_ABILITIES.HAZARD_POOL, cooldown: 5, block: 'ice', radius: 5, duration: 16, harmless: true },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 4.5, speed: 16, range: 30 },
         ],
@@ -325,7 +362,7 @@ export const BOSS_DEFINITIONS = {
     damage: 15,
     attackSpeed: 0.5,
     knockback: 7.0,
-    speed: 2.2,
+    speed: 5.2,
     fleeSpeed: 0,
     hitbox: { width: 3.4, height: 5.6 },
     biomes: [],
@@ -338,14 +375,14 @@ export const BOSS_DEFINITIONS = {
     experience: 800,
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
-      aggroRange: 48, attackRange: 4.8, attackCooldown: 2.2,
+      aggroRange: 48, attackRange: 6.0, attackCooldown: 2.2,
       loseInterestRange: 72, senseRange: 56, packAggro: false, packRadius: 0,
       wanderInterval: [5, 9], fleeRange: 0,
     },
     phases: twoPhase(
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 2.2, damage: 15, range: 4.8 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 2.2, damage: 15, range: 6.0 },
           // "Burrow and surface" — it closes the distance the only way something that
           // size plausibly can.
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 11, speed: 9, range: 30, teleport: true },
@@ -354,7 +391,7 @@ export const BOSS_DEFINITIONS = {
       },
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.6, damage: 19, range: 5.2 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.6, damage: 19, range: 6.4 },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 7, speed: 11, range: 34, teleport: true },
           { kind: BOSS_ABILITIES.SUMMON, cooldown: 14, mob: 'stone_golem', count: 2, max: 4 },
         ],
@@ -410,7 +447,7 @@ export const BOSS_DEFINITIONS = {
     damage: 14,
     attackSpeed: 0.6,
     knockback: 5.0,
-    speed: 2.8,
+    speed: 5.6,
     fleeSpeed: 0,
     hitbox: { width: 3.0, height: 5.2 },
     biomes: [],
@@ -423,21 +460,21 @@ export const BOSS_DEFINITIONS = {
     experience: 900,
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
-      aggroRange: 40, attackRange: 4.4, attackCooldown: 1.8,
+      aggroRange: 40, attackRange: 5.6, attackCooldown: 1.8,
       loseInterestRange: 64, senseRange: 48, packAggro: false, packRadius: 0,
       wanderInterval: [4, 8], fleeRange: 0,
     },
     phases: twoPhase(
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.8, damage: 14, range: 4.4 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.8, damage: 14, range: 5.6 },
           { kind: BOSS_ABILITIES.SUMMON, cooldown: 12, mob: 'stone_golem', count: 2, max: 5 },
         ],
         speedMultiplier: 1.0,
       },
       {
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.3, damage: 18, range: 4.8 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.3, damage: 18, range: 6.0 },
           { kind: BOSS_ABILITIES.SUMMON, cooldown: 8, mob: 'stone_golem', count: 3, max: 8 },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 9, speed: 10, range: 24 },
         ],
@@ -498,7 +535,7 @@ export const BOSS_DEFINITIONS = {
     damage: 16,
     attackSpeed: 0.9,
     knockback: 6.0,
-    speed: 3.6,
+    speed: 5.6,
     fleeSpeed: 0,
     hitbox: { width: 3.2, height: 6.0 },
     biomes: [],
@@ -511,7 +548,7 @@ export const BOSS_DEFINITIONS = {
     experience: 2000,
     behavior: MOB_BEHAVIORS.AGGRESSIVE,
     ai: {
-      aggroRange: 56, attackRange: 4.6, attackCooldown: 1.2,
+      aggroRange: 56, attackRange: 5.8, attackCooldown: 1.2,
       loseInterestRange: 96, senseRange: 72, packAggro: false, packRadius: 0,
       wanderInterval: [3, 6], fleeRange: 0,
     },
@@ -519,7 +556,7 @@ export const BOSS_DEFINITIONS = {
       {
         id: 'guardian', from: 1.0, name: 'Guardian',
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.2, damage: 16, range: 4.6 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.2, damage: 16, range: 5.8 },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 8, speed: 12, range: 26 },
           { kind: BOSS_ABILITIES.HAZARD_POOL, cooldown: 9, block: 'magma', radius: 3, duration: 12 },
           { kind: BOSS_ABILITIES.HAZARD_POOL, cooldown: 11, block: 'ice', radius: 4, duration: 12, harmless: true },
@@ -529,7 +566,7 @@ export const BOSS_DEFINITIONS = {
       {
         id: 'darkness', from: 0.66, name: 'Darkness',
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.1, damage: 18, range: 4.6 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 1.1, damage: 18, range: 5.8 },
           { kind: BOSS_ABILITIES.SUMMON, cooldown: 6, mob: 'corrupt_wisp', count: 3, max: 10 },
           { kind: BOSS_ABILITIES.HAZARD_POOL, cooldown: 5, block: 'corrupt_grass', radius: 5, duration: 999 },
           { kind: BOSS_ABILITIES.SHIELD, cooldown: 22, hp: 150, duration: 20 },
@@ -539,7 +576,7 @@ export const BOSS_DEFINITIONS = {
       {
         id: 'true_form', from: 0.33, name: 'True Form',
         abilities: [
-          { kind: BOSS_ABILITIES.MELEE, cooldown: 0.8, damage: 22, range: 5.0 },
+          { kind: BOSS_ABILITIES.MELEE, cooldown: 0.8, damage: 22, range: 6.2 },
           { kind: BOSS_ABILITIES.CHARGE, cooldown: 4, speed: 15, range: 32 },
           { kind: BOSS_ABILITIES.SUMMON, cooldown: 5, mob: 'corrupt_wolf', count: 3, max: 12 },
           { kind: BOSS_ABILITIES.HAZARD_POOL, cooldown: 3, block: 'toxic_slime', radius: 4, duration: 999 },
