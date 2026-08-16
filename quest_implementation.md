@@ -1,6 +1,6 @@
 # Cuubz — Quest, Seal and Boss Implementation Plan
 
-> **Status: IMPLEMENTED. S0–S8 all landed on `feat/quest-system`.**
+> **Status: IMPLEMENTED. S0–S8 all landed on `feat/quest-system`, S9+ in §14.**
 > Companion to `questStoryline.md`, which is the *narrative* design. This file is the
 > *engineering* design: what exists, what does not, what has to be built, in what order,
 > and which decisions are still open.
@@ -9,7 +9,8 @@
 > what was decided and why, and several of its judgements turned out to matter more than
 > they looked. §13 is what actually happened: which parts held, which numbers were wrong,
 > the five defects the work uncovered (D-117 through D-121), and the answers taken to the
-> four open questions §12 left.
+> four open questions §12 left. **§14 is the follow-up session** — the gaps §13 named,
+> closed or explicitly declined.
 
 **The headline:** `questStoryline.md` describes a feature that this codebase has almost
 none of the machinery for. The quest *data* items exist (`quest_key`, `corrupt_crystal`),
@@ -956,6 +957,7 @@ Nine stages, nine commits, `feat/quest-system`. **75 test files, 531 tests, lint
   `worldgenVersion: 2`; existing ones stay at 1 and generate byte-identically.
   `WorldManager.upgradeWorldgen(id)` exists for the opt-in — **the world-screen
   confirmation UI is not built**, so today the upgrade has a mechanism and no button.
+  *(Built in S9. See §14.)*
 
 ### What is deliberately not built
 
@@ -965,7 +967,9 @@ Nine stages, nine commits, `feat/quest-system`. **75 test files, 531 tests, lint
   storyline's two ranged attacks are hazard fields instead: the Lava Titan's molten debris
   is a magma pool that becomes lava below 40%, and the Frost Serpent's freezing breath is
   a field of ice to be fought around. Same trade §8.3 made for the AoE effects.
-- **The v1→v2 world-screen upgrade button.** Mechanism yes, UI no. See Q8.
+- ~~**The v1→v2 world-screen upgrade button.** Mechanism yes, UI no. See Q8.~~
+  **Built in S9 — §14.** It was the largest of these: without it no world made before S4
+  can reach the Verdant or Ember seal, and so cannot reach the finale at all.
 - **Boss loot for offline contributors.** Loot goes to every contributor who is present at
   the kill. A player who fought and disconnected before it died keeps their `brokenBy`
   entry and gets nothing, because there is nowhere to put it.
@@ -978,3 +982,57 @@ quest log and the health meter. The multiplayer claims run against the **shipped
 over real WebSockets with a real `HostManager`. The two worldgen files are driven by
 evaluating the actual worker source in a `vm` context, because an import would be testing
 a different program than the one the worker loads.
+
+---
+
+## 14. The follow-up session (S9+)
+
+§13 closed with four named gaps and a bug ledger. This section is the record of the
+session that worked on them, in the same spirit: what landed, what was judged not worth
+building, and what each judgement cost. It does not rewrite §13 — that is the record of
+S0–S8 as it stood.
+
+### S9 — the upgrade has a button
+
+§13's *"the upgrade has a mechanism and no button"* was the largest real gap, and not
+cosmetically: a world made before S4 stays at `worldgenVersion: 1` forever, generates no
+Corrupt and no Lava, and therefore can never reach the Verdant or the Ember seal. Two of
+the five the finale gate requires (§3.7) are unreachable, so the endgame is unreachable,
+in every save that predates this branch. That is the whole of the argument for building
+it now rather than deferring it again.
+
+**Where the control lives, and why it is not in `.world-slot-actions`.** The obvious place
+is beside the delete button. That row is `opacity: 0` until the slot is hovered
+(`src/ui/css/screens/slots.css`), which is exactly right for a destructive action nobody
+should find by accident and exactly wrong for an offer the player has to *discover* — a
+player who never hovers a world slot would never learn the offer exists, and the symptom
+would read as "the Corrupt biome doesn't spawn" rather than as an unaccepted opt-in. So
+the badge (`.world-upgrade-badge`) is its own always-visible element in the slot's other
+corner, slow-pulsing, and `test/unit/ui/worldUpgrade.test.js` asserts it stays outside
+that row so a later tidy cannot quietly bury it.
+
+**What the confirmation says.** §3.1 asks for "this will seam your terrain" and the word
+*seam* is the contract, so it is in the copy verbatim and asserted. The modal also states
+what is gained (the two biomes, and the two seals that live nowhere else) before what it
+costs, because the cost paragraph is meaningless without it, and that the change cannot
+be undone. A player who cancels has changed nothing.
+
+**Which world the modal is about travels on `dataset.worldId`**, the way the shared delete
+modal's does, rather than in a closure captured at open time. The closure works and breaks
+the moment two opens interleave; there is an assertion for the dataset specifically.
+
+**Wiring lives in `WorldScreen`, not `UIManager`.** `UIManager` owns the delete modal's
+handler for one reason only — the element is shared between two screens and neither can
+own it without reaching into the other. Nothing shares this one.
+
+**D-122, found by writing the failure case.** `upgradeWorldgen` set the version and *then*
+saved, so a storage throw returned `{success:false}` over a cache that already said 2 —
+and the cache is what `genParams` reads. The session would have written v2 chunks into a
+world that reloads as v1: the mixed terrain the version gate exists to prevent, without
+the confirmation, and permanent once the chunks are on disk. The failure path had no
+caller at all before this commit, which is why S4 could add the method and not see it.
+Fixed by rolling the cache back, restoring an absent key as absent.
+
+**Verification** is jsdom against the real templates and the real `WorldManager` over an
+in-memory store, per §11 — 12 assertions, one of them confirmed red against the pre-fix
+`upgradeWorldgen`.

@@ -72,3 +72,4 @@
    the end, where it can only override, never be silently overridden. */
 @import './overlays/quest-log.css';
 @import './hud/boss-bar.css';
+@import './screens/world-upgrade.css';

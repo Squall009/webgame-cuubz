@@ -60,6 +60,10 @@ export class UIManager {
       createCharModal: document.getElementById('create-char-modal'),
       deleteCharModal: document.getElementById('delete-char-modal'),
       createWorldModal: document.getElementById('create-world-modal'),
+      // S9 — the worldgen opt-in (§3.1 / Q8). `WorldScreen` owns its handlers; it is
+      // here because this is where every modal element is captured, and because the
+      // capture happening in the constructor is what decision 53's eager mount buys.
+      upgradeWorldgenModal: document.getElementById('upgrade-worldgen-modal'),
     };
 
     // Additional screen elements for session UI

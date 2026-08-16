@@ -441,7 +441,17 @@ export class WorldManager {
    *
    * One-way, and it will seam: chunks already on disk keep the terrain they were
    * generated with, and only newly-generated ones can contain a Corrupt or Lava patch.
-   * The confirmation for that belongs to the world screen; this method is the mechanism.
+   * The confirmation for that is `WorldScreen.openUpgradeModal` (S9); this method is the
+   * mechanism it drives.
+   *
+   * **D-122 — the cache is rolled back if the save throws.** The first version set the
+   * field and then tried to persist it, so a storage failure returned `{success:false}`
+   * over a cache that already said 2. Disk would have said 1, the running session would
+   * have generated v2 chunks into it, and the next load would have been a v1 world full
+   * of v2 terrain — the mixed generation this whole version gate exists to prevent,
+   * reached without the confirmation. `deleteWorld` has always ordered it the other way
+   * round; this now matches. The absent key is restored as *absent*, because that is what
+   * a pre-S4 save actually contains and `serialize()` writes the object it is given.
    */
   async upgradeWorldgen(id) {
     const world = this.getWorld(id);
@@ -449,11 +459,14 @@ export class WorldManager {
     if ((world.worldgenVersion || WORLDGEN_VERSION_LEGACY) >= CURRENT_WORLDGEN_VERSION) {
       return { success: false, error: 'World is already on the current worldgen version' };
     }
+    const had = Object.prototype.hasOwnProperty.call(world, 'worldgenVersion');
+    const previous = world.worldgenVersion;
     world.worldgenVersion = CURRENT_WORLDGEN_VERSION;
     try {
       await this.storage.saveWorld(world);
       return { success: true, world };
     } catch (err) {
+      if (had) world.worldgenVersion = previous; else delete world.worldgenVersion;
       return { success: false, error: `Failed to save world: ${err.message}` };
     }
   }
