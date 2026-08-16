@@ -19,6 +19,8 @@
  * S4 adds hazards and S6 adds the encounter, and each stage leaves the tree green.
  */
 
+import { reportStepError } from '../reportStepError.js';
+
 /**
  * @param {import('../../../core/GameState.js').GameState} state
  */
@@ -30,7 +32,7 @@ export function questStep(state) {
     try {
       state.questTracker.tick(state.frameCount, state.player ? state.player.position : null);
     } catch (e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Quest tracker error:', e.message);
+      reportStepError(state, 'Quest tracker', e);
     }
   }
 
@@ -39,7 +41,7 @@ export function questStep(state) {
     try {
       state.hazardSystem.update(state.game.delta);
     } catch (e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Hazard system error:', e.message);
+      reportStepError(state, 'Hazard system', e);
     }
   }
 
@@ -48,7 +50,7 @@ export function questStep(state) {
     try {
       state.playerVitals.update(state.game.delta);
     } catch (e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Vitals error:', e.message);
+      reportStepError(state, 'Vitals', e);
     }
   }
 
@@ -60,7 +62,7 @@ export function questStep(state) {
     try {
       state.eatingSystem.update(state.game.delta);
     } catch (e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Eating system error:', e.message);
+      reportStepError(state, 'Eating system', e);
     }
   }
 
@@ -81,7 +83,7 @@ export function questStep(state) {
         );
       }
     } catch (e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Seal system error:', e.message);
+      reportStepError(state, 'Seal system', e);
     }
   }
 
@@ -90,7 +92,7 @@ export function questStep(state) {
     try {
       state.bossEncounter.update(state.game.delta);
     } catch (e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Boss encounter error:', e.message);
+      reportStepError(state, 'Boss encounter', e);
     }
   }
 
@@ -99,7 +101,7 @@ export function questStep(state) {
     try {
       state.bossSync.update(state.game.delta);
     } catch (e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Boss sync error:', e.message);
+      reportStepError(state, 'Boss sync', e);
     }
   }
 }

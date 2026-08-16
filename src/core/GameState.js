@@ -155,6 +155,11 @@ export class GameState {
     // and nothing read it; hunger went with `SurvivalSystem` in PR 34 and took the only
     // reader with it, leaving passive regen as the player's whole recovery budget.
     this.eatingSystem = null;
+    // D-89 — one-shot latch keys, one per render-loop step that has already reported a
+    // failure this session. Per-session and not module-level: a module Set would carry
+    // the first world's latches into the second and silence it entirely. See
+    // \.
+    this._stepErrorLatched = new Set();
     // HUD writers. The quest tracker markup has been mounted and permanently `hidden`
     // with zero writers since it was written; this is the writer.
     this.questTrackerHUD = null;

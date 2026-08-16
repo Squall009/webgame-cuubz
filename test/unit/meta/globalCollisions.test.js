@@ -44,6 +44,10 @@ import { validateHostInventory } from '../../../src/multiplayer/Host.js';
 import { validateInventorySlots } from '../../../src/multiplayer/InventorySync.js';
 import { isMobileViewport, MOBILE_MAX_WIDTH_PERF, MOBILE_MAX_WIDTH_HUD } from '../../../src/util/Viewport.js';
 import { smoothstep, distanceBetween } from '../../../src/util/MathUtils.js';
+// D-90 (3) — the mixin guard, extracted from ChunkMeshBuilder's module-load block so
+// that a colliding configuration can be handed to it without importing a module that
+// refuses to import.
+import { assertNoMixinCollisions, CHUNK_MESH_MIXINS } from '../../../src/engine/renderer/ChunkMeshBuilder.js';
 
 it('globalCollisions', () => legacy(async () => {
 let passed = 0;
@@ -399,6 +403,78 @@ assertTrue(globalAliases('const self = globalThis;\nself.x = 1;').includes('self
 console.log(`\n===================================`);
 console.log(`Results: ${passed}/${total} passed, ${failed} failed`);
 console.log(`===================================`);
+
+// ═══════════════════════════════════════════════════════════════════
+// MIXIN COLLISIONS — BUGS.md D-90 (3)
+// ═══════════════════════════════════════════════════════════════════
+//
+// `ChunkMeshBuilder.js` splits its prototype across two mixin files and guards, at module
+// load, against a mixin and the class body defining the same method name. A silent
+// overwrite is the one failure mode a mixin split has that a single class does not —
+// which is the same shared-scope collision class the rest of this file exists for, and
+// **this file had never mentioned mixins**. The guard was proved by hand in three
+// colliding configurations and had no regression test; D-90 (3) is that gap, and its
+// own source comment pointed here.
+//
+// The guard was extracted from the module-load block to make this possible. It could not
+// be exercised in place: injecting a collision means importing a module that refuses to
+// import.
+{
+  console.log('\n--- Mixin collisions (D-90 (3)) ---');
+
+  class Base { alpha() {} }
+  const throws = (mixins, proto, why) => {
+    let message = null;
+    try { assertNoMixinCollisions(mixins, proto); } catch (e) { message = e.message; }
+    assert(message !== null, why);
+    return message || '';
+  };
+
+  // 1 — two mixins claiming the same name.
+  {
+    const msg = throws(
+      [['MixA', { beta() {} }], ['MixB', { beta() {} }]], Base.prototype,
+      'two mixins defining the same method collide'
+    );
+    assert(msg.includes("'beta'"), '...and the message names the method');
+    assert(msg.includes('MixA.js') && msg.includes('MixB.js'), '...and names BOTH owners');
+  }
+
+  // 2 — a mixin shadowing the class body. This is the dangerous one: `Object.assign`
+  // runs after the class is defined, so the mixin wins and the class body's version is
+  // simply gone.
+  {
+    const msg = throws(
+      [['MixA', { alpha() {} }]], Base.prototype,
+      'a mixin shadowing a class-body method collides'
+    );
+    assert(msg.includes('the class body'), '...and the message says the class body owns it');
+  }
+
+  // 3 — a collision in the SECOND pair, not the first. A guard that only compared
+  // neighbours, or that stopped after one mixin, would pass this.
+  throws(
+    [['MixA', { one() {} }], ['MixB', { two() {} }], ['MixC', { one() {} }]], Base.prototype,
+    'a collision between non-adjacent mixins is still caught'
+  );
+
+  // And the negative: the shape the real module has must not throw.
+  {
+    let threw = false;
+    try {
+      assertNoMixinCollisions([['MixA', { beta() {} }], ['MixB', { gamma() {} }]], Base.prototype);
+    } catch { threw = true; }
+    assertFalse(threw, 'disjoint mixins over a disjoint class body do not collide');
+  }
+
+  // The real configuration, swept rather than assumed: the module already ran this at
+  // import time, so reaching this line proves it passed — but assert the sweep was not
+  // vacuous, because a guard over an empty list also never throws.
+  assert(CHUNK_MESH_MIXINS.length >= 2,
+    `ChunkMeshBuilder still has at least two mixins (${CHUNK_MESH_MIXINS.length})`);
+  const methodCount = CHUNK_MESH_MIXINS.reduce((n, [, m]) => n + Object.keys(m).length, 0);
+  assert(methodCount >= 4, `and the guard swept a real number of methods (${methodCount})`);
+}
 
 process.exit(failed === 0 ? 0 : 1);
 }));

@@ -1185,3 +1185,58 @@ be crafted with, and would not stack with the cobblestone the player mined. Same
 D-118 and D-119, in the one dimension S1's guard did not cover. The fix is one constant;
 the deliverable is the guard that resolves **every** mob drop against the registry, which
 now sits next to the biome-name guard in the same file.
+
+### S14 — closing what could be closed cleanly
+
+The last item on the brief: *anything in `BUGS.md`'s Open table you can close cleanly.*
+Four rows moved. What was declined is recorded with the reason, because a row that was
+looked at and left is different from one nobody read.
+
+**D-89 — closed, and the fix is the one the row specified.** Its status field already said
+what to build: *"a one-shot latch: report the first throw after frame 10 and then go
+quiet."* The row names `WorldStep.js:219-221`, where a `try/catch` logged only while
+`frameCount < 10`, so after the tenth frame a throw was silent and mobs stopped updating
+for the rest of the session. **The idiom was in nine places.** `CombatStep` had one,
+`QuestStep` had six — S1 through S8 each added a system and copied its neighbour, and one
+of those six is S10's, written this session — and `WorldStep` had two. Fixing the one site
+D-89 happens to name would have moved the defect. `reportStepError` is the latch, the nine
+sites route through it, and the test sweeps `src/engine/loop/steps/` for the raw idiom so
+a step added tomorrow that copies from its neighbours fails a test instead of going silent
+in production. Three of its ten assertions were red beforehand.
+
+**D-86 (1) and (3) — closed.** (1) is live and slightly worse than the row says: the
+"Test file crashed outside the assertion scope" banner prints on a **green** run and is
+invisible only because Vitest suppresses console output for passing files, which means it
+is there the instant anyone turns interception off. Five of the six named files had lost
+their tails to later edits; the sixth rethrows the exit signal now. (3) is the
+comment-scraping trap, and **the fix bit back once in a way worth recording**: stripping
+block comments before line comments swallowed 700 lines of `saveLoad.js`, because line 885
+is a *line* comment containing the text `src/**` and a naive block-first pass reads that
+`/*` as an opener. Twelve genuinely-driven ids silently vanished and only the count floor
+caught it. One alternation and four non-vacuity probes, including that regression.
+
+**D-90 (3) — closed.** The mixin collision guard ran at module load and threw, which is
+correct and is exactly why it had no test: injecting a collision means importing a module
+that refuses to import. It is an exported function called two lines below its definition
+now — same code, same moment, reachable — and `globalCollisions.test.js`, which its own
+comment pointed at and which had never mentioned mixins, holds the three colliding
+configurations the row says were proved by hand.
+
+**D-68 — closed, with its residue moved rather than deleted.** See S13. The two water
+biomes are blocked on D-70, which already owns the buoyancy work and now owns them too, so
+the row can close instead of being reassigned to a fifth PR slot.
+
+**D-33 — looked at and declined.** 121 warnings across 44 files, down from the 149 the row
+records. Closing it means deleting every unused binding and flipping the rule to `error`,
+which is a 44-file diff whose entire value is lint hygiene — and some of those bindings
+are deliberate (`void HostRemotePlayer;` exists so lint sees an import kept for the type it
+documents). Doing that unattended, in the branch that also carries a balance pass and three
+new systems, would turn a diff that currently reads cleanly into one nobody can review. The
+row's own owner and reasoning stand. Three warnings came off it in passing, from the
+`catch (e)` bindings D-89's work made bindless.
+
+**D-70, D-93 — declined for the same reason, stated once.** Both are real and both are
+gameplay or render-ordering changes whose correctness is *visual*. Browser e2e cannot run
+here (§11). Building mob buoyancy or rewriting who owns the group transform during an
+animation, with no way to look at the result, is the shape of change this whole plan's §8.1
+is a warning about. They stay open with their owners.

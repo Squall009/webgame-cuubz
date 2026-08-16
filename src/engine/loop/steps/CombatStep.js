@@ -16,6 +16,7 @@
 
 import * as THREE from 'three';
 import { NAMED_ITEMS } from '../../../game/systems/InventorySystem.js';
+import { reportStepError } from '../reportStepError.js';
 
 /**
  * How far the player's swing reaches, in blocks. The same 7 as
@@ -92,7 +93,8 @@ export function combatStep(state) {
             // `this.knockback = def.knockback || 0` shadows the method of the same name. This
             // threw on every single hit, and the throw is why the two lines below it never
             // ran: no hand swing, and `_attackOverride` never set, so attacking a mob also
-            // broke the block behind it. Silenced after frame 10 by the catch below.
+            // broke the block behind it. Reported once by the catch below — D-89 turned
+            // that catch from "silent after frame 10" into a one-shot latch.
             hit.mob.applyKnockback(dx/dist, dz/dist, 0.5 + damage * 0.1);
           }
 
@@ -103,8 +105,8 @@ export function combatStep(state) {
           if (state.blockInteraction) state.blockInteraction._attackOverride = true;
         }
       }
-    } catch(e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Mob attack error:', e.message);
+    } catch (e) {
+      reportStepError(state, 'Mob attack', e);
     }
   }
 
