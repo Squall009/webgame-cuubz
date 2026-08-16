@@ -9,7 +9,20 @@
  *   - Drops table (weighted item rolls)
  *   - Procedural 3D geometry (built from Three.js primitives at runtime)
  *   - Animation configuration (per-state type + parameters)
+ *
+ * ─── DROPS NAME REAL THINGS, AND THE TEST SAYS SO (D-125) ───────────────────
+ *
+ * A `drops[].item` is either a `NAMED_ITEMS` key or a **numeric block id from
+ * `BLOCK_TYPES`** — never a block's *name* as a string. `Inventory.addItem` accepts any
+ * string at all (unknown ones fall back to the RESOURCE stack size), so a mob dropping
+ * `'cobblestone'` gave the player something they could hold, could not place
+ * (`consumeSelectedBlock` requires a numeric typeId), could not craft with, and which
+ * would not stack with the cobblestone they mined — because mining yields the id `3`.
+ * `test/unit/game/mobBiomes.test.js` resolves every drop against `NAMED_ITEMS` and
+ * `BLOCK_BY_ID`, which is the same guard S1 built for quest objectives after D-118.
  */
+
+import { BLOCK_TYPES } from '../../engine/world/BlockRegistry.js';
 
 export const MOB_CATEGORIES = {
   PASSIVE: 'passive',
@@ -322,7 +335,9 @@ export const MOB_DEFINITIONS = {
       fleeRange: 0,
     },
     drops: [
-      { item: 'cobblestone', minCount: 2, maxCount: 5, weight: 100 },
+      // D-125: was the string `'cobblestone'`, which is not a `NAMED_ITEMS` key and is
+      // therefore not the same thing `getBlockDrop` hands out when you mine one.
+      { item: BLOCK_TYPES.COBBLESTONE, minCount: 2, maxCount: 5, weight: 100 },
       { item: 'iron_ingot', minCount: 0, maxCount: 1, weight: 25 },
     ],
     // ── 3D Geometry ──────────────────────────────────────────

@@ -27,6 +27,8 @@ import { it } from 'vitest';
 import { legacy } from '../../helpers/legacy.js';
 import { BIOME_DEFS, BIOME_IDS, BIOME_NAME_TO_ID, BiomeSystem } from '../../../src/engine/world/BiomeSystem.js';
 import { MOB_DEFINITIONS, selectMobForBiome } from '../../../src/game/mobs/mobDefinitions.js';
+import { NAMED_ITEMS } from '../../../src/game/data/ItemDefinitions.js';
+import { BLOCK_BY_ID, BLOCK_BY_NAME } from '../../../src/engine/world/BlockRegistry.js';
 
 it('mobBiomes', () => legacy(async () => {
 let passed = 0;
@@ -153,6 +155,53 @@ assertEquals(MOB_DEFINITIONS.stone_golem.biomes.join(','), 'mountains', 'stone_g
 assertEquals([...drawsIn('plains')].sort().join(','), 'deer,rabbit', 'plains still selects deer and rabbit');
 assertEquals([...drawsIn('forest')].sort().join(','), 'deer,rabbit', 'forest still selects deer and rabbit');
 assertEquals([...drawsIn('tundra')].sort().join(','), 'rabbit', 'tundra still selects rabbit');
+
+// ═══════════════════════════════════════════════════════════════════
+// 3b — THE SECOND GUARD: no mob may drop an item that does not exist (D-125)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Exactly the shape of the guard S1 added for quest objectives after D-118 and D-119:
+// `drops[].item` is matched against nothing, and `Inventory.addItem` accepts any string
+// at all — it falls back to the RESOURCE stack size and puts the slot on the bar. So a
+// drop naming something that is neither a `NAMED_ITEMS` key nor a real block id yields
+// an item the player can hold, cannot place (`consumeSelectedBlock` requires a NUMERIC
+// typeId), cannot craft with, and which will not even stack with the identically-named
+// thing they mined. That is D-125, and `stone_golem` was doing it.
+console.log('--- 3b: every mob drop resolves ---');
+
+{
+  const badDrops = [];
+  for (const [key, def] of Object.entries(MOB_DEFINITIONS)) {
+    for (const drop of def.drops || []) {
+      const item = drop.item;
+      const ok = typeof item === 'string'
+        ? !!NAMED_ITEMS[item]
+        : (Number.isInteger(item) && item > 0 && !!BLOCK_BY_ID[item]);
+      if (!ok) badDrops.push(`${key} → ${JSON.stringify(item)}`);
+    }
+  }
+  assertEquals(badDrops.length, 0,
+    `every mob drop is a real NAMED_ITEMS key or a real block id (offenders: ${JSON.stringify(badDrops)})`);
+
+  // A block drop must be the SAME representation mining that block yields, or the two
+  // will sit in separate slots and refuse to stack. `getBlockDrop` returns the numeric
+  // id; a mob handing out the string name is the defect, not a different-but-equal way
+  // of saying it.
+  for (const [key, def] of Object.entries(MOB_DEFINITIONS)) {
+    for (const drop of def.drops || []) {
+      if (typeof drop.item !== 'string') continue;
+      assertTrue(BLOCK_BY_NAME[drop.item] === undefined || !!NAMED_ITEMS[drop.item],
+        `${key} drops '${drop.item}' by NAME where the block registry has one — mining it yields the id, and the two would not stack`);
+    }
+  }
+
+  // NON-VACUITY.
+  {
+    const bogus = { drops: [{ item: 'not_a_real_item', minCount: 1, maxCount: 1, weight: 100 }] };
+    const found = bogus.drops.filter((d) => !NAMED_ITEMS[d.item]);
+    assertEquals(found.length, 1, 'NON-VACUITY: the drop guard detects an unresolvable item when one is present');
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // 4 — the DEFERRED half, recorded rather than fixed
