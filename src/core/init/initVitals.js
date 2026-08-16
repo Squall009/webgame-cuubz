@@ -1,8 +1,9 @@
 /**
  * Cuubz — init step 15a: the player can be hurt (S3)
  *
- * Builds `PlayerVitals`, wires the health meter, connects mob attacks to it, and owns
- * the respawn.
+ * Builds `PlayerVitals`, wires the health meter, connects mob attacks to it, owns the
+ * respawn, and — since S10 — builds the `EatingSystem` and hands `BlockInteraction` the
+ * `onUseItem` callback that turns a right-click on food into a heal (D-123).
  *
  * ─── IT RUNS BEFORE `initQuests`, AND AFTER `initInventory` ─────────────────
  *
@@ -21,6 +22,7 @@
 
 import { PlayerVitals } from '../../game/entities/PlayerVitals.js';
 import { HazardSystem } from '../../game/systems/HazardSystem.js';
+import { EatingSystem } from '../../game/systems/EatingSystem.js';
 import { HealthMeter } from '../../ui/hud/HealthMeter.js';
 import { DAMAGE_SOURCES } from '../../game/data/DamageSources.js';
 import { CuubzLogger } from '../../util/Logger.js';
@@ -105,8 +107,23 @@ export function initVitals(game) {
   });
   state.hazardSystem = hazards;
 
+  // ─── Eating (S10, D-123) ───────────────────────────────────────
+  //
+  // Wired here rather than in `initInventory` because it needs both halves and vitals is
+  // the later of the two. `BlockInteraction` gives `onUseItem` first refusal on every
+  // right-click and places a block on anything it does not claim, so `tryEat`'s boolean
+  // is load-bearing — see its header.
+  const eating = new EatingSystem({ inventory: state.inventory, vitals });
+  state.eatingSystem = eating;
+  if (state.blockInteraction) {
+    state.blockInteraction.onUseItem = () => {
+      if (isCreative()) return false; // nothing to heal, and a creative click is a place
+      return eating.tryEat().eaten;
+    };
+  }
+
   meter.render(vitals.health, vitals.maxHealth);
   state.addTeardown(() => meter.dispose());
 
-  log('[Cuubz] Player vitals and hazards ready');
+  log('[Cuubz] Player vitals, hazards and eating ready');
 }

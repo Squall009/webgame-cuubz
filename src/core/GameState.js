@@ -151,6 +151,10 @@ export class GameState {
     // §3.5 — a per-tick lookup of the block under the player against a `blockId → dps`
     // table. No status effects, no timers, no per-player debuff state to serialize.
     this.hazardSystem = null;
+    // S10 / D-123 — right-click a food item to heal. Nine items carried `foodRestore`
+    // and nothing read it; hunger went with `SurvivalSystem` in PR 34 and took the only
+    // reader with it, leaving passive regen as the player's whole recovery budget.
+    this.eatingSystem = null;
     // HUD writers. The quest tracker markup has been mounted and permanently `hidden`
     // with zero writers since it was written; this is the writer.
     this.questTrackerHUD = null;

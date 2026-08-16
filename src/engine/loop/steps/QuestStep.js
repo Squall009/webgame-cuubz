@@ -52,6 +52,18 @@ export function questStep(state) {
     }
   }
 
+  // ─── Eating (S10) ──────────────────────────────────────────
+  // Only the cooldown ticks here; the bite itself is driven by right-click through
+  // `BlockInteraction.onUseItem`. After vitals so a bite taken this frame is already in
+  // the health the meter drew.
+  if (state.eatingSystem) {
+    try {
+      state.eatingSystem.update(state.game.delta);
+    } catch (e) {
+      if (state.frameCount < 10) console.warn('[Cuubz] Eating system error:', e.message);
+    }
+  }
+
   // ─── Seal proximity, altar interaction, and the HUD marker (S5) ──
   if (state.sealSystem) {
     try {

@@ -87,6 +87,10 @@ export class BlockInteraction {
     // Attack override flag — set by the game loop when a mob attack fires.
     // When true, block breaking is skipped this frame (mob attack takes priority).
     this._attackOverride = false;
+
+    // S10 — `() => boolean`, set by `initVitals`. Given first refusal on a right-click;
+    // returning true means the click was used and no block is placed. See `_tryUseItem`.
+    this.onUseItem = null;
   }
 
   /**
@@ -132,11 +136,36 @@ export class BlockInteraction {
       }
     }
 
-    // ─── Block Placing ──────────────────────────────────
+    // ─── Use item, then place (S10) ─────────────────────
+    //
+    // Right-click is "use what I am holding". For a block that means place it, and since
+    // S10 for a food item it means eat it. `onUseItem` returns true when it claimed the
+    // click, so the two cannot both fire — see `EatingSystem.tryEat`, which is why every
+    // one of its refusals is explicit: anything it does not claim falls through to the
+    // placement path, and a false positive here would make stone unplaceable.
+    //
+    // A callback rather than an `EatingSystem` field because this system is built at
+    // init step 13 and the player's vitals do not exist until 15a.
     const shouldPlace = (this.mouse && this.mouse.justClickedRight) ||
                         (this.touch && this.touch.placePressed);
     if (shouldPlace) {
-      this._tryPlaceBlock();
+      if (!this._tryUseItem()) this._tryPlaceBlock();
+    }
+  }
+
+  /**
+   * Give whatever owns "using" the held item first refusal on this click.
+   * Never throws: this runs on a player input and a broken consumer must not eat the
+   * placement path with it.
+   * @returns {boolean} true if the click was consumed
+   */
+  _tryUseItem() {
+    if (typeof this.onUseItem !== 'function') return false;
+    try {
+      return this.onUseItem() === true;
+    } catch (e) {
+      console.warn('[Cuubz] onUseItem threw:', e && e.message);
+      return false;
     }
   }
 
