@@ -56,12 +56,29 @@
     CHERRY_LOG: 71, CHERRY_LEAVES: 110,
     MANGROVE_LOG: 72, MANGROVE_LEAVES: 111,
     BAMBOO_BLOCK: 75,
-    POPLAR_LOG: 74, ORANGE_POPLAR_LEAVES: 113, RED_POPLAR_LEAVES: 114, YELLOW_POPLAR_LEAVES: 115,
+    // D-121: `YELLOW_POPLAR_LEAVES` said **115**, which is `white_concrete`. This is the
+    // THIRD copy of that exact mistake — D-63 fixed the same wrong id in `meshWorker.js`
+    // (where it tinted white concrete green) and `BlockCategories.js` documents it. It
+    // was latent here because no tree table names yellow poplar; adding one would have
+    // planted concrete leaves. The real id is 192.
+    POPLAR_LOG: 74, ORANGE_POPLAR_LEAVES: 113, RED_POPLAR_LEAVES: 114, YELLOW_POPLAR_LEAVES: 192,
     // Ground cover / plants
     SHORT_GRASS: 177, TALL_GRASS: 178,
     BROWN_MUSHROOM: 181, RED_MUSHROOM: 182,
     // Deepslate block (for deep terrain)
-    DEEPSLATE: 8
+    DEEPSLATE: 8,
+    // ── S4: the two hazardous biomes ────────────────────────────────
+    // Ids are literals here because this file is a classic script with no imports
+    // (decision 14) — it cannot read `BLOCK_TYPES`. They must match `BlockRegistry.js`,
+    // which is the same standing constraint every id above is under.
+    CORRUPT_GRASS: 193, CORRUPT_STONE: 194, CORRUPT_VEIN: 195,
+    TOXIC_SLIME: 188, CORRUPT_CRYSTAL: 189,
+    NETHERRACK: 147, BASALT: 148, BLACKSTONE: 149, MAGMA: 155,
+    CRYING_OBSIDIAN: 154, SOUL_SAND: 150, SOUL_SOIL: 151, SOUL_LANTERN: 174,
+    // ── S5: seal structure materials ────────────────────────────────
+    STONE_BRICKS: 16, CHISELED_STONE_BRICKS: 19,
+    DEEPSLATE_BRICKS: 14, DEEPSLATE_TILES: 15,
+    OBSIDIAN: 196, SANDSTONE: 197
   };
 
   // ── Biome definitions (must match biomeSystem.js) ───────────────────
@@ -148,8 +165,38 @@
       subVariants:     [[BLOCK.COARSE_DIRT, 50], [BLOCK.STONE, 30], [BLOCK.DIRT, 20]],
       stoneVariants:   [[BLOCK.STONE, 40], [BLOCK.ANDESITE, 18], [BLOCK.DIORITE, 15], [BLOCK.GRANITE, 17], [BLOCK.TUFF, 10]],
       color: '#e0f7fa', name: 'Frozen Peaks'
+    },
+
+    // ── S4: the two hazardous biomes ──────────────────────────────────
+    // Byte-for-byte the same numbers and the same variant weights as
+    // `BiomeSystem.js`'s CORRUPT and LAVA. §2.4: these two tables are duplicated and a
+    // difference between them means the terrain the worker builds disagrees with the
+    // biome the main thread thinks the player is standing in — wrong fog, wrong mob
+    // spawns, wrong hazard checks, and no failing test. `biomeMasks.test.js` sweeps the
+    // two `selectBiome` copies against each other for exactly that reason.
+    CORRUPT: {
+      baseY: 66,  amplitude: 8,
+      surfaceBlock: BLOCK.CORRUPT_GRASS, subBlock: BLOCK.CORRUPT_STONE,
+      surfaceVariants: [[BLOCK.CORRUPT_GRASS, 34], [BLOCK.GRASS, 30], [BLOCK.COARSE_DIRT, 20], [BLOCK.PODZOL, 10], [BLOCK.MOSS_BLOCK, 6]],
+      subVariants:     [[BLOCK.CORRUPT_STONE, 45], [BLOCK.DIRT, 35], [BLOCK.COARSE_DIRT, 20]],
+      stoneVariants:   [[BLOCK.CORRUPT_STONE, 35], [BLOCK.STONE, 40], [BLOCK.DEEPSLATE, 15], [BLOCK.TUFF, 10]],
+      color: '#4a2060', name: 'Corrupt', hazard: true
+    },
+    LAVA_BIOME: {
+      baseY: 72,  amplitude: 16,
+      surfaceBlock: BLOCK.NETHERRACK, subBlock: BLOCK.NETHERRACK,
+      surfaceVariants: [[BLOCK.NETHERRACK, 45], [BLOCK.BASALT, 25], [BLOCK.BLACKSTONE, 20], [BLOCK.MAGMA, 10]],
+      subVariants:     [[BLOCK.NETHERRACK, 55], [BLOCK.BLACKSTONE, 30], [BLOCK.BASALT, 15]],
+      stoneVariants:   [[BLOCK.BLACKSTONE, 45], [BLOCK.NETHERRACK, 30], [BLOCK.BASALT, 15], [BLOCK.STONE, 10]],
+      color: '#8a2b0a', name: 'Lava', hazard: true
     }
   };
+
+  // Mask thresholds and frequency — must equal BiomeSystem.js's exported constants.
+  var BLIGHT_THRESHOLD = 0.44;
+  var SCORCH_THRESHOLD = 0.46;
+  var MASK_MIN_CONTINENTALNESS = 0.02;
+  var MASK_SCALE = 1400;
 
   var CONT_SPLINE = [
     [-1.0, -1.1], [-0.4, -0.6], [-0.1, -0.1], [0.1, 0.2], [0.25, 0.6], [0.5, 0.85], [1.0, 1.1]
@@ -193,7 +240,13 @@
     'Badlands':     { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.02, treeMaxY: 125, flowerMaxY: 120 },
     'Frozen Peaks': { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.03, treeMaxY: 125, flowerMaxY: 120 },
     'Ocean':        { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
-    'Deep Ocean':   { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.00, treeMaxY: 125, flowerMaxY: 120 }
+    'Deep Ocean':   { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    // S4 — both new biomes need a row here or `FEATURE_RATES[name]` is `undefined` and
+    // the decoration pass reads a property off it. Neither has trees or flowers: the
+    // Corrupt biome's decoration is veins and crystals and the Lava biome's is magma,
+    // both placed by their own pass below rather than by this table.
+    'Corrupt':      { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.00, treeMaxY: 125, flowerMaxY: 120 },
+    'Lava':         { treeChance: 0.00, redFlowerChance: 0.00, yellowFlowerChance: 0.00, grassChance: 0.00, treeMaxY: 125, flowerMaxY: 120 }
   };
 
   // ── Ore definitions ────────────────────────────────────────────────
@@ -463,15 +516,31 @@
       temp:   createPerlin(sInt ^ 0x3333), hum:  createPerlin(sInt ^ 0x4444),
       det:    createPerlin(sInt ^ 0x5555), c1:   createPerlin(sInt ^ 0x6666),
       c2:     createPerlin(sInt ^ 0x7777), river:createPerlin(sInt ^ 0x8888),
-      jitter: createPerlin(sInt ^ 0xBBBB)
+      jitter: createPerlin(sInt ^ 0xBBBB),
+      // S4 — the two biome masks. Same salts as `src/engine/world/Noise.js`, and §2.4 is
+      // why that matters: this file is a classic script with its own copy of every
+      // helper, and a mask seeded differently here would put the Corrupt biome in a
+      // different place than the main thread believes it is.
+      blight: createPerlin(sInt ^ 0xCCCC),
+      scorch: createPerlin(sInt ^ 0xDDDD)
     };
   }
 
   // ── Biome selection (matches biomeSystem.js) ────────────────────────
   // Widened thresholds: lower humidity cutoff for forest, added highlands biome,
   // reduced plains catch-all area.
-  function selectBiome(cont, eros, temp, hum) {
+  function selectBiome(cont, eros, temp, hum, blight, scorch) {
     var isCold = temp < -0.20;
+    // ── The mask override (S4) ────────────────────────────────────────
+    // `undefined` is the v1 path: a world created before these biomes existed calls
+    // this with four arguments and `undefined > 0.46` is false, so it takes the
+    // identical branch it always took and generates byte-identical terrain (§3.1).
+    if (scorch !== undefined && scorch > SCORCH_THRESHOLD && cont > MASK_MIN_CONTINENTALNESS) {
+      return BIOME.LAVA_BIOME;
+    }
+    if (blight !== undefined && blight > BLIGHT_THRESHOLD && cont > MASK_MIN_CONTINENTALNESS) {
+      return BIOME.CORRUPT;
+    }
     if (cont < -0.4)  return Object.assign({}, BIOME.DEEP_OCEAN, { frozenWater: isCold });
     if (cont < -0.15) return Object.assign({}, BIOME.OCEAN,      { frozenWater: isCold });
     if (cont < 0.02)  return Object.assign({}, BIOME.BEACH,       { frozenWater: isCold });
@@ -500,8 +569,15 @@
   }
 
   // ── Biome parameter sampling with Gaussian blending + domain warp ───
-  function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humScale, erosScale) {
+  function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humScale, erosScale, useMasks) {
     var RADIUS = 1, STEP = 8;
+
+    // ── The two masks (S4) ──────────────────────────────────────────
+    // Sampled once per column and deliberately NOT blended across the 3x3 grid: a mask
+    // is a hard override, and blending it would ring every patch with half-corrupt
+    // terrain. Identical to BiomeSystem.js, offsets included.
+    var blight = useMasks ? p.blight.noise2(wx / MASK_SCALE, wz / MASK_SCALE) : undefined;
+    var scorch = useMasks ? p.scorch.noise2(wx / MASK_SCALE + 4093.7, wz / MASK_SCALE + 1721.3) : undefined;
     var sumBase = 0, sumAmp = 0, sumW = 0;
     var dominantBiome = null, dominantW = -1;
 
@@ -539,7 +615,7 @@
         cont = Math.max(-1.1, Math.min(1.1, cont));
         cont += fbm2(p.jitter, sx / 15, sz / 15, 3, 0.5, 2.0) * 0.08;
         var eros = p.eros.noise2((sx + warpGX) / erosScale, (sz + warpGZ) / erosScale);
-        var biome = selectBiome(cont, eros, blendedTemp, blendedHum);
+        var biome = selectBiome(cont, eros, blendedTemp, blendedHum, blight, scorch);
         var dist2 = dx * dx + dz * dz;
         var w = Math.exp(-dist2 * 0.6);
         sumBase += biome.baseY     * w;
@@ -785,6 +861,126 @@
     }
   }
 
+
+  // ══════════════════════════════════════════════════════════════════
+  // Seal structures — altars, arenas, key caches and the spire (S5, §7.2)
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // Written HERE, in this file's style, for the same reason everything else is: it is a
+  // classic script with no imports and its own tables (decision 14). The site
+  // coordinates come in through `params.sealSites`, which `ChunkGenerator` forwards
+  // verbatim — the *selection* is `src/engine/world/structures/SealSites.js`, which is
+  // pure and node-testable, and only the *stamping* is here.
+  //
+  // Kept to a handful of block writes per affected chunk. This is the generation hot
+  // path and the overwhelming majority of chunks touch no site at all, which is what
+  // `chunkTouchesSite` is for.
+
+  /** Cheap rejection: does this chunk come within `radius` of a site? */
+  function chunkTouchesSite(chunkX, chunkZ, site, radius) {
+    var minX = chunkX * 16, minZ = chunkZ * 16;
+    var nearestX = Math.max(minX, Math.min(site.x, minX + 15));
+    var nearestZ = Math.max(minZ, Math.min(site.z, minZ + 15));
+    var dx = site.x - nearestX, dz = site.z - nearestZ;
+    return dx * dx + dz * dz <= radius * radius;
+  }
+
+  /** Per-seal arena and altar materials. Keyed by seal id, matching SealDefinitions. */
+  var SEAL_MATERIALS = {
+    verdant:   { floor: BLOCK.CORRUPT_STONE, wall: BLOCK.DEEPSLATE_BRICKS, radius: 24, height: 20 },
+    ember:     { floor: BLOCK.BLACKSTONE,    wall: BLOCK.BLACKSTONE,       radius: 26, height: 22 },
+    frozen:    { floor: BLOCK.STONE_BRICKS,  wall: BLOCK.DEEPSLATE_TILES,  radius: 26, height: 20 },
+    sunken:    { floor: BLOCK.SANDSTONE,     wall: BLOCK.SANDSTONE,        radius: 28, height: 22 },
+    deepstone: { floor: BLOCK.DEEPSLATE_TILES, wall: BLOCK.DEEPSLATE_BRICKS, radius: 24, height: 18 },
+    finale:    { floor: BLOCK.BLACKSTONE,    wall: BLOCK.CRYING_OBSIDIAN,  radius: 30, height: 40 }
+  };
+
+  /**
+   * Stamp every seal structure that touches this chunk.
+   *
+   * The arena is a flattened disc: the boss needs walkable ground, and `mobMovement`
+   * decides walkability with `isSolidBlock`. Everything above the floor inside the
+   * radius is cleared so a fight is not conducted inside a hill.
+   */
+  function placeSealStructures(chunk, surfaceMap, chunkX, chunkZ, sites) {
+    if (!sites) return;
+
+    for (var sealId in sites) {
+      if (!Object.prototype.hasOwnProperty.call(sites, sealId)) continue;
+      var site = sites[sealId];
+      if (!site || typeof site.x !== 'number') continue;
+      var mat = SEAL_MATERIALS[sealId];
+      if (!mat) continue;
+      if (!chunkTouchesSite(chunkX, chunkZ, site, mat.radius + 2)) continue;
+
+      // Floor height: the surface at the site's own column, so the arena is level even
+      // where the terrain is not. A site whose centre is outside this chunk uses the
+      // nearest column we have, which is close enough at 16-block granularity.
+      var centreLx = site.x - chunkX * 16;
+      var centreLz = site.z - chunkZ * 16;
+      var sampleLx = Math.max(0, Math.min(15, centreLx));
+      var sampleLz = Math.max(0, Math.min(15, centreLz));
+      var floorY = typeof site.y === 'number'
+        ? site.y
+        : surfaceMap[sampleLx * 16 + sampleLz];
+      if (!floorY || floorY < 4) continue;
+
+      for (var lx = 0; lx < 16; lx++) {
+        for (var lz = 0; lz < 16; lz++) {
+          var wx = chunkX * 16 + lx, wz = chunkZ * 16 + lz;
+          var dx = wx - site.x, dz = wz - site.z;
+          var dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist > mat.radius + 1) continue;
+
+          if (dist <= mat.radius) {
+            // Arena floor, and clear the volume above it.
+            chunk[cidx(lx, floorY, lz)] = mat.floor;
+            for (var cy = floorY + 1; cy < Math.min(CHUNK_H, floorY + mat.height); cy++) {
+              chunk[cidx(lx, cy, lz)] = BLOCK.AIR;
+            }
+            // A shallow foundation, so a player mining down does not fall out of the
+            // arena into a cave immediately.
+            for (var fy = floorY - 1; fy >= Math.max(1, floorY - 3); fy--) {
+              chunk[cidx(lx, fy, lz)] = mat.wall;
+            }
+          } else {
+            // The rim: one ring of wall, waist height. It reads as a boundary without
+            // being a cage — Q4 is unresolved and the cheapest answer is unprotected
+            // arenas with an encounter that resets if the boss leaves.
+            for (var wy = floorY + 1; wy <= floorY + 2 && wy < CHUNK_H; wy++) {
+              chunk[cidx(lx, wy, lz)] = mat.wall;
+            }
+          }
+
+          // The altar: a small stepped block at the exact centre, with the marked centre
+          // block on top. `SealSystem` matches on proximity to `site`, not on this
+          // block, so a player who mines it has not broken the seal — they have made a
+          // hole where a nice-looking altar was.
+          if (dist < 1.5 && sealId !== 'finale') {
+            chunk[cidx(lx, floorY + 1, lz)] = BLOCK.CHISELED_STONE_BRICKS;
+            chunk[cidx(lx, floorY + 2, lz)] = BLOCK.CRYING_OBSIDIAN;
+          }
+
+          // The key cache: one corrupt crystal a short way out from the altar, which is
+          // the seal key's physical home before a player picks it up.
+          if (sealId !== 'finale' && Math.abs(dist - 6) < 0.6) {
+            chunk[cidx(lx, floorY + 1, lz)] = BLOCK.CORRUPT_CRYSTAL;
+          }
+
+          // The spire. Physically present from world generation and inert until all five
+          // seals are broken (§3.7) — the player walks past it five times before it
+          // means anything, which is better foreshadowing than a structure that pops
+          // into existence.
+          if (sealId === 'finale' && dist < 4) {
+            for (var sy = floorY; sy < Math.min(CHUNK_H - 1, floorY + mat.height); sy++) {
+              chunk[cidx(lx, sy, lz)] = (sy % 6 === 0) ? BLOCK.CRYING_OBSIDIAN : BLOCK.BLACKSTONE;
+            }
+          }
+        }
+      }
+    }
+  }
+
   // ════════════════════════════════════════════════════════════════════
   // MAIN GENERATION FUNCTION — called once per chunk
   // Returns a Promise that yields between columns to avoid blocking main thread.
@@ -792,6 +988,13 @@
   function generateChunk(chunkX, chunkZ, seed, params) {
     var p = createSharedPerlin(seed);
     var sInt = hashString(String(seed));
+
+    // §3.1 — the whole compatibility guarantee, in one line. A world created before the
+    // Corrupt and Lava biomes existed has no `worldgenVersion` on its config, arrives
+    // here as `undefined`, and generates exactly the terrain it always did. Chunks live
+    // in IndexedDB keyed by world and coordinates, so a world that has already explored
+    // outward would otherwise show a visible seam where old chunks meet new.
+    var useMasks = (params.worldgenVersion || 1) >= 2;
 
     // Separate RNG streams for surface, caves, ores, features (deterministic per-chunk).
     var rngSurface = mulberry32(sInt ^ ((chunkX * 73856093) ^ (chunkZ * 19349663)) ^ 0x1000);
@@ -811,7 +1014,8 @@
 
         // Sample blended biome parameters.
         var blended = sampleBiomeParams(p, wx, wz, params.continentScale, params.contScale,
-                                        params.tempScale, params.humScale, params.erosScale);
+                                        params.tempScale, params.humScale, params.erosScale,
+                                        useMasks);
 
         // Mountain factor — smooth 0→1 from continentalness + erosion blend.
         var MOUNTAIN_RADIUS = 1, STEP2 = 8;
@@ -1048,6 +1252,12 @@
 
     // ── Phase 4: Feature placement (trees + flowers) ─────────────────
     placeFeatures(chunk, surfaceMap, biomeMap, rngFeature, p, chunkX, chunkZ);
+
+    // ── Phase 5: Seal structures (S5) ────────────────────────────────
+    // Last, so an altar is never buried by a tree the feature pass placed on top of it.
+    // Only runs at all for a v2 world: `params.sealSites` is absent otherwise, and a v1
+    // world's terrain must stay byte-identical (§3.1).
+    if (useMasks) placeSealStructures(chunk, surfaceMap, chunkX, chunkZ, params.sealSites);
 
     // Return result (used by both worker and inline fallback).
     // humidityMap: 256 floats (one per column), normalized 0..1 from biome humidity.

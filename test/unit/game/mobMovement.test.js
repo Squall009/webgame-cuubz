@@ -92,7 +92,9 @@ const disagreements = BLOCK_REGISTRY
   .map((b) => b.id)
   .filter((id) => oldIsPassable(id) !== isPassable(id))
   .sort((a, b) => a - b);
-assertEquals(disagreements.join(','), '12,46,47,104,105,106,107,108,109,110,111,112,113,114,168,170,172,173,174,175,177,178,179,180,181,182,183,184,186,187,188,189,190,191,192',
+// 195 is `corrupt_vein`, S4's cutout decoration — a mob walks through it, exactly as
+// it walks through every other cutout on this list.
+assertEquals(disagreements.join(','), '12,46,47,104,105,106,107,108,109,110,111,112,113,114,168,170,172,173,174,175,177,178,179,180,181,182,183,184,186,187,188,189,190,191,192,195',
   'the new predicate differs from `b === 0 || b === 12` at exactly: 12 (granite), 46/47 (water/lava), and every cutout');
 
 // ═══════════════════════════════════════════════════════════════════

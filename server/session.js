@@ -258,13 +258,26 @@ class SessionManager {
         break;
 
       case MESSAGE_TYPES.QUEST_UPDATE:
-        // Broadcast quest progress to all players
-        this._broadcast(null, {
-          type: MESSAGE_TYPES.QUEST_UPDATE,
-          questId: msg.questId,
-          progress: msg.progress,
-          updatedBy: playerId,
-        });
+      case MESSAGE_TYPES.QUEST_SYNC:
+      case MESSAGE_TYPES.SEAL_UPDATE:
+      case MESSAGE_TYPES.BOSS_SPAWN:
+      case MESSAGE_TYPES.BOSS_STATE:
+      case MESSAGE_TYPES.BOSS_DEFEATED:
+      case MESSAGE_TYPES.BOSS_DESPAWN:
+      case MESSAGE_TYPES.BOSS_LOOT:
+        // Host → everyone. The relay holds no quest state and no boss: the host is the
+        // authority for both, exactly as it is for chunks, so these are pure forwarding.
+        // Anyone but the host sending one is ignored rather than relayed — a guest
+        // cannot announce that a seal broke.
+        this._relayFromHost(playerId, msg);
+        break;
+
+      case MESSAGE_TYPES.QUEST_CONTRIBUTE:
+      case MESSAGE_TYPES.BOSS_HIT:
+        // Client → host, with the sender's `playerId` attached — the same shape as
+        // CHUNK_REQUEST and for the same reason: the host needs to know who asked and
+        // the client is not a trusted source for its own identity.
+        this._relayToHost(playerId, msg);
         break;
 
       case MESSAGE_TYPES.HEARTBEAT:
@@ -469,6 +482,62 @@ class SessionManager {
       playerId,
       inventory: msg.inventory,
     });
+  }
+
+  /**
+   * Forward a host-authored message to every other player, unchanged.
+   *
+   * The quest, seal and boss messages are all "the host has decided something" — a pool
+   * total, a seal transition, a boss's position. The relay holds none of that state and
+   * validates none of it; its whole job is to be the wire. What it *does* enforce is who
+   * may speak: a guest that sends `SEAL_UPDATE` is dropped with a warning rather than
+   * relayed, because a client that can announce a broken seal can hand itself the finale.
+   *
+   * `targetPlayers` is honoured for the same reason `_handleChunkData` honours it — a
+   * `QUEST_SYNC` is for the one player who just joined, not for everyone.
+   */
+  _relayFromHost(playerId, msg) {
+    if (!playerId) return;
+    if (playerId !== this.hostId) {
+      console.warn(`[SESSION ${this.sessionId}] Non-host ${playerId} sent ${msg.type} — ignoring (hostId=${this.hostId})`);
+      return;
+    }
+
+    // Re-emit rather than forwarding `msg` itself: an object straight off the wire can
+    // carry any field a client felt like adding, and the relay should not be the thing
+    // that widens it. `type` is taken from the switch's own case, not from the payload.
+    const out = { ...msg, type: msg.type };
+    delete out.targetPlayers;
+
+    if (Array.isArray(msg.targetPlayers) && msg.targetPlayers.length > 0) {
+      for (const targetId of msg.targetPlayers) {
+        if (targetId === playerId) continue;
+        const target = this.players.get(targetId);
+        if (target) this._send(target.ws, out);
+      }
+      return;
+    }
+    this._broadcast(playerId, out);
+  }
+
+  /**
+   * Forward a client's message to the host alone, with the sender's `playerId` attached.
+   *
+   * `QUEST_CONTRIBUTE` and `BOSS_HIT` are the two untrusted, upward messages. The relay
+   * adds the identity because the client cannot be trusted to supply it — the same rule
+   * `_handleChunkRequest` established for D-116 — and the host validates everything else
+   * (§6.3). A host that sends one to itself is a no-op here: it calls its own handler
+   * directly through the local transport, which is §6.4's one-code-path rule.
+   */
+  _relayToHost(playerId, msg) {
+    if (!playerId) return;
+    if (playerId === this.hostId) return;
+
+    const host = this.players.get(this.hostId);
+    if (!host) return;
+
+    const out = { ...msg, type: msg.type, playerId };
+    this._send(host.ws, out);
   }
 
   /**

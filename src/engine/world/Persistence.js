@@ -16,6 +16,7 @@
  */
 
 import { ChunkManager } from './ChunkManager.js';
+import { migrateQuestState, serializeQuestState } from '../../game/data/QuestState.js';
 
 export const MAX_WORLD_SLOTS = 3;
 
@@ -173,7 +174,13 @@ export class PersistenceManager {
       name: worldData.name,
       seed: worldData.seed,
       biomeMap: worldData.biomeMap,
-      questProgress: worldData.questProgress || {},
+      // §5.1 — was `questProgress`, a write-only field in one of three disagreeing
+      // shapes. `migrateQuestState` accepts every one of them plus `undefined`, and
+      // `serializeQuestState` is what holds the write inside the 8 KB localStorage
+      // budget: completed quests are collapsed to a boolean and a timestamp, and only
+      // the active quest carries its per-contributor high-water marks.
+      questState: serializeQuestState(migrateQuestState(worldData.questState)),
+      worldgenVersion: worldData.worldgenVersion || 1,
       spawnPoint: worldData.spawnPoint || { x: 0, y: 30, z: 0 },
       createdAt: worldData.createdAt || Date.now(),
       lastPlayed: worldData.lastPlayed || null,
@@ -188,7 +195,15 @@ export class PersistenceManager {
       const confStr = localStorage.getItem(this._worldConfKey(i));
       if (confStr) {
         try {
-          worlds.push(JSON.parse(confStr));
+          const conf = JSON.parse(confStr);
+          // Migrate on the way out, so nothing above this line ever sees a legacy
+          // shape. A world config written before S0 has `questProgress` and no
+          // `questState`; one written before the biomes has no `worldgenVersion`,
+          // which means 1 and means "generate exactly as you always did" (§3.1).
+          conf.questState = migrateQuestState(conf.questState);
+          conf.worldgenVersion = conf.worldgenVersion || 1;
+          delete conf.questProgress;
+          worlds.push(conf);
         } catch { /* skip corrupt entries */ }
       }
     }

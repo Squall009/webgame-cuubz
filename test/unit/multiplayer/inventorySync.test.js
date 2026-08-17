@@ -81,19 +81,23 @@ console.log('[Constants]');
 // (`1, // Grass`, `3, // Stone`, `7, // Wood Log`) named blocks that are now bedrock,
 // cobblestone and tuff — and which refused 166 of the registry's 193 ids.
 assertEquals(VALID_BLOCK_IDS.size, BLOCK_REGISTRY.length, 'VALID_BLOCK_IDS has one entry per registry block');
-assertEquals(VALID_BLOCK_IDS.size, 193, 'VALID_BLOCK_IDS has 193 entries — the registry\'s real size');
+assertEquals(VALID_BLOCK_IDS.size, 199, 'VALID_BLOCK_IDS has 199 entries — the registry\'s real size');
 assertTrue(BLOCK_REGISTRY.every((b) => VALID_BLOCK_IDS.has(b.id)), 'every registry block id is accepted');
 assertTrue(VALID_BLOCK_IDS.has(0), 'Block ID 0 (Air) is valid');
 assertTrue(VALID_BLOCK_IDS.has(27), 'Block ID 27 (deepslate_iron_ore) IS valid — it used to be rejected');
 assertTrue(VALID_BLOCK_IDS.has(192), 'Block ID 192 (yellow_poplar_leaves) is valid');
-assertFalse(VALID_BLOCK_IDS.has(193), 'Block ID 193 does not exist and is not valid');
+// 193-195 are S4's three Corrupt blocks and are real now; 199 is past the end.
+assertTrue(VALID_BLOCK_IDS.has(193), 'Block ID 193 is corrupt_grass and IS valid (S4)');
+assertFalse(VALID_BLOCK_IDS.has(199), 'Block ID 199 is past the end of the registry and is not valid');
 assertFalse(VALID_BLOCK_IDS.has(-1), 'Block ID -1 is not valid');
 
 // VALID_NAMED_ITEMS — the canonical NAMED_ITEMS keys, all 104.
 // WAS: `size === 10` and `!has('diamond_sword')`. diamond_sword is a canonical item; the
 // old allowlist rejected it and 93 others.
 assertEquals(VALID_NAMED_ITEMS.size, Object.keys(NAMED_ITEMS).length, 'VALID_NAMED_ITEMS === the canonical NAMED_ITEMS keys');
-assertEquals(VALID_NAMED_ITEMS.size, 104, 'VALID_NAMED_ITEMS has 104 entries');
+// 109: 104, plus the five `seal_key_*` items. One shared `quest_key` could never work
+// — it is `maxStack: 1`, so a second seal's key would not fit alongside the first.
+assertEquals(VALID_NAMED_ITEMS.size, 109, 'VALID_NAMED_ITEMS has 109 entries');
 assertTrue(VALID_NAMED_ITEMS.has('coal'), 'coal is a valid named item');
 assertTrue(VALID_NAMED_ITEMS.has('golden_apple'), 'golden_apple is a valid named item');
 assertTrue(VALID_NAMED_ITEMS.has('diamond_sword'), 'diamond_sword IS defined — it used to be rejected over the wire');
@@ -111,7 +115,7 @@ assertEquals(MAX_STACK.tool, 1, 'Tool max stack is 1');
 // 104 instead of 2.
 assertTrue(
   Object.keys(NAMED_ITEMS).every((k) => getMaxStackSize(k) === NAMED_ITEMS[k].maxStack),
-  'getMaxStackSize agrees with canonical NAMED_ITEMS for all 104 items'
+  'getMaxStackSize agrees with canonical NAMED_ITEMS for all 109 items'
 );
 assertTrue(
   Object.keys(NAMED_ITEMS).every((k) => getItemCategory(k) === NAMED_ITEMS[k].category),
@@ -191,7 +195,8 @@ assertTrue(isValidTypeId(27), 'Block ID 27 is valid — it is deepslate_iron_ore
 assertTrue(isValidTypeId(192), 'Block ID 192 is valid — it is yellow_poplar_leaves');
 assertFalse(isValidTypeId(-1), 'Block ID -1 is invalid');
 assertFalse(isValidTypeId(999), 'Block ID 999 is invalid');
-assertFalse(isValidTypeId(193), 'Block ID 193 is invalid — one past the last real block');
+assertTrue(isValidTypeId(193), 'Block ID 193 is corrupt_grass and IS valid (S4)');
+assertFalse(isValidTypeId(199), 'Block ID 199 is invalid — one past the last real block');
 
 assertTrue(isValidTypeId('coal'), 'coal is valid');
 assertTrue(isValidTypeId('apple'), 'apple is valid');

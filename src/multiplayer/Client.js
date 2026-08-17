@@ -639,6 +639,36 @@ export class WSConnection {
   }
 
   /**
+   * Send QUEST_CONTRIBUTE — "I have newly gathered `delta` of this objective".
+   *
+   * A *delta*, not a total. The sender has already compared what it holds against its
+   * own high-water mark (§4.5) and this is the difference; the host adds it to the pool
+   * and never sees the raw count. The relay overwrites `contributorId`'s companion
+   * `playerId` with the sender's real one, but `contributorId` itself is the **character**
+   * id, which the host checks against the character it recorded on join.
+   */
+  sendQuestContribute(questId, objectiveKey, delta, contributorId) {
+    this.send({
+      type: MESSAGE_TYPES.QUEST_CONTRIBUTE,
+      questId,
+      objectiveKey,
+      delta,
+      contributorId,
+    });
+  }
+
+  /** Send BOSS_HIT — an attack landed, for the host to validate and apply. */
+  sendBossHit(bossId, damage, origin, direction) {
+    this.send({
+      type: MESSAGE_TYPES.BOSS_HIT,
+      bossId,
+      damage,
+      origin,
+      direction,
+    });
+  }
+
+  /**
    * Send HOST message to matchmaking.
    *
    * `maxPlayers` is D-84: the host form read `#host-max-players`, `SessionHosting.js:87`
@@ -1010,11 +1040,23 @@ export class MultiplayerClient {
   _setupGameSessionHandlers() {
     if (!this._gameSessionConn) return;
 
+    // Every type that reaches a game-session handler has to be listed here. It is a
+    // whitelist, and a type missing from it is not an error anywhere — the message
+    // simply arrives and is dropped, in silence, on every client including the one that
+    // sent it. That is exactly what happened to `QUEST_UPDATE`, which was in the
+    // protocol and relayed by the server from the day both were written and was in this
+    // list until S0 added it (§2.1). The quest, seal and boss types are here in full,
+    // including the two that travel *upward* — `QUEST_CONTRIBUTE` and `BOSS_HIT` are
+    // relayed to the host, and the host is a client of this class like any other.
     const gameEvents = [
       MESSAGE_TYPES.WELCOME, MESSAGE_TYPES.PLAYER_JOINED, MESSAGE_TYPES.PLAYER_LEFT,
       MESSAGE_TYPES.PLAYER_MOVE, MESSAGE_TYPES.BLOCK_BREAK, MESSAGE_TYPES.BLOCK_PLACE,
       MESSAGE_TYPES.INVENTORY_SYNC, MESSAGE_TYPES.CHUNK_DATA, MESSAGE_TYPES.CHUNK_REQUEST,
       MESSAGE_TYPES.TIME_SYNC,
+      MESSAGE_TYPES.QUEST_UPDATE, MESSAGE_TYPES.QUEST_SYNC, MESSAGE_TYPES.QUEST_CONTRIBUTE,
+      MESSAGE_TYPES.SEAL_UPDATE,
+      MESSAGE_TYPES.BOSS_SPAWN, MESSAGE_TYPES.BOSS_STATE, MESSAGE_TYPES.BOSS_HIT,
+      MESSAGE_TYPES.BOSS_DEFEATED, MESSAGE_TYPES.BOSS_DESPAWN, MESSAGE_TYPES.BOSS_LOOT,
       MESSAGE_TYPES.ERROR, 'disconnect', 'stateChange',
     ];
     for (const eventType of gameEvents) {
@@ -1131,6 +1173,20 @@ export class MultiplayerClient {
   sendInventory(inventory) {
     if (this._gameSessionConn) {
       this._gameSessionConn.sendInventoryUpdate(inventory);
+    }
+  }
+
+  /** Contribute a positive delta toward a pooled quest objective (§4.5). */
+  sendQuestContribute(questId, objectiveKey, delta, contributorId) {
+    if (this._gameSessionConn) {
+      this._gameSessionConn.sendQuestContribute(questId, objectiveKey, delta, contributorId);
+    }
+  }
+
+  /** Report a landed attack on a boss for the host to validate (§6.3). */
+  sendBossHit(bossId, damage, origin, direction) {
+    if (this._gameSessionConn) {
+      this._gameSessionConn.sendBossHit(bossId, damage, origin, direction);
     }
   }
 

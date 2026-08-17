@@ -70,6 +70,29 @@ const NOISE = 0.085; // per-output-pixel grain
 // ─── Shapes ───────────────────────────────────────────────────────────
 
 const SHAPES = {
+  // Seal key (S1). Five of them, one per seal, distinguished only by palette — the
+  // silhouette is deliberately identical so a player reads "a seal key" at a glance and
+  // "which one" from the colour, the same way the five altars will read.
+  // `B` is the bit, `E` the bow's inner void.
+  sealKey: [
+    '................',
+    '.....LLLL.......',
+    '....LHMMDL......',
+    '...LHMEEMDL.....',
+    '...LHMEEMDL.....',
+    '...LHMMMMDL.....',
+    '....LHMMDL......',
+    '.....LMMDL......',
+    '......LMDL......',
+    '......LMDL......',
+    '......LMDL......',
+    '......LMBDL.....',
+    '......LMDL......',
+    '......LMBDL.....',
+    '......LMDL......',
+    '.......LL.......',
+  ],
+
   ingot: [
     '................',
     '................',
@@ -395,6 +418,19 @@ const ITEMS = [
   { name: 'rabbit_meat',  shape: 'meatChunk', palette: { L: '#5a2028', H: '#f0a0a8', M: '#d4666f', D: '#a03c46' } },
   { name: 'raw_venison',  shape: 'steak',     palette: { L: '#4a1218', H: '#d4707a', M: '#a83440', D: '#75202a' } },
   { name: 'corrupt_fang', shape: 'fang',      palette: { L: '#2a0f3f', H: '#f0e0ff', M: '#c9a0e0', D: '#8f5fb0' } },
+
+  // ── S1: the five seal keys ────────────────────────────────────────
+  //
+  // `quest_key` is `maxStack: 1`, so one shared key across five dungeons could never be
+  // carried — two would not fit in a slot and the second pickup would be silently
+  // refused. Five distinct items instead (§4.3), each in its seal's colour: green for
+  // Verdant, molten orange for Ember, pale blue for Frozen, sandstone for Sunken, and
+  // deepslate grey for Deepstone.
+  { name: 'seal_key_verdant',   shape: 'sealKey', palette: { L: '#123d18', H: '#9ee88f', M: '#4fae4a', D: '#2c7330', B: '#e8f5c0', E: '#0d2a12' } },
+  { name: 'seal_key_ember',     shape: 'sealKey', palette: { L: '#4a1405', H: '#ffc46b', M: '#e0631c', D: '#9c3a0c', B: '#ffe9a8', E: '#2e0c03' } },
+  { name: 'seal_key_frozen',    shape: 'sealKey', palette: { L: '#123240', H: '#dff4ff', M: '#8fc9e8', D: '#4d8fb5', B: '#ffffff', E: '#0d2530' } },
+  { name: 'seal_key_sunken',    shape: 'sealKey', palette: { L: '#4a3a18', H: '#f0dfa8', M: '#cfae6a', D: '#95793f', B: '#fff4d0', E: '#2e2410' } },
+  { name: 'seal_key_deepstone', shape: 'sealKey', palette: { L: '#14161a', H: '#8b93a0', M: '#5a616d', D: '#343a44', B: '#c8cedb', E: '#0b0d10' } },
 ];
 
 // ─── Generation ───────────────────────────────────────────────────────

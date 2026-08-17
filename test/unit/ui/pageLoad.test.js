@@ -71,13 +71,50 @@ console.log('Group 1: every id test/e2e/saveLoad.js drives exists in the assembl
  * Scrape the harness. Two shapes reach an element: a `#id` CSS selector handed to
  * Playwright, and a `getElementById('id')` inside `page.evaluate`. Matches ending in `-`
  * are template literals (`#btn-${mode}`) and are dropped — an id cannot end in a hyphen.
+ *
+ * **D-86 (3): comments are stripped first.** This scraped the file's raw *text*, prose
+ * included, so a `#foo` written in a comment — "see #world-slots below", a markdown
+ * heading, a URL fragment — became an assertion that the assembled DOM must contain an
+ * element by that name. Writing an explanatory comment in the e2e harness could turn a
+ * unit test red, with a failure message that named an id nobody had ever added. Nothing
+ * warned about it anywhere. The strip is deliberately crude in the safe direction: it
+ * can only *remove* candidates, so the worst case is a driven id going unchecked, and
+ * the count floor below is what catches that.
  */
-const harness = fs.readFileSync(E2E_PATH, 'utf8');
+// One alternation, not two passes, and the order inside it is the whole correctness
+// argument: whichever comment opens FIRST at a given index wins. `saveLoad.js:885` is a
+// **line** comment containing the text `src/**`, and a block-comments-first pass treats
+// that `/*` as an opener and swallows 700 lines of real code with it — which is how the
+// first attempt at this fix silently dropped twelve ids that the harness genuinely
+// drives. The `(?<!:)` keeps `https://` out of it.
+const stripJsComments = (src) => src.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/[^\n]*/g, ' ');
+
+const harness = stripJsComments(fs.readFileSync(E2E_PATH, 'utf8'));
 const e2eIds = new Set();
 for (const m of harness.matchAll(/#([A-Za-z][-\w]*)/g)) {
   if (!m[1].endsWith('-')) e2eIds.add(m[1]);
 }
 for (const m of harness.matchAll(/getElementById\(\s*['"]([^'"]+)['"]/g)) e2eIds.add(m[1]);
+
+// NON-VACUITY for the strip: a `#id` that exists ONLY in a comment must not be scraped,
+// and one in real code must still be. Without this the strip could silently become a
+// no-op — or, worse, eat the whole file — and the count floor above would be the only
+// thing left standing between that and a green run over zero assertions.
+{
+  const probe = stripJsComments(
+    "// see #only-in-a-line-comment\n/* and #only-in-a-block-comment */\nawait page.click('#a-real-one');"
+  );
+  assert(!/#only-in-a-line-comment/.test(probe), 'NON-VACUITY: a #id in a line comment is stripped');
+  assert(!/#only-in-a-block-comment/.test(probe), 'NON-VACUITY: a #id in a block comment is stripped');
+  assert(/#a-real-one/.test(probe), 'NON-VACUITY: a #id in real code survives the strip');
+
+  // The regression that the first attempt at this fix actually caused, pinned.
+  const tricky = stripJsComments("// a line comment mentioning src/**\nawait page.click('#survivor');");
+  assert(/#survivor/.test(tricky),
+    'NON-VACUITY: a `/*` inside a LINE comment does not swallow the code after it (saveLoad.js:885)');
+  assert(/#a-real-one/.test(stripJsComments("await page.goto('https://x/y'); await page.click('#a-real-one');")),
+    'NON-VACUITY: a `//` inside a URL is not treated as a comment');
+}
 
 assert(e2eIds.size >= 30, `Scraped a plausible id list from saveLoad.js (${e2eIds.size} ids)`);
 for (const id of [...e2eIds].sort()) {

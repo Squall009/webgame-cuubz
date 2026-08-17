@@ -993,6 +993,17 @@ await run().then(() => {
   console.log('All tests passed!\n');
   process.exit(0);
 }).catch(err => {
+  // **D-86 (1).** `process.exit` is a throw inside a Vitest worker (`test/setup.js`), so
+  // the `process.exit(0)` two lines above unwinds straight into this handler and printed
+  // a "Test file crashed outside the assertion scope" banner on every **green** run. It
+  // was invisible only because Vitest suppresses console output for a passing file, which
+  // makes it worse rather than better: the banner is in the log the moment anyone turns
+  // interception off to read one.
+  //
+  // The verdict is already recorded by then — `setup.js` records before it throws, and
+  // first-exit-wins — so rethrowing hands it to `legacy()` untouched. A real crash has no
+  // `__cuubzExit` and still takes the banner and the exit(1).
+  if (err && err.__cuubzExit !== undefined) throw err;
   console.error(`\nTest file crashed outside the assertion scope: ${err.stack}`);
   process.exit(1);
 });

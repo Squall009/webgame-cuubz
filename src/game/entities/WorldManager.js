@@ -8,6 +8,13 @@
  *   - Tests: In-memory mock store
  */
 
+import {
+  createQuestState,
+  migrateQuestState,
+  serializeQuestState,
+  QUEST_STATE_VERSION,
+} from '../data/QuestState.js';
+
 // ============================================================
 // Constants
 // ============================================================
@@ -39,6 +46,25 @@ export const MAX_WORLD_NAME_LENGTH = 32;
 export const WORLD_LIMIT_MESSAGE = `Maximum ${MAX_WORLDS} worlds reached`;
 
 export const DEFAULT_SEED = 42;
+
+/**
+ * Worldgen version — the gate that keeps existing saves byte-identical (D-Q1, §3.1).
+ *
+ * `workerGeneration.js` derives terrain from `(cx, cz, seed)`, and saved chunks live in
+ * IndexedDB keyed `${worldId}:${cx},${cz}`. Adding the Corrupt and Lava biomes changes
+ * what *newly generated* chunks look like while already-saved chunks keep the old
+ * terrain, so a world that has already explored outward would show a visible seam where
+ * old chunks meet new.
+ *
+ * So it is versioned rather than switched: **new worlds get 2** and the new biomes;
+ * every world created before this change has no `worldgenVersion` field, defaults to
+ * **1** on load, and generates exactly as it always did. The value threads to the worker
+ * through `genParams` (`ChunkGenerator.js:44-51`), and a v1 world can be opted in from
+ * the world screen behind a "this will seam your terrain" confirmation.
+ */
+export const WORLDGEN_VERSION_LEGACY = 1;
+export const WORLDGEN_VERSION_BIOMES = 2;
+export const CURRENT_WORLDGEN_VERSION = WORLDGEN_VERSION_BIOMES;
 export const BIOME_NAMES = [
   'Deep Ocean', 'Ocean', 'Beach', 'Plains', 'Forest', 'Badlands',
   'Tundra', 'Desert', 'Mountains', 'Frozen Peaks'
@@ -223,7 +249,8 @@ export class WorldManager {
       name: trimmedName,
       seed: worldSeed,
       biomeMap,
-      questProgress: {}, // Shared quest state (world-scoped)
+      questState: createQuestState(), // §4.1 — world-scoped, shared by everyone in it
+      worldgenVersion: CURRENT_WORLDGEN_VERSION, // §3.1 — new worlds get the new biomes
       chunkReferences: [], // List of saved chunk keys
       createdAt: Date.now(),
       lastPlayed: null,
@@ -354,47 +381,94 @@ export class WorldManager {
   }
 
   // ============================================================
-  // Quest Progress Helpers (world-scoped, shared by all players)
+  // Quest State (world-scoped, shared by all players)
   // ============================================================
+  //
+  // These three replaced `getQuestProgress` / `setQuestProgress` / `advanceQuest`.
+  //
+  // The old trio were placeholders and said so: `advanceQuest` hard-coded
+  // `completed = nextStage >= 5` under the comment *"simplified — actual quest system
+  // will define stages"*, so every quest in the game was five stages long and no
+  // definition could ever say otherwise. `setQuestProgress` took an opaque `progress`
+  // whose shape nothing agreed on (§2.1). Nothing in `src/` called any of them; the
+  // only readers were `test/integration/worldPersistence.test.js`, which asserted the
+  // hard-coded 5 back at itself.
+  //
+  // `QuestSystem` owns advancement now, and this class owns only storage: hand it a
+  // state, get a state back.
 
   /**
-   * Get quest progress for a world.
+   * The world's quest state, migrated to the current schema.
+   *
+   * Migrating on read rather than on load means a world config written by any earlier
+   * version is legal input and the caller never sees a legacy shape.
+   *
+   * @returns {object|null} a v1 quest state, or null if the world does not exist
    */
-  getQuestProgress(id) {
+  getQuestState(id) {
     const world = this.getWorld(id);
     if (!world) return null;
-    return { ...world.questProgress }; // Return copy
+    if (!world.questState || world.questState.v !== QUEST_STATE_VERSION) {
+      world.questState = migrateQuestState(world.questState);
+    }
+    return world.questState;
   }
 
   /**
-   * Set quest progress for a world.
+   * Replace the world's quest state. Takes the object by reference — `saveWorldState`
+   * serializes it on the way to storage, and the live system needs to keep mutating the
+   * same object between saves.
    */
-  setQuestProgress(id, questId, progress) {
+  setQuestState(id, questState) {
     const world = this.getWorld(id);
     if (!world) return false;
-    world.questProgress[questId] = progress;
+    world.questState = migrateQuestState(questState);
     return true;
   }
 
   /**
-   * Advance a quest to the next stage.
+   * Which terrain generator this world was created with (§3.1). Absent means 1: every
+   * world made before the field existed predates the Corrupt and Lava biomes.
    */
-  advanceQuest(id, questId) {
+  getWorldgenVersion(id) {
     const world = this.getWorld(id);
-    if (!world) return false;
-    const current = world.questProgress[questId] || { stage: 0, completed: false };
-    if (current.completed) return true; // Already completed
+    if (!world) return null;
+    return world.worldgenVersion || WORLDGEN_VERSION_LEGACY;
+  }
 
-    // Determine next stage (simplified — actual quest system will define stages)
-    const nextStage = current.stage + 1;
-    const completed = nextStage >= 5; // Default: 5 stages per quest
-
-    world.questProgress[questId] = {
-      stage: completed ? 5 : nextStage,
-      completed,
-      lastUpdated: Date.now(),
-    };
-    return true;
+  /**
+   * Opt an existing world into the new biomes.
+   *
+   * One-way, and it will seam: chunks already on disk keep the terrain they were
+   * generated with, and only newly-generated ones can contain a Corrupt or Lava patch.
+   * The confirmation for that is `WorldScreen.openUpgradeModal` (S9); this method is the
+   * mechanism it drives.
+   *
+   * **D-122 — the cache is rolled back if the save throws.** The first version set the
+   * field and then tried to persist it, so a storage failure returned `{success:false}`
+   * over a cache that already said 2. Disk would have said 1, the running session would
+   * have generated v2 chunks into it, and the next load would have been a v1 world full
+   * of v2 terrain — the mixed generation this whole version gate exists to prevent,
+   * reached without the confirmation. `deleteWorld` has always ordered it the other way
+   * round; this now matches. The absent key is restored as *absent*, because that is what
+   * a pre-S4 save actually contains and `serialize()` writes the object it is given.
+   */
+  async upgradeWorldgen(id) {
+    const world = this.getWorld(id);
+    if (!world) return { success: false, error: `World "${id}" not found` };
+    if ((world.worldgenVersion || WORLDGEN_VERSION_LEGACY) >= CURRENT_WORLDGEN_VERSION) {
+      return { success: false, error: 'World is already on the current worldgen version' };
+    }
+    const had = Object.prototype.hasOwnProperty.call(world, 'worldgenVersion');
+    const previous = world.worldgenVersion;
+    world.worldgenVersion = CURRENT_WORLDGEN_VERSION;
+    try {
+      await this.storage.saveWorld(world);
+      return { success: true, world };
+    } catch (err) {
+      if (had) world.worldgenVersion = previous; else delete world.worldgenVersion;
+      return { success: false, error: `Failed to save world: ${err.message}` };
+    }
   }
 
   // ============================================================
@@ -436,7 +510,8 @@ export class WorldManager {
       name: w.name,
       seed: w.seed,
       biomeMap: w.biomeMap,
-      questProgress: w.questProgress,
+      questState: serializeQuestState(migrateQuestState(w.questState)),
+      worldgenVersion: w.worldgenVersion || WORLDGEN_VERSION_LEGACY,
       chunkReferences: w.chunkReferences,
       createdAt: w.createdAt,
       lastPlayed: w.lastPlayed,
@@ -452,7 +527,11 @@ export class WorldManager {
       name: w.name,
       seed: w.seed || DEFAULT_SEED,
       biomeMap: w.biomeMap || WorldManager.generateBiomeMap(w.seed || DEFAULT_SEED),
-      questProgress: w.questProgress || {},
+      // Migrated, not defaulted: a world written before S0 carries a `questProgress` in
+      // one of the three legacy shapes and no `questState` at all, and `migrateQuestState`
+      // turns every one of those — including `undefined` — into a valid v1 state.
+      questState: migrateQuestState(w.questState),
+      worldgenVersion: w.worldgenVersion || WORLDGEN_VERSION_LEGACY,
       chunkReferences: w.chunkReferences || [],
       createdAt: w.createdAt || Date.now(),
       lastPlayed: w.lastPlayed || null,

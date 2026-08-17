@@ -322,12 +322,27 @@ const MIXINS = [
   ['ChunkMeshGeometry', ChunkMeshGeometryMethods],
 ];
 
-{
+/**
+ * The guard itself, **exported so it can be tested** — `BUGS.md` D-90 (3).
+ *
+ * It ran at module load and threw, which is the right behaviour and made it impossible
+ * to exercise: injecting a collision means loading a module that refuses to load. It was
+ * proved by hand in three colliding configurations and had no regression test at all, in
+ * a codebase whose `test/unit/meta/globalCollisions.test.js` exists for exactly this
+ * class of defect and had never mentioned mixins. Extracting it changes nothing about
+ * when it runs — the call is two lines below — and makes those three configurations
+ * assertions instead of a memory.
+ *
+ * @param {Array<[string, object]>} mixins — `[fileLabel, methodsObject]` pairs
+ * @param {object} prototype — the class body's prototype
+ * @throws {Error} naming both owners of the first collision found
+ */
+export function assertNoMixinCollisions(mixins, prototype) {
   const seen = new Map();
-  for (const [file, methods] of MIXINS) {
+  for (const [file, methods] of mixins) {
     for (const name of Object.keys(methods)) {
       const prior = seen.get(name) ||
-        (Object.prototype.hasOwnProperty.call(ChunkMeshBuilder.prototype, name) ? 'the class body' : null);
+        (Object.prototype.hasOwnProperty.call(prototype, name) ? 'the class body' : null);
       if (prior) {
         throw new Error(`[ChunkMeshBuilder] Mixin collision: '${name}' is defined by both ` +
           `${prior} and ${file}.js. Two files cannot own the same method.`);
@@ -337,4 +352,9 @@ const MIXINS = [
   }
 }
 
+assertNoMixinCollisions(MIXINS, ChunkMeshBuilder.prototype);
+
 Object.assign(ChunkMeshBuilder.prototype, ...MIXINS.map(([, methods]) => methods));
+
+/** The pairs the guard ran over, exported so a test can prove it was a real sweep. */
+export const CHUNK_MESH_MIXINS = MIXINS;

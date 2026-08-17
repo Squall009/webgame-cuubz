@@ -23,7 +23,9 @@ console.log('==================\n');
 // ── Biome definitions ────────────────────────────────────────────────
 console.log('[Biome Definitions]');
 const biomeKeys = Object.keys(BIOME_DEFS);
-assert(biomeKeys.length === 10, `10 biomes defined: ${biomeKeys.length}`);
+// 12 since S4: the ten climate biomes plus Corrupt and Lava, which are mask overrides
+// rather than climate results — see BiomeSystem.js's BIOME_DEFS.
+assert(biomeKeys.length === 12, `12 biomes defined: ${biomeKeys.length}`);
 assert(!!BIOME_DEFS.PLAINS, 'PLAINS biome exists');
 assert(!!BIOME_DEFS.FOREST, 'FOREST biome exists');
 assert(!!BIOME_DEFS.DESERT, 'DESERT biome exists');

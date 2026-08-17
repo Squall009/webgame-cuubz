@@ -111,7 +111,17 @@ export function createSharedPerlin(seed) {
     c1:     createPerlin(sInt ^ 0x6666),
     c2:     createPerlin(sInt ^ 0x7777),
     river:  createPerlin(sInt ^ 0x8888),
-    jitter: createPerlin(sInt ^ 0xBBBB)
+    jitter: createPerlin(sInt ^ 0xBBBB),
+    // S4 — the two biome masks (§3.2). New salts, so no existing channel's output
+    // changes and a v1 world's terrain is untouched by their presence; they are only
+    // *sampled* when `worldgenVersion >= 2`.
+    //
+    // `workerGeneration.js` carries its own copy of this function (classic script,
+    // decision 14) and **must gain the same two lines with the same two salts**, or the
+    // worker and the main thread will disagree about where the Corrupt biome is — wrong
+    // fog, wrong mob spawns, wrong hazard checks, and no failing test. §2.4.
+    blight: createPerlin(sInt ^ 0xCCCC),
+    scorch: createPerlin(sInt ^ 0xDDDD)
   };
 }
 

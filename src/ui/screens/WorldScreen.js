@@ -12,9 +12,17 @@
  * `confirmDelete` is where the D-18 / H-3 chunk cleanup is reached from:
  * `WorldManager.deleteWorld` → `PersistenceManager.deleteWorld` → the IndexedDB key range.
  * `test/e2e/saveLoad.js` drives this exact path through this exact button (PR 14).
+ *
+ * **S9 added the second modal this screen owns** — the worldgen upgrade confirmation
+ * (`quest_implementation.md` §3.1, open question Q8). Unlike the delete modal it is not
+ * shared, so its handlers are wired in `init()` here rather than in `UIManager`.
+ * `test/unit/ui/worldUpgrade.test.js` drives the badge, both modal buttons and the
+ * persisted version through this file.
  */
 
-import { MAX_WORLDS, WorldManager } from '../../game/entities/WorldManager.js';
+import {
+  CURRENT_WORLDGEN_VERSION, MAX_WORLDS, WorldManager,
+} from '../../game/entities/WorldManager.js';
 import { escapeHtml } from '../../util/HTMLUtils.js';
 import {
   canOpen, hideBanner, randomSeed, setBanner, submitCreate, syncCreateButton,
@@ -79,6 +87,15 @@ export class WorldScreen {
       if (e.key === 'Enter') { e.preventDefault(); document.getElementById('btn-save-world').click(); }
       if (e.key === 'Escape') this.closeCreateModal();
     });
+
+    // ── The worldgen upgrade modal (S9) ─────────────────────────────────
+    // Wired here and not in `UIManager` because — unlike `#delete-char-modal`, whose
+    // handler lives there precisely because two screens share the element — nothing but
+    // this screen ever opens it.
+    document.getElementById('btn-confirm-upgrade-worldgen')
+      .addEventListener('click', () => this.confirmUpgrade());
+    document.getElementById('btn-cancel-upgrade-worldgen')
+      .addEventListener('click', () => this.closeUpgradeModal());
   }
 
   // ── Slot rendering ────────────────────────────────────────────────────
@@ -141,6 +158,19 @@ export class WorldScreen {
     const primaryBiome = preview.biomes.split(',')[0] || 'Plains';
     const biomeColor = BIOME_COLORS[primaryBiome] || '#4CAF50';
 
+    // S9, §3.1 / Q8 — the opt-in badge, and why it is not in `.world-slot-actions`.
+    //
+    // That row is `opacity: 0` until the slot is hovered (`screens/slots.css`), which is
+    // the right treatment for a delete button and the wrong one for the only control
+    // that makes the Corrupt and Lava biomes — and so the Verdant and Ember seals, and
+    // so the finale — reachable in a world made before S4. A player who never hovers
+    // would never learn the offer exists. So it is its own always-visible element.
+    const needsUpgrade = wm && wm.getWorldgenVersion(world.id) < CURRENT_WORLDGEN_VERSION;
+    const upgradeBadge = needsUpgrade
+      ? '<button class="world-upgrade-badge" data-action="upgrade"' +
+        ' title="New biomes available — Corrupt and Lava. Click to enable.">✦</button>'
+      : '';
+
     slot.innerHTML = `
       <div class="world-icon" style="background:${biomeColor};" title="${preview.biomes}">🌍</div>
       <div class="world-info">
@@ -148,13 +178,14 @@ export class WorldScreen {
         <span class="world-seed">Seed: ${preview.seed}</span>
         <span class="world-biomes" title="${preview.biomes}">${preview.biomes}</span>
       </div>
+      ${upgradeBadge}
       <div class="world-slot-actions">
         <button class="world-slot-action-btn delete" title="Delete world" data-action="delete">✕</button>
       </div>
     `;
 
     slot.addEventListener('click', async (e) => {
-      if (e.target.closest('.world-slot-action-btn')) return;
+      if (e.target.closest('.world-slot-action-btn, .world-upgrade-badge')) return;
       const mgr = this.deps.worldManager;
       if (mgr) {
         await mgr.selectWorld(world.id);
@@ -167,6 +198,14 @@ export class WorldScreen {
       e.stopPropagation();
       this.openDeleteModal(world);
     });
+
+    const upgradeBtn = slot.querySelector('[data-action="upgrade"]');
+    if (upgradeBtn) {
+      upgradeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openUpgradeModal(world);
+      });
+    }
 
     return slot;
   }
@@ -217,6 +256,56 @@ export class WorldScreen {
     } else {
       alert(result.error);
     }
+  }
+
+  // ── Worldgen upgrade modal (S9, §3.1 / Q8) ────────────────────────────
+
+  /**
+   * Offer the v1→v2 opt-in for one world.
+   *
+   * Which world travels on `dataset.worldId`, not in a closure. That is the shared
+   * delete modal's convention and it is the right one for a single-element modal too:
+   * a captured id survives a second `openUpgradeModal` for a different slot, and the
+   * dataset does not.
+   */
+  openUpgradeModal(world) {
+    const modal = this.ui.modals.upgradeWorldgenModal;
+    if (!modal) return;
+    document.getElementById('upgrade-worldgen-name').textContent = `"${world.name}"`;
+    modal.dataset.worldId = world.id;
+    hideBanner(document.getElementById('upgrade-worldgen-error'));
+    modal.classList.remove('hidden');
+  }
+
+  closeUpgradeModal() {
+    const modal = this.ui.modals.upgradeWorldgenModal;
+    if (!modal) return;
+    modal.classList.add('hidden');
+    delete modal.dataset.worldId;
+  }
+
+  /**
+   * Take the offer. One-way and it will seam — see `WorldManager.upgradeWorldgen`, which
+   * is the mechanism this is the button for.
+   *
+   * A failure leaves the modal **open** with the reason in its banner rather than closing
+   * over a silent no-op: `upgradeWorldgen` returns `{success:false}` for a storage error,
+   * and a world that quietly stayed on v1 would look upgraded until the player walked far
+   * enough to notice there was no Corrupt biome anywhere.
+   */
+  async confirmUpgrade() {
+    const modal = this.ui.modals.upgradeWorldgenModal;
+    const worldId = modal && modal.dataset.worldId;
+    if (!worldId) return;
+
+    const result = await this.deps.worldManager.upgradeWorldgen(worldId);
+    if (!result.success) {
+      setBanner(document.getElementById('upgrade-worldgen-error'), result.error);
+      return;
+    }
+    this.closeUpgradeModal();
+    this.render();
+    this.deps.log(`[Cuubz] Worldgen upgraded to v${CURRENT_WORLDGEN_VERSION}: ${result.world.name}`);
   }
 
   // ── Error banner ──────────────────────────────────────────────────────

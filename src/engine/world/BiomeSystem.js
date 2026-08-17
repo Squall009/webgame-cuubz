@@ -95,8 +95,68 @@ export const BIOME_DEFS = {
     subVariants:     [[BLOCK_TYPES.COARSE_DIRT, 50], [BLOCK_TYPES.STONE, 30], [BLOCK_TYPES.DIRT, 20]],
     stoneVariants:   [[BLOCK_TYPES.STONE, 40], [BLOCK_TYPES.ANDESITE, 18], [BLOCK_TYPES.DIORITE, 15], [BLOCK_TYPES.GRANITE, 17], [BLOCK_TYPES.TUFF, 10]],
     color: '#e0f7fa', name: 'Frozen Peaks'
+  },
+
+  // ── The two hazardous biomes (S4, D-Q1) ─────────────────────────────────
+  //
+  // Not climate-driven. There is no temperature/humidity combination that means
+  // "cursed", and bolting these into the cont/eros/temp/hum waterfall would displace
+  // existing biomes and change terrain everywhere. They are **mask overrides**: two
+  // separate low-frequency noise channels that beat the climate result where they exceed
+  // a threshold, so the rest of the world is untouched (§3.2).
+  //
+  // `hazard: true` marks them for `BiomeEffects` and for the seal-site sweep. The fog
+  // and sky configs for both have existed in `BiomeEffects.js:54-55` since before either
+  // biome did — written for biomes that could not be produced.
+  CORRUPT: {
+    baseY: 66,  amplitude: 8,
+    surfaceBlock: BLOCK_TYPES.CORRUPT_GRASS, subBlock: BLOCK_TYPES.CORRUPT_STONE,
+    // The surface mix IS the hazard design (§3.5): corruption is **scattered, not
+    // total**. Ordinary grass and dirt generate throughout, so there is always a route
+    // across a patch and finding it is the gameplay. A biome that replaced every
+    // surface block would be a wall, not a place.
+    surfaceVariants: [[BLOCK_TYPES.CORRUPT_GRASS, 34], [BLOCK_TYPES.GRASS, 30], [BLOCK_TYPES.COARSE_DIRT, 20], [BLOCK_TYPES.PODZOL, 10], [BLOCK_TYPES.MOSS_BLOCK, 6]],
+    subVariants:     [[BLOCK_TYPES.CORRUPT_STONE, 45], [BLOCK_TYPES.DIRT, 35], [BLOCK_TYPES.COARSE_DIRT, 20]],
+    stoneVariants:   [[BLOCK_TYPES.CORRUPT_STONE, 35], [BLOCK_TYPES.STONE, 40], [BLOCK_TYPES.DEEPSLATE, 15], [BLOCK_TYPES.TUFF, 10]],
+    color: '#4a2060', name: 'Corrupt', hazard: true
+  },
+  LAVA: {
+    baseY: 72,  amplitude: 16,
+    surfaceBlock: BLOCK_TYPES.NETHERRACK, subBlock: BLOCK_TYPES.NETHERRACK,
+    surfaceVariants: [[BLOCK_TYPES.NETHERRACK, 45], [BLOCK_TYPES.BASALT, 25], [BLOCK_TYPES.BLACKSTONE, 20], [BLOCK_TYPES.MAGMA, 10]],
+    subVariants:     [[BLOCK_TYPES.NETHERRACK, 55], [BLOCK_TYPES.BLACKSTONE, 30], [BLOCK_TYPES.BASALT, 15]],
+    stoneVariants:   [[BLOCK_TYPES.BLACKSTONE, 45], [BLOCK_TYPES.NETHERRACK, 30], [BLOCK_TYPES.BASALT, 15], [BLOCK_TYPES.STONE, 10]],
+    color: '#8a2b0a', name: 'Lava', hazard: true
   }
 };
+
+/**
+ * Mask thresholds — the two numbers that set how rare each biome is (§3.2).
+ *
+ * Target is roughly 2–4% of land area each, and these two numbers are **measured, not
+ * guessed**: over a 90,000-point sweep of the blight channel the 96th percentile is
+ * 0.441 and the 97th is 0.470, so 0.44 and 0.46 put each biome a little under and a
+ * little over 3% of the world's area. `test/unit/engine/biomeMasks.test.js` asserts the
+ * resulting land fraction stays inside 1–8%, which is wide enough not to be brittle and
+ * narrow enough to catch "the threshold was raised and the biome vanished".
+ *
+ * `cont > 0.02` is the same cutoff `BEACH` uses, so neither biome can land in an ocean:
+ * a Lava biome under water would be a lake of steam and a Corrupt seabed would be
+ * unreachable.
+ *
+ * These are load-bearing for S5 rather than cosmetic. The Verdant and Ember seal sites
+ * *must* find a patch of their biome inside `siteRing`, so if these are tuned up the
+ * spiral search starts failing and falling back to an unfiltered position.
+ */
+export const BLIGHT_THRESHOLD = 0.44;
+export const SCORCH_THRESHOLD = 0.46;
+export const MASK_MIN_CONTINENTALNESS = 0.02;
+
+/**
+ * Mask frequency. Large, so a patch is a place you walk into rather than a speckle.
+ * The two masks are offset from each other so Corrupt and Lava do not correlate.
+ */
+export const MASK_SCALE = 1400;
 
 /**
  * Biome display name → the stable id every consumer matches on.
@@ -125,8 +185,26 @@ export const BIOME_IDS = Object.freeze(Object.values(BIOME_NAME_TO_ID));
  * Widened thresholds: lower humidity cutoff for forest, added highlands biome,
  * reduced plains catch-all area.
  */
-export function selectBiome(cont, eros, temp, hum) {
+export function selectBiome(cont, eros, temp, hum, blight, scorch) {
   const isCold = temp < -0.20;
+
+  // ── The mask override (S4, §3.2) ────────────────────────────────────────
+  //
+  // Checked FIRST and above the climate waterfall, because that is what "override"
+  // means: where a mask exceeds its threshold the biome is decided and the rest of this
+  // function does not run.
+  //
+  // **`undefined` is the v1 path and must stay exactly falsy.** A world created before
+  // the biomes existed calls this with four arguments, both masks arrive `undefined`,
+  // and `undefined > 0.62` is false — so a v1 world takes the identical branch it always
+  // took and generates byte-identical terrain (§3.1). That is not an accident of
+  // JavaScript being permissive; it is the compatibility guarantee, and it is asserted.
+  if (scorch !== undefined && scorch > SCORCH_THRESHOLD && cont > MASK_MIN_CONTINENTALNESS) {
+    return BIOME_DEFS.LAVA;
+  }
+  if (blight !== undefined && blight > BLIGHT_THRESHOLD && cont > MASK_MIN_CONTINENTALNESS) {
+    return BIOME_DEFS.CORRUPT;
+  }
 
   if (cont < -0.4) return Object.assign({}, BIOME_DEFS.DEEP_OCEAN, { frozenWater: isCold });
   if (cont < -0.15) return Object.assign({}, BIOME_DEFS.OCEAN, { frozenWater: isCold });
@@ -165,9 +243,22 @@ export function selectBiome(cont, eros, temp, hum) {
  * Sample blended biome parameters at a world position.
  * Uses Gaussian-weighted grid sampling with domain warping for seamless transitions.
  */
-export function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humScale, erosScale) {
+export function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScale, humScale, erosScale, useMasks) {
   const RADIUS = 1;
   const STEP = 8;
+
+  // ── The two masks (S4) ──────────────────────────────────────────────────
+  //
+  // Sampled ONCE per column rather than per grid sample, and deliberately not blended:
+  // the climate parameters are Gaussian-blended across a 3×3 grid so biome boundaries
+  // are organic, but a mask is a hard override and blending it would produce a ring of
+  // half-corrupt terrain around every patch. `MASK_SCALE` is low-frequency, so the
+  // patches come out biome-sized rather than speckled.
+  //
+  // `undefined` when `useMasks` is false — see `selectBiome`, where that is the entire
+  // v1 compatibility guarantee.
+  const blight = useMasks ? p.blight.noise2(wx / MASK_SCALE, wz / MASK_SCALE) : undefined;
+  const scorch = useMasks ? p.scorch.noise2(wx / MASK_SCALE + 4093.7, wz / MASK_SCALE + 1721.3) : undefined;
 
   // Domain warp — jitter noise displaces coordinates for organic boundaries.
   const WARP = 120;
@@ -217,7 +308,7 @@ export function sampleBiomeParams(p, wx, wz, continentScale, contScale, tempScal
       cont += _fbm2(p.jitter, sx / 15, sz / 15, 3, 0.5, 2.0) * 0.08;
 
       const eros = p.eros.noise2((sx + warpGX) / erosScale, (sz + warpGZ) / erosScale);
-      const biome = selectBiome(cont, eros, blendedTemp, blendedHum);
+      const biome = selectBiome(cont, eros, blendedTemp, blendedHum, blight, scorch);
 
       const dist2 = dx * dx + dz * dz;
       const w = Math.exp(-dist2 * 0.6);
@@ -346,12 +437,21 @@ export var BiomeSystem = (function () {
   // against it (D-68).
   var NAME_TO_ID = BIOME_NAME_TO_ID;
 
-  function getBiomeAtWorldPos(wx, wz, seed) {
+  /**
+   * @param {number} wx @param {number} wz @param {number|string} seed
+   * @param {number} [worldgenVersion=1] — 2 enables the Corrupt and Lava masks (§3.1).
+   *   Defaults to 1 so that **every existing caller is unchanged**: `WorldStep`,
+   *   `BiomeEffects` and mob spawning all call this with three arguments today, and a
+   *   default of 2 would have quietly told them a v1 world contained biomes its terrain
+   *   does not.
+   */
+  function getBiomeAtWorldPos(wx, wz, seed, worldgenVersion) {
     var p = _createSharedPerlin(seed);
     var params = DEFAULT_PARAMS;
     var result = sampleBiomeParams(p, wx, wz,
       params.continentScale, params.contScale,
-      params.tempScale, params.humScale, params.erosScale);
+      params.tempScale, params.humScale, params.erosScale,
+      (worldgenVersion || 1) >= 2);
     var biomeName = result.biome.name;
     return {
       id: NAME_TO_ID[biomeName] || biomeName.toLowerCase().replace(/\s+/g, '_'),

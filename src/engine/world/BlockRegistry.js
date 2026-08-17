@@ -278,6 +278,47 @@ export const BLOCK_REGISTRY = [
   { id: 189, name: 'corrupt_crystal',  texture: { all: 'amethyst_cluster' },     category: 'cutout',  hardness: 2.0,  tool: 'pickaxe' },
   { id: 190, name: 'apple',            texture: { side: 'melon_side', top: 'melon_top', bottom: 'melon_top' }, category: 'cutout', hardness: 0.1 },
   { id: 191, name: 'quest_key',        texture: { all: 'iron_bars' },            category: 'cutout',  hardness: 0.1 },
+
+  // ═══════════════════════════════════════════════════════════
+  // IDs 193–195 — The Corrupt biome (S4)
+  // ═══════════════════════════════════════════════════════════
+  //
+  // **Zero new art.** Every texture here is a PNG that has shipped in
+  // `textures/blocks/` all along and that no registry entry referenced, which is why
+  // none of them appear in `manifest.json` today — the generator emits only what the
+  // registry names. Adding these three means re-running `npm run generate-manifest`,
+  // and `test/unit/meta/textureCoverage.test.js` is where forgetting shows up.
+  //
+  // Lava needs nothing: `netherrack`, `basalt`, `blackstone`, `magma`, `soul_sand`,
+  // `soul_soil`, `crying_obsidian`, `soul_lantern` and `lava` are all already here.
+  { id: 193, name: 'corrupt_grass',    texture: { side: 'warped_nylium_side', top: 'warped_nylium', bottom: 'dirt' }, category: 'solid', hardness: 0.6, tool: 'shovel' },
+  { id: 194, name: 'corrupt_stone',    texture: { all: 'sculk' },                category: 'solid',   hardness: 3.0,  tool: 'pickaxe' },
+  { id: 195, name: 'corrupt_vein',     texture: { all: 'sculk_vein' },           category: 'cutout',  hardness: 0.0 },
+
+  // ═══════════════════════════════════════════════════════════
+  // IDs 196–198 — Content the 28-quest storyline assumes and the registry lacked
+  // ═══════════════════════════════════════════════════════════
+  //
+  // `quest_implementation.md` §2.5 lists two gaps (`bed`, `bread`). Writing the quest
+  // definitions found two more, and every one of the four is a quest requirement that
+  // could never be met:
+  //
+  //   • **obsidian** — Q13 asks for 5, Q14 for 15, Q16 for 10. The registry had only
+  //     `crying_obsidian`, at hardness **-1**, which `getBlockDrop` returns `null` for.
+  //     `BLOCK_TYPES.OBSIDIAN` was a legacy *alias* pointing at it, so "collect obsidian"
+  //     meant "mine an unbreakable block that drops nothing" — three quests in Act 3 dead
+  //     behind a texture that was already on disk.
+  //   • **sandstone** — Q22 asks for 15 and §7.3 builds the Buried Hall out of it. No
+  //     entry at all, though `sandstone.png` / `_top` / `_bottom` have always shipped.
+  //
+  // 193–195 are left free: `quest_implementation.md` §3.4 assigns them to the three
+  // Corrupt blocks in S4, and taking them here would make that plan's ids wrong.
+  { id: 196, name: 'obsidian',         texture: { all: 'obsidian' },             category: 'solid',   hardness: 10.0, tool: 'pickaxe' },
+  { id: 197, name: 'sandstone',        texture: { side: 'sandstone', top: 'sandstone_top', bottom: 'sandstone_bottom' }, category: 'solid', hardness: 1.5, tool: 'pickaxe' },
+  // The bed is a crafted block, not a generated one. No bed texture ships, and rather
+  // than draw one it is what a bed is in a voxel world: wool over planks. Q06 asks the
+  // player to build a place to rest, and this is a thing you can place and stand on.
+  { id: 198, name: 'bed',              texture: { side: 'oak_planks', top: 'white_wool', bottom: 'oak_planks' }, category: 'solid', hardness: 0.2, tool: 'axe' },
 ];
 
 // ─── Convenience lookups (computed once at load) ─────────────────────
@@ -467,11 +508,29 @@ export const BLOCK_TYPES = {
   CORRUPT_CRYSTAL: BLOCK_BY_NAME['corrupt_crystal'].id,
   APPLE:           BLOCK_BY_NAME['apple'].id,
   QUEST_KEY:       BLOCK_BY_NAME['quest_key'].id,
+  OBSIDIAN:        BLOCK_BY_NAME['obsidian'].id,
+  SANDSTONE:       BLOCK_BY_NAME['sandstone'].id,
+  BED:             BLOCK_BY_NAME['bed'].id,
+  // Seal-structure materials (S5). These four were in the registry array from the
+  // start and **not in this table**, so `BLOCK_TYPES.CHISELED_STONE_BRICKS` was
+  // `undefined` — which is not an error in JavaScript, just a comparison that never
+  // matches and a block placement that silently writes `undefined`. Found by the S5
+  // worldgen test, which counted altars and got zero while the altars were there.
+  STONE_BRICKS:         BLOCK_BY_NAME['stone_bricks'].id,
+  CHISELED_STONE_BRICKS: BLOCK_BY_NAME['chiseled_stone_bricks'].id,
+  DEEPSLATE_BRICKS:     BLOCK_BY_NAME['deepslate_bricks'].id,
+  DEEPSLATE_TILES:      BLOCK_BY_NAME['deepslate_tiles'].id,
+  CORRUPT_GRASS:   BLOCK_BY_NAME['corrupt_grass'].id,
+  CORRUPT_STONE:   BLOCK_BY_NAME['corrupt_stone'].id,
+  CORRUPT_VEIN:    BLOCK_BY_NAME['corrupt_vein'].id,
   // Legacy aliases (old code may reference these)
   WOOD_LOG:        BLOCK_BY_NAME['oak_log'].id,
   LEAVES:          BLOCK_BY_NAME['oak_leaves'].id,
   PLANKS:          BLOCK_BY_NAME['oak_planks'].id,
-  OBSIDIAN:        BLOCK_BY_NAME['crying_obsidian'].id,
+  // `OBSIDIAN` used to be here, aliased to `crying_obsidian` — an **unbreakable** block
+  // that drops nothing (hardness -1). Three Act 3 quests asked the player to collect it.
+  // It is a real block above; this line is kept only as the note that the alias moved.
+  CRYING_OBSIDIAN: BLOCK_BY_NAME['crying_obsidian'].id,
   CAVE_AIR:        BLOCK_BY_NAME['air'].id,  // CAVE_AIR → same as AIR in new system
   SNOW_STONE:      BLOCK_BY_NAME['coarse_dirt'].id,
   CAVE_TORCH:      BLOCK_BY_NAME['torch'].id,
@@ -496,6 +555,11 @@ export const BLOCK_DROP_OVERRIDES = {
   diamond_ore:     'item:diamond',
   corrupt_crystal: 'item:corrupt_crystal',
   apple:           'item:apple',
+  // Breaking corrupted ground gives you ordinary dirt, exactly as `grass_block` does.
+  // The corruption is a surface condition, not a material — which is also why the
+  // hazard is "the block I am standing on", not "a thing I am carrying" (§3.5).
+  corrupt_grass:   'dirt',
+  corrupt_vein:    null,
 };
 
 /**

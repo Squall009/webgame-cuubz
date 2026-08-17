@@ -27,16 +27,18 @@
  * it on the class that now runs the real init is how a second rAF loop gets started by
  * accident — `PR16_HANDOFF.md` §4.4 flagged exactly that. `BUGS.md` **D-53**.
  *
- * ─── THE FIFTEEN STEPS ──────────────────────────────────────────────────────
+ * ─── THE STEPS ──────────────────────────────────────────────────────────────
  *
  * `init()` calls them in the order `main.js`'s banners had, which is the order the code
- * ran in and **is the authority** (`BUGS.md` D-36). Three couplings are load-bearing and
+ * ran in and **is the authority** (`BUGS.md` D-36). Four couplings are load-bearing and
  * each is restated in the file that owns it:
  *
  *   • the texture atlases (4) exist before anything draws an item icon;
  *   • the spawn search (8) reads `chunkManager.memoryCache`, so it cannot move above 7;
  *   • the mob system (9) is constructed before the inventory and handed it at 13 — the
- *     `inventory: null` in its deps is that, not an oversight.
+ *     `inventory: null` in its deps is that, not an oversight;
+ *   • quests (15) poll `state.inventory` and write the HUD template, so they come after
+ *     13 and 14. S1 added the step; the render loop is 16 now.
  *
  * ─── THE INIT-ONLY LOCALS ───────────────────────────────────────────────────
  *
@@ -53,6 +55,7 @@ import { GameState } from './GameState.js';
 import { BlockPalette } from './BlockPalette.js';
 import { CuubzLogger } from '../util/Logger.js';
 import { savePlayerState as _savePlayerState } from './savePlayerState.js'; // split for the ceiling
+import { saveWorldState as _saveWorldState } from './saveWorldState.js'; // §5.1 sibling
 
 import { initScene } from './init/initScene.js';                   // steps 1–5
 import { initSkybox } from './init/initSkybox.js';                 // step 6
@@ -63,6 +66,8 @@ import { initPlayerSync } from './init/initPlayerSync.js';         // step 11a
 import { initChunkStreaming } from './init/initChunkStreaming.js'; // step 11b
 import { initInventory } from './init/initInventory.js';           // steps 12–13
 import { initHud } from './init/initHud.js';                       // step 14
+import { initVitals } from './init/initVitals.js';                 // step 15a
+import { initQuests } from './init/initQuests.js';                 // step 15b
 
 // Debug logging — set CuubzLogger.DEBUG = true in console to enable
 // D-27: the `typeof CuubzLogger !== 'undefined'` test and its `else` branch are gone —
@@ -200,7 +205,9 @@ export class Game {
       initChunkStreaming(this);       // 11b
       initInventory(this);            // 12 block interaction   13 inventory + systems
       initHud(this);                  // 14
-      await this._startRenderLoop();  // 15
+      initVitals(this);               // 15a — health, damage, death, respawn
+      initQuests(this);               // 15b — quests, tracker, HUD, quest log
+      await this._startRenderLoop();  // 16
 
       log('[Cuubz] Game started successfully in ' + mode + ' mode');
     } catch (err) {
@@ -210,7 +217,7 @@ export class Game {
     }
   }
 
-  /** Step 15 — the collision shim, the second sleep, and the loop itself. */
+  /** Step 16 — the collision shim, the second sleep, and the loop itself. */
   async _startRenderLoop() {
     const state = this.state;
     const deps = this.deps;
@@ -222,6 +229,14 @@ export class Game {
         return chunkManager.getVoxel(Math.floor(bx), Math.floor(by), Math.floor(bz));
       }
     };
+
+    // The hazard system needs the same collision shim, and it is built one line above.
+    // §3.5's check is "the block I am standing on, right now", so it reads through
+    // exactly the handle the player's own collision does.
+    if (state.hazardSystem) state.hazardSystem.setWorld(state.chunkWorld);
+    // The boss encounter needs it too — to find the arena floor when it spawns, and to
+    // write and revert hazard pools (§8.3).
+    if (state.bossEncounter) state.bossEncounter.setWorld(state.chunkWorld);
 
     // The 500 ms that lets the last of the init settle before the render loop starts
     // taking the frame budget. Behaviour, like the 200 ms above (PR 13).
@@ -265,6 +280,14 @@ export class Game {
     _savePlayerState(this.state, this.deps);
   }
 
+  /**
+   * Persist the world's quest state — the same three call sites, the same `deps`
+   * discipline, a different object. §5.1 and `src/core/saveWorldState.js`.
+   */
+  saveWorldState() {
+    _saveWorldState(this.state, this.deps);
+  }
+
   // ============================================================
   // Lifecycle — unchanged from the Phase-0 class
   // ============================================================
@@ -301,6 +324,11 @@ export class Game {
     // silently reinstate both of the bugs this method exists to close, behind one warning.
     try {
       if (state.inventory && state.player) this.savePlayerState();
+      // Quest state is world-scoped and has no `inventory`/`player` precondition — a
+      // session that got far enough to advance a quest but died before the player
+      // existed is not a case, but a session that ends on the world screen is, and the
+      // guard above would skip it.
+      if (state.currentWorld) this.saveWorldState();
       if (state.droppedItems) state.droppedItems.clear();
     } catch (e) {
       console.warn('[Game] stop(): save/clear failed, continuing teardown:', e && e.message);

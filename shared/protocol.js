@@ -36,6 +36,11 @@
  *         a bare literal in all five of its call sites) and **HOST_REJECTED**, D-78.
  *   = 27
  *
+ * Since then: **+1** CHUNK_REQUEST (D-116, the client→host re-send ask) = 28, and
+ * **+8** for the quest, seal and boss systems (S0/S2/S6) = **36**. The eight are grouped
+ * and commented in place below; `test/unit/multiplayer/protocol.test.js` asserts the
+ * count, so this arithmetic and that number cannot drift apart silently.
+ *
  * ─── THIS IS AN ES MODULE, AND `server/package.json` SAYS `"type": "module"` ──
  *
  * One source of truth has to be importable from both sides, and the two sides are a
@@ -106,6 +111,39 @@ export const MESSAGE_TYPES = Object.freeze({
   CHUNK_REQUEST: 'CHUNK_REQUEST',
   // Was a bare literal in all five of its call sites and in neither symbol table.
   TIME_SYNC: 'TIME_SYNC',
+
+  // ── Quests and seals (S0/S2) ──────────────────────────────────────────────
+  //
+  // `QUEST_UPDATE` above predates all of these and was **dead on both ends**: the host
+  // never registered a handler for it and the client never forwarded it, so the one
+  // quest message that existed could not travel in either direction (§2.1). It is now
+  // the host's authoritative broadcast of one objective pool, and the four below are the
+  // rest of the shape it needed to be useful.
+  //
+  // Full state on join; a client's positive delta on the way up; a seal transition on
+  // the way down.
+  QUEST_SYNC: 'QUEST_SYNC',
+  QUEST_CONTRIBUTE: 'QUEST_CONTRIBUTE',
+  SEAL_UPDATE: 'SEAL_UPDATE',
+
+  // ── Boss encounters (S6) ──────────────────────────────────────────────────
+  //
+  // Mobs are client-local and `Math.random()`-driven (§2.3), so two players in one chunk
+  // see different mobs and always have. A boss cannot work that way — these five are the
+  // host-authoritative entity layer, scoped to bosses and to nothing else.
+  //
+  // `BOSS_STATE` is the only high-rate one: 10 Hz, ~120 bytes, and only while a boss is
+  // alive. `PLAYER_MOVE` already runs at ~20 Hz per player.
+  BOSS_SPAWN: 'BOSS_SPAWN',
+  BOSS_STATE: 'BOSS_STATE',
+  BOSS_HIT: 'BOSS_HIT',
+  BOSS_DEFEATED: 'BOSS_DEFEATED',
+  BOSS_DESPAWN: 'BOSS_DESPAWN',
+  // S12 — loot for a contributor who was not connected when the boss died. Host → one
+  // player, on their next join, out of `questState.pendingLoot`. It is separate from
+  // `BOSS_DEFEATED` because that message is scoped to a live boss the receiver can see,
+  // and this one arrives when there is no boss and possibly a different session.
+  BOSS_LOOT: 'BOSS_LOOT',
 
   // ── Matchmaking, client → server ──────────────────────────────────────────
   HOST: 'HOST',

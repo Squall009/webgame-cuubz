@@ -1,0 +1,61 @@
+/* ============================================================
+   Boss health bar
+   Loaded from src/ui/css/index.css — @import order is load-bearing (D-52).
+   The element is created by src/ui/hud/BossBar.js on first show, not by the
+   hud.js template: it is visible for a few minutes of a whole playthrough,
+   and pageLoad.test.js asserts the assembled DOM.
+   ============================================================ */
+
+#boss-bar {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 70vw);
+  text-align: center;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.boss-bar-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+  margin-bottom: var(--space-2xs);
+}
+
+.boss-bar-track {
+  height: 14px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid var(--overlay-white-10);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.boss-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #7b1fa2, #e53935);
+  transition: width 0.15s linear;
+}
+
+/* A shielded boss is taking no damage. Without this the player reads a frozen bar
+   as a bug and keeps swinging at something immune. */
+.boss-bar-fill.shielded {
+  background: linear-gradient(90deg, #1565c0, #64b5f6);
+}
+
+.boss-bar-phase {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-dim);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  margin-top: var(--space-2xs);
+  min-height: 12px;
+}
+
+.boss-bar-phase-count {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}

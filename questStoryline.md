@@ -323,11 +323,65 @@ Quest items are placed at deterministic locations during world generation:
 | Q27 | "Seal Master" | Prepared for the source |
 | Q28 | "World Saver" | Game complete |
 
-## Known Gaps Against the Current Build
+## Known Gaps Against the Current Build — closed
 
-Two quests in Act 1 and one in Act 4 ask for things the game does not have. Listed here so the numbers are not mistaken for a plan:
+This section used to list two quests that asked for content the game did not have. There
+were **four**, and all four are now built rather than re-specified:
 
-- **Q06** requires crafting a `bed`. There is no `bed` block and no `bed` recipe.
-- **Q19** requires 3 `bread`. `bread` is a defined item with no recipe and no source.
+- **Q06** wanted a crafted `bed`. There was no `bed` block and no recipe. There is now:
+  block 198, wool over planks, crafting-table recipe. (No bed texture ships and drawing
+  one was not worth it; a bed in a voxel world is wool over planks.)
+- **Q19** wanted 3 `bread`. `bread` was a defined item with a texture, no recipe and no
+  source anywhere in the world. It has a hand recipe from hay now.
+- **Q13, Q14, Q16** wanted `obsidian`. `BLOCK_TYPES.OBSIDIAN` was an alias for
+  `crying_obsidian` — hardness -1, unbreakable, drops nothing. Three of Act 3's five
+  quests asked the player to collect a block the game refused to let them break, and did
+  so silently. `obsidian` is a real, mineable block now (`BUGS.md` **D-118**).
+- **Q22** wanted `sandstone`, which had no registry entry at all despite its three
+  textures shipping since forever (**D-119**).
 
-Both need content added or the quest re-specified. `quest_implementation.md` §2.5 tracks them.
+`test/unit/game/questSystem.test.js` now checks **every** `contribute_item` objective in
+all 28 quests against the block registry: the item must be a real `NAMED_ITEMS` entry, or
+a block that is breakable and drops something. The next quest to ask for the impossible
+fails a test rather than a playthrough.
+
+## Implementation Status
+
+**Built.** S0–S8 all landed on `feat/quest-system`; `quest_implementation.md` §13 is the
+record of what held, what did not, and the five defects the work uncovered. Two notes for
+anyone reading the narrative above and expecting to see it move:
+
+- The **ranged attacks** described for the Lava Titan ("streams of molten debris") and the
+  Frost Serpent ("breathes freezing mist") are built as hazard *fields* rather than
+  projectiles — a pool of magma or lava, and a field of ice to be fought around. There is
+  no projectile renderer in this engine and a projectile nobody can see is worse than a
+  hazard they can. Everything else in the Boss Mechanics lines is as written.
+- The **Corrupt biome's fog and sky** and the **corrupt_wolf** and **corrupt_wisp** were
+  written years before the biome existed. They all work now, unchanged.
+
+### After the first pass — what changed in the world the storyline describes
+
+`quest_implementation.md` §14 is the engineering record. Four things in it change what a
+player actually experiences of the narrative above:
+
+- **Food is food now.** Q03's five berries, Q06's whole "prepare to survive" premise and
+  Q19's three loaves of bread all referred to items that did nothing at all: `foodRestore`
+  was a hunger number and hunger was deleted before any of this was written (`BUGS.md`
+  **D-123**). Right-click eats, one bite per 1.2 s. The Winter Supplies quest is now
+  supplies.
+- **The bosses can reach you.** Five of the six were slower than a walking player, so
+  every fight in the storyline could be won by holding the back key and clicking
+  (**D-124**). They are faster than a walk and slower than a sprint now — the Colossus and
+  the Serpent are no longer told apart by speed, but by how often and how hard they swing.
+- **The Lava biome is inhabited.** It had no mob of its own, which made the one place in
+  the game that can kill you also the emptiest, across four quests. The **ash crawler** is
+  a low, slow thing of cooled crust and molten seams — the Lava Titan's own look, small.
+  The shoreline got a **sand crab**, and hares now range into the desert, the badlands and
+  the frozen peaks.
+- **A world made before the Corrupt and Lava biomes existed can be opted in**, from a
+  badge on its slot in the world screen. Without it that save can never reach the Verdant
+  or Ember seal, and so can never reach the ending described above.
+
+Still true: the ranged attacks are hazard fields rather than projectiles, and no mob lives
+in the ocean — mobs cannot swim (**D-70**), and a fish that walks along the seabed is
+worse than no fish.

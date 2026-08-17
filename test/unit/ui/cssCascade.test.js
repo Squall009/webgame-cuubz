@@ -3,7 +3,7 @@
  *
  * ─── WHY THIS FILE EXISTS ───────────────────────────────────────────────────
  *
- * The stylesheet is 31 files loaded by an ordered `@import` manifest (`src/ui/css/
+ * The stylesheet is 33 files loaded by an ordered `@import` manifest (`src/ui/css/
  * index.css`), each one a contiguous span of the pre-split `css/style.css`. The
  * responsive layer carries **no `!important` at all** — every one of its overrides wins
  * on source order alone. That makes the manifest load-bearing, and it makes a whole
@@ -217,10 +217,13 @@ const q = (sel) => {
 };
 
 describe('the stylesheet loads in the manifest order index.css declares', () => {
-  it('parses all 31 files and keeps responsive.css ahead of utilities.css', () => {
+  it('parses all 34 files and keeps responsive.css ahead of utilities.css', () => {
     const order = importOrder();
-    // 31 files: index.css is the manifest itself, so it imports the other 30.
-    eq(order.length, 30, 'index.css imports the other 30 files');
+    // 34 files: index.css is the manifest itself, so it imports the other 33.
+    // S1 added overlays/quest-log.css, S6 added hud/boss-bar.css and S9 added
+    // screens/world-upgrade.css, all three appended at the end of the manifest so they
+    // can only override, never be silently overridden (D-52).
+    eq(order.length, 33, 'index.css imports the other 33 files');
     eq(order.length + 1, fs.readdirSync(CSS_DIR, { recursive: true })
       .filter((f) => String(f).endsWith('.css')).length,
     'and every .css file on disk is in the manifest — an unimported file is dead style');

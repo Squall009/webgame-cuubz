@@ -11,7 +11,6 @@ import { MobRenderer } from './rendering/mobRenderer.js';
 // change. That re-export was this file's only edge into SurvivalSystem.js, and it is the
 // reason `src/index.js` used to call that module "reached". PR 34 deleted SurvivalSystem.js,
 // so the import now points at the table's actual home. The table itself is unchanged.
-import { DAMAGE_SOURCES } from '../data/DamageSources.js';
 
 export class MobIntegration {
   constructor() {
@@ -64,23 +63,23 @@ export class MobIntegration {
       if (onMobDeath) onMobDeath(mob, drops);
     };
 
-    // Wire mob attack callback — deal damage to player
-    if (survivalSystem) {
-      this.mobManager.onMobAttack = (mob, damage) => {
-        if (survivalSystem && !survivalSystem.isDead) {
-          // Apply armor reduction
-          let actualDamage = damage;
-          const inventory = deps.inventory;
-          if (inventory && typeof inventory.getEquipmentStats === 'function') {
-            const stats = inventory.getEquipmentStats();
-            const armorValue = stats.totalArmor || 0;
-            const reduction = Math.min(0.8, armorValue / 30);
-            actualDamage = Math.floor(damage * (1 - reduction));
-          }
-          survivalSystem.takeDamage(actualDamage, DAMAGE_SOURCES.MOB);
-        }
-      };
-    }
+    // ─── Mob attack → player damage ───────────────────────────────────────
+    //
+    // This was an `if (survivalSystem) { … }` block that installed `onMobAttack` with
+    // its own armour-reduction arithmetic. It had been **unreachable since PR 34
+    // deleted `SurvivalSystem`**: `initMobs.js` passed `survivalSystem: null` and
+    // nothing else ever supplied one, so mobs could not damage the player at all (§2.2).
+    //
+    // S3 gives the callback a real receiver, and installs it from
+    // `src/core/init/initVitals.js` instead of here — because the armour reduction has
+    // to be the *same* reduction lava and a boss's slam use, and duplicating the
+    // formula in two files is how one of them silently becomes wrong. It lives in
+    // `PlayerVitals.applyArmor` now, and this class no longer knows what a hit point is.
+    //
+    // `survivalSystem` stays in the deps signature and stays unused: `initMobs.js`
+    // still passes it, and removing the parameter is a rename with no behaviour and
+    // three call sites.
+    void survivalSystem;
 
     // Create MobRenderer.
     //

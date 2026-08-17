@@ -20,6 +20,7 @@
  */
 
 import * as THREE from 'three';
+import { reportStepError } from '../reportStepError.js';
 import { BiomeSystem } from '../../world/BiomeSystem.js';
 import { BLOCK_TYPES } from '../../world/BlockRegistry.js';
 import { MIN_Y } from '../../world/ChunkData.js';
@@ -95,8 +96,14 @@ export function worldStep(state) {
     const wz = Math.floor(state.player.position.z);
     let biomeData = null;
     try {
-      biomeData = BiomeSystem.getBiomeAtWorldPos(wx, wz, state.chunkManager.worldSeed);
-    } catch(e) { /* Fallback to default */ }
+      // The world's generator version decides whether the Corrupt and Lava masks are
+      // sampled at all (§3.1). Passing it is what keeps the fog the player sees and the
+      // terrain the worker built in agreement — a v1 world must never report `corrupt`.
+      biomeData = BiomeSystem.getBiomeAtWorldPos(
+        wx, wz, state.chunkManager.worldSeed, state.chunkManager.genParams?.worldgenVersion
+      );
+    } catch { /* Fallback to default. D-89: bindless, because this is an EXPECTED
+           condition (an unloaded column) and not a swallowed failure. */ }
 
     if (biomeData) {
       state.biomeEffects.setBiome(biomeData.id);
@@ -185,8 +192,8 @@ export function worldStep(state) {
             tooltipId.textContent = `ID: ${blockId}`;
             tooltipName.textContent = blockName.replace(/_/g, ' ');
             tooltip.classList.remove('hidden');
-          } catch (e) {
-            // Block out of range — hide tooltip
+          } catch {
+            // Block out of range — hide tooltip. Expected, not swallowed; see above.
             tooltip.classList.add('hidden');
           }
         } else {
@@ -211,13 +218,18 @@ export function worldStep(state) {
       // Pass a biome lookup function so each chunk spawns its own biome's mobs
       const getBiomeFn = (wx, wz) => {
         try {
-          const bd = BiomeSystem.getBiomeAtWorldPos(wx, wz, state.chunkManager.worldSeed);
+          const bd = BiomeSystem.getBiomeAtWorldPos(
+            wx, wz, state.chunkManager.worldSeed, state.chunkManager.genParams?.worldgenVersion
+          );
           return bd ? bd.id : undefined;
-        } catch(e) { return undefined; }
+        } catch { return undefined; } // an unloaded column, not a failure
       };
       state.mobIntegration.update(state.game.delta, state.chunkWorld, state.player.position, state.chunkManager.renderDistance || 6, getBiomeFn);
-    } catch(e) {
-      if (state.frameCount < 10) console.warn('[Cuubz] Mob update error:', e.message);
+    } catch (e) {
+      // **D-89 is this exact catch.** It logged only while `frameCount < 10`, so after the
+      // tenth frame a throw was silent and mobs simply stopped updating for the rest of
+      // the session — in the one subsystem D-77 had just put a renderer inside.
+      reportStepError(state, 'Mob update', e);
     }
   }
 }

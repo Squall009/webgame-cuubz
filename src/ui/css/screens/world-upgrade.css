@@ -1,0 +1,68 @@
+/* ============================================================
+   The v1→v2 worldgen opt-in — S9, quest_implementation.md §3.1 / Q8
+   Loaded LAST from src/ui/css/index.css — @import order is load-bearing (D-52),
+   and appending is what keeps a new sheet able to override rather than be
+   silently overridden.
+   ============================================================ */
+
+/* The badge on a world slot that predates the Corrupt and Lava biomes.
+
+   Deliberately NOT `.world-slot-action-btn`, and deliberately not inside
+   `.world-slot-actions`: that row is `opacity: 0` until the slot is hovered
+   (screens/slots.css), which is correct for a delete button and wrong for the one
+   control that makes half the endgame reachable. This one is always visible.
+   `test/unit/ui/worldUpgrade.test.js` asserts it stays outside that row. */
+.world-upgrade-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(76,175,80,0.6);
+  border-radius: var(--radius-md);
+  background: rgba(76,175,80,0.25);
+  color: var(--color-primary-light);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The offer is easy to miss on a screen the player has already learned to skim past,
+     so it breathes. 2 s is slow enough to read as "available", not as an alarm. */
+  animation: world-upgrade-pulse 2s ease-in-out infinite;
+}
+
+.world-upgrade-badge:hover {
+  background: rgba(76,175,80,0.6);
+  color: var(--color-white);
+}
+
+@keyframes world-upgrade-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* --- The confirmation modal's own copy ---
+   `#upgrade-worldgen-name` is the sibling of `#delete-char-name` (components/modal.css)
+   and shares its weight, in the affirmative colour rather than the danger one: this is
+   an opt-in, not a deletion. */
+#upgrade-worldgen-name {
+  margin-bottom: var(--space-lg);
+  color: var(--color-primary-light);
+  font-weight: bold;
+}
+
+/* The seam warning. §3.1 asks for it in as many words, so it is set apart from the
+   paragraph above it rather than being a fourth line of body copy nobody reads. */
+.modal-note.warning {
+  color: var(--color-warning);
+  border-left: 3px solid var(--color-warning);
+  padding-left: var(--space-md);
+}
+
+.modal-note.warning strong {
+  color: var(--color-warning);
+  text-decoration: underline;
+}

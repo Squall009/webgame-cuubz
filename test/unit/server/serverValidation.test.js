@@ -7,7 +7,7 @@
 
 import { it } from 'vitest';
 import { legacy } from '../../helpers/legacy.js';
-import { validateBlockBreak, validateBlockPlace, validateMove, validateQuestUpdate } from '../../../src/multiplayer/Host.js';
+import { validateBlockBreak, validateBlockPlace, validateMove, validateQuestContribute } from '../../../src/multiplayer/Host.js';
 import { InventoryValidator, VALID_BLOCK_IDS, VALID_NAMED_ITEMS, MAX_STACK, isValidTypeId, validateSlot, slotsEqual, DEFAULT_INVENTORY_ROWS, DEFAULT_INVENTORY_COLS, validateInventorySlots as invSyncValidateInventory } from '../../../src/multiplayer/InventorySync.js';
 import { HOST_STATE, DEFAULT_HOST_CONFIG, RateLimiter } from '../../../src/multiplayer/Host.js';
 
@@ -193,27 +193,39 @@ function runTests() {
   vResult = nullValidator.validateBlockPlace('nullplayer', 3, 0);
   assert(vResult.valid === false, 'All-null inventory rejected for block place');
 
-  group('7. Quest update validation — numeric progress');
+  group('7. Quest contribution validation — a positive delta from a named contributor');
 
-  // Valid quest progress update — progress must be a number
-  result = validateQuestUpdate('player1', { questId: 'Q01', progress: 5 });
-  assert(result.valid === true, 'Valid quest update accepted (numeric progress)');
+  // S0 replaced `validateQuestUpdate({questId, progress})` with this. Pooled objectives
+  // (§4.5) are a party-wide sum, so what travels is a *delta* credited against the
+  // sender's own high-water mark — not a progress figure, which two players could never
+  // agree on.
+  const contribution = { questId: 'q01', objectiveKey: 'wood_log', delta: 5, contributorId: 'char_a' };
 
-  // Invalid: missing questId
-  result = validateQuestUpdate('player1', { progress: 5 });
-  assert(result.valid === false, 'Quest update without questId rejected');
+  result = validateQuestContribute('player1', contribution);
+  assert(result.valid === true, 'Valid contribution accepted');
 
-  // Invalid: null progress data
-  result = validateQuestUpdate('player1', { questId: 'Q01', progress: null });
-  assert(result.valid === false, 'Null progress data rejected');
+  result = validateQuestContribute('player1', { ...contribution, questId: undefined });
+  assert(result.valid === false, 'Contribution without questId rejected');
 
-  // Invalid: negative progress
-  result = validateQuestUpdate('player1', { questId: 'Q01', progress: -1 });
-  assert(result.valid === false, 'Negative progress rejected');
+  result = validateQuestContribute('player1', { ...contribution, objectiveKey: undefined });
+  assert(result.valid === false, 'Contribution without objectiveKey rejected');
 
-  // Valid: zero progress (starting a quest)
-  result = validateQuestUpdate('player1', { questId: 'Q01', progress: 0 });
-  assert(result.valid === true, 'Zero progress accepted (quest start)');
+  result = validateQuestContribute('player1', { ...contribution, delta: null });
+  assert(result.valid === false, 'Null delta rejected');
+
+  result = validateQuestContribute('player1', { ...contribution, delta: -1 });
+  assert(result.valid === false, 'Negative delta rejected');
+
+  // The one that inverted: `progress: 0` used to be valid ("quest start"). A delta of
+  // zero is not a contribution and the pool is monotonic, so it is rejected.
+  result = validateQuestContribute('player1', { ...contribution, delta: 0 });
+  assert(result.valid === false, 'Zero delta rejected — a delta describes a change, not a state');
+
+  result = validateQuestContribute('player1', { ...contribution, contributorId: undefined });
+  assert(result.valid === false, 'Contribution without contributorId rejected');
+
+  result = validateQuestContribute('player1', contribution, 'char_b');
+  assert(result.valid === false, 'Contribution claiming another character rejected');
 
   group('8. Multi-player validation — each player validated independently');
 

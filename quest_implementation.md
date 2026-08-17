@@ -1,9 +1,16 @@
 # Cuubz — Quest, Seal and Boss Implementation Plan
 
-> **Status: PLAN ONLY. Nothing here is implemented.**
+> **Status: IMPLEMENTED. S0–S8 all landed on `feat/quest-system`, S9+ in §14.**
 > Companion to `questStoryline.md`, which is the *narrative* design. This file is the
 > *engineering* design: what exists, what does not, what has to be built, in what order,
 > and which decisions are still open.
+>
+> **Read §13 first.** The plan below is preserved as written, because it is the record of
+> what was decided and why, and several of its judgements turned out to matter more than
+> they looked. §13 is what actually happened: which parts held, which numbers were wrong,
+> the five defects the work uncovered (D-117 through D-121), and the answers taken to the
+> four open questions §12 left. **§14 is the follow-up session** — the gaps §13 named,
+> closed or explicitly declined.
 
 **The headline:** `questStoryline.md` describes a feature that this codebase has almost
 none of the machinery for. The quest *data* items exist (`quest_key`, `corrupt_crystal`),
@@ -879,3 +886,359 @@ by player count (2× for four players?) is unspecified. Not answerable until S3 
 §3.1 gates the new biomes behind `worldgenVersion`, so existing saves are untouched. Offering
 an opt-in upgrade means a "this will seam your terrain" confirmation in the world screen.
 The alternative — new worlds only, no upgrade path — is simpler and needs no UI.
+
+
+---
+
+## 13. What actually happened
+
+Nine stages, nine commits, `feat/quest-system`. **75 test files, 531 tests, lint clean.**
+
+### The stages, and what each one cost
+
+| Stage | Landed | Notes |
+|---|---|---|
+| **S0** | one schema, migration, `saveWorldState`, both broken wire routes | Found **D-117** |
+| **S1** | 28 quests, `QuestSystem`, polling tracker, HUD writer, quest log | Found **D-118**, **D-119** |
+| **S2** | `QuestSync`, pooled objectives across four players, real-relay test | Found **D-120** |
+| **S3** | `PlayerVitals`, armour, death, respawn, the health meter's first writer | — |
+| **S4** | Corrupt + Lava as real biomes, `worldgenVersion`, `HazardSystem` | The §2.4 guard now exists |
+| **S5** | `SealSites`, altars, arenas, the spire, `SealSystem` | Found **D-121**; spiral was 38.8% |
+| **S6** | `BossEntity`, `BossEncounter`, `BossSync`, boss bar, all six boss defs | Two bugs caught by their own tests |
+| **S7** | every seal reachable and completable, end to end | Projectiles deliberately skipped |
+| **S8** | the finale's own state machine, the spire gate, the full 28-quest run | — |
+
+### The plan's own judgements, scored
+
+**Right, and load-bearing:**
+
+- *"Roughly 60% of the work below is prerequisites, not quests."* Accurate. S0, S3 and S4
+  are all prerequisite and are three of the four hardest stages.
+- *§2.4, "the constraint that shapes all of S4".* The duplicated `selectBiome` was exactly
+  as dangerous as described, and the sweep that now guards it also found **D-121** in the
+  neighbouring hand-maintained table.
+- *§8.1, "reuse the mob renderer — do not write a new one".* This is why S6 is a state
+  machine and not a rendering project, and why six bosses cost roughly what one would
+  have.
+- *§8.2, initialise every phase timer.* The rule and the test it demanded are both here.
+- *"Building the hazardous biomes first means the AoE ground effects come almost free at
+  S6."* Free, in fact — a boss's lava pool is the same block with the same damage tick,
+  and `BossEncounter` contains no damage code for it at all.
+- *§4.5's verification item* — "confirm `character.id` is present on the wire and not
+  stripped". It was stripped. That is D-117.
+
+**Wrong, or incomplete:**
+
+- **§2.5's content audit missed two.** It listed `bed` and `bread`. Writing the quest
+  definitions found `obsidian` (D-118 — an alias for an unbreakable block, wanted by
+  three Act 3 quests) and `sandstone` (D-119 — no registry entry at all). All four are
+  closed, and a test now checks every objective in all 28 quests against the registry.
+- **§7.1's spiral parameters were far too small.** The plan asks for ≥95% and the first
+  implementation of its described algorithm scored **38.8%**. The problem was reach, not
+  density. 1200 probes at 150 blocks apart on a golden-angle sunflower: 98.8%, at a mean
+  of 156 probes.
+- **Q13 wants 5 obsidian, not 20.** A test written against the plan's own act table had
+  to be retargeted at Q14. Minor, but it is the kind of thing that only shows up when
+  something drives the definitions.
+
+### The four open questions, answered
+
+- **Q3 — should a guest keep anything?** *No*, as the plan assumed. A guest holds a view,
+  discarded on disconnect; their contributions persist in the host's world keyed on their
+  character id. Titles are world-scoped, not character-scoped. Revisit if anyone asks.
+- **Q4 — are seal arenas protected?** *No.* §7.3's cheapest answer, taken. The altar is a
+  **place**, not a block, so a player who mines it has made a hole rather than destroyed
+  their run, and the encounter resets if the arena empties for 60 s.
+- **Q5 — difficulty, and what a wipe costs.** A wipe costs time and nothing else: full HP,
+  no partial credit. HP scales ×1.2 per extra player (×1.6 at four), not the ×2 the plan
+  floated — a four-player fight should be longer, not a health-bar marathon. One formula,
+  one place, cheap to retune once anyone has played it.
+- **Q8 — should existing worlds be offered the biome upgrade?** Both. New worlds are
+  `worldgenVersion: 2`; existing ones stay at 1 and generate byte-identically.
+  `WorldManager.upgradeWorldgen(id)` exists for the opt-in — **the world-screen
+  confirmation UI is not built**, so today the upgrade has a mechanism and no button.
+  *(Built in S9. See §14.)*
+
+### What is deliberately not built
+
+- **Projectiles.** §8.3 lists them as the one ability the engine cannot do, and S7's scope
+  makes them conditional. There is no projectile rendering path in this codebase, and a
+  projectile with no renderer repeats precisely the mistake §8.1 spends a section on. The
+  storyline's two ranged attacks are hazard fields instead: the Lava Titan's molten debris
+  is a magma pool that becomes lava below 40%, and the Frost Serpent's freezing breath is
+  a field of ice to be fought around. Same trade §8.3 made for the AoE effects.
+- ~~**The v1→v2 world-screen upgrade button.** Mechanism yes, UI no. See Q8.~~
+  **Built in S9 — §14.** It was the largest of these: without it no world made before S4
+  can reach the Verdant or Ember seal, and so cannot reach the finale at all.
+- ~~**Boss loot for offline contributors.** Loot goes to every contributor who is present
+  at the kill. A player who fought and disconnected before it died keeps their `brokenBy`
+  entry and gets nothing, because there is nowhere to put it.~~
+  **Built in S12 — §14.** There is somewhere to put it: `questState.pendingLoot`, which is
+  the same place Q3 already decided everything else a guest earns lives.
+
+### Verification
+
+Browser e2e cannot run in this environment (§11), so every UI claim is a jsdom assertion
+against the real templates and the real writers — 23 of them across the quest tracker, the
+quest log and the health meter. The multiplayer claims run against the **shipped relay**
+over real WebSockets with a real `HostManager`. The two worldgen files are driven by
+evaluating the actual worker source in a `vm` context, because an import would be testing
+a different program than the one the worker loads.
+
+---
+
+## 14. The follow-up session (S9+)
+
+§13 closed with four named gaps and a bug ledger. This section is the record of the
+session that worked on them, in the same spirit: what landed, what was judged not worth
+building, and what each judgement cost. It does not rewrite §13 — that is the record of
+S0–S8 as it stood.
+
+### S9 — the upgrade has a button
+
+§13's *"the upgrade has a mechanism and no button"* was the largest real gap, and not
+cosmetically: a world made before S4 stays at `worldgenVersion: 1` forever, generates no
+Corrupt and no Lava, and therefore can never reach the Verdant or the Ember seal. Two of
+the five the finale gate requires (§3.7) are unreachable, so the endgame is unreachable,
+in every save that predates this branch. That is the whole of the argument for building
+it now rather than deferring it again.
+
+**Where the control lives, and why it is not in `.world-slot-actions`.** The obvious place
+is beside the delete button. That row is `opacity: 0` until the slot is hovered
+(`src/ui/css/screens/slots.css`), which is exactly right for a destructive action nobody
+should find by accident and exactly wrong for an offer the player has to *discover* — a
+player who never hovers a world slot would never learn the offer exists, and the symptom
+would read as "the Corrupt biome doesn't spawn" rather than as an unaccepted opt-in. So
+the badge (`.world-upgrade-badge`) is its own always-visible element in the slot's other
+corner, slow-pulsing, and `test/unit/ui/worldUpgrade.test.js` asserts it stays outside
+that row so a later tidy cannot quietly bury it.
+
+**What the confirmation says.** §3.1 asks for "this will seam your terrain" and the word
+*seam* is the contract, so it is in the copy verbatim and asserted. The modal also states
+what is gained (the two biomes, and the two seals that live nowhere else) before what it
+costs, because the cost paragraph is meaningless without it, and that the change cannot
+be undone. A player who cancels has changed nothing.
+
+**Which world the modal is about travels on `dataset.worldId`**, the way the shared delete
+modal's does, rather than in a closure captured at open time. The closure works and breaks
+the moment two opens interleave; there is an assertion for the dataset specifically.
+
+**Wiring lives in `WorldScreen`, not `UIManager`.** `UIManager` owns the delete modal's
+handler for one reason only — the element is shared between two screens and neither can
+own it without reaching into the other. Nothing shares this one.
+
+**D-122, found by writing the failure case.** `upgradeWorldgen` set the version and *then*
+saved, so a storage throw returned `{success:false}` over a cache that already said 2 —
+and the cache is what `genParams` reads. The session would have written v2 chunks into a
+world that reloads as v1: the mixed terrain the version gate exists to prevent, without
+the confirmation, and permanent once the chunks are on disk. The failure path had no
+caller at all before this commit, which is why S4 could add the method and not see it.
+Fixed by rolling the cache back, restoring an absent key as absent.
+
+**Verification** is jsdom against the real templates and the real `WorldManager` over an
+in-memory store, per §11 — 12 assertions, one of them confirmed red against the pre-fix
+`upgradeWorldgen`.
+
+### S10 and S11 — the balance pass, and the hole it found first
+
+The brief was the six sets of constants nobody had played: boss HP and phase thresholds,
+`scaledMaxHp`'s per-player scaling, hazard DPS, the regeneration rate and the
+invulnerability window, and the biome mask thresholds. Reasoning about them needs a model
+of the player, so the model is stated first, because half the findings are relations
+between a boss number and a player number and neither side could previously see the other.
+
+**The player, as the code actually defines them.** 20 HP. Walks at 5 blocks/s, sprints at
+8. Swings 7 blocks (`CombatStep`'s `maxDist`, the same 7 as `BlockInteraction.breakRange`).
+Sustained damage is `weapon.damage × (4.0 + weapon.attackSpeed)` — stone sword 15.4/s, iron
+19.8, diamond 26.4, netherite 33.0. Armour reduces by `min(0.8, totalArmor/30)`: a full
+iron set is 50%, diamond 63%, netherite 67%.
+
+**The first finding was that the player had no way to heal at all**, which makes "how hard
+should a boss hit" unanswerable. That is **D-123** and S10: nine food items carried a
+`foodRestore` that nothing read, because it was a hunger number and hunger went with
+`SurvivalSystem` in PR 34. Q03 pays out berries, Q19 asks for bread, and both were stacks
+of nothing. Right-click now eats, at one bite per 1.2 s. Everything below assumes it.
+
+**D-124 — five of the six bosses could not reach a walking player.** Base speeds were 3.2,
+2.6, 5.0, 2.2, 2.8 and 3.6 against a walk speed of 5, and melee ranges were 3.4–5.2 against
+a reach of 7. The whole game was beatable by holding the back key and clicking. Speeds are
+5.2–5.8 now — above a walk, below a sprint in every phase, so a boss can catch you and you
+can still leave — and melee ranges are 5.0–6.4, still under the player's reach so a safe
+band exists, but a corridor rather than a room. `PLAYER_WALK_SPEED`,
+`PLAYER_SPRINT_MULTIPLIER` and `PLAYER_ATTACK_REACH` are exported for the first time,
+because a relation nothing can see is a relation nothing can check.
+
+**What that cost.** The speed range was [2.2, 5.0] and is now [5.2, 5.8]. "Slow, enormous"
+and "darting" are no longer carried by speed at all; they are carried by attack cooldown
+(the Colossus swings every 2.2 s, the Serpent every 1.1 s), by damage per hit, and by which
+closer each one gets. That is a real loss of texture and it is the price of the bosses
+being able to touch you.
+
+**The rest, one line each, with the reason rather than the number:**
+
+| What | From → to | Why |
+|---|---|---|
+| Boss HP | 400/520/**560**/620/680/1200 | Only the Frost Serpent moved. It had 480 against the Lava Titan's 520, so Act 4's boss was a shorter fight than Act 3's against a player who had since found diamonds — the one place the curve went backwards |
+| Seal-boss enrage | 0.4 → **0.5** | The enrage is where each boss's *third* ability appears. At 40%, half a fight's mechanical content arrived for the last 40% of the bar and then the fight ended |
+| `scaledMaxHp` | ×0.2 → **×0.75** per extra player | Q5's original reasoning was wrong arithmetic. Four players deal ~4× the damage, so ×1.6 made a full-party fight **40%** of the solo one, not longer. And a party is *less* dangerous per head — `_nearestPlayer` targets exactly one of them — so scaling has to hold duration flat and let the safety be the reward. ×3.25 at four players is ~80% of solo |
+| Magma DPS | 1.0 → **2.0** | The table has to read as three bands: lava is death, a boss pool means move, corruption is attrition. Magma and toxic slime were both in the attrition band, so a Lava Titan's ground slam cost 0.5 HP/s through iron armour and there was no reason to step out of it |
+| Toxic slime DPS | 1.5 → **2.5** | Same band, and it has to stay nastier than magma — it is the Warden's *enraged* pool and the Overlord's true-form floor |
+| Lava DPS | 8.0, unchanged | §3.5's load-bearing claim: ~2.5 s from full, ignoring armour and ignoring the invulnerability window. It is the only hazard that kills by surprise and that is the point |
+| Corruption DPS | 0.25, unchanged | §3.5's own description holds exactly: 3 s to cross costs under 1 HP, a minute of mining costs more than half the bar |
+| Regen rate | 0.5 → **1.0** HP/s | The loop a boss arena forces is fight → leave → wait → return, and the encounter resets after **60 s** of an empty arena. At 0.5 HP/s recovering from 4 HP took 8 + 32 = 40 s, leaving 20 s of margin before the attempt was discarded. Nobody chose that; it fell out of two constants set three stages apart. 28 s now. Raising the *rate* is safe because the **delay** is what keeps regen out of combat, and every hazard lands a hit at least every 4 s |
+| Regen delay | 8 s, unchanged | It is the actual gate. See above |
+| Invulnerability | 0.4 s, unchanged | Examined and left, which is a decision worth recording. It is a throughput guard, not a fairness window, and the shortest attack cooldown anything in the game has is 0.8 s — so it has never suppressed an intended hit. Growing it would silently start eating boss swings |
+| Mask thresholds | 0.44 / 0.46, unchanged | These were **measured** rather than guessed (§3.2, a 90,000-point percentile sweep for ~3% of land area each) and the quests that consume the biomes were checked against them: Q14 wants 20 blackstone, which is 20% of the Lava surface mix in a patch hundreds of blocks across at `MASK_SCALE` 1400, and S5's spiral finds a site 98.8% of the time. Nothing to fix |
+
+**What a balance test can honestly claim.** `test/unit/game/bossBalance.test.js` — 42
+assertions — cannot say whether a fight is fun. It holds the relations that decide whether
+a fight is a fight at all: a boss outpaces a walk and not a sprint; its reach is under the
+player's but not far under; HP never goes backwards along `BOSS_ORDER`; the party-scaling
+formula's *implied duration ratio* stays in [0.75, 1.0]; the hazard table reads as three
+bands; a full regeneration fits inside the arena reset; and the invulnerability window
+stays below the shortest real cooldown. It was red on 15 of those before the change.
+
+### S12 — loot for contributors who were not there
+
+§13's third deliberate omission: *"a player who fought and disconnected before it died
+keeps their `brokenBy` entry and gets nothing, because there is nowhere to put it."*
+
+**Built, not declined**, and the argument for building it is that Q3 had already decided
+the shape. A guest holds a *view*; their contributions live in the host's world keyed on
+their character id; they carry nothing home. Pending loot is one more of those, so it
+goes where the rest of it goes — `questState.pendingLoot`, a map from contributor id to
+what they are owed — and the host hands it over on their next join. Nothing new was
+invented; an existing rule was applied to one more thing.
+
+**The version did not bump, deliberately.** `QuestState.js` says to bump when a field
+changes meaning, and `migrateQuestState` turns an unrecognised `v` into a **fresh state**
+— so bumping to 2 would erase the quest progress of every world written before this stage
+in order to add a map that is empty in all of them. `pendingLoot` is purely additive and
+its absence has exactly one correct reading, `{}`, so it is defaulted. A version bump is
+for a field whose old value has to be *translated*, and there is no old value here. The
+test asserts the no-bump path preserves progress, which is the property that matters.
+
+**The 8 KB budget is why it merges by item.** §4.1's serialized state lives in
+`localStorage` beside two other world configs. Counts are merged per item and the map is
+capped at `MAX_PLAYERS_LIMIT` contributors, exactly as `brokenBy` is — so a player who
+missed all six bosses holds one entry per *distinct drop across the whole game*, which is
+five, not eighteen. The budget test now includes four contributors each owed the maximum
+of all five and still passes.
+
+**At most once, and the window left open on purpose.** The entry is cleared on a
+successful send, not on an acknowledgement. An ack makes delivery at-*least*-once: a lost
+ack is a re-send and a re-send is duplicated diamonds. D-117 is this repo's standing
+lesson about crediting the same thing twice across a reconnect and the same argument
+applies to an item grant. So the residual loss is "the socket died between the host's
+write and the client's read" — milliseconds, against the original bug's window of an
+entire boss fight — and an unsent message leaves the entry exactly where it was.
+
+**`BOSS_LOOT` is a new message type rather than a reuse of `BOSS_DEFEATED`**, which is the
+37th. `handleDefeated` opens with `if (!this.boss || data.bossId !== this.boss.id) return`
+and every property that guard depends on is false at delivery time: there is no boss, no
+seal is contested, and it may be a different session on a different day. A message that
+arrives when the thing it is about is gone needs a handler that does not look for it.
+
+**Who counts as absent** is injected into `BossEncounter` rather than derived there —
+that class has positions, not players. `initQuests` supplies the predicate from
+`host.getPlayerList()`, which already excludes anyone whose `connected` flag is down; a
+player who blipped and came back counts as present, because D-120 taught the host how to
+set that flag back up. Single-player passes no predicate and the default is always-true.
+
+Verified through the shipped relay (`test/integration/questSync.test.js`): a guest drops,
+a boss they fought dies, they rejoin, and `BOSS_LOOT` arrives at them and at nobody else,
+with `targetPlayers` stripped by the relay. Confirmed red with the flush disabled.
+
+### S13 — the empty biomes, and D-125
+
+D-68's residue: seven biomes with no mob at all, pinned as a ledger line in
+`test/unit/game/mobBiomes.test.js`. Five are closed and two are declined.
+
+**`lava` is the one this branch owed.** S4 built the biome and gave it no inhabitant,
+which left the only place in the game that can kill you also the emptiest — and Acts 3's
+Q13–Q16 all send the player there. `ash_crawler` is a slow, low, six-legged hostile in
+the Lava Titan's own visual language (basalt-black plates over molten seams) so the biome
+reads as one place. Deliberately **slower than the player's walk**, which is the opposite
+of the call D-124 made for bosses and for the same reason stated in reverse: in the Lava
+biome the floor is the threat, and a hostile you cannot walk away from would mean dying
+to a chase instead of to your own footing.
+
+**`beach` got `sand_crab`**, the game's third passive and the only one of the remaining
+six a land animal can honestly fill.
+
+**`desert`, `badlands` and `frozen_peaks` were filled with mobs that already exist** —
+`rabbit` to all three, `stone_golem` to badlands. Three near-identical new definitions
+would have bought one ledger line each and 250 lines of hand-authored geometry that no
+renderer in this environment can check; a hare is what those three biomes actually have.
+`badlands` is a special case worth naming: it lost its only mobs when S4 sent the two
+corrupt ones back to the Corrupt biome they were written for, so it was empty by our doing.
+
+**`deep_ocean` and `ocean` are declined, and the reason is D-70.** Mobs have no buoyancy,
+no swim and no drown — `_findSpawnPosition` returns seabed+1 and `_resolveAxis` does not
+stop them at the waterline — so anything spawned in an ocean walks around on the bottom.
+An aquatic mob in a game with no swimming is half a mechanic with no way to see the other
+half working, which is §8.1's rule and the deleted `Boss.js`'s whole lesson. Those two
+rows belong to whoever closes D-70, and the ledger assertion now says so in the file.
+
+**D-125, found looking for something the Lava mob could legitimately drop.** `stone_golem`
+dropped the *string* `'cobblestone'`, which is not a `NAMED_ITEMS` key. `addItem` accepts
+any string, so it landed in the bar looking fine and then could not be placed, could not
+be crafted with, and would not stack with the cobblestone the player mined. Same family as
+D-118 and D-119, in the one dimension S1's guard did not cover. The fix is one constant;
+the deliverable is the guard that resolves **every** mob drop against the registry, which
+now sits next to the biome-name guard in the same file.
+
+### S14 — closing what could be closed cleanly
+
+The last item on the brief: *anything in `BUGS.md`'s Open table you can close cleanly.*
+Four rows moved. What was declined is recorded with the reason, because a row that was
+looked at and left is different from one nobody read.
+
+**D-89 — closed, and the fix is the one the row specified.** Its status field already said
+what to build: *"a one-shot latch: report the first throw after frame 10 and then go
+quiet."* The row names `WorldStep.js:219-221`, where a `try/catch` logged only while
+`frameCount < 10`, so after the tenth frame a throw was silent and mobs stopped updating
+for the rest of the session. **The idiom was in nine places.** `CombatStep` had one,
+`QuestStep` had six — S1 through S8 each added a system and copied its neighbour, and one
+of those six is S10's, written this session — and `WorldStep` had two. Fixing the one site
+D-89 happens to name would have moved the defect. `reportStepError` is the latch, the nine
+sites route through it, and the test sweeps `src/engine/loop/steps/` for the raw idiom so
+a step added tomorrow that copies from its neighbours fails a test instead of going silent
+in production. Three of its ten assertions were red beforehand.
+
+**D-86 (1) and (3) — closed.** (1) is live and slightly worse than the row says: the
+"Test file crashed outside the assertion scope" banner prints on a **green** run and is
+invisible only because Vitest suppresses console output for passing files, which means it
+is there the instant anyone turns interception off. Five of the six named files had lost
+their tails to later edits; the sixth rethrows the exit signal now. (3) is the
+comment-scraping trap, and **the fix bit back once in a way worth recording**: stripping
+block comments before line comments swallowed 700 lines of `saveLoad.js`, because line 885
+is a *line* comment containing the text `src/**` and a naive block-first pass reads that
+`/*` as an opener. Twelve genuinely-driven ids silently vanished and only the count floor
+caught it. One alternation and four non-vacuity probes, including that regression.
+
+**D-90 (3) — closed.** The mixin collision guard ran at module load and threw, which is
+correct and is exactly why it had no test: injecting a collision means importing a module
+that refuses to import. It is an exported function called two lines below its definition
+now — same code, same moment, reachable — and `globalCollisions.test.js`, which its own
+comment pointed at and which had never mentioned mixins, holds the three colliding
+configurations the row says were proved by hand.
+
+**D-68 — closed, with its residue moved rather than deleted.** See S13. The two water
+biomes are blocked on D-70, which already owns the buoyancy work and now owns them too, so
+the row can close instead of being reassigned to a fifth PR slot.
+
+**D-33 — looked at and declined.** 121 warnings across 44 files, down from the 149 the row
+records. Closing it means deleting every unused binding and flipping the rule to `error`,
+which is a 44-file diff whose entire value is lint hygiene — and some of those bindings
+are deliberate (`void HostRemotePlayer;` exists so lint sees an import kept for the type it
+documents). Doing that unattended, in the branch that also carries a balance pass and three
+new systems, would turn a diff that currently reads cleanly into one nobody can review. The
+row's own owner and reasoning stand. Three warnings came off it in passing, from the
+`catch (e)` bindings D-89's work made bindless.
+
+**D-70, D-93 — declined for the same reason, stated once.** Both are real and both are
+gameplay or render-ordering changes whose correctness is *visual*. Browser e2e cannot run
+here (§11). Building mob buoyancy or rewriting who owns the group transform during an
+animation, with no way to look at the result, is the shape of change this whole plan's §8.1
+is a warning about. They stay open with their owners.

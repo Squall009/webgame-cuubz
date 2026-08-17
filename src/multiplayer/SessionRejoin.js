@@ -1,6 +1,7 @@
 import { createSessionManager } from './SessionManager.js';
 import { attachHostManager } from './SessionHosting.js';
 import { readLastSession } from '../util/StorageHelper.js';
+import { createQuestState } from '../game/data/QuestState.js';
 
 /**
  * Cuubz — the rejoin panel and the manual rejoin (PR 16, refactor.md §8.3)
@@ -86,7 +87,7 @@ export async function rejoinSession(deps, adoptSessionManager) {
       name: session.name || 'Remote World',
       seed: session.seed,
       biomeMap: { dominantBiomes: ['Plains'], seed: session.seed },
-      questProgress: {},
+      questState: createQuestState(),
       chunkReferences: [],
     };
     worldManager.worlds.push(tempWorld);
